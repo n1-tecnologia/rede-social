@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
-current_plan: 8
+current_plan: 9
 status: executing
-stopped_at: Completed 10.1-07-PLAN.md
-last_updated: "2026-11-13T02:22:55.513Z"
+stopped_at: Completed 10.1-08-PLAN.md
+last_updated: "2026-11-13T02:35:09.259Z"
 last_activity: 2026-11-12
 last_activity_desc: Phase 10.1 execution started
-state_head: 75276fcaf5e132fd0678ed2e0f39a94b7efd8284
+state_head: 48d59052ef25da6e79b5316bc346490c16fd9271
 progress:
   total_phases: 32
   completed_phases: 0
   total_plans: 431
-  completed_plans: 396
+  completed_plans: 397
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — EXECUTING
-Current Plan: 8
+Current Plan: 9
 Total Plans in Phase: 15
-Plan: 8 of 15
+Plan: 9 of 15
 Status: Ready to execute
 Last activity: 2026-11-12 — Phase 10.1 execution started
 
@@ -365,6 +365,7 @@ Progress: [███████████████████░] 160/162
 | Phase 10.1 P05 | 30 min | 3 tasks | 17 files |
 | Phase 10.1 P06 | 16 min | 3 tasks | 17 files |
 | Phase 10.1 P07 | 18 min | 3 tasks | 12 files |
+| Phase 10.1 P08 | 9 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -1139,6 +1140,8 @@ Recent decisions affecting current work:
 - [Phase 10.1]: 10.1-06: event mapping routes lock with app.event_ticket_lock; a failed PUT compensates its central route only when no mapping of the tenant still holds the key; deleteEvent frees an unsold mapping after commit and keeps one with sales — Removal and sale are serialised by one advisory key; a refund after a delete must still find the presence (D-760)
 - [Phase 10.1]: 10.1-07 A-UI-13: a row is over the limit iff ticket or courtesy, going or checked_in, capacity set and rank by (responded_at, id) above capacity; a plain Vou takes a seat but is never flagged. A-UI-6: the release sheet reuses GET /v1/admin/members plus the holders read — Both stay planner assumptions until Igor confirms them in the sketch review
 - [Phase 10.1]: 10.1-07 the edit read ticket key is absent for any role but admin_tenant and null for an admin on an unmapped event; DELETE courtesy answers 204 — The form must tell no mapping from not allowed to know
+- [Phase 10.1]: 10.1-08: eventSaleState validates the link itself (safeCheckoutHref, https only) and orders cancelled, ended, under way, unavailable, full, buy; paid keys are optional and absent on free events — A free event's serialised views stay byte-identical, and no caller can hand a view an unchecked buy href (T-10.1-24).
+- [Phase 10.1]: 10.1-08: the confirmed block is not hidden after the event ends (literal UI-D-749); tenantName and gatewayName are optional context the pages of plans 12 and 13 must pass; aviso page excludes ingresso until plan 12 (A-10.1-PLUMB) — Keeps today's behaviour for ?motivo=ingresso and leaves the screen choices to the plans that draw them.
 
 ### Pending Todos
 
@@ -1270,6 +1273,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-13T02:22:55.214Z
-Stopped at: Completed 10.1-07-PLAN.md
+Last session: 2026-11-13T02:35:08.956Z
+Stopped at: Completed 10.1-08-PLAN.md
 Resume file: None

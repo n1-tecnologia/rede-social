@@ -365,14 +365,14 @@ Phase 10.1 lets a tenant sell an event through its payment gateway: `admin_tenan
 - [ ] **TICK-13**: In a paid event the online `Entrar` and the venue-code check-in accept only a member who already holds a presence and refuse anyone else with a stable code before any code guess is counted; for an event with no product both stay as they are, walk-ins included *(D-742)*
 - [ ] **TICK-14**: The admin releases a presence without payment to any live member of the tenant (origin `courtesy`) until `ends_at`, over capacity if need be, never on a cancelled or ended event, and can remove a courtesy presence but never a paid one by hand *(D-743)*
 - [ ] **TICK-15**: A member without a presence in a paid event sees the `Pago` badge, the optional price and a single `Comprar ingresso` link to the stored purchase link with the states `Esgotado`, `Vendas encerradas`, `Venda indisponível` and `Presença confirmada`, and a confirmed member has no `Não vou` *(D-753, D-754, D-755)*
-- [ ] **TICK-16**: Members read the purchase link only through a tenant-pinned definer that answers an `https:` URL or nothing; `payment_products` stays admin-only *(D-753, D-508)*
+- [x] **TICK-16**: Members read the purchase link only through a tenant-pinned definer that answers an `https:` URL or nothing; `payment_products` stays admin-only *(D-753, D-508)*
 - [ ] **TICK-17**: A webhook-confirmed presence emits an in-app notification and a push `Presença confirmada em {evento}` after commit, the open event page refreshes through the existing Realtime user signal, and the 24 h and 1 h reminders reach the payer unchanged *(D-756)*
 - [ ] **TICK-18**: `Participantes` marks each presence `Pago`, `Cortesia`, `Anterior ao ingresso`, `Reembolsado` and `Acima do limite` while the confirmed count keeps meaning `going + checked_in` *(D-758, D-751, D-219)*
 - [ ] **TICK-19**: The Pagamentos `Eventos recentes` lists ticket deliveries with the neutral type, an `Ingresso · {evento}` product line and the effects `confirmada`, `acima do limite`, `removida`, `mantida`, `sem efeito`, `sem conta`, `evento encerrado`, `evento cancelado` *(D-758, D-749, D-750)*
 - [ ] **TICK-20**: No gateway brand name appears outside the adapter in any new column, function, route, log field, catalog key or test fixture string *(D-740)*
 - [ ] **TICK-21**: Every changed or added table, column, policy, function and route carries a cross-tenant negative (pgTAP and integration); a webhook signed with tenant A's token that names tenant B's event product writes nothing in B *(PAY-29 extended)*
 - [ ] **TICK-22**: The release is expand-only and ordered migrations (every tenant database), web, API; the running API keeps working on the migrated database and every new response key is `.optional()` *(D-741, D-755)*
-- [ ] **TICK-23**: The new refusal codes (`payment_required`, `ticket_locked`, `ticket_required`) are published as stable strings in the contracts the native app reads *(D-741)*
+- [x] **TICK-23**: The new refusal codes (`payment_required`, `ticket_locked`, `ticket_required`) are published as stable strings in the contracts the native app reads *(D-741)*
 - [ ] **TICK-24**: The first real purchase of a real gateway product confirms a real presence and its refund removes it (owner proof, recorded in the ledger; the product id format is unproven) *(D-740, D-752)*
 
 ### Database per tenant
@@ -997,14 +997,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TICK-13 | Phase 10.1 | Pending |
 | TICK-14 | Phase 10.1 | Pending |
 | TICK-15 | Phase 10.1 | Pending |
-| TICK-16 | Phase 10.1 | Pending |
+| TICK-16 | Phase 10.1 | Complete |
 | TICK-17 | Phase 10.1 | Pending |
 | TICK-18 | Phase 10.1 | Pending |
 | TICK-19 | Phase 10.1 | Pending |
 | TICK-20 | Phase 10.1 | Pending |
 | TICK-21 | Phase 10.1 | Pending |
 | TICK-22 | Phase 10.1 | Pending |
-| TICK-23 | Phase 10.1 | Pending |
+| TICK-23 | Phase 10.1 | Complete |
 | TICK-24 | Phase 10.1 | Pending |
 | DBT-01 | Phase 09.2 (plans 02, 14) | Complete |
 | DBT-02 | Phase 09.2 (plans 03, 14) | Complete |
