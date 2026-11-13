@@ -67,7 +67,7 @@ begin;
 --    (`event_ended`, `event_cancelled`) beside each replay.
 --
 -- Fixture ids use the `1e310000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(344);
+select plan(354);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-tkt-a', 'Ingresso A', '1e310000-0000-4000-8000-000000000001');
@@ -1642,6 +1642,62 @@ select results_eq(
   $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('811'), 'fake', 'S9-R1') $$,
   $$ values ('already_in'::text, tests.tk('101')) $$,
   'WR-03/D-750/D-752: the same order again after the event ended is already_in, not event_ended');
+reset role;
+
+-- Ended event 811, beside the replay: another member, a second reference, and the first-time control.
+select tests.as_service();
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('811'), 'fake', 'S9-R1') $$,
+  $$ values ('already_in'::text, tests.tk('102')) $$,
+  'WR-03/D-752: the same reference sold again to another member after the end is already_in (one reference is one presence)');
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('811'), 'fake', 'S9-R1b') $$,
+  $$ values ('already_in'::text, tests.tk('101')) $$,
+  'WR-03/A10: a second different reference for the ticket holder after the end is already_in (one presence per member and event)');
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('203'), tests.tk('811'), 'fake', 'S9-R1c') $$,
+  $$ values ('event_ended'::text, null::uuid) $$,
+  'D-750 control: a FIRST-TIME reference for a member with no row is still event_ended after the end');
+reset role;
+select is((select count(*)::int from public.event_attendances where event_id = tests.tk('811')), 1,
+  'WR-03: ...and the ended event still holds exactly one presence row');
+
+-- Cancelled event 812: sold while live, cancelled, then replayed; a first-time reference is still refused.
+select tests.as_service();
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('204'), tests.tk('812'), 'fake', 'S9-R2') $$,
+  $$ values ('granted'::text, tests.tk('104')) $$,
+  'WR-03: an order sold while the event is live is granted (event 812)');
+reset role;
+update public.events set status = 'cancelled', cancelled_at = now() where id = tests.tk('812');
+select tests.as_service();
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('204'), tests.tk('812'), 'fake', 'S9-R2') $$,
+  $$ values ('already_in'::text, tests.tk('104')) $$,
+  'WR-03/D-760: the same order again after the event was cancelled is already_in, not event_cancelled');
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('205'), tests.tk('812'), 'fake', 'S9-R2b') $$,
+  $$ values ('event_cancelled'::text, null::uuid) $$,
+  'D-760 control: a FIRST-TIME reference on the cancelled event is still event_cancelled');
+reset role;
+
+-- Soft-deleted event 813: the same shape.
+select tests.as_service();
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('206'), tests.tk('813'), 'fake', 'S9-R3') $$,
+  $$ values ('granted'::text, tests.tk('106')) $$,
+  'WR-03: an order sold while the event is live is granted (event 813)');
+reset role;
+update public.events set deleted_at = now() where id = tests.tk('813');
+select tests.as_service();
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('206'), tests.tk('813'), 'fake', 'S9-R3') $$,
+  $$ values ('already_in'::text, tests.tk('106')) $$,
+  'WR-03/D-760: the same order again after the event was soft-deleted is already_in, not event_cancelled');
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('207'), tests.tk('813'), 'fake', 'S9-R3b') $$,
+  $$ values ('event_cancelled'::text, null::uuid) $$,
+  'D-760 control: a FIRST-TIME reference on the soft-deleted event is still event_cancelled');
 reset role;
 
 -- The rank count rides the status index BY NAME on a volume fixture (a handful of rows is always scanned):

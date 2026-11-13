@@ -264,6 +264,43 @@ describe('10.1 outcomes', () => {
     expect(await attendancesOf(ev.eventId)).toHaveLength(1);
   });
 
+  it('WR-03 already_in: a re-sent approval after the event ended is no_effect, not a mislabelled event_ended (D-750, D-752)', async () => {
+    const ev = await paidEvent();
+    const buyer = await newBuyer('wr03ended');
+    const ref = orderRef();
+    expect(await send('purchase_approved', ev, buyer.email, ref)).toMatchObject({
+      state: 'applied',
+      outcome: 'ticket_granted',
+    });
+    await adminSql`
+      update public.events set starts_at = now() - interval '3 hours', ends_at = now() - interval '1 hour'
+       where id = ${ev.eventId}::uuid`;
+    const again = await send('purchase_approved', ev, buyer.email, ref, { resent: 1 });
+    expect(again).toMatchObject({ state: 'applied', outcome: 'no_effect' });
+    expect(again.outcome).not.toBe('event_ended');
+    const rows = await attendancesOf(ev.eventId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ user_id: buyer.userId, origin: 'ticket' });
+  });
+
+  it('WR-03 already_in: a re-sent approval after the event was cancelled is no_effect, not event_cancelled (D-760, D-752)', async () => {
+    const ev = await paidEvent();
+    const buyer = await newBuyer('wr03cancel');
+    const ref = orderRef();
+    expect(await send('purchase_approved', ev, buyer.email, ref)).toMatchObject({
+      state: 'applied',
+      outcome: 'ticket_granted',
+    });
+    await adminSql`
+      update public.events set status = 'cancelled', cancelled_at = now() where id = ${ev.eventId}::uuid`;
+    const again = await send('purchase_approved', ev, buyer.email, ref, { resent: 1 });
+    expect(again).toMatchObject({ state: 'applied', outcome: 'no_effect' });
+    expect(again.outcome).not.toBe('event_cancelled');
+    const rows = await attendancesOf(ev.eventId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ user_id: buyer.userId, origin: 'ticket' });
+  });
+
   it('already_in: the same reference for another buyer is no_effect, one reference is one presence (EP-36)', async () => {
     const ev = await paidEvent();
     const first = await newBuyer('owner');
