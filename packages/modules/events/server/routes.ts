@@ -118,12 +118,12 @@ const createEventRoute = createRoute({
   responses: {
     201: {
       description:
-        "The created event, in the shape the list returns. Start and end are wall-clock pairs in the TENANT's timezone and are converted to UTC by the database. `category` (trimmed, up to 40 characters, blank = none) and `capacity` (an integer from 1 to 100000, null = no limit) are optional. `schedule` (the programme) is optional too: up to 200 moments of `{ day, time, title }` (day 1..31, time `HH:MM` on the 24-hour clock, title 1..80 characters), stored normalised (titles on one line, duplicates dropped, sorted by day then time); the answer is the list shape and never carries it. Two identical bodies create two events with distinct ids, and neither answers 409.",
+        "The created event, in the shape the list returns. Start and end are wall-clock pairs in the TENANT's timezone and are converted to UTC by the database. `category` (trimmed, up to 40 characters, blank = none) and `capacity` (an integer from 1 to 100000, null = no limit) are optional. `schedule` (the programme) is optional too: up to 200 moments of `{ day, time, title }` (day 1..31, time `HH:MM` on the 24-hour clock, title 1..80 characters), stored normalised (titles on one line, duplicates dropped, sorted by day then time); the answer is the list shape and never carries it. `registrationOpens` (a wall-clock `{ date, time }` in the tenant's timezone, or null) is the optional opening of the sale of a paid event, converted to UTC by the database like the start; a date already in the past simply means open. Two identical bodies create two events with distinct ids, and neither answers 409.",
       content: { 'application/json': { schema: eventSummarySchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.event` carrying one machine code: `name_required`, `end_before_start`, `location_required`, `url_required`, `url_invalid` or `cover_invalid`. A category over 40 characters, a capacity outside 1..100000 or an invalid `schedule` (more than 200 moments, a bad time or day, an empty or over-long title, an unknown key) is a generic `details.issues` list and writes nothing.',
+        '`VALIDATION_FAILED` with `details.event` carrying one machine code: `name_required`, `end_before_start`, `location_required`, `url_required`, `url_invalid`, `cover_invalid` or `opening_after_start` (the optional `registrationOpens` wall clock is at or after the start). A category over 40 characters, a capacity outside 1..100000 or an invalid `schedule` (more than 200 moments, a bad time or day, an empty or over-long title, an unknown key) is a generic `details.issues` list and writes nothing.',
     },
     403: {
       description: 'The caller does not hold `events.event.manage` in this tenant',
@@ -242,17 +242,21 @@ const updateEventRoute = createRoute({
   responses: {
     200: {
       description:
-        'The event after a WHOLE-EVENT replacement (D-214), in the shape the list returns (no URL). Every field is editable after members answered, and their answers and check-ins are kept: a `capacity` lower than the current confirmed count is stored as asked and only refuses NEW confirmations. An absent `category`, `capacity` or `schedule` clears it; a present `schedule` (up to 200 moments, normalised) replaces the stored one, and only a changed schedule counts as a change. A format switch moves the location and the link together. A body equal to the stored event writes nothing and emits nothing.',
+        'The event after a WHOLE-EVENT replacement (D-214), in the shape the list returns (no URL). Every field is editable after members answered, and their answers and check-ins are kept: a `capacity` lower than the current confirmed count is stored as asked and only refuses NEW confirmations. An absent `category`, `capacity` or `schedule` clears it; a present `schedule` (up to 200 moments, normalised) replaces the stored one, and only a changed schedule counts as a change. A format switch moves the location and the link together. A body equal to the stored event writes nothing and emits nothing. An OMITTED `registrationOpens` keeps the stored opening and only an explicit null clears it (a client that predates the key can never wipe it).',
       content: { 'application/json': { schema: eventSummarySchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.event`: `name_required`, `end_before_start`, `location_required`, `url_required`, `url_invalid` or `cover_invalid`. An invalid `schedule` is a generic `details.issues` list and the stored schedule is left untouched.',
+        '`VALIDATION_FAILED` with `details.event`: `name_required`, `end_before_start`, `location_required`, `url_required`, `url_invalid`, `cover_invalid` or `opening_after_start` (the opening is at or after the start, by the schema or by the database CHECK when only the start moved). An invalid `schedule` is a generic `details.issues` list and the stored schedule is left untouched.',
     },
     403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
     404: {
       description:
         'The event, or a NEW cover asset id, is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.event` `opening_locked`: the opening date cannot change (a new pair or an explicit null) once a ticket exists. The database trigger is the only judge, so the answer is the same for every writer and no race slips past it; a courtesy or a plain Vou never locks it, and a full refund lifts it. Saving the same date, or omitting the key, is never refused.',
     },
   },
 });

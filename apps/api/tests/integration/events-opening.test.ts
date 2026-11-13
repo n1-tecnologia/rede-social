@@ -84,10 +84,10 @@ function body(label: string, days = 10, extra: Partial<Body> = {}): Body {
   };
 }
 
-const create = (payload: unknown) =>
+const create = async (payload: unknown) =>
   request('/v1/events', adminToken, { method: 'POST', body: JSON.stringify(payload) });
 
-const put = (eventId: string, payload: unknown) =>
+const put = async (eventId: string, payload: unknown) =>
   request(`/v1/events/${eventId}`, adminToken, { method: 'PUT', body: JSON.stringify(payload) });
 
 async function created(payload: unknown): Promise<string> {

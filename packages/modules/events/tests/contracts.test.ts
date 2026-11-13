@@ -199,6 +199,113 @@ describe('eventInputSchema — the refusal vocabulary', () => {
   });
 });
 
+describe('10.2-06 — the opening: input key, refinement and the append-only issue list', () => {
+  const OPENING_BASE_LIST = [
+    'name_required',
+    'end_before_start',
+    'location_required',
+    'url_required',
+    'url_invalid',
+    'cover_invalid',
+    'poster_invalid',
+    'rsvp_closed',
+    'cancelled',
+    'attendance_locked',
+    'checkin_not_open',
+    'checkin_closed',
+    'wrong_code',
+    'too_many_attempts',
+    'reactivate_started',
+    'event_ended',
+    'event_full',
+    'photo_invalid',
+    'payment_required',
+    'ticket_locked',
+    'event_not_paid',
+    'not_courtesy',
+  ];
+
+  it('11. EP-45: the list is append-only: the first 22 entries are unchanged and the two new codes are the last two', () => {
+    expect(EVENT_ISSUES.slice(0, 22)).toEqual(OPENING_BASE_LIST);
+    expect(EVENT_ISSUES.slice(-2)).toEqual(['opening_locked', 'opening_after_start']);
+    expect(EVENT_ISSUES).toHaveLength(24);
+  });
+
+  it('12. EP-43: the two codes are distinct from each other, from ticket_locked and from every earlier code', () => {
+    expect(new Set(EVENT_ISSUES).size).toBe(EVENT_ISSUES.length);
+    expect(OPENING_BASE_LIST).not.toContain('opening_locked');
+    expect(OPENING_BASE_LIST).not.toContain('opening_after_start');
+    expect('opening_locked').not.toBe('ticket_locked');
+    // No code is a prefix of another, so a client matching on a prefix never confuses two.
+    for (const a of EVENT_ISSUES) {
+      for (const b of EVENT_ISSUES) {
+        if (a !== b) expect(b.startsWith(a)).toBe(false);
+      }
+    }
+  });
+
+  it('13. EP-44: an empty or unknown details.event string is not in the closed set', () => {
+    expect(EVENT_ISSUE_SET.has('')).toBe(false);
+    expect(EVENT_ISSUE_SET.has('opening')).toBe(false);
+    expect(EVENT_ISSUE_SET.has('opening_locked')).toBe(true);
+    expect(EVENT_ISSUE_SET.has('opening_after_start')).toBe(true);
+  });
+
+  it('14. registrationOpens parses as a pair, as null and absent, and is never defaulted (OPEN-24)', () => {
+    const opens = { date: '2026-10-05', time: '09:30' };
+    expect(refusal({ ...base, registrationOpens: opens })).toBeNull();
+    expect(refusal({ ...base, registrationOpens: null })).toBeNull();
+    expect(refusal(base)).toBeNull();
+    // A past pair is accepted: it simply means open.
+    expect(
+      refusal({ ...base, registrationOpens: { date: '2020-01-01', time: '00:00' } }),
+    ).toBeNull();
+    const parsed = eventInputSchema.parse(base);
+    expect('registrationOpens' in parsed).toBe(false);
+    expect(
+      eventInputSchema.parse({ ...base, registrationOpens: null }).registrationOpens,
+    ).toBeNull();
+  });
+
+  it('15. EP-08: a half pair, an empty object, an impossible day and an extra key are generic', () => {
+    expect(refusal({ ...base, registrationOpens: { date: '2026-10-05' } })).toBe('generic');
+    expect(refusal({ ...base, registrationOpens: { time: '09:30' } })).toBe('generic');
+    expect(refusal({ ...base, registrationOpens: {} })).toBe('generic');
+    expect(refusal({ ...base, registrationOpens: { date: '2026-02-30', time: '09:30' } })).toBe(
+      'generic',
+    );
+    expect(
+      refusal({ ...base, registrationOpens: { date: '2026-10-05', time: '09:30', zone: 'x' } }),
+    ).toBe('generic');
+  });
+
+  it('16. opening_after_start: at or after the start is refused at the path registrationOpens; one minute before passes', () => {
+    expect(refusal({ ...base, registrationOpens: base.start })).toBe('opening_after_start');
+    expect(refusal({ ...base, registrationOpens: { date: '2026-10-12', time: '19:01' } })).toBe(
+      'opening_after_start',
+    );
+    expect(refusal({ ...base, registrationOpens: { date: '2026-10-13', time: '08:00' } })).toBe(
+      'opening_after_start',
+    );
+    expect(
+      refusal({ ...base, registrationOpens: { date: '2026-10-12', time: '18:59' } }),
+    ).toBeNull();
+
+    const result = eventInputSchema.safeParse({ ...base, registrationOpens: base.start });
+    expect(result.success).toBe(false);
+    const issue = result.error?.issues.find((i) => i.message === 'opening_after_start');
+    expect(issue?.path).toEqual(['registrationOpens']);
+    // An impossible start keeps its own generic issue and never hides behind the machine code.
+    expect(
+      refusal({
+        ...base,
+        start: { date: '2026-02-30', time: '19:00' },
+        registrationOpens: { date: '2026-10-12', time: '19:00' },
+      }),
+    ).toBe('generic');
+  });
+});
+
 describe('eventQuerySchema — period is closed, limit clamps', () => {
   it('9. period defaults to upcoming and accepts exactly upcoming | past', () => {
     expect(eventQuerySchema.parse({}).period).toBe('upcoming');
