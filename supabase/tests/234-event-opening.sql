@@ -42,7 +42,7 @@ begin;
 --    tenant with no events and a random id are told nothing; a session with no claims is told nothing.
 --
 -- Fixture ids use the `1e320000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(102);
+select plan(122);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-opn-a', 'Abertura A', '1e320000-0000-4000-8000-000000000001');
@@ -547,6 +547,108 @@ reset role;
 select is((select (registration_opens_at is null)::text || ':' || (select origin from public.event_attendances where event_id = tests.op('e6') and user_id = tests.op('b2'))
              from public.events where id = tests.op('e6')),
   'true:rsvp', 'EP-48 control: ...and it clears the opening and turns the courtesy row back to rsvp');
+
+-- ── 6. the grant records when (plan 05, D-782, D-791, OPEN-12, OPEN-13, EP-49, EP-59, T-10.2-10) ──
+-- `app.event_gateway_grant` called as the service role, in events whose opening is ahead, far ahead and past: it
+-- NEVER refuses for the opening (D-782), and on every write path it stamps `ticket_confirmed_at = now()`.
+-- Users 6xx, memberships 7xx, events 6xx, all of tenant A. 601 opens in an hour (early) | 602 started an hour ago,
+-- opened before the start (checked-in and walk-in rows made BEFORE the link) | 603 opens in 50 days (far ahead) |
+-- 604 opened three days ago.
+select tests.auth_user('g' || h || '@opn-6.local', tests.op(h))
+  from unnest(array['601','602','603','604','605','606','607','608','609']) as h;
+insert into public.memberships (id, tenant_id, user_id, role, status, blocked_at, deleted_at)
+  select tests.op('7' || substr(h, 2)), tests.op('1'), tests.op(h), 'member', 'active', null, null
+    from unnest(array['601','602','603','604','605','606','607','608','609']) as h;
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, registration_opens_at) values
+  (tests.op('601'), tests.op('1'), tests.op('a1'), 'G1', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '1 hour'),
+  (tests.op('602'), tests.op('1'), tests.op('a1'), 'G2', 'in_person', 'Sede', 'Rua 1', now() - interval '1 hour', now() + interval '2 hours', now() - interval '90 minutes'),
+  (tests.op('603'), tests.op('1'), tests.op('a1'), 'G3', 'in_person', 'Sede', 'Rua 1', now() + interval '60 days', now() + interval '60 days 2 hours', now() + interval '50 days'),
+  (tests.op('604'), tests.op('1'), tests.op('a1'), 'G4', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() - interval '3 days');
+-- Presences made BEFORE the link (the events are still free, so the guard lets them in).
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.op('1'), tests.op('601'), tests.op('602'), 'not_going', now() - interval '2 days', 'rsvp'),
+  (tests.op('1'), tests.op('601'), tests.op('603'), 'going', now() - interval '2 days', 'rsvp'),
+  (tests.op('1'), tests.op('601'), tests.op('604'), 'going', now() - interval '2 days', 'courtesy');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, checked_in_at, checkin_via, origin) values
+  (tests.op('1'), tests.op('602'), tests.op('606'), 'checked_in', now(), now(), 'code', 'rsvp');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, checked_in_at, checkin_via, origin) values
+  (tests.op('1'), tests.op('602'), tests.op('607'), 'walk_in', now(), 'online', 'rsvp');
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id)
+  select tests.op('1'), 'fake', 'event', 'opn-234-g' || h, tests.op(h) from unnest(array['601','602','603','604']) as h;
+
+select set_config('request.jwt.claims', '', true);
+select tests.as_service();
+-- Path 1, no row: an early payment is granted and the row reads both instants as the transaction's now().
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('701'), tests.op('601'), 'fake', 'OPN6-1') $$,
+  $$ values ('granted'::text) $$, 'D-782: an approved payment BEFORE the opening is granted (no refusal)');
+-- Path 2, not_going to going.
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('702'), tests.op('601'), 'fake', 'OPN6-2') $$,
+  $$ values ('granted'::text) $$, 'D-782: a not_going member paying before the opening is granted');
+-- Path 3, the upgrade of a going rsvp, a courtesy, a checked-in and a walk-in row.
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('703'), tests.op('601'), 'fake', 'OPN6-3') $$,
+  $$ values ('granted'::text) $$, 'D-782: an old Vou paying before the opening is granted');
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('704'), tests.op('601'), 'fake', 'OPN6-4') $$,
+  $$ values ('granted'::text) $$, 'D-782: a courtesy holder paying before the opening is granted');
+-- The manual release (sixth argument true) stamps the admin's click time too.
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('705'), tests.op('601'), 'manual', 'OPN6-5', true) $$,
+  $$ values ('granted'::text) $$, 'OPEN-13: the manual release before the opening is granted');
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('706'), tests.op('602'), 'fake', 'OPN6-6') $$,
+  $$ values ('granted'::text) $$, 'the checked-in row made before the link is upgraded');
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('707'), tests.op('602'), 'fake', 'OPN6-7') $$,
+  $$ values ('granted'::text) $$, 'the walk-in row made before the link is upgraded');
+-- D-782 with an opening far ahead and one in the past.
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('708'), tests.op('603'), 'fake', 'OPN6-8') $$,
+  $$ values ('granted'::text) $$, 'D-782: an approved payment 50 days before the opening is granted');
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('709'), tests.op('604'), 'fake', 'OPN6-9') $$,
+  $$ values ('granted'::text) $$, 'D-782: an approved payment after the opening is granted');
+reset role;
+
+select is(
+  (select origin = 'ticket' and status = 'going' and responded_at = now() and ticket_confirmed_at = now()
+     from public.event_attendances where event_id = tests.op('601') and user_id = tests.op('601')),
+  true, 'D-791/OPEN-13: path 1 (no row) writes responded_at and ticket_confirmed_at, both the transaction now()');
+select is(
+  (select origin = 'ticket' and status = 'going' and responded_at = now() and ticket_confirmed_at = now()
+     from public.event_attendances where event_id = tests.op('601') and user_id = tests.op('602')),
+  true, 'D-791: path 2 (not_going to going) writes the instant');
+select is(
+  (select origin = 'ticket' and status = 'going' and responded_at = now() - interval '2 days' and ticket_confirmed_at = now()
+     from public.event_attendances where event_id = tests.op('601') and user_id = tests.op('603')),
+  true, 'D-791: the upgrade of an old Vou writes the instant and leaves responded_at at its old value (why the column exists)');
+select is(
+  (select origin = 'ticket' and status = 'going' and responded_at = now() - interval '2 days' and ticket_confirmed_at = now()
+     from public.event_attendances where event_id = tests.op('601') and user_id = tests.op('604')),
+  true, 'D-791: the upgrade of a courtesy row writes the instant');
+select is(
+  (select origin = 'ticket' and order_provider = 'manual' and ticket_confirmed_at = now()
+     from public.event_attendances where event_id = tests.op('601') and user_id = tests.op('605')),
+  true, 'D-791: the manual release stamps the instant');
+select is(
+  (select origin = 'ticket' and status = 'checked_in' and ticket_confirmed_at = now()
+     from public.event_attendances where event_id = tests.op('602') and user_id = tests.op('606')),
+  true, 'D-791: the upgrade of a checked-in row writes the instant and keeps the status');
+select is(
+  (select origin = 'ticket' and status = 'walk_in' and ticket_confirmed_at = now()
+     from public.event_attendances where event_id = tests.op('602') and user_id = tests.op('607')),
+  true, 'D-791: the upgrade of a walk-in row writes the instant and keeps the status');
+select is(
+  (select count(*)::int from public.event_attendances
+    where event_id in (tests.op('603'), tests.op('604')) and origin = 'ticket' and ticket_confirmed_at = now()),
+  2, 'D-782/D-791: the far-ahead and the past opening both left a confirmed ticket row with the instant');
+
+-- EP-49, EP-59: a replay writes nothing. The instant is moved back first so that a rewrite would be visible.
+update public.event_attendances set ticket_confirmed_at = now() - interval '5 minutes'
+ where event_id = tests.op('601') and user_id = tests.op('601');
+select tests.as_service();
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('701'), tests.op('601'), 'fake', 'OPN6-1') $$,
+  $$ values ('already_in'::text) $$, 'EP-49: the same order again answers already_in');
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('701'), tests.op('601'), 'fake', 'OPN6-1B') $$,
+  $$ values ('already_in'::text) $$, 'EP-59: a second DIFFERENT order by a member who already holds a ticket answers already_in');
+reset role;
+select is(
+  (select count(*)::int || ':' || (min(ticket_confirmed_at) = now() - interval '5 minutes')::text
+     from public.event_attendances where event_id = tests.op('601') and user_id = tests.op('601')),
+  '1:true', 'EP-49/EP-59: one presence, and the confirmation instant was never rewritten');
 
 select * from finish();
 rollback;
