@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
-current_plan: 15
-status: ready_for_verification
-stopped_at: Completed 10.1-15-PLAN.md (15/15 plans done; phase ready for verification)
-last_updated: "2026-11-13T13:00:26.784Z"
+current_plan: 16
+status: ready_to_execute
+stopped_at: Gap closure 10.1-16..19 planned and checked (0 blockers); next /gsd-execute-phase 10.1 --gaps-only
+last_updated: "2026-11-13T14:04:43.588Z"
 last_activity: 2026-11-13
-last_activity_desc: "10.1-15 complete: the paid-event end-to-end spec, the neutrality extension, the Phase 10.1 release notes, the owner ledger and the recorded exit gate; 15/15 plans done, phase ready for verification"
-state_head: fe3c08c1f1dfeb3de9916e7960b4c78d49ff2032
+last_activity_desc: "10.1 gap round planned: 10.1-16 (CR-01 guard), 10.1-17 (WR-01 manual release lock), 10.1-18 (WR-03 replay first), 10.1-19 (release notes, ledger P20/P21, exit gate); plan checker passed with 3 info advisories; nothing executed"
+state_head: ec86b9d9d87a6ce821681b71731a50939377b2da
 progress:
   total_phases: 32
   completed_phases: 0
-  total_plans: 431
+  total_plans: 435
   completed_plans: 403
   percent: 0
 ---
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — READY FOR VERIFICATION
-Current Plan: 15
-Total Plans in Phase: 15
-Plan: 15 of 15 complete (10.1-15 done; phase ready for code review, verification and close)
-Status: Ready for verification
-Last activity: 2026-11-13 — 10.1-15 complete: the paid-event end-to-end spec, the neutrality extension, the Phase 10.1 release notes, the owner ledger (P1 to P19) and the recorded exit gate
+Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — READY TO EXECUTE (gap closure)
+Current Plan: 16
+Total Plans in Phase: 19
+Plan: 15 of 19 complete (gap plans 10.1-16..19 planned from 10.1-VERIFICATION.md gaps_found; CR-01 blocking, WR-01 and WR-03 advisories folded in; WR-02, WR-04, IN-01 stay open advisories)
+Status: Ready to execute (gaps only)
+Last activity: 2026-11-13 — Phase 10.1 gap closure planned (4 plans, waves 14 to 16), checker passed
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
