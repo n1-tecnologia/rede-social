@@ -312,6 +312,29 @@ export async function ticketDiagnostics(eventId: string, email: string): Promise
   });
 }
 
+/**
+ * Waits until the worker has worked through the notification fan-out jobs already waiting in the queue.
+ * The integration suites enqueue fan-out jobs and run with no worker, so a local database that has just
+ * been through them holds a backlog that a freshly started worker drains at its own pace; a delivery
+ * sent behind it would get its notification (and the live swap that follows it) only after the whole
+ * backlog. Draining first makes the wait the product's, not the leftovers'. Fails naming the count.
+ */
+export async function waitForFanoutBacklog(timeoutMs = 150_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let waiting = -1;
+  while (Date.now() < deadline) {
+    const rows = await sql()<{ n: number }[]>`
+      select count(*)::int as n from pgboss.job
+       where name = 'notifications.fanout' and state in ('created', 'retry') and start_after <= now()`;
+    waiting = rows[0]?.n ?? 0;
+    if (waiting === 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(
+    `${waiting} notification fan-out job(s) still waiting after ${timeoutMs} ms; is the worker running?`,
+  );
+}
+
 /** The id of the live event titled `title` in `tenantSlug`. */
 export async function eventIdByTitle(tenantSlug: string, title: string): Promise<string> {
   const rows = await sql()<{ id: string }[]>`

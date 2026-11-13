@@ -25,6 +25,7 @@ import {
   signedDelivery,
   ticketDiagnostics,
   waitForEventState,
+  waitForFanoutBacklog,
 } from './payments';
 import { ensureWorker } from './worker';
 
@@ -87,6 +88,30 @@ const eventIdFrom = (page: Page) => page.url().split('/eventos/')[1]?.split(/[/?
 const buyAnchor = (page: Page) => page.getByTestId('event-actions-buy');
 const confirmedBanner = (page: Page) =>
   page.locator('[data-testid="event-banner"][data-kind="confirmed"]');
+
+/**
+ * Starts watching the page's Realtime sockets and returns a waiter that resolves once the page has
+ * joined its own user topic (`tenant:{id}:user:{id}`, the topic the live swap listens on). The hook
+ * ignores the first join and a signal sent before it is lost to that page, so a spec that sends the
+ * delivery on a cold dev server (slow hydration) must wait for the join, not for the network to idle.
+ * Call it BEFORE the navigation: the socket opens during it.
+ */
+function watchUserTopicJoin(page: Page): () => Promise<void> {
+  let joined = false;
+  page.on('websocket', (socket) => {
+    socket.on('framereceived', ({ payload }) => {
+      const text = typeof payload === 'string' ? payload : payload.toString('utf8');
+      if (text.includes('phx_reply') && text.includes(':user:') && text.includes('"status":"ok"')) {
+        joined = true;
+      }
+    });
+  });
+  return async () => {
+    await expect
+      .poll(() => joined, { message: 'the page joined its user topic', timeout: 60_000 })
+      .toBe(true);
+  };
+}
 
 test.beforeAll(async ({ browser }) => {
   await resetPayments(LAB, PAYMENTS_NAMESPACE);
@@ -209,13 +234,18 @@ test('2. a member sees the Pago tag and one Comprar ingresso anchor with the sto
 test('3. the tracer: a signed approved delivery swaps the open page into Presença confirmada without a reload', async ({
   browser,
 }) => {
+  // A backlog of fan-out jobs from earlier runs on this database would delay the notification that
+  // drives the swap; let the worker clear it first.
+  await waitForFanoutBacklog();
   const context = await phoneContext(browser);
   const page = await context.newPage();
   try {
     await login(page, buyer, PASSWORD, hosts.lab);
+    const joined = watchUserTopicJoin(page);
     await openUntilReady(page, `${hosts.lab}/eventos/${paidId}`, () => buyAnchor(page));
     // Let the shell's and the page's Realtime joins settle: a signal sent before the first join is the
     // page's own render, not a refresh.
+    await joined();
     await page.waitForLoadState('networkidle');
 
     // Prove "no reload": a marker only the document that holds it can keep, and a counter of the loads.
