@@ -7,10 +7,12 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   attendancesOf,
+  confirmedAtOf,
   deliver,
   deliverAndApply,
   eventRow,
   freshEmail,
+  notificationCount,
   type Person,
   personWithEmail,
   removeTicketEvents,
@@ -65,6 +67,7 @@ let unsubscribe: () => void = () => {};
 
 type Json = Record<string, unknown>;
 type EventItem = {
+  beforeOpening?: boolean;
   id: string;
   type: string;
   state: string;
@@ -1161,4 +1164,137 @@ describe('10.1 events: paid-event deliveries', () => {
     await removePaymentIntegrations(demoTenantId);
     await removePaymentMappings(demoTenantId);
   }, 60_000);
+
+  /* ── 10.2-08: the neutral "paid before the opening" marker (D-791, D-782, OPEN-12, OPEN-15, OPEN-26) ── */
+
+  describe('10.2 the early marker', () => {
+    const EARLY_KEYS = [...TICKET_KEYS, 'beforeOpening'].sort();
+    const keysOf = (item: unknown) => Object.keys(item as Record<string, unknown>).sort();
+
+    /** A paid event whose sale opens an hour from now (the start is a day away, the CHECK needs opening < start). */
+    const opensLater = (label: string) =>
+      paid({
+        title: `${TITLE}-${label}`,
+        startsInMinutes: 1_440,
+        endsInMinutes: 1_560,
+        opensInMinutes: 60,
+      });
+
+    /** Another event of the lab tenant, already open (its opening is in the past); `paid` is not reused so the mapping above stays. */
+    async function alreadyOpen(label: string) {
+      const eventId = await ticketEvent(labTenantId, {
+        title: `${TITLE}-${label}`,
+        startsInMinutes: 1_440,
+        endsInMinutes: 1_560,
+        opensInMinutes: -30,
+      });
+      const mapping = await ticketMapping(labTenantId, eventId);
+      return { eventId, productId: mapping.externalProductId };
+    }
+
+    it('tracer: an approved signed delivery before the opening confirms the presence and lists with beforeOpening; late, replay, refund, ignored and store rows carry no key (OPEN-12, OPEN-15, OPEN-26)', async () => {
+      const early = await opensLater('cedo');
+      const open = await alreadyOpen('aberto');
+      const buyer = await personWithEmail(freshEmail(PREFIX, 'early'), 'lab');
+      const lateBuyer = await personWithEmail(freshEmail(PREFIX, 'late'), 'lab');
+      const refunded = await personWithEmail(freshEmail(PREFIX, 'refunded'), 'lab');
+      const storeBuyer = await personWithEmail(freshEmail(PREFIX, 'store'), 'lab');
+      const storeId = `sp-${crypto.randomUUID()}`;
+      await seedPaymentMapping(labTenantId, {
+        kind: 'store_product',
+        targetId: storeProduct,
+        externalProductId: storeId,
+      });
+      const adminNoticesBefore = await notificationCount(labAdminUserId);
+
+      // the sale has not opened and the delivery still confirms the presence (D-782)
+      const earlyRef = ref();
+      const granted = await deliverAndApply(
+        integration,
+        approved(early.productId, buyer.email, earlyRef),
+      );
+      expect(granted).toMatchObject({ state: 'applied', outcome: 'ticket_granted' });
+      const rows = await attendancesOf(early.eventId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        user_id: buyer.userId,
+        status: 'going',
+        origin: 'ticket',
+        order_provider: 'fake',
+        order_ref: earlyRef,
+      });
+      const instants = await confirmedAtOf(early.eventId);
+      expect(instants).toHaveLength(1);
+      expect(instants[0]?.confirmed_at).not.toBeNull();
+
+      // a second delivery of the SAME order with other bytes is a replay: no effect, no marker
+      const replay = await deliverAndApply(integration, {
+        ...approved(early.productId, buyer.email, earlyRef),
+        resent: true,
+      });
+      expect(replay).toMatchObject({ state: 'applied', outcome: 'no_effect' });
+
+      // a delivery after the opening
+      const late = await deliverAndApply(integration, approved(open.productId, lateBuyer.email));
+      expect(late).toMatchObject({ state: 'applied', outcome: 'ticket_granted' });
+
+      // an early order that is refunded: the purchase row and the refund row both lose the marker
+      const refundRef = ref();
+      const refundedBuy = await deliverAndApply(
+        integration,
+        approved(early.productId, refunded.email, refundRef),
+      );
+      expect(refundedBuy).toMatchObject({ outcome: 'ticket_granted' });
+      const refund = await deliverAndApply(
+        integration,
+        ticketDelivery('purchase_refunded', {
+          ref: refundRef,
+          productId: early.productId,
+          email: refunded.email,
+        }),
+      );
+      expect(refund).toMatchObject({ state: 'applied', outcome: 'ticket_revoked' });
+      expect(await attendancesOf(early.eventId)).toHaveLength(1);
+
+      // an ignored delivery for the early product and a store delivery
+      const ignored = await deliverAndApply(
+        integration,
+        ticketDelivery('cart_abandoned', {
+          ref: ref(),
+          productId: early.productId,
+          email: buyer.email,
+        }),
+      );
+      const store = await deliverAndApply(
+        integration,
+        saleBody('purchase_approved', { ref: ref(), productId: storeId, email: storeBuyer.email }),
+      );
+      expect(store).toMatchObject({ state: 'applied' });
+
+      // nothing was added for the admin, and the early buyer got exactly the one notice of 10.1
+      expect(await runNotificationJobs(labTenantId)).toBeGreaterThan(0);
+      expect(await noticesOf(buyer.userId)).toHaveLength(1);
+      expect(await notificationCount(labAdminUserId)).toBe(adminNoticesBefore);
+
+      const { items, raw } = await listEvents();
+      const byId = (id: string) => items.find((item) => item.id === id);
+      const marked = byId(granted.id);
+      expect(marked).toMatchObject({
+        kind: 'event',
+        outcome: 'ticket_granted',
+        beforeOpening: true,
+      });
+      expect(keysOf(marked)).toEqual(EARLY_KEYS);
+      for (const row of [replay, late, refundedBuy, refund, ignored, store]) {
+        const item = byId(row.id);
+        expect(item, `delivery ${row.id} is listed`).toBeDefined();
+        expect(keysOf(item)).not.toContain('beforeOpening');
+      }
+      // the shapes the marker must not change
+      expect(keysOf(byId(late.id))).toEqual(TICKET_KEYS);
+      expect(keysOf(byId(store.id))).toEqual(EVENT_KEYS);
+      // the marker is one boolean: no instant, no opening date and no reason rides along
+      expect(raw).not.toMatch(/registrationOpensAt|ticketConfirmedAt|confirmedAt/);
+    }, 90_000);
+  });
 });

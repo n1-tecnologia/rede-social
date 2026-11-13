@@ -35,7 +35,12 @@ const log = moduleLogger('payments-events');
  * paid-event delivery (Phase 10.1, D-749, D-758) it is the event's title through `app.event_title_for(tenant,
  * event)` (the same seam, `service_role` only) and the item also carries `kind: 'event'` and `eventTitle`
  * (null when the event is gone: soft-deleted or foreign); a store or access item carries neither key, so a
- * tenant with no ticket delivery lists exactly as before. A delivery for an ended or cancelled event is
+ * tenant with no ticket delivery lists exactly as before. Phase 10.2 (D-791, OPEN-15): a GRANTED ticket delivery
+ * whose payment was confirmed before the event's registration opening also carries `beforeOpening: true`,
+ * asked per delivery from the events-owned SQL definer `app.event_ticket_before_opening(tenant, event,
+ * provider, order reference)` BY NAME (the kernel never imports the events module and never reads the
+ * opening); a replay, a refund, an ignored delivery and every store or access item stay unmarked, and no
+ * notification is created for it. A delivery for an ended or cancelled event is
  * `ignored` with the matching outcome and the screen says so (`event_ended` / `event_cancelled`).
  *
  * THE MANUAL RELEASE is three short steps, not one long transaction (planning decision 4):
@@ -70,6 +75,8 @@ type EventRow = {
   outcome: PaymentEventOutcome | null;
   kind: string | null;
   event_title: string | null;
+  /** Phase 10.2 (D-791): true only for a granted ticket delivery paid before the opening; null otherwise. */
+  before_opening: boolean | null;
   received_at: string;
 };
 
@@ -104,6 +111,8 @@ const toItem = (row: EventRow): EventItem => {
     item.kind = 'event';
     item.eventTitle = row.event_title;
   }
+  // Phase 10.2 (D-791): the key exists only when true, so every other item keeps its exact shape.
+  if (row.before_opening === true) item.beforeOpening = true;
   return item;
 };
 
@@ -125,6 +134,9 @@ const columns = sql`
   e.outcome,
   p.kind,
   case when p.kind = 'event' then app.event_title_for(e.tenant_id, p.event_id) end as event_title,
+  case when p.kind = 'event' and e.outcome in ('ticket_granted', 'ticket_granted_over_limit')
+       then app.event_ticket_before_opening(e.tenant_id, p.event_id, e.provider, e.external_ref)
+  end as before_opening,
   to_char(e.received_at at time zone 'utc', ${ISO_MICROSECONDS}) as received_at`;
 
 /** `GET /v1/payments/events`: the latest 50 settled events of the tenant, no payload, no paging. */

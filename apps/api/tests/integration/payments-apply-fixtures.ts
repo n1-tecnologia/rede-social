@@ -182,6 +182,11 @@ export type TicketEventOptions = {
   status?: 'active' | 'cancelled';
   capacity?: number | null;
   deleted?: boolean;
+  /**
+   * Phase 10.2: the stored registration opening, in minutes from the DATABASE clock (negative for a past
+   * opening); null or absent leaves no opening. It must stay before the start (the table's CHECK).
+   */
+  opensInMinutes?: number | null;
 };
 
 /** An event of `tenantId`, created by that tenant's first admin (the title prefix sweeps it afterwards). */
@@ -194,12 +199,17 @@ export async function ticketEvent(tenantId: string, options: TicketEventOptions)
   const [row] = await adminSql<{ id: string }[]>`
     with e as (
       insert into public.events (tenant_id, created_by_user_id, title, format, starts_at, ends_at,
-                                 status, cancelled_at, capacity, deleted_at)
+                                 status, cancelled_at, capacity, deleted_at, registration_opens_at)
       values (${tenantId}::uuid, ${creator.id}::uuid, ${options.title}, 'online',
               now() + make_interval(mins => ${options.startsInMinutes ?? 60}),
               now() + make_interval(mins => ${options.endsInMinutes ?? 180}),
               ${status}, ${status === 'cancelled' ? adminSql`now()` : null},
-              ${options.capacity ?? null}::int, ${options.deleted ? adminSql`now()` : null})
+              ${options.capacity ?? null}::int, ${options.deleted ? adminSql`now()` : null},
+              ${
+                options.opensInMinutes === undefined || options.opensInMinutes === null
+                  ? null
+                  : adminSql`now() + make_interval(mins => ${options.opensInMinutes})`
+              })
       returning id, tenant_id, format
     ), s as (
       insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code, meeting_url)
@@ -270,6 +280,15 @@ export const attendancesOf = (eventId: string) =>
            refunded_at
       from public.event_attendances
      where event_id = ${eventId}::uuid
+     order by created_at, id`;
+
+/** The confirmation instants of every ticket row of one event, as ISO text with microseconds (Phase 10.2). */
+export const confirmedAtOf = (eventId: string) =>
+  adminSql<{ user_id: string; confirmed_at: string | null }[]>`
+    select user_id::text as user_id,
+           to_char(ticket_confirmed_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as confirmed_at
+      from public.event_attendances
+     where event_id = ${eventId}::uuid and origin = 'ticket'
      order by created_at, id`;
 
 /** Removes the events whose title starts with `prefix` (their attendances and mapping go first). */

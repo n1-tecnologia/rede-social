@@ -178,7 +178,22 @@ describe('10.1 - the closed vocabularies of the event ticket (D-740, D-741, TICK
       true,
     );
     expect(eventItemSchema.safeParse({ ...base, orderRef: 'x' }).success).toBe(false);
+    // Phase 10.2 (D-791, OPEN-15): the early marker is optional, boolean and strict like its siblings
+    expect(
+      eventItemSchema.safeParse({
+        ...base,
+        kind: 'event',
+        eventTitle: 'Encontro',
+        beforeOpening: true,
+      }).success,
+    ).toBe(true);
+    expect(eventItemSchema.safeParse({ ...base, beforeOpening: 'sim' }).success).toBe(false);
+    expect(eventItemSchema.safeParse({ ...base, beforeOpening: null }).success).toBe(false);
+    expect(eventItemSchema.safeParse({ ...base, beforeOpening: true, opensAt: 'x' }).success).toBe(
+      false,
+    );
     expect(Object.keys(eventItemSchema.shape).sort()).toEqual([
+      'beforeOpening',
       'email',
       'eventTitle',
       'externalProductId',
@@ -192,6 +207,7 @@ describe('10.1 - the closed vocabularies of the event ticket (D-740, D-741, TICK
     ]);
     expect(eventItemSchema.shape.kind.isOptional()).toBe(true);
     expect(eventItemSchema.shape.eventTitle.isOptional()).toBe(true);
+    expect(eventItemSchema.shape.beforeOpening.isOptional()).toBe(true);
   });
 
   it('no new value is anything but lowercase snake case (the neutrality walk owns the brand rule, TICK-20)', () => {

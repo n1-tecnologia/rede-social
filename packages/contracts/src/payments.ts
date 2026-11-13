@@ -557,6 +557,10 @@ export const eventItemSchema = z
     // before the API, and a store or access item never carries either key.
     kind: z.enum(PAYMENT_PRODUCT_KINDS).nullable().optional(),
     eventTitle: z.string().nullable().optional(),
+    // Phase 10.2 (D-791, OPEN-15): present, and then `true`, only on a ticket delivery applied (granted) before
+    // the event's registration opening. Absent on every other item, so the web that deploys first reads it as
+    // optional and a store, access, replayed, refunded or ignored item keeps its exact key set.
+    beforeOpening: z.boolean().optional(),
   })
   .strict();
 export type EventItem = z.infer<typeof eventItemSchema>;
