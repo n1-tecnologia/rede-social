@@ -651,6 +651,28 @@
       "google": "Google Agenda",
       "ics": "Arquivo .ics"
     },
+    "countdown": {
+      "short": {
+        "days": "{count} d",
+        "hours": "{count} h",
+        "minutes": "{count} min",
+        "lessThanMinute": "menos de 1 min"
+      },
+      "block": {
+        "days": "{count, plural, one {dia} other {dias}}",
+        "hours": "{count, plural, one {hora} other {horas}}",
+        "minutes": "min",
+        "lessThanMinute": "Menos de 1 min"
+      },
+      "spoken": {
+        "opening": "Tempo restante para a abertura: {time}.",
+        "event": "Tempo restante para o evento: {time}.",
+        "days": "{count, plural, one {# dia} other {# dias}}",
+        "hours": "{count, plural, one {# hora} other {# horas}}",
+        "minutes": "{count, plural, one {# minuto} other {# minutos}}",
+        "lessThanMinute": "menos de 1 minuto"
+      }
+    },
     "reine": {
       "example": "Exemplo",
       "participated": {
