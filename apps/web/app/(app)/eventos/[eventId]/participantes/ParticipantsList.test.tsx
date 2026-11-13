@@ -48,6 +48,7 @@ const state = vi.hoisted(() => ({
   permissions: [] as string[],
   summary: null as unknown,
   page: null as unknown,
+  event: { status: 'ok', event: { capacity: 50 } } as unknown,
 }));
 
 vi.mock('@/lib/bootstrap', () => ({
@@ -60,6 +61,7 @@ vi.mock('@/lib/bootstrap', () => ({
 vi.mock('@/lib/events', () => ({
   loadAttendanceSummary: vi.fn(async () => state.summary),
   loadAttendance: vi.fn(async () => state.page),
+  loadEvent: vi.fn(async () => state.event),
 }));
 
 const router = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
@@ -81,6 +83,7 @@ vi.mock('../../actions', () => ({
   courtesyHoldersAction: vi.fn(),
 }));
 
+const { loadEvent } = await import('@/lib/events');
 const { default: ParticipantsPage } = await import('./page');
 const { ParticipantsList } = await import('./ParticipantsList');
 const {
@@ -137,6 +140,8 @@ beforeEach(() => {
   vi.mocked(courtesyHoldersAction).mockReset();
   vi.mocked(refreshAttendanceAction).mockReset();
   router.refresh.mockReset();
+  vi.mocked(loadEvent).mockClear();
+  state.event = { status: 'ok', event: { capacity: 50 } };
   state.permissions = ADMIN;
   state.summary = { status: 'ok', summary: summary() };
   state.page = { items: [attendee(A1)], nextCursor: null };
@@ -697,5 +702,112 @@ describe('ParticipantsList: Liberar presença on the Não vão chip', () => {
     delete free.marks;
     renderList({ list: 'not_going', canManage: true, initialItems: [free] });
     expect(screen.queryByRole('button', { name: /Liberar presença/ })).toBeNull();
+  });
+});
+
+/**
+ * Phase 10.1-14 (UI-D-757 b, D-758) — the over-limit notice above the chips and the reworded Confirmados
+ * body of a paid event. The server flags the state (`summary.overLimit`); the numbers come from the event.
+ */
+describe('Participantes: the Acima do limite notice and the paid empty body', () => {
+  const notice = () => document.querySelector('[data-over-limit-notice]') as HTMLElement | null;
+
+  it('13a. one over the limit: the notice sits above the chips with CircleAlert and both plural branches', async () => {
+    state.summary = {
+      status: 'ok',
+      summary: summary({ paid: true, overLimit: true, confirmedCount: 51 }),
+    };
+    await renderPage();
+    const element = notice() as HTMLElement;
+    expect(element.textContent).toBe(
+      '51 confirmados para 50 vagas. Pagamentos aprovados depois de lotar confirmam mesmo assim.',
+    );
+    for (const token of ['flex', 'items-start', 'gap-2', 'rounded-xl', 'bg-warning/10', 'p-4']) {
+      expect(element.className).toContain(token);
+    }
+    expect(element.querySelector('svg')).not.toBeNull();
+    // Static text at load: no live region.
+    expect(element.getAttribute('role')).toBeNull();
+    expect(element.closest('[aria-live]')).toBeNull();
+    const nav = screen.getByRole('navigation', { name: 'Filtrar participantes' });
+    expect(element.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(loadEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('13b. at the limit the notice is absent, and the event is not even read', async () => {
+    state.summary = {
+      status: 'ok',
+      summary: summary({ paid: true, overLimit: false, confirmedCount: 50 }),
+    };
+    await renderPage();
+    expect(notice()).toBeNull();
+    expect(loadEvent).not.toHaveBeenCalled();
+  });
+
+  it('13c. a flag that disagrees with the numbers draws nothing; so do a null limit and an unreadable event', async () => {
+    state.summary = {
+      status: 'ok',
+      summary: summary({ paid: true, overLimit: true, confirmedCount: 50 }),
+    };
+    const first = await renderPage();
+    expect(notice()).toBeNull();
+    first.unmount();
+    state.summary = {
+      status: 'ok',
+      summary: summary({ paid: true, overLimit: true, confirmedCount: 51 }),
+    };
+    state.event = { status: 'ok', event: { capacity: null } };
+    const second = await renderPage();
+    expect(notice()).toBeNull();
+    second.unmount();
+    state.event = { status: 'error' };
+    await renderPage();
+    expect(notice()).toBeNull();
+  });
+
+  it.each([
+    [2, 1, '2 confirmados para 1 vaga.'],
+    [52, 50, '52 confirmados para 50 vagas.'],
+  ])('13d. %i confirmed for %i spots reads "%s"', async (confirmedCount, capacity, start) => {
+    state.summary = {
+      status: 'ok',
+      summary: summary({ paid: true, overLimit: true, confirmedCount }),
+    };
+    state.event = { status: 'ok', event: { capacity } };
+    await renderPage();
+    expect((notice() as HTMLElement).textContent?.startsWith(start)).toBe(true);
+  });
+
+  it('13e. a free event shows no notice and no toolbar door', async () => {
+    state.summary = { status: 'ok', summary: summary({ confirmedCount: 51 }) };
+    await renderPage();
+    expect(notice()).toBeNull();
+    expect(loadEvent).not.toHaveBeenCalled();
+  });
+
+  it('13f. the Confirmados empty body names the ticket and the courtesy ONLY for a paid event', () => {
+    const { unmount } = renderList({ paid: true });
+    expect(
+      within(screen.getByTestId('participants-empty')).getByText(
+        'Quem pagar o ingresso ou receber uma cortesia aparece aqui até fazer check-in.',
+      ),
+    ).toBeTruthy();
+    unmount();
+    renderList({ paid: false });
+    expect(
+      within(screen.getByTestId('participants-empty')).getByText(
+        'Quem responder Vou aparece aqui até fazer check-in.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('13g. the paid reword touches Confirmados alone: Presentes and Não vão keep the shipped body', () => {
+    const { unmount } = renderList({ list: 'present', paid: true });
+    expect(
+      screen.getByText('Os check-ins feitos no local ou pelo Entrar aparecem aqui.'),
+    ).toBeTruthy();
+    unmount();
+    renderList({ list: 'not_going', paid: true });
+    expect(screen.getByText('Quem responder Não vou aparece aqui.')).toBeTruthy();
   });
 });

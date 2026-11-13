@@ -40,6 +40,11 @@ export interface ParticipantsListProps {
    * (UI-D-756). The page decides it from the bootstrap; the API's literal guard is the authority.
    */
   canManage?: boolean;
+  /**
+   * Phase 10.1-14 (D-758): the event is paid, so the Confirmados empty body is reworded to name the ticket
+   * and the courtesy. Every other empty and error state is the shipped one.
+   */
+  paid?: boolean;
 }
 
 /** Each chip's own empty state (UI-SPEC Copywriting "Participantes" empties). */
@@ -98,6 +103,7 @@ export function ParticipantsList({
   initialCursor,
   initialError,
   canManage = false,
+  paid = false,
 }: ParticipantsListProps) {
   const t = useTranslations('events');
   const router = useRouter();
@@ -254,7 +260,11 @@ export function ParticipantsList({
           data-testid="participants-empty"
           data-list={list}
           title={t(`participants.empty.${key}.title`)}
-          body={t(`participants.empty.${key}.body`)}
+          body={
+            paid && key === 'confirmed'
+              ? t('participants.empty.confirmed.bodyPaid')
+              : t(`participants.empty.${key}.body`)
+          }
         />
       </div>
     );

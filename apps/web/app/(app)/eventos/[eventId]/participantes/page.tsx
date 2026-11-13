@@ -5,7 +5,7 @@ import { CircleAlert } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { loadAttendance, loadAttendanceSummary } from '@/lib/events';
+import { loadAttendance, loadAttendanceSummary, loadEvent } from '@/lib/events';
 import {
   attendanceListFromParam,
   attendeeView,
@@ -13,6 +13,7 @@ import {
   spelledCode,
 } from '@/lib/events-view';
 import { ActiveChipInView } from './ActiveChipInView';
+import { isOverLimit, OverLimitNotice } from './OverLimitNotice';
 import { ParticipantsList } from './ParticipantsList';
 import { RegenerateCodeControl } from './RegenerateCodeControl';
 import { ReleasePresenceToolbar } from './ReleasePresenceSheet';
@@ -36,6 +37,7 @@ const CHIPS_ID = 'participants-chips';
  *     "Gerar novo código" sits in its action slot only with `events.event.manage` (D-217);
  *  2b. a paid event and `events.event.manage` add the "Liberar presença" toolbar door above the chips
  *     (10.1-14, UI-D-755); a free event has none;
+ *  2c. while a paid event is over its limit, the "Acima do limite" notice (10.1-14, UI-D-757);
  *  3. the chip nav: three `Chip` links carrying the counts (`pendingConfirmedCount`, `presentCount`,
  *     `notGoingCount`: Pitfall 11, the Confirmados chip is `going` ONLY), `whitespace-nowrap` and
  *     `tabular-nums`, scrolling horizontally when four-digit counts exceed a 320px row (UI E11
@@ -111,6 +113,11 @@ export default async function ParticipantsPage({
   const rows = (page?.items ?? []).map((attendee) =>
     attendeeView(attendee, list, { tz, nowMs, t }),
   );
+  const paid = summary.paid === true;
+  // The notice names the limit, which only the event read carries; read it ONLY when the server says the
+  // count is over (the common page asks nothing more). An unreadable event simply draws no notice.
+  const limit = summary.overLimit === true ? await loadEvent(eventId) : null;
+  const capacity = limit?.status === 'ok' ? limit.event.capacity : null;
 
   const chips: { list: AttendanceList; label: string }[] = [
     {
@@ -141,7 +148,12 @@ export default async function ParticipantsPage({
       />
 
       {/* Phase 10.1-14 (UI-D-755): the toolbar door, a paid event and the manage permission only. */}
-      {summary.paid === true && canManage ? <ReleasePresenceToolbar eventId={eventId} /> : null}
+      {paid && canManage ? <ReleasePresenceToolbar eventId={eventId} /> : null}
+
+      {/* Phase 10.1-14 (UI-D-757 b): the over-limit notice, while the count is above the limit. */}
+      {capacity !== null && isOverLimit(summary.confirmedCount, capacity) ? (
+        <OverLimitNotice confirmed={summary.confirmedCount} capacity={capacity} />
+      ) : null}
 
       <nav
         id={CHIPS_ID}
@@ -171,6 +183,7 @@ export default async function ParticipantsPage({
         initialCursor={page?.nextCursor ?? null}
         initialError={page === null}
         canManage={canManage}
+        paid={paid}
       />
     </div>
   );

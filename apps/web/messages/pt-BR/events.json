@@ -261,6 +261,7 @@
       "title": "Gerenciar evento",
       "participants": "Participantes",
       "participantsSub": "{confirmed} · {present}",
+      "overLimit": "Acima do limite",
       "edit": "Editar evento"
     },
     "reactivate": {
@@ -572,6 +573,7 @@
         "notGoing": "Respondeu em {date}"
       },
       "removed": "Membro removido",
+      "overLimitNote": "{confirmed, plural, one {# confirmado} other {# confirmados}} para {capacity, plural, one {# vaga} other {# vagas}}. Pagamentos aprovados depois de lotar confirmam mesmo assim.",
       "origin": {
         "paid": "Pago",
         "courtesy": "Cortesia",
@@ -628,7 +630,8 @@
       "empty": {
         "confirmed": {
           "title": "Ninguém confirmou ainda",
-          "body": "Quem responder Vou aparece aqui até fazer check-in."
+          "body": "Quem responder Vou aparece aqui até fazer check-in.",
+          "bodyPaid": "Quem pagar o ingresso ou receber uma cortesia aparece aqui até fazer check-in."
         },
         "present": {
           "title": "Nenhum check-in ainda",

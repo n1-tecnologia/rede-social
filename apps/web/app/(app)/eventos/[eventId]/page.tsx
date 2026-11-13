@@ -33,6 +33,7 @@ import { EventLocationMap } from './EventLocationMap';
 import { EventPhotos } from './EventPhotos';
 import { EventRefresh } from './EventRefresh';
 import { EventSchedule } from './EventSchedule';
+import { isOverLimit } from './participantes/OverLimitNotice';
 import { ReactivateEventControl } from './ReactivateEventControl';
 
 /**
@@ -106,6 +107,11 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
   });
   const canManage = bootstrap.permissions.includes(EVENT_PERMISSIONS.manage);
   const canReadAttendance = bootstrap.permissions.includes(EVENT_PERMISSIONS.attendanceRead);
+  // Phase 10.1-14 (D-751, UI-D-757 a): a paid event past its limit, for the organiser only.
+  const overLimit =
+    canReadAttendance &&
+    result.event.paid === true &&
+    isOverLimit(result.event.confirmedCount, result.event.capacity);
   const canReactivate = canManage && view.cancelled && nowMs < Date.parse(result.event.startsAt);
   const googleHref = view.calendar
     ? googleCalendarHref(result.event, { origin: await exportOrigin() })
@@ -305,6 +311,15 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
                           present: t('count.present', { count: result.event.presentCount }),
                         })}
                       </span>
+                      {overLimit ? (
+                        <StatusPill
+                          tone="warning"
+                          data-event-manage-over-limit
+                          className="mt-1 self-start"
+                        >
+                          {t('manage.overLimit')}
+                        </StatusPill>
+                      ) : null}
                     </span>
                     <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
                   </a>

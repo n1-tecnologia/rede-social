@@ -488,6 +488,60 @@ describe('events.json: Liberar presença (UI-D-755, A-UI-5, A-UI-6)', () => {
 });
 
 /**
+ * Phase 10.1-14 (UI-D-757, D-758): the over-limit notice, the manage-card pill and the paid event's
+ * Confirmados empty body. The sentence carries TWO ICU plurals, pinned on both branches.
+ */
+const OVER_LIMIT: Record<string, { text: string; names: string[] }> = {
+  'participants.overLimitNote': {
+    text: '{confirmed, plural, one {# confirmado} other {# confirmados}} para {capacity, plural, one {# vaga} other {# vagas}}. Pagamentos aprovados depois de lotar confirmam mesmo assim.',
+    names: ['capacity', 'confirmed'],
+  },
+  'manage.overLimit': { text: 'Acima do limite', names: [] },
+  'participants.empty.confirmed.bodyPaid': {
+    text: 'Quem pagar o ingresso ou receber uma cortesia aparece aqui até fazer check-in.',
+    names: [],
+  },
+};
+
+describe('events.json: Acima do limite and the paid empty body (UI-D-757, D-758)', () => {
+  it('carries every key with the approved sentence and its placeholders', () => {
+    for (const [key, { text, names }] of Object.entries(OVER_LIMIT)) {
+      expect(all[key], `missing key events.${key}`).toBe(text);
+      expect(placeholders(all[key] as string), `placeholders of events.${key}`).toEqual(names);
+    }
+  });
+
+  it.each([
+    [1, 1, '1 confirmado para 1 vaga.'],
+    [2, 1, '2 confirmados para 1 vaga.'],
+    [1, 2, '1 confirmado para 2 vagas.'],
+    [51, 50, '51 confirmados para 50 vagas.'],
+    [1204, 1200, '1.204 confirmados para 1.200 vagas.'],
+  ])(
+    'formats %i confirmed for %i spots with the right plural branches',
+    (confirmed, capacity, start) => {
+      const text = translate('participants.overLimitNote', { confirmed, capacity });
+      expect(text.startsWith(start)).toBe(true);
+      expect(text.endsWith('Pagamentos aprovados depois de lotar confirmam mesmo assim.')).toBe(
+        true,
+      );
+    },
+  );
+
+  it('keeps the shipped Confirmados empty body beside the paid one', () => {
+    expect(all['participants.empty.confirmed.body']).toBe(
+      'Quem responder Vou aparece aqui até fazer check-in.',
+    );
+  });
+
+  it('names the provider nowhere (TICK-20)', () => {
+    for (const key of Object.keys(OVER_LIMIT)) {
+      expect(all[key], `events.${key}`).not.toMatch(/kiwify|gateway|webhook/i);
+    }
+  });
+});
+
+/**
  * Phase 10.1-13 (UI-D-760): the bell row of the paid event, in the `notifications` namespace. Rich text:
  * the lead is a `<b>` tag the renderer fills, the title a plain value.
  */
