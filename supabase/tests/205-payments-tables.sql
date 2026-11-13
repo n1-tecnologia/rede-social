@@ -25,7 +25,7 @@ begin;
 --    `service_role` only.
 --
 -- Fixture ids use the `20500000-…` prefix, used by no other file. Like its siblings, this file ROLLS BACK.
-select plan(129);
+select plan(140);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-pay-a', 'Pay A', '20500000-0000-4000-8000-000000000001');
@@ -64,8 +64,8 @@ select columns_are('public', 'payment_integrations', array[
 ], 'payment_integrations has exactly the planned columns');
 select columns_are('public', 'payment_products', array[
   'id', 'tenant_id', 'provider', 'kind', 'name', 'external_product_id', 'checkout_url', 'target_id',
-  'created_by_user_id', 'created_at', 'updated_at'
-], 'payment_products has exactly the planned columns');
+  'event_id', 'created_by_user_id', 'created_at', 'updated_at'
+], 'payment_products has exactly the planned columns (10.1 added event_id)');
 select columns_are('public', 'payment_events', array[
   'id', 'tenant_id', 'integration_id', 'provider', 'dedupe_key', 'type', 'effect', 'external_ref', 'order_ref',
   'external_product_id', 'email', 'amount_cents', 'currency', 'recurring', 'valid_until', 'occurred_at', 'received_at',
@@ -77,6 +77,10 @@ select col_is_pk('public', 'payment_events', 'id', 'payment_events.id is the pri
 select has_index('public', 'payment_integrations', 'payment_integrations_tenant_provider_uq', 'one integration per tenant and provider (index)');
 select has_index('public', 'payment_products', 'payment_products_provider_ext_uq', 'the GLOBAL (provider, product id) index exists');
 select has_index('public', 'payment_products', 'payment_products_target_uq', 'one mapping per store target (index)');
+select has_index('public', 'payment_products', 'payment_products_event_uq', 'one mapping per event (index, 10.1 D-745)');
+select is(
+  (select confdeltype::text from pg_constraint where conname = 'payment_products_event_fk'),
+  'c', 'payment_products_event_fk (tenant_id, event_id) -> events exists and cascades on delete (10.1 TICK-01)');
 select has_index('public', 'payment_products', 'payment_products_tenant_kind_idx', 'the Pagamentos list index exists');
 select has_index('public', 'payment_events', 'payment_events_dedupe_uq', 'the (integration, dedupe key) index exists');
 select has_index('public', 'payment_events', 'payment_events_tenant_received_idx', 'the Eventos total-order index exists (P6)');
@@ -92,8 +96,9 @@ select is(
   (select count(*)::int from pg_constraint
     where conrelid = 'public.payment_products'::regclass and contype = 'c'
       and conname in ('payment_products_provider_chk', 'payment_products_kind_chk', 'payment_products_ext_id_chk',
-                      'payment_products_name_chk', 'payment_products_target_chk', 'payment_products_url_chk')),
-  6, 'payment_products carries its six named CHECKs');
+                      'payment_products_name_chk', 'payment_products_target_chk', 'payment_products_url_chk',
+                      'payment_products_event_chk')),
+  7, 'payment_products carries its seven named CHECKs (10.1 added event_chk)');
 select is(
   (select count(*)::int from pg_constraint
     where conrelid = 'public.payment_events'::regclass and contype = 'c'
@@ -214,6 +219,42 @@ select lives_ok(
 select lives_ok(
   $$ insert into public.payment_products (tenant_id, provider, kind, name, external_product_id) values ('20500000-0000-4000-8000-000000000001', 'fake', 'access', 'Maiusc', 'ABC-X'), ('20500000-0000-4000-8000-000000000001', 'fake', 'access', 'Minusc', 'abc-x') $$,
   'P69: ids that differ only in case coexist (compared exactly, case-sensitive)');
+-- Phase 10.1 (D-740, D-744, D-745, TICK-01; T-10.1-01, T-10.1-02): the third kind, `event`. Two events, one per
+-- tenant, are created for these cases and DELETED again before section 3, so the set comparisons of the lane
+-- below see exactly the mappings they always saw. Deleting event 1 is also the cascade proof.
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at) values
+  ('20500000-0000-4000-8000-0000000000c1', '20500000-0000-4000-8000-000000000001', '20500000-0000-4000-8000-0000000000a1', 'Evento A', 'in_person', 'Sede', 'Rua A, 1', now() + interval '10 days', now() + interval '10 days 2 hours'),
+  ('20500000-0000-4000-8000-0000000000c2', '20500000-0000-4000-8000-000000000002', '20500000-0000-4000-8000-0000000000b1', 'Evento B', 'in_person', 'Sede', 'Rua B, 1', now() + interval '10 days', now() + interval '10 days 2 hours');
+select lives_ok(
+  $$ insert into public.payment_products (id, tenant_id, provider, kind, external_product_id, event_id) values ('20500000-0000-4000-8000-0000000000d9', '20500000-0000-4000-8000-000000000001', 'fake', 'event', 'EV-A', '20500000-0000-4000-8000-0000000000c1') $$,
+  'D-740: an event mapping naming an event of its own tenant is accepted (no name, no target)');
+select throws_ok(
+  $$ insert into public.payment_products (tenant_id, provider, kind, external_product_id) values ('20500000-0000-4000-8000-000000000001', 'fake', 'event', 'EV-NO') $$,
+  '23514', null, 'D-744: an event mapping without an event_id is refused (payment_products_event_chk)');
+select throws_ok(
+  $$ insert into public.payment_products (tenant_id, provider, kind, name, external_product_id, event_id) values ('20500000-0000-4000-8000-000000000001', 'fake', 'access', 'x', 'EV-AC', '20500000-0000-4000-8000-0000000000c1') $$,
+  '23514', null, 'D-744: an access mapping carrying an event_id is refused');
+select throws_ok(
+  $$ insert into public.payment_products (tenant_id, provider, kind, external_product_id, target_id, event_id) values ('20500000-0000-4000-8000-000000000001', 'fake', 'store_product', 'EV-SP', '20500000-0000-4000-8000-0000000000f1', '20500000-0000-4000-8000-0000000000c1') $$,
+  '23514', null, 'D-744: a store-product mapping carrying an event_id is refused');
+select throws_ok(
+  $$ insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values ('20500000-0000-4000-8000-000000000001', 'fake', 'event', 'EV-DUP', '20500000-0000-4000-8000-0000000000c1') $$,
+  '23505', null, 'D-745: a second mapping for the same event is refused (payment_products_event_uq)');
+select throws_ok(
+  $$ insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values ('20500000-0000-4000-8000-000000000001', 'fake', 'event', 'EV-FOREIGN', '20500000-0000-4000-8000-0000000000c2') $$,
+  '23503', null, 'T-10.1-01: a mapping naming ANOTHER tenant''s event is refused (composite foreign key)');
+select throws_ok(
+  $$ insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values ('20500000-0000-4000-8000-000000000002', 'fake', 'event', 'EV-A', '20500000-0000-4000-8000-0000000000c2') $$,
+  '23505', null, 'T-10.1-02: the global (provider, product id) index still refuses the same id in a second tenant');
+select lives_ok(
+  $$ insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values ('20500000-0000-4000-8000-000000000002', 'fake', 'event', 'EV-B', '20500000-0000-4000-8000-0000000000c2') $$,
+  'D-745: another tenant maps its own event under its own product id');
+delete from public.events where id = '20500000-0000-4000-8000-0000000000c1';
+select is(
+  (select count(*)::int from public.payment_products where event_id = '20500000-0000-4000-8000-0000000000c1'),
+  0, 'deleting the event deletes its mapping (on delete cascade)');
+delete from public.events where id = '20500000-0000-4000-8000-0000000000c2';
+
 insert into public.payment_events (id, tenant_id, integration_id, provider, dedupe_key, type, effect)
   values ('20500000-0000-4000-8000-0000000000aa', '20500000-0000-4000-8000-000000000001', '20500000-0000-4000-8000-0000000000d1', 'fake', 'k-dup', 'other', 'none');
 select throws_ok(
