@@ -175,13 +175,17 @@ select lives_ok(
 );
 
 -- ── 5. no trigger writes elsewhere ────────────────────────────────────────────────────────────
+-- Phase 10.2 (plan 04) added `events_opening_guard`: `before update of registration_opens_at`, so a soft delete
+-- (which never names that column) cannot fire it, and it only READS `event_attendances` to refuse a change of
+-- the opening. It is the one named exception; pgTAP 234 section 4 proves a soft delete of a locked event passes.
 select is_empty(
   $$ select t.tgname
        from pg_trigger t
        join pg_class c on c.oid = t.tgrelid
        join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'public' and c.relname = 'events'
-        and not t.tgisinternal and (t.tgtype & 16) = 16 $$,
+        and not t.tgisinternal and (t.tgtype & 16) = 16
+        and t.tgname <> 'events_opening_guard' $$,
   'public.events has no non-internal UPDATE trigger: a soft delete cannot write another table'
 );
 

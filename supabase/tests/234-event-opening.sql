@@ -30,10 +30,19 @@ begin;
 --    only a plain rsvp can have its opening set, moved and cleared; the same value, a title edit and a soft
 --    delete never meet it; a fully refunded sale lifts the lock (the revoke definer deletes the going ticket) and
 --    a refunded checked-in ticket (kept and flagged) keeps it; `app.event_ticket_reset` clears the opening and
---    turns the courtesy rows back to rsvp for the admin of the tenant only. 5. is appended by the next task.
+--    turns the courtesy rows back to rsvp for the admin of the tenant only.
+--
+-- 5. HARDENING AND ISOLATION (plan 04, OPEN-23, OPEN-24, EP-46, EP-47, EP-48, T-10.2-01, T-10.2-04, T-10.2-05): by
+--    catalogue, the four functions of the plan are SECURITY DEFINER with an empty `search_path`, the three
+--    callable ones execute for `authenticated` and not for `anon` or `public`, the trigger function for none,
+--    and `events_opening_guard` is an enabled BEFORE UPDATE row trigger on `public.events` that names the
+--    opening column and has no insert half; across tenants, in BOTH directions with the fixtures swapped and a
+--    positive control each time, the link, the readiness and the reset see only the caller's own tenant; two
+--    tenants' events with the same title and the same opening instant each hand out only their own link; a
+--    tenant with no events and a random id are told nothing; a session with no claims is told nothing.
 --
 -- Fixture ids use the `1e320000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(74);
+select plan(102);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-opn-a', 'Abertura A', '1e320000-0000-4000-8000-000000000001');
@@ -428,6 +437,116 @@ reset role;
 select is((select (registration_opens_at = now() + interval '8 days')::text || ':' || (select origin from public.event_attendances where event_id = tests.op('db') and user_id = tests.op('c1'))
              from public.events where id = tests.op('db')),
   'true:courtesy', 'D-783 backstop: ...the opening stays and the courtesy row stays a courtesy (the call rolled back as a whole)');
+
+-- ── 5. hardening and isolation (plan 04, OPEN-23, OPEN-24, EP-46 to EP-48) ─────────────────────
+-- By catalogue: SECURITY DEFINER with an empty search_path on the four functions of the plan.
+select ok(coalesce((select p.prosecdef and p.proconfig @> array['search_path=""']
+                      from pg_proc p where p.oid = to_regprocedure(v.sig)), false),
+          v.sig || ' is SECURITY DEFINER with an empty search_path')
+  from (values
+    ('app.event_checkout_url(uuid)'),
+    ('app.event_sale_ready(uuid)'),
+    ('app.event_opening_guard()'),
+    ('app.event_ticket_reset(uuid)')
+  ) as v(sig);
+-- The privilege matrix: three callable by authenticated only, the trigger function by nobody.
+select ok(has_function_privilege(v.role, v.sig, 'execute') = v.expected,
+          v.role || (case when v.expected then ' can execute ' else ' cannot execute ' end) || v.sig)
+  from (values
+    ('authenticated', 'app.event_checkout_url(uuid)', true),
+    ('authenticated', 'app.event_sale_ready(uuid)', true),
+    ('authenticated', 'app.event_ticket_reset(uuid)', true),
+    ('authenticated', 'app.event_opening_guard()', false),
+    ('anon',          'app.event_checkout_url(uuid)', false),
+    ('anon',          'app.event_sale_ready(uuid)', false),
+    ('anon',          'app.event_ticket_reset(uuid)', false),
+    ('anon',          'app.event_opening_guard()', false),
+    ('public',        'app.event_checkout_url(uuid)', false),
+    ('public',        'app.event_sale_ready(uuid)', false),
+    ('public',        'app.event_ticket_reset(uuid)', false),
+    ('public',        'app.event_opening_guard()', false)
+  ) as v(role, sig, expected);
+-- The trigger: on public.events, a BEFORE (2) UPDATE (16) ROW (1) trigger and no INSERT (4) half, enabled.
+select is(
+  (select t.tgtype & 31 = 19 and t.tgenabled = 'O' and t.tgfoid = to_regprocedure('app.event_opening_guard()')
+     from pg_trigger t where t.tgrelid = 'public.events'::regclass and t.tgname = 'events_opening_guard' and not t.tgisinternal),
+  true, 'OPEN-23: events_opening_guard is an enabled BEFORE UPDATE row trigger on public.events (no insert half) running the guard');
+select ok(
+  (select pg_get_triggerdef(t.oid) ~ 'UPDATE OF registration_opens_at' and pg_get_triggerdef(t.oid) ~ 'IS DISTINCT FROM'
+     from pg_trigger t where t.tgrelid = 'public.events'::regclass and t.tgname = 'events_opening_guard'),
+  'OPEN-23: its definition names the opening column and compares old with new');
+
+-- Fixtures swapped: tenant B gets what tenant A has (module, gateway, mapped events with links).
+select tests.tenant('pgtap-opn-c', 'Abertura C', tests.op('3'));
+select tests.auth_user('u1@opn-b.local', tests.op('b2'));
+select tests.auth_user('u7@opn-c.local', tests.op('c7'));
+insert into public.tenant_modules (tenant_id, module_key, enabled) values (tests.op('2'), 'payments', true);
+insert into public.payment_integrations (tenant_id, provider, secret_sealed) values (tests.op('2'), 'fake', 'sealed-pgtap-opn-b');
+-- E3 B's mapped event, no opening | E4 (A) and E5 (B): the SAME title and the SAME opening instant | E6 B's event for the reset.
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, registration_opens_at) values
+  (tests.op('e3'), tests.op('2'), tests.op('b1'), 'E3', 'in_person', 'Sede', 'Rua B', now() + interval '10 days', now() + interval '10 days 2 hours', null),
+  (tests.op('e4'), tests.op('1'), tests.op('a1'), 'Mesmo titulo', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() - interval '1 day'),
+  (tests.op('e5'), tests.op('2'), tests.op('b1'), 'Mesmo titulo', 'in_person', 'Sede', 'Rua B', now() + interval '10 days', now() + interval '10 days 2 hours', now() - interval '1 day'),
+  (tests.op('e6'), tests.op('2'), tests.op('b1'), 'E6', 'in_person', 'Sede', 'Rua B', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '8 days');
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id, checkout_url) values
+  (tests.op('2'), 'fake', 'event', 'opn-234-e3', tests.op('e3'), 'https://pay.example.test/b-e3'),
+  (tests.op('1'), 'fake', 'event', 'opn-234-e4', tests.op('e4'), 'https://pay.example.test/a-e4'),
+  (tests.op('2'), 'fake', 'event', 'opn-234-e5', tests.op('e5'), 'https://pay.example.test/b-e5');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.op('2'), tests.op('e6'), tests.op('b2'), 'going', now(), 'courtesy');
+
+-- A to B, with the positive control (A's own link and readiness first).
+select tests.as_tenant(tests.op('1'), tests.op('c1'));
+select results_eq(
+  $$ select app.event_checkout_url(tests.op('f1')), app.event_sale_ready(tests.op('f1')), app.event_checkout_url(tests.op('e3')), app.event_sale_ready(tests.op('e3')) $$,
+  $$ values ('https://pay.example.test/f1'::text, true, null::text, false) $$,
+  'EP-48: a member of tenant A gets its own link and readiness, and null and false for tenant B''s event');
+reset role;
+-- B to A, the same fixtures swapped.
+select tests.as_tenant(tests.op('2'), tests.op('b2'));
+select results_eq(
+  $$ select app.event_checkout_url(tests.op('e3')), app.event_sale_ready(tests.op('e3')), app.event_checkout_url(tests.op('f1')), app.event_sale_ready(tests.op('f1')) $$,
+  $$ values ('https://pay.example.test/b-e3'::text, true, null::text, false) $$,
+  'EP-48: a member of tenant B gets its own link and readiness, and null and false for tenant A''s event');
+select results_eq(
+  $$ select app.event_checkout_url(tests.op('e5')), app.event_checkout_url(tests.op('e4')) $$,
+  $$ values ('https://pay.example.test/b-e5'::text, null::text) $$,
+  'EP-46: same title, same opening instant: tenant B reads only its own link');
+reset role;
+select tests.as_tenant(tests.op('1'), tests.op('c1'));
+select results_eq(
+  $$ select app.event_checkout_url(tests.op('e4')), app.event_checkout_url(tests.op('e5')) $$,
+  $$ values ('https://pay.example.test/a-e4'::text, null::text) $$,
+  'EP-46: ...and tenant A reads only its own');
+reset role;
+-- EP-47: a tenant with no events, and a random id.
+select tests.as_tenant(tests.op('3'), tests.op('c7'));
+select results_eq(
+  $$ select app.event_checkout_url(gen_random_uuid()), app.event_sale_ready(gen_random_uuid()), app.event_checkout_url(tests.op('f1')), app.event_sale_ready(tests.op('e3')) $$,
+  $$ values (null::text, false, null::text, false) $$,
+  'EP-47: a tenant with no events and no module is told nothing, for a random id or for another tenant''s events');
+reset role;
+-- A session with no claims is told nothing (T-10.2-01).
+select tests.as_tenant_without_claims();
+select results_eq(
+  $$ select app.event_checkout_url(tests.op('f1')), app.event_sale_ready(tests.op('f1')) $$,
+  $$ values (null::text, false) $$, 'T-10.2-01: a session with no claims is told nothing');
+reset role;
+
+-- The reset, A to B (the section 4 case was B to A), then the positive control with B's own admin.
+select tests.as_tenant(tests.op('1'), tests.op('a1'), 'admin_tenant');
+select lives_ok($$ select app.event_ticket_reset('1e320000-0000-4000-8000-0000000000e6') $$,
+  'T-10.2-04: tenant A''s admin resetting tenant B''s event is accepted and changes nothing');
+reset role;
+select is((select (registration_opens_at = now() + interval '8 days')::text || ':' || (select origin from public.event_attendances where event_id = tests.op('e6') and user_id = tests.op('b2'))
+             from public.events where id = tests.op('e6')),
+  'true:courtesy', 'T-10.2-04: ...tenant B''s opening and courtesy row of E6 are untouched');
+select tests.as_tenant(tests.op('2'), tests.op('b1'), 'admin_tenant');
+select lives_ok($$ select app.event_ticket_reset('1e320000-0000-4000-8000-0000000000e6') $$, 'EP-48 control: tenant B''s own admin resets E6');
+reset role;
+select is((select (registration_opens_at is null)::text || ':' || (select origin from public.event_attendances where event_id = tests.op('e6') and user_id = tests.op('b2'))
+             from public.events where id = tests.op('e6')),
+  'true:rsvp', 'EP-48 control: ...and it clears the opening and turns the courtesy row back to rsvp');
 
 select * from finish();
 rollback;
