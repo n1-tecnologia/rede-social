@@ -1046,6 +1046,70 @@ describe('10.1 events: paid-event deliveries', () => {
     expect((await eventRow(waiting.id)).state).toBe('no_membership');
   }, 60_000);
 
+  it('WR-01: with no refund in play the release waits for the order lock and then releases the presence (200 ticket_granted, once, idempotent)', async () => {
+    const ev = await paid({ title: `${TITLE}-wr01-control` });
+    const email = freshEmail(PREFIX, 'wr01ctl');
+    const orderRef = ref();
+    const waiting = await deliverAndApply(integration, approved(ev.productId, email, orderRef));
+    expect(waiting.state).toBe('no_membership');
+    const payer = await personWithEmail(email, 'lab');
+
+    const holder = await holdOrderLock(labTenantId, orderRef);
+    let releasing: ReturnType<typeof grant> = Promise.resolve({
+      status: 0,
+      json: {},
+      raw: '',
+    });
+    try {
+      releasing = grant(waiting.id);
+      expect(
+        await waitersOnAdvisoryLock(),
+        'the release must be waiting on the same key the holder took (the helper builds the literal key)',
+      ).toBeGreaterThan(0);
+      await holder.release();
+      const res = await releasing;
+      expect(res.status, JSON.stringify(res.json)).toBe(200);
+      expect(res.json).toMatchObject({ state: 'applied', outcome: 'ticket_granted' });
+    } finally {
+      await holder.end();
+      await releasing.catch(() => undefined);
+    }
+    expect(await attendancesOf(ev.eventId)).toMatchObject([
+      { user_id: payer.userId, origin: 'ticket' },
+    ]);
+    const again = await grant(waiting.id);
+    expect(again.status).toBe(200);
+    expect(await attendancesOf(ev.eventId)).toHaveLength(1);
+  }, 60_000);
+
+  it('WR-01: the apply job of a fresh approved delivery waits on the same order lock and settles applied / ticket_granted once it is free', async () => {
+    const ev = await paid({ title: `${TITLE}-wr01-apply` });
+    const email = freshEmail(PREFIX, 'wr01app');
+    const orderRef = ref();
+    const member = await personWithEmail(email, 'lab');
+    const id = await deliver(integration, approved(ev.productId, email, orderRef));
+
+    const holder = await holdOrderLock(labTenantId, orderRef);
+    let applying: Promise<unknown> = Promise.resolve();
+    try {
+      applying = runApply(id);
+      expect(
+        await waitersOnAdvisoryLock(),
+        'the apply job must be waiting on the order lock',
+      ).toBeGreaterThan(0);
+      expect((await eventRow(id)).state).toBe('received');
+      await holder.release();
+      await applying;
+    } finally {
+      await holder.end();
+      await applying.catch(() => undefined);
+    }
+    expect(await eventRow(id)).toMatchObject({ state: 'applied', outcome: 'ticket_granted' });
+    expect(await attendancesOf(ev.eventId)).toMatchObject([
+      { user_id: member.userId, origin: 'ticket' },
+    ]);
+  }, 60_000);
+
   it('an event that ended, was cancelled or was deleted since is 409 event_ended / event_cancelled and the row stays "sem conta"', async () => {
     const ev = await paid({ title: `${TITLE}-fechado` });
     const email = freshEmail(PREFIX, 'closing');

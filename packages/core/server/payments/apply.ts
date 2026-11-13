@@ -13,6 +13,7 @@ import type { RequestContext } from '../auth/context';
 import { emit, flush } from '../events/bus';
 import { moduleLogger, type RedactedDbError, redactDbError } from '../logging';
 import { centralProjectId } from '../tenancy/project-registry';
+import { appliedRefundExists, lockPaymentOrder } from './order-lock';
 import { type AccessEffect, decideAccessWrite, decideStoreWrite } from './policy';
 
 /**
@@ -29,9 +30,11 @@ import { type AccessEffect, decideAccessWrite, decideStoreWrite } from './policy
  *  1. `select … from payment_events … for update of e`: the row lock is the idempotency. A state other than
  *     `received` or `failed` is an untouched no-op, so a replayed job or a second delivery of the same
  *     bytes changes nothing. (The `short` queue policy is NOT idempotency, Pitfall 7.)
- *  2. `pg_advisory_xact_lock(hashtextextended(tenant:provider:externalRef, 0))` serialises the events of
- *     ONE subscription or order, so two of them can never interleave their read-decide-write (P13). Events
- *     of other references take other keys and run freely (T-09.1-35).
+ *  2. `lockPaymentOrder` (`order-lock.ts`, the single definition of the key
+ *     `hashtextextended(tenant:provider:externalRef, 0)`) serialises the events of ONE subscription or
+ *     order, so two of them can never interleave their read-decide-write (P13). The manual release of a
+ *     ticket delivery takes the same lock through the same helper (WR-01). Events of other references take
+ *     other keys and run freely (T-09.1-35).
  *  3. effect `none`, or no product id → `ignored`/`no_effect`. The mapping is looked up with the tenant
  *     PINNED: `tenant_id = <integration tenant> and provider and external_product_id`, so a product mapped
  *     by another tenant is `unknown_product` here and writes nothing anywhere (PAY-29).
@@ -245,22 +248,11 @@ async function applyAccess(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<S
 /**
  * The one-off rule's fact (T-09.1-33, PAY-30): an APPLIED refund or chargeback of the same sale (same tenant,
  * provider and reference), earlier. The store branch and the ticket branch read the SAME fact, so a late
- * approval can never undo a refund in either.
+ * approval can never undo a refund in either. The predicate is `appliedRefundExists` (`order-lock.ts`), the
+ * one the manual release re-runs under the same order lock (WR-01).
  */
-async function priorTerminalEvent(tx: Tx, ev: EventRow, providerRef: string): Promise<boolean> {
-  const prior = rowsOf<{ found: boolean }>(
-    await tx.execute(sql`
-      select exists (
-        select 1
-          from public.payment_events
-         where tenant_id = ${ev.tenant_id}::uuid
-           and provider = ${ev.provider}
-           and external_ref = ${providerRef}
-           and id <> ${ev.id}::uuid
-           and state = 'applied'
-           and type in ('purchase_refunded', 'chargeback')) as found`),
-  )[0];
-  return prior?.found ?? false;
+function priorTerminalEvent(tx: Tx, ev: EventRow, providerRef: string): Promise<boolean> {
+  return appliedRefundExists(tx, ev.tenant_id, ev.provider, providerRef, ev.id);
 }
 
 /**
@@ -501,9 +493,7 @@ async function applyInTx(
   if (ev.state !== 'received' && ev.state !== 'failed') return { untouched: ev };
 
   if (ev.external_ref) {
-    await tx.execute(sql`
-      select pg_advisory_xact_lock(
-        hashtextextended(${ev.tenant_id}::text || ':' || ${ev.provider}::text || ':' || ${ev.external_ref}::text, 0))`);
+    await lockPaymentOrder(tx, ev.tenant_id, ev.provider, ev.external_ref);
   }
 
   // The mapping, TENANT PINNED (PAY-29): a product another tenant mapped is not found here.
