@@ -1577,7 +1577,7 @@ Plans:
 **Goal:** An event can be linked to a Kiwify product (not a store product of the system); a member's presence is confirmed only after that product's purchase is approved, matched by the gateway product id and the buyer's e-mail; a refund or chargeback removes the presence and frees the seat; a payment that arrives at a full event still confirms; an event with no linked product keeps the automatic RSVP.
 **Requirements**: TICK-01..TICK-24
 **Depends on:** Phase 10 (and, for the base it extends, Phase 06 events and Phase 09.1 payment gateway)
-**Plans:** 7/15 plans executed
+**Plans:** 8/15 plans executed
 
 Plans:
 **Wave 1**
@@ -1608,7 +1608,7 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 10.1-07-PLAN.md — The events read model (paid, link, own origin, edit-read ticket object, attendee marks with the over-limit rank) and the courtesy routes
+- [x] 10.1-07-PLAN.md — The events read model (paid, link, own origin, edit-read ticket object, attendee marks with the over-limit rank) and the courtesy routes
 
 **Wave 8** *(blocked on Wave 7 completion)*
 

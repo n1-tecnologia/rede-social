@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
-current_plan: 7
+current_plan: 8
 status: executing
-stopped_at: Completed 10.1-06-PLAN.md
-last_updated: "2026-11-13T02:01:14.859Z"
+stopped_at: Completed 10.1-07-PLAN.md
+last_updated: "2026-11-13T02:22:55.513Z"
 last_activity: 2026-11-12
 last_activity_desc: Phase 10.1 execution started
-state_head: f2ca142d1219c3ec9d83c3b269489635d11e79f2
+state_head: 75276fcaf5e132fd0678ed2e0f39a94b7efd8284
 progress:
   total_phases: 32
   completed_phases: 0
   total_plans: 431
-  completed_plans: 395
+  completed_plans: 396
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — EXECUTING
-Current Plan: 7
+Current Plan: 8
 Total Plans in Phase: 15
-Plan: 7 of 15
+Plan: 8 of 15
 Status: Ready to execute
 Last activity: 2026-11-12 — Phase 10.1 execution started
 
@@ -364,6 +364,7 @@ Progress: [███████████████████░] 160/162
 | Phase 10.1 P04 | 12 min | 3 tasks | 8 files |
 | Phase 10.1 P05 | 30 min | 3 tasks | 17 files |
 | Phase 10.1 P06 | 16 min | 3 tasks | 17 files |
+| Phase 10.1 P07 | 18 min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -1136,6 +1137,8 @@ Recent decisions affecting current work:
 - [Phase 10.1]: 10.1-05: a ticket always reads the stale fact as a one-off order (recurring=false) and the manual release of a paid-event delivery settles in one admin transaction (releaseTicket) — A late approval after a refund must never regrant whatever the body says about recurrence; one transaction cannot leave a presence without its applied row
 - [Phase 10.1]: 10.1-06 A-06-PRICE: an omitted ticketPriceCents keeps the stored price and an explicit null clears it (differs from the poster key); for Igor to confirm — An older cached client that predates the key must never wipe a price it cannot see
 - [Phase 10.1]: 10.1-06: event mapping routes lock with app.event_ticket_lock; a failed PUT compensates its central route only when no mapping of the tenant still holds the key; deleteEvent frees an unsold mapping after commit and keeps one with sales — Removal and sale are serialised by one advisory key; a refund after a delete must still find the presence (D-760)
+- [Phase 10.1]: 10.1-07 A-UI-13: a row is over the limit iff ticket or courtesy, going or checked_in, capacity set and rank by (responded_at, id) above capacity; a plain Vou takes a seat but is never flagged. A-UI-6: the release sheet reuses GET /v1/admin/members plus the holders read — Both stay planner assumptions until Igor confirms them in the sketch review
+- [Phase 10.1]: 10.1-07 the edit read ticket key is absent for any role but admin_tenant and null for an admin on an unmapped event; DELETE courtesy answers 204 — The form must tell no mapping from not allowed to know
 
 ### Pending Todos
 
@@ -1267,6 +1270,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-13T02:01:14.560Z
-Stopped at: Completed 10.1-06-PLAN.md
+Last session: 2026-11-13T02:22:55.214Z
+Stopped at: Completed 10.1-07-PLAN.md
 Resume file: None
