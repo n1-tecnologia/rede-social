@@ -354,9 +354,8 @@ const EVENT_STATE_WORD: Record<EventItemState, string> = {
  * "Evento sem efeito no acesso", which is true of it. A closer line needs the design team (SUMMARY).
  *
  * Phase 10.1-01 (TICK-23): the four ticket outcomes that need no placeholder read their approved
- * attendance lines (UI-D-758). `event_ended` and `event_cancelled` outcomes carry the `{gateway}` refund
- * hint, which this function cannot fill yet, so they read "Evento sem efeito no acesso" until the
- * Pagamentos UI plan of the phase wires the gateway display name through.
+ * attendance lines (UI-D-758). Phase 10.1-08: `event_ended` and `event_cancelled` read their own
+ * `{gateway}` lines in `effectLine`, with the display name the caller passes.
  */
 const EFFECT_KEY: Record<NonNullable<EventItem['outcome']>, string> = {
   access_granted: 'access_granted',
@@ -370,6 +369,8 @@ const EFFECT_KEY: Record<NonNullable<EventItem['outcome']>, string> = {
   ticket_granted_over_limit: 'attendanceOverLimit',
   ticket_revoked: 'attendanceRemoved',
   ticket_kept: 'attendanceKept',
+  // The two not-confirmed outcomes read their own `{gateway}` lines in `effectLine`; these entries only keep
+  // the map exhaustive.
   event_ended: 'no_effect',
   event_cancelled: 'no_effect',
 };
@@ -382,13 +383,22 @@ const EFFECT_KEY: Record<NonNullable<EventItem['outcome']>, string> = {
 export function eventRowView(
   item: EventItem,
   t: PaymentsTranslator,
-  ctx: { serverNow: string },
+  ctx: {
+    serverNow: string;
+    /**
+     * Phase 10.1-08 (D-758): the adapter's display name, the `{gateway}` of the two "not confirmed"
+     * effect lines (admin copy). Only the ticket lines use it.
+     */
+    gatewayName?: string;
+  },
 ): EventRowView {
-  const product =
-    item.productName ??
-    (item.externalProductId === null
-      ? null
-      : t('payments.events.idMeta', { externalId: item.externalProductId }));
+  const ticket = item.kind === 'event';
+  const product = ticket
+    ? ticketProductLine(item, t)
+    : (item.productName ??
+      (item.externalProductId === null
+        ? null
+        : t('payments.events.idMeta', { externalId: item.externalProductId })));
   return {
     id: item.id,
     state: item.state,
@@ -396,11 +406,48 @@ export function eventRowView(
     name: t(`payments.events.types.${item.type}`),
     email: item.email ?? t('payments.events.noEmail'),
     product,
-    effect: item.outcome === null ? null : t(`payments.events.effects.${EFFECT_KEY[item.outcome]}`),
+    effect: item.outcome === null ? null : effectLine(item.outcome, ticket, t, ctx.gatewayName),
     received: t('payments.events.received', { when: whenText(item.receivedAt, ctx.serverNow) }),
     canGrant: item.state === 'no_account',
     canRegister: item.state === 'unknown_product',
   };
+}
+
+/**
+ * Phase 10.1-08 (D-758, UI-D-758): the product line of a TICKET delivery, "Ingresso · {evento}", or
+ * "Ingresso · evento removido" when the event is gone. The line names the event so the word "evento"
+ * in the "Evento encerrado" pill is read against a visible title (UI-D-740). The title is a plain value
+ * for a React text node, never markup.
+ */
+function ticketProductLine(item: EventItem, t: PaymentsTranslator): string {
+  return item.eventTitle
+    ? t('payments.events.ticketProduct', { event: item.eventTitle })
+    : t('payments.events.ticketProductGone');
+}
+
+/**
+ * The effect line (12/400 tertiary) by outcome. The seven outcomes of the ticket lane read the
+ * attendance lines of UI-D-758; `no_effect` on a ticket delivery is a subscription-type delivery on an
+ * event product (D-757) and reads "Sem efeito na presença"; the two not-confirmed reasons carry the
+ * `{gateway}` refund hint. Any other outcome keeps the access/store wording, so the old rows are
+ * unchanged.
+ */
+function effectLine(
+  outcome: NonNullable<EventItem['outcome']>,
+  ticket: boolean,
+  t: PaymentsTranslator,
+  gatewayName: string | undefined,
+): string {
+  if (outcome === 'event_ended' || outcome === 'event_cancelled') {
+    return t(
+      outcome === 'event_ended'
+        ? 'payments.events.effects.ticketEnded'
+        : 'payments.events.effects.ticketCancelled',
+      { gateway: gatewayName ?? '' },
+    );
+  }
+  if (outcome === 'no_effect' && ticket) return t('payments.events.effects.ticketNoEffect');
+  return t(`payments.events.effects.${EFFECT_KEY[outcome]}`);
 }
 
 /** "Mostrando os últimos {count, plural, one {# evento} other {# eventos}}." */

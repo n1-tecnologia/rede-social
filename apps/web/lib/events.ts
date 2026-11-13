@@ -6,9 +6,12 @@ import {
   attendanceSummarySchema,
   type CheckinCode,
   type CheckinResult,
+  type CourtesyHolders,
   checkinCodeSchema,
   checkinResultSchema,
+  courtesyHoldersSchema,
   type EnterResult,
+  EVENT_COURTESY_MAX_HOLDER_IDS,
   EVENT_MAX_PAGE_SIZE,
   EVENT_PAGE_SIZE,
   EVENT_PHOTO_PAGE_SIZE,
@@ -530,4 +533,44 @@ export async function removeEventPhoto(eventId: string, photoId: string): Promis
 export async function deleteEvent(eventId: string): Promise<void> {
   const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
   if (!res.ok) throw await apiError(res);
+}
+
+/**
+ * `GET /v1/events/{eventId}/courtesy/holders?membershipIds=a,b` (Phase 10.1-08, A-UI-6): which of the
+ * members a release sheet is showing already hold a presence, so it can draw "Já inscrito" before the
+ * click. Manage-only on the API. At most `EVENT_COURTESY_MAX_HOLDER_IDS` ids are sent (the rest are
+ * dropped here, so a long page never turns into a 400); the answer is the membership ids that are in.
+ * A 404 (unknown, another tenant's, removed, not a uuid) and a 403 (the permission vanished) answer
+ * `null`, the caller's "could not read" (the sheet then offers every row, and the write refuses
+ * `already_in` itself). A refusal `bootstrapRedirectPath` knows becomes a navigation OUTSIDE the
+ * try/catch. No id is logged.
+ */
+export async function loadCourtesyHolders(
+  eventId: string,
+  membershipIds: readonly string[],
+): Promise<CourtesyHolders['holders'] | null> {
+  const ids = membershipIds.slice(0, EVENT_COURTESY_MAX_HOLDER_IDS);
+  if (ids.length === 0) return [];
+  let path: string | null = null;
+  let holders: CourtesyHolders['holders'] | null = null;
+  try {
+    const search = new URLSearchParams({ membershipIds: ids.join(',') });
+    const res = await apiFetch(
+      `/v1/events/${encodeURIComponent(eventId)}/courtesy/holders?${search.toString()}`,
+    );
+    if (res.ok) {
+      holders = courtesyHoldersSchema.parse(await res.json()).holders;
+    } else if (res.status !== 404 && res.status !== 400 && res.status !== 403) {
+      const error = await apiError(res);
+      path = bootstrapRedirectPath(error);
+      if (!path) console.error('events.courtesy_holders_failed', { status: res.status });
+    }
+  } catch (error) {
+    console.error('events.courtesy_holders_failed', {
+      error: error instanceof Error ? error.name : 'unknown',
+    });
+  }
+
+  if (path) redirect(path);
+  return holders;
 }

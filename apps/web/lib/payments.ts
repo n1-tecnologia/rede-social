@@ -9,8 +9,10 @@ import {
   accessProductSchema,
   accessResultSchema,
   type EventItem,
+  type EventMappingResponse,
   type EventsResponse,
   eventItemSchema,
+  eventMappingResponseSchema,
   eventsResponseSchema,
   type GateBody,
   type GatePreview,
@@ -300,4 +302,23 @@ export function putStoreMapping(
 /** `DELETE /v1/payments/store-products/{id}`: removing a product that is not mapped answers the same. */
 export function deleteStoreMapping(productId: string): Promise<StoreMappingOutcome> {
   return storeMappingCall('DELETE', productId);
+}
+
+/**
+ * `GET /v1/payments/event-products/{eventId}` (Phase 10.1-08, D-744, D-747, D-757): the ticket mapping of
+ * one event with `connected`, `soldCount`, `locked` and the `recurring` hint, for the event form's Ingresso
+ * section. Behind `payments.manage` and the module flag, so the form asks it only for an admin who holds
+ * the permission. A bare 404 (the module is off, or the event is unknown, another tenant's or removed)
+ * answers `null`, the form's "nothing to show"; every other refusal is thrown like the rest of this
+ * client (`ApiClientError` for a session the bootstrap knows, else `PaymentsApiError`). No link or
+ * product id is logged.
+ */
+export async function getEventMapping(eventId: string): Promise<EventMappingResponse | null> {
+  try {
+    const res = await send(`/event-products/${encodeURIComponent(eventId)}`, 'GET');
+    return eventMappingResponseSchema.parse(await res.json());
+  } catch (error) {
+    if (error instanceof PaymentsApiError && error.status === 404) return null;
+    throw error;
+  }
 }

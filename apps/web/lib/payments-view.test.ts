@@ -485,3 +485,123 @@ describe('eventsHeaderView (UI-D-519): "Mostrando os últimos {count}"', () => {
     expect(eventsHeaderView(1, t)).toBe('Mostrando os últimos 1 evento.');
   });
 });
+
+/* ── Phase 10.1-08: the ticket delivery rows (D-757, D-758, UI-D-758) ─────────────────────────── */
+
+/**
+ * The recording translator: it returns the KEY and the interpolated values, so each case asserts which
+ * catalog key a state asks for. The catalog words of the ticket product line and of the not-confirmed
+ * effects are the Pagamentos UI plan's; the keys that already exist are also checked against the real
+ * catalog below.
+ */
+const rec = ((key: string, values?: Record<string, unknown>) =>
+  values === undefined ? key : `${key}${JSON.stringify(values)}`) as unknown as PaymentsTranslator;
+
+function ticket(patch: Partial<EventItem> = {}): EventItem {
+  return event({
+    kind: 'event',
+    eventTitle: 'Encontro anual',
+    productName: null,
+    externalProductId: 'tk-1',
+    outcome: 'ticket_granted',
+    ...patch,
+  });
+}
+
+describe('eventRowView: a ticket delivery (D-758, UI-D-758)', () => {
+  it('names the event on the product line, a plain value, and falls back for a removed event', () => {
+    expect(eventRowView(ticket(), rec, { serverNow: NOW }).product).toBe(
+      'payments.events.ticketProduct{"event":"Encontro anual"}',
+    );
+    expect(eventRowView(ticket({ eventTitle: null }), rec, { serverNow: NOW }).product).toBe(
+      'payments.events.ticketProductGone',
+    );
+    expect(eventRowView(ticket({ eventTitle: undefined }), rec, { serverNow: NOW }).product).toBe(
+      'payments.events.ticketProductGone',
+    );
+    // A title is data for a text node, never interpreted.
+    expect(
+      eventRowView(ticket({ eventTitle: '<img src=x onerror=alert(1)>' }), rec, { serverNow: NOW })
+        .product,
+    ).toContain('"event":"<img src=x onerror=alert(1)>"');
+  });
+
+  it.each([
+    ['ticket_granted', 'payments.events.effects.attendanceConfirmed'],
+    ['ticket_granted_over_limit', 'payments.events.effects.attendanceOverLimit'],
+    ['ticket_revoked', 'payments.events.effects.attendanceRemoved'],
+    ['ticket_kept', 'payments.events.effects.attendanceKept'],
+    ['no_effect', 'payments.events.effects.ticketNoEffect'],
+  ] as const)('reads the outcome %s through %s', (outcome, key) => {
+    expect(eventRowView(ticket({ outcome }), rec, { serverNow: NOW }).effect).toBe(key);
+  });
+
+  it('words the two not-confirmed reasons with the gateway’s display name', () => {
+    expect(
+      eventRowView(ticket({ state: 'event_ended', outcome: 'event_ended' }), rec, {
+        serverNow: NOW,
+        gatewayName: 'Pagamentos X',
+      }).effect,
+    ).toBe('payments.events.effects.ticketEnded{"gateway":"Pagamentos X"}');
+    expect(
+      eventRowView(ticket({ state: 'event_cancelled', outcome: 'event_cancelled' }), rec, {
+        serverNow: NOW,
+        gatewayName: 'Pagamentos X',
+      }).effect,
+    ).toBe('payments.events.effects.ticketCancelled{"gateway":"Pagamentos X"}');
+  });
+
+  it('maps the two new states to their words and never offers a manual grant on them', () => {
+    const ended = eventRowView(ticket({ state: 'event_ended', outcome: 'event_ended' }), rec, {
+      serverNow: NOW,
+    });
+    expect(ended.stateLabel).toBe('payments.states.eventEnded');
+    expect(ended.canGrant).toBe(false);
+    expect(ended.canRegister).toBe(false);
+    const cancelled = eventRowView(
+      ticket({ state: 'event_cancelled', outcome: 'event_cancelled' }),
+      rec,
+      { serverNow: NOW },
+    );
+    expect(cancelled.stateLabel).toBe('payments.states.eventCancelled');
+    expect(cancelled.canGrant).toBe(false);
+  });
+
+  it('keeps the grant door on the no-account ticket row only', () => {
+    expect(
+      eventRowView(ticket({ state: 'no_account', outcome: null }), rec, { serverNow: NOW }),
+    ).toMatchObject({ canGrant: true, effect: null });
+    expect(eventRowView(ticket(), rec, { serverNow: NOW }).canGrant).toBe(false);
+  });
+
+  it('reads the keys that exist today through the real catalog', () => {
+    const view = eventRowView(ticket({ state: 'event_ended', outcome: 'ticket_kept' }), t, {
+      serverNow: NOW,
+    });
+    expect(view.stateLabel).toBe('Evento encerrado');
+    expect(view.effect).toBe('Presença mantida: o check-in já foi feito');
+    expect(
+      eventRowView(ticket({ state: 'event_cancelled' }), t, { serverNow: NOW }).stateLabel,
+    ).toBe('Evento cancelado');
+    expect(
+      eventRowView(ticket({ outcome: 'ticket_granted_over_limit' }), t, { serverNow: NOW }).effect,
+    ).toBe('Presença confirmada acima do limite');
+  });
+
+  it('leaves the access and store rows exactly as they were', () => {
+    expect(eventRowView(event(), t, { serverNow: NOW })).toEqual(
+      eventRowView(event({ kind: 'access', eventTitle: null }), t, { serverNow: NOW }),
+    );
+    const store = eventRowView(
+      event({ kind: 'store_product', productName: 'Curso A', outcome: 'product_granted' }),
+      t,
+      { serverNow: NOW },
+    );
+    expect(store.product).toBe('Curso A');
+    expect(store.effect).toBe('Produto liberado');
+    // A stray event title on a non-ticket row is ignored.
+    expect(eventRowView(event({ eventTitle: 'Encontro' }), t, { serverNow: NOW }).product).toBe(
+      'Assinatura mensal',
+    );
+  });
+});
