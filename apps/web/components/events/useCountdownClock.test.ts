@@ -3,7 +3,11 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { COUNTDOWN_TICK_MARGIN_MS, useCountdownClock } from './useCountdownClock';
+import {
+  COUNTDOWN_RESEED_AFTER_HIDDEN_MS,
+  COUNTDOWN_TICK_MARGIN_MS,
+  useCountdownClock,
+} from './useCountdownClock';
 
 /**
  * Phase 10.2-11 (OPEN-21, OPEN-24, D-788, EP-25, T-10.2-01, T-10.2-06) - the seeded, single-timeout,
@@ -11,13 +15,25 @@ import { COUNTDOWN_TICK_MARGIN_MS, useCountdownClock } from './useCountdownClock
  * fast, a day slow and to 2099 to prove the count follows the SERVER seed only.
  */
 
+const refresh = vi.fn();
+const router = { refresh };
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
+
 const SEED = '2026-11-13T12:00:00.000Z';
 const SEED_MS = Date.parse(SEED);
 /** Thirteen minutes forty seconds after the seed. */
 const TARGET_MS = SEED_MS + 13 * 60_000 + 40_000;
 const TARGET = new Date(TARGET_MS).toISOString();
 
+let visibility: DocumentVisibilityState = 'visible';
+
 beforeEach(() => {
+  refresh.mockReset();
+  visibility = 'visible';
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => visibility,
+  });
   vi.useFakeTimers();
 });
 
@@ -29,6 +45,18 @@ afterEach(() => {
 
 function setDevice(ms: number) {
   vi.setSystemTime(ms);
+}
+
+function setVisibility(next: DocumentVisibilityState) {
+  visibility = next;
+  act(() => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+}
+
+/** happy-dom's `PageTransitionEvent` drops `persisted`, so the flag is set on a plain event. */
+function pageshow(persisted: boolean) {
+  return Object.assign(new Event('pageshow'), { persisted });
 }
 
 function Probe({ target, seed }: { target: string; seed: string | null }) {
@@ -168,5 +196,129 @@ describe('useCountdownClock ticking (OPEN-21)', () => {
     expect(vi.getTimerCount()).toBe(1);
     view.unmount();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('useCountdownClock hidden tab (OPEN-21, A-UI-12)', () => {
+  it('clears the timer on hidden and runs no tick while hidden, even ten minutes later', () => {
+    const view = renderHook(() => useCountdownClock(TARGET, SEED));
+    const before = view.result.current.remainingMs;
+    expect(vi.getTimerCount()).toBe(1);
+    setVisibility('hidden');
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => {
+      vi.advanceTimersByTime(10 * 60_000);
+    });
+    expect(view.result.current.remainingMs).toBe(before);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('recomputes AT ONCE on visible, before any timer elapses, and arms one new timer', () => {
+    const view = renderHook(() => useCountdownClock(TARGET, SEED));
+    setVisibility('hidden');
+    act(() => {
+      vi.advanceTimersByTime(10 * 60_000);
+    });
+    const stale = view.result.current.remainingMs;
+    setVisibility('visible');
+    expect(view.result.current.remainingMs).toBe((stale ?? 0) - 10 * 60_000);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('asks for exactly one refresh after more than 60 s hidden, and none at exactly 60 s', () => {
+    expect(COUNTDOWN_RESEED_AFTER_HIDDEN_MS).toBe(60_000);
+    renderHook(() => useCountdownClock(TARGET, SEED));
+
+    setVisibility('hidden');
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    setVisibility('visible');
+    expect(refresh).not.toHaveBeenCalled();
+
+    setVisibility('hidden');
+    act(() => {
+      vi.advanceTimersByTime(61_000);
+    });
+    setVisibility('visible');
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('a second visible event without a new hide does not refresh again', () => {
+    renderHook(() => useCountdownClock(TARGET, SEED));
+    setVisibility('hidden');
+    act(() => {
+      vi.advanceTimersByTime(5 * 60_000);
+    });
+    setVisibility('visible');
+    setVisibility('visible');
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('a pageshow with persisted true re-seeds once; with persisted false it does nothing', () => {
+    renderHook(() => useCountdownClock(TARGET, SEED));
+    act(() => {
+      window.dispatchEvent(pageshow(false));
+    });
+    expect(refresh).not.toHaveBeenCalled();
+    act(() => {
+      window.dispatchEvent(pageshow(true));
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('a back-forward restore that fires visibilitychange and pageshow asks once', () => {
+    renderHook(() => useCountdownClock(TARGET, SEED));
+    setVisibility('hidden');
+    act(() => {
+      vi.advanceTimersByTime(5 * 60_000);
+    });
+    setVisibility('visible');
+    act(() => {
+      window.dispatchEvent(pageshow(true));
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('mounting while hidden arms no timer; becoming visible later arms one', () => {
+    visibility = 'hidden';
+    renderHook(() => useCountdownClock(TARGET, SEED));
+    expect(vi.getTimerCount()).toBe(0);
+    setVisibility('visible');
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('unmount removes the listeners, clears the timer and refreshes nothing afterwards', () => {
+    const spies = {
+      docAdd: vi.spyOn(document, 'addEventListener'),
+      docRemove: vi.spyOn(document, 'removeEventListener'),
+      winAdd: vi.spyOn(window, 'addEventListener'),
+      winRemove: vi.spyOn(window, 'removeEventListener'),
+    };
+    const net = (add: keyof typeof spies, remove: keyof typeof spies, type: string) =>
+      spies[add].mock.calls.filter(([t]) => t === type).length -
+      spies[remove].mock.calls.filter(([t]) => t === type).length;
+    const added = {
+      get: (name: string) =>
+        name === 'document:visibilitychange'
+          ? net('docAdd', 'docRemove', 'visibilitychange')
+          : net('winAdd', 'winRemove', 'pageshow'),
+    };
+
+    const view = renderHook(() => useCountdownClock(TARGET, SEED));
+    expect(added.get('document:visibilitychange')).toBe(1);
+    expect(added.get('window:pageshow')).toBe(1);
+    view.unmount();
+    expect(added.get('document:visibilitychange')).toBe(0);
+    expect(added.get('window:pageshow')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    visibility = 'visible';
+    vi.advanceTimersByTime(5 * 60_000);
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(pageshow(true));
+    expect(refresh).not.toHaveBeenCalled();
   });
 });
