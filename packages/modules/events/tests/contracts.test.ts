@@ -464,11 +464,25 @@ describe('06-07 — the attendance contract (Participantes)', () => {
       'checkedInAt',
       'displayName',
       'id',
+      'origin',
+      'overLimit',
+      'refunded',
       'removed',
       'respondedAt',
       'status',
       'walkIn',
     ]);
+    // 10.1-07 (D-758): the three marks are OPTIONAL, so a free event's row parses without them.
+    for (const key of ['origin', 'overLimit', 'refunded'] as const) {
+      expect(attendeeSchema.shape[key].isOptional(), key).toBe(true);
+    }
+    for (const origin of ['ticket', 'courtesy', 'before_ticket', null]) {
+      expect(
+        attendeeSchema.safeParse({ ...attendee, origin, refunded: false, overLimit: true }).success,
+        String(origin),
+      ).toBe(true);
+    }
+    expect(attendeeSchema.safeParse({ ...attendee, origin: 'rsvp' }).success).toBe(false);
     for (const extra of ['email', 'role', 'membershipId', 'userId']) {
       expect(attendeeSchema.safeParse({ ...attendee, [extra]: 'x' }).success, extra).toBe(false);
     }
@@ -872,5 +886,34 @@ describe('2026-11-13 — the reference price of a ticket (10.1-06, D-755, EP-02,
     ).toBe(true);
     expect(eventDetailSchema.safeParse({ ...detail, checkoutUrl: null }).success).toBe(true);
     expect(eventDetailSchema.safeParse({ ...detail, checkoutUrl: 5 }).success).toBe(false);
+  });
+
+  it('44. 10.1-07: the edit read carries the admin ticket object as an OPTIONAL nullable strict key, and the summary the paid and over-limit flags', () => {
+    expect(Object.keys(eventEditSchema.shape)).toContain('ticket');
+    expect(eventEditSchema.shape.ticket.isOptional()).toBe(true);
+    const ticket = {
+      externalProductId: 'prod-1',
+      checkoutUrl: 'https://pay.example.com/x',
+      gatewayOpen: true,
+      soldCount: 3,
+      gatewayName: 'Gateway de teste',
+    };
+    expect(eventEditSchema.safeParse({ ...editBody, ticket }).success).toBe(true);
+    expect(eventEditSchema.safeParse({ ...editBody, ticket: null }).success).toBe(true);
+    expect(
+      eventEditSchema.safeParse({ ...editBody, ticket: { ...ticket, gatewayName: null } }).success,
+    ).toBe(true);
+    expect(
+      eventEditSchema.safeParse({ ...editBody, ticket: { ...ticket, token: 'x' } }).success,
+    ).toBe(false);
+    expect(
+      eventEditSchema.safeParse({ ...editBody, ticket: { ...ticket, soldCount: -1 } }).success,
+    ).toBe(false);
+    expect(
+      eventEditSchema.safeParse({ ...editBody, ticket: { ...ticket, soldCount: 1.5 } }).success,
+    ).toBe(false);
+    for (const key of ['paid', 'overLimit'] as const) {
+      expect(attendanceSummarySchema.shape[key].isOptional(), key).toBe(true);
+    }
   });
 });

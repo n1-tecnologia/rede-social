@@ -7,7 +7,17 @@ import type {
 } from '@rede-social/module-events/contracts';
 import { EVENT_CHECKIN_CODE_ALPHABET } from '@rede-social/module-events/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { removeTicketEvents, ticketEvent, ticketMapping } from './payments-apply-fixtures';
+import {
+  adminSql,
+  api,
+  createSharedIdentity,
+  HOSTS,
+  removeIdentitiesByPrefix,
+  removePaymentMappings,
+  SEED_PASSWORD,
+  signInAs,
+} from './setup';
 
 /**
  * EVENT-05 end to end against the live local stack and the real seed (06-07): the organiser's
@@ -270,6 +280,9 @@ describe('events attendance (Participantes)', () => {
       notGoingCount: 1,
       confirmedCount: 3,
       checkinCode: fixtureCode,
+      // 10.1-07 (D-758): a free event answers the two flags as plain false.
+      paid: false,
+      overLimit: false,
     });
     // The member-facing number is the same one the detail prints (D-219).
     const detail = await request(`/v1/events/${fixture.id}`, tokens.demoMember);
@@ -361,6 +374,8 @@ describe('events attendance (Participantes)', () => {
       notGoingCount: 0,
       confirmedCount: 0,
       checkinCode: null,
+      paid: false,
+      overLimit: false,
     });
   });
 
@@ -439,5 +454,331 @@ describe('events attendance (Participantes)', () => {
     expect(clamped.nextCursor).not.toBeNull();
     const malformed = await request(listPath('not-a-uuid'), tokens.demoAdmin);
     expect(malformed.status).toBe(400);
+  });
+});
+
+/**
+ * 10.1-07 (TICK-10, TICK-14, TICK-18; D-751, D-758; A-UI-13; EP-26..EP-30): the attendee marks of a PAID
+ * event. Everything lives in the LAB tenant under its own prefix (events, identities and mappings are swept in
+ * `beforeAll` and `afterAll`); rows are written the way the server writes them (the migration role), and the
+ * reads go through the real API as a lab admin and a lab member.
+ */
+describe('10.1-07 the attendee marks of a paid event', () => {
+  const PREFIX = 'evattk';
+  let labTenantId = '';
+  let admin = { userId: '', token: '' };
+  let member = { userId: '', token: '' };
+  const lab = (path: string, token: string) => request(path, token, {}, HOSTS.lab);
+
+  type Mark = {
+    id: string;
+    displayName: string | null;
+    status: string;
+    origin?: string | null;
+    refunded?: boolean;
+    overLimit?: boolean;
+  };
+
+  async function identity(role: 'member' | 'admin_tenant', label: string) {
+    const created = await createSharedIdentity({
+      prefix: PREFIX,
+      memberships: [{ host: 'lab', role, displayName: `${PREFIX}-${label}` }],
+    });
+    return { userId: created.userId, token: await signInAs(created.email, created.password) };
+  }
+
+  /** `count` fresh members named `${PREFIX}-${label}${n}`. */
+  async function members(label: string, count: number) {
+    const out: string[] = [];
+    for (let n = 1; n <= count; n += 1) {
+      out.push((await identity('member', `${label}${n}`)).userId);
+    }
+    return out;
+  }
+
+  async function row(
+    eventId: string,
+    userId: string,
+    spec: {
+      status?: 'going' | 'checked_in' | 'not_going';
+      origin?: 'rsvp' | 'ticket' | 'courtesy';
+      at: string;
+      refunded?: boolean;
+      id?: string;
+    },
+  ) {
+    const origin = spec.origin ?? 'rsvp';
+    const status = spec.status ?? 'going';
+    const [made] = await adminSql<{ id: string }[]>`
+      insert into public.event_attendances
+             (id, tenant_id, event_id, user_id, status, responded_at, checked_in_at, checkin_via, origin,
+              order_provider, order_ref, refunded_at)
+      values (${spec.id ?? crypto.randomUUID()}::uuid, ${labTenantId}::uuid, ${eventId}::uuid,
+              ${userId}::uuid, ${status}, ${spec.at}::timestamptz,
+              ${status === 'checked_in' ? adminSql`now()` : null},
+              ${status === 'checked_in' ? 'online' : null}, ${origin},
+              ${origin === 'ticket' ? 'fake' : null},
+              ${origin === 'ticket' ? `ord-${crypto.randomUUID()}` : null},
+              ${spec.refunded ? adminSql`now()` : null})
+      returning id::text as id`;
+    return made?.id ?? '';
+  }
+
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+
+  async function marks(eventId: string, list = 'confirmed', query = ''): Promise<AttendancePage> {
+    const res = await lab(`/v1/events/${eventId}/attendance?list=${list}${query}`, admin.token);
+    expect(res.status).toBe(200);
+    return (await res.json()) as AttendancePage;
+  }
+
+  const byName = (page: AttendancePage) =>
+    new Map((page.items as Mark[]).map((item) => [item.displayName, item]));
+
+  async function mappedEvent(label: string, capacity: number | null) {
+    const eventId = await ticketEvent(labTenantId, { title: `${PREFIX}-${label}`, capacity });
+    return eventId;
+  }
+
+  beforeAll(async () => {
+    const [tenant] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.tenants where slug = 'rede-lab'`;
+    labTenantId = tenant?.id ?? '';
+    await removeTicketEvents(PREFIX);
+    await removePaymentMappings(labTenantId);
+    await removeIdentitiesByPrefix(PREFIX);
+    admin = await identity('admin_tenant', 'admin');
+    member = await identity('member', 'viewer');
+  }, 60_000);
+
+  afterAll(async () => {
+    await removeTicketEvents(PREFIX);
+    await removePaymentMappings(labTenantId);
+    await removeIdentitiesByPrefix(PREFIX);
+  });
+
+  it('T1. every presence of a paid event shows its origin, its refund and the over-limit rank to the admin', async () => {
+    const [early, buyer, guest, refunded, declined] = await members('t1-', 5);
+    const eventId = await mappedEvent('marks', 2);
+    // The plain Vou of a member who answered BEFORE the link exists (the door closes the Vou afterwards).
+    await row(eventId, early as string, { at: hoursAgo(5) });
+    await row(eventId, declined as string, { at: hoursAgo(1), status: 'not_going' });
+    await ticketMapping(labTenantId, eventId);
+    await row(eventId, buyer as string, { at: hoursAgo(4), origin: 'ticket' });
+    await row(eventId, guest as string, { at: hoursAgo(3), origin: 'courtesy' });
+    await row(eventId, refunded as string, {
+      at: hoursAgo(2),
+      origin: 'ticket',
+      status: 'checked_in',
+      refunded: true,
+    });
+
+    const confirmed = byName(await marks(eventId, 'confirmed'));
+    expect(confirmed.get(`${PREFIX}-t1-1`)).toMatchObject({
+      origin: 'before_ticket',
+      refunded: false,
+      overLimit: false,
+    });
+    expect(confirmed.get(`${PREFIX}-t1-2`)).toMatchObject({
+      origin: 'ticket',
+      refunded: false,
+      overLimit: false,
+    });
+    // Rank 3 at limit 2.
+    expect(confirmed.get(`${PREFIX}-t1-3`)).toMatchObject({
+      origin: 'courtesy',
+      refunded: false,
+      overLimit: true,
+    });
+
+    const present = byName(await marks(eventId, 'present'));
+    expect(present.get(`${PREFIX}-t1-4`)).toMatchObject({
+      origin: 'ticket',
+      refunded: true,
+      overLimit: true,
+    });
+
+    const notGoing = byName(await marks(eventId, 'not_going'));
+    expect(notGoing.get(`${PREFIX}-t1-5`)).toMatchObject({
+      origin: null,
+      refunded: false,
+      overLimit: false,
+    });
+  });
+
+  it('T2. a member cannot list attendees at all (403), so no mark can reach one', async () => {
+    const eventId = await mappedEvent('member', 1);
+    await ticketMapping(labTenantId, eventId);
+    for (const path of [
+      `/v1/events/${eventId}/attendance?list=confirmed`,
+      `/v1/events/${eventId}/attendance/summary`,
+    ]) {
+      const res = await lab(path, member.token);
+      expect(res.status, path).toBe(403);
+      expect(await res.text(), path).not.toMatch(/overLimit|origin|refunded/);
+    }
+  });
+
+  it('T3. EP-28: a free event rows carry none of the three keys, and a paid event with nobody is empty', async () => {
+    const [one, two] = await members('t3-', 2);
+    const free = await mappedEvent('free', null);
+    await row(free, one as string, { at: hoursAgo(2) });
+    await row(free, two as string, { at: hoursAgo(1) });
+    const page = await marks(free);
+    expect(page.items).toHaveLength(2);
+    for (const item of page.items) {
+      const keys = Object.keys(item);
+      expect(keys).not.toContain('origin');
+      expect(keys).not.toContain('refunded');
+      expect(keys).not.toContain('overLimit');
+    }
+    const freeSummary = await lab(`/v1/events/${free}/attendance/summary`, admin.token);
+    expect(await freeSummary.json()).toMatchObject({
+      paid: false,
+      overLimit: false,
+      confirmedCount: 2,
+    });
+
+    const empty = await mappedEvent('empty', 2);
+    await ticketMapping(labTenantId, empty);
+    for (const list of ['confirmed', 'present', 'not_going']) {
+      expect(await marks(empty, list), list).toEqual({ items: [], nextCursor: null });
+    }
+    const summary = await lab(`/v1/events/${empty}/attendance/summary`, admin.token);
+    expect(await summary.json()).toMatchObject({
+      paid: true,
+      overLimit: false,
+      confirmedCount: 0,
+      presentCount: 0,
+      pendingConfirmedCount: 0,
+      notGoingCount: 0,
+    });
+  });
+
+  it('T4. EP-26: rank 3 of 3 at limit 2 is the only flag; a count equal to the limit and a null limit flag nobody', async () => {
+    const [a, b, c] = await members('t4-', 3);
+    const over = await mappedEvent('over', 2);
+    await ticketMapping(labTenantId, over);
+    await row(over, a as string, { at: hoursAgo(3), origin: 'ticket' });
+    await row(over, b as string, { at: hoursAgo(2), origin: 'ticket' });
+    await row(over, c as string, { at: hoursAgo(1), origin: 'ticket' });
+    const flagged = (await marks(over)).items as Mark[];
+    expect(flagged.filter((item) => item.overLimit).map((item) => item.displayName)).toEqual([
+      `${PREFIX}-t4-3`,
+    ]);
+    const summaryOver = await lab(`/v1/events/${over}/attendance/summary`, admin.token);
+    expect(await summaryOver.json()).toMatchObject({ paid: true, overLimit: true });
+
+    const equal = await mappedEvent('equal', 3);
+    await ticketMapping(labTenantId, equal);
+    await row(equal, a as string, { at: hoursAgo(3), origin: 'ticket' });
+    await row(equal, b as string, { at: hoursAgo(2), origin: 'ticket' });
+    await row(equal, c as string, { at: hoursAgo(1), origin: 'ticket' });
+    expect(((await marks(equal)).items as Mark[]).some((item) => item.overLimit)).toBe(false);
+    const summaryEqual = await lab(`/v1/events/${equal}/attendance/summary`, admin.token);
+    expect(await summaryEqual.json()).toMatchObject({ paid: true, overLimit: false });
+
+    const unlimited = await mappedEvent('unlimited', null);
+    await ticketMapping(labTenantId, unlimited);
+    await row(unlimited, a as string, { at: hoursAgo(3), origin: 'ticket' });
+    await row(unlimited, b as string, { at: hoursAgo(2), origin: 'courtesy' });
+    await row(unlimited, c as string, { at: hoursAgo(1), origin: 'ticket' });
+    expect(((await marks(unlimited)).items as Mark[]).some((item) => item.overLimit)).toBe(false);
+  });
+
+  it('T5. EP-27: tickets on one instant rank by id, so the same row is flagged on every read', async () => {
+    const [a, b, c] = await members('t5-', 3);
+    const eventId = await mappedEvent('tie', 2);
+    await ticketMapping(labTenantId, eventId);
+    const at = hoursAgo(2);
+    const ids = [
+      '5e000000-0000-4000-8000-000000000001',
+      '5e000000-0000-4000-8000-000000000002',
+      '5e000000-0000-4000-8000-000000000003',
+    ];
+    await row(eventId, a as string, { at, origin: 'ticket', id: ids[0] });
+    await row(eventId, b as string, { at, origin: 'ticket', id: ids[1] });
+    await row(eventId, c as string, { at, origin: 'ticket', id: ids[2] });
+    for (let read = 0; read < 3; read += 1) {
+      const items = (await marks(eventId)).items as Mark[];
+      expect(
+        items.filter((item) => item.overLimit).map((item) => item.id),
+        `read ${read}`,
+      ).toEqual([ids[2]]);
+    }
+  });
+
+  it('T6. EP-29: two successive pages visit every row once, in the same order as one big page', async () => {
+    const people = await members('t6-', 5);
+    const eventId = await mappedEvent('paging', 3);
+    await ticketMapping(labTenantId, eventId);
+    for (const [index, userId] of people.entries()) {
+      await row(eventId, userId, { at: hoursAgo(10 - index), origin: 'ticket' });
+    }
+    const whole = ((await marks(eventId, 'confirmed', '&limit=25')).items as Mark[]).map(
+      (item) => item.id,
+    );
+    expect(whole).toHaveLength(5);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const query: string = `&limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+      const page: AttendancePage = await marks(eventId, 'confirmed', query);
+      seen.push(...(page.items as Mark[]).map((item) => item.id));
+      cursor = page.nextCursor;
+      pages += 1;
+    } while (cursor && pages < 6);
+    expect(seen).toEqual(whole);
+    expect(new Set(seen).size).toBe(5);
+  });
+
+  it('T7. a refund that frees a seat clears the flag of the next row', async () => {
+    const [a, b, c] = await members('t7-', 3);
+    const eventId = await mappedEvent('refund', 2);
+    await ticketMapping(labTenantId, eventId);
+    const first = await row(eventId, a as string, { at: hoursAgo(3), origin: 'ticket' });
+    await row(eventId, b as string, { at: hoursAgo(2), origin: 'ticket' });
+    await row(eventId, c as string, { at: hoursAgo(1), origin: 'ticket' });
+    expect(((await marks(eventId)).items as Mark[]).filter((item) => item.overLimit)).toHaveLength(
+      1,
+    );
+    await adminSql`delete from public.event_attendances where id = ${first}::uuid`;
+    expect(((await marks(eventId)).items as Mark[]).filter((item) => item.overLimit)).toHaveLength(
+      0,
+    );
+  });
+
+  it('T8. EP-30: the counts stay integers computed by the unchanged expressions', async () => {
+    const [a, b, c, d] = await members('t8-', 4);
+    const eventId = await mappedEvent('counts', 10);
+    await row(eventId, a as string, { at: hoursAgo(5) });
+    await ticketMapping(labTenantId, eventId);
+    await row(eventId, b as string, { at: hoursAgo(4), origin: 'ticket' });
+    await row(eventId, c as string, { at: hoursAgo(3), origin: 'courtesy' });
+    await row(eventId, d as string, {
+      at: hoursAgo(2),
+      origin: 'ticket',
+      status: 'checked_in',
+      refunded: true,
+    });
+    const res = await lab(`/v1/events/${eventId}/attendance/summary`, admin.token);
+    const summary = (await res.json()) as AttendanceSummary;
+    expect(summary).toMatchObject({
+      pendingConfirmedCount: 3,
+      presentCount: 1,
+      notGoingCount: 0,
+      confirmedCount: 4,
+      paid: true,
+      overLimit: false,
+    });
+    for (const value of [
+      summary.pendingConfirmedCount,
+      summary.presentCount,
+      summary.notGoingCount,
+      summary.confirmedCount,
+    ]) {
+      expect(Number.isInteger(value)).toBe(true);
+    }
   });
 });

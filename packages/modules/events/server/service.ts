@@ -28,6 +28,7 @@ import type {
   EventStatus,
   EventStatusUpdate,
   EventSummary,
+  EventTicketAdmin,
   NextEvent,
   RsvpInput,
   RsvpResult,
@@ -914,6 +915,11 @@ type EventEditRow = {
   starts_at: string;
   ends_at: string;
   schedule?: unknown;
+  /** Phase 10.1-07: the claim-gated ticket read; every column is null when there is no mapping or no admin claim. */
+  ticket_product_id?: string | null;
+  ticket_checkout_url?: string | null;
+  ticket_gateway_open?: boolean | null;
+  ticket_sold?: number | null;
 };
 
 /**
@@ -957,12 +963,17 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
              to_char(e.ends_at at time zone t.timezone, 'HH24:MI') as end_time,
              e.status,
              to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
-             to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at
+             to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at,
+             ta.external_product_id as ticket_product_id,
+             ta.checkout_url as ticket_checkout_url,
+             ta.gateway_open as ticket_gateway_open,
+             ta.sold as ticket_sold
         from events e
         join tenants t on t.id = e.tenant_id
         left join media_assets a on a.id = e.cover_asset_id
         left join media_assets pa on pa.id = e.poster_asset_id
         left join event_secrets s on s.tenant_id = e.tenant_id and s.event_id = e.id
+        left join lateral app.event_ticket_admin(e.id) ta on true
        where e.tenant_id = ${ctx.tenantId}::uuid
          and e.id = ${eventId}::uuid
          and e.deleted_at is null
@@ -970,6 +981,7 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
   );
   const row = rows[0];
   if (!row) throw new ApiError(404, 'NOT_FOUND');
+  const ticket = await ticketForEdit(ctx, row);
   return {
     id: row.id,
     title: row.title,
@@ -991,7 +1003,56 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     schedule: toSchedule(row.schedule),
+    // Absent for any caller but the tenant admin (D-753); `null` for an admin and an unmapped event.
+    ...(ticket === undefined ? {} : { ticket }),
   };
+}
+
+/**
+ * The edit read's `ticket` object (Phase 10.1-07, D-747, D-753): the stored product id and purchase link as
+ * the claim-gated `app.event_ticket_admin` read them, the sold count, whether the gateway is open, and the
+ * adapter's display name. `undefined` (the key is left out) for anyone but the tenant admin: the definer
+ * checks the claim itself, this check keeps the payload shape honest if a lane ever answers anyway.
+ */
+async function ticketForEdit(
+  ctx: RequestContext,
+  row: EventEditRow,
+): Promise<EventTicketAdmin | null | undefined> {
+  if (ctx.role !== 'admin_tenant') return undefined;
+  if (row.ticket_product_id === null || row.ticket_product_id === undefined) return null;
+  return {
+    externalProductId: row.ticket_product_id,
+    checkoutUrl: row.ticket_checkout_url ?? null,
+    gatewayOpen: row.ticket_gateway_open === true,
+    soldCount: Number(row.ticket_sold ?? 0),
+    gatewayName: await gatewayDisplayName(ctx),
+  };
+}
+
+/**
+ * The display name of the tenant's gateway adapter, the accessor the Pagamentos overview uses
+ * (`gatewayAdapter(provider)?.displayName`), or null when there is none (or the provider cannot be
+ * resolved). Loaded on demand like the mapping release: the payments setup pulls the gateway adapters and
+ * the job queue registry, which this module's static graph keeps out. Never fails the read.
+ */
+async function gatewayDisplayName(ctx: RequestContext): Promise<string | null> {
+  try {
+    const { tenantProvider } = await import('@rede-social/core/server/payments/setup');
+    const { gatewayAdapter } = await import('@rede-social/core/server/payments/index');
+    return gatewayAdapter(await tenantProvider(ctx.tenantId))?.displayName ?? null;
+  } catch (error) {
+    log.warn(
+      {
+        event: 'events.edit.gateway_name_failed',
+        tenantId: ctx.tenantId,
+        requestId: ctx.requestId,
+        eventId: undefined,
+        code: error instanceof ApiError ? error.code : 'UNKNOWN',
+      },
+      'the gateway name could not be resolved',
+    );
+    return null;
+  }
 }
 
 /** The locked current row an update starts from. */
@@ -1610,7 +1671,31 @@ type AttendeeRow = {
   display_name: string | null;
   avatar_asset_id: string | null;
   avatar_variant_widths: number[] | null;
+  /** Phase 10.1-07 (D-751, D-758). Optional in the TYPE only so a hand-built test row may omit them. */
+  event_paid?: boolean;
+  origin?: 'rsvp' | 'ticket' | 'courtesy';
+  refunded?: boolean;
+  over_limit?: boolean;
 };
+
+/**
+ * The over-limit rule (Phase 10.1-07, A-UI-13, D-758), stated ONCE: a presence is over the limit iff it came
+ * from a ticket or a courtesy, is `going` or `checked_in`, the event has a `capacity`, and its rank by
+ * `(responded_at, id)` ascending among the event's `going` and `checked_in` rows is above that capacity. A
+ * correlated count riding `event_attendances_tenant_event_status_idx` (a page is at most 25 rows); computed
+ * at read time, so a refund that frees a seat clears the flag of the next row. The text is copied VERBATIM
+ * into `233-event-tickets.sql` section 7, so edit both together. The aliases it uses are `a` (the listed
+ * row) and `ev` (its event).
+ */
+const OVER_LIMIT = sql.raw(`(ev.capacity is not null
+            and a.origin in ('ticket','courtesy')
+            and a.status in ('going','checked_in')
+            and (select count(*)::int
+                   from event_attendances r
+                  where r.tenant_id = a.tenant_id
+                    and r.event_id = a.event_id
+                    and r.status in ('going','checked_in')
+                    and (r.responded_at, r.id) <= (a.responded_at, a.id)) > ev.capacity) as over_limit`);
 
 /**
  * THE attendee projection, shared by the three chip statements so they can never disagree about what
@@ -1631,8 +1716,14 @@ const attendeeProjection = sql`
            (ms.id is null) as removed,
            mp.display_name,
            mp.avatar_asset_id,
-           av.variant_widths as avatar_variant_widths
+           av.variant_widths as avatar_variant_widths,
+           pd.paid as event_paid,
+           a.origin,
+           (a.refunded_at is not null) as refunded,
+           ${OVER_LIMIT}
       from event_attendances a
+      join events ev on ev.tenant_id = a.tenant_id and ev.id = a.event_id
+      left join lateral (select app.event_is_paid(a.event_id) as paid) pd on true
       left join memberships ms
              on ms.tenant_id = a.tenant_id
             and ms.user_id = a.user_id
@@ -1651,7 +1742,26 @@ const toAttendee = (row: AttendeeRow): Attendee => ({
   respondedAt: row.responded_at,
   checkedInAt: row.checked_in_at,
   walkIn: row.status === 'walk_in',
+  // Phase 10.1-07 (D-758): the three marks exist on the rows of a PAID event only; a free event's rows
+  // carry none of the keys, which is also the answer of a row that predates them.
+  ...(row.event_paid === true
+    ? {
+        origin: attendeeOrigin(row),
+        refunded: row.refunded === true,
+        overLimit: row.over_limit === true,
+      }
+    : {}),
 });
+
+/**
+ * Where a presence of a paid event came from: the stored `ticket` or `courtesy`, `before_ticket` for a plain
+ * `rsvp` (or walk-in) presence given before the event was mapped, and null for a `Não vou` row, which is
+ * no presence at all.
+ */
+function attendeeOrigin(row: AttendeeRow): ViewerOrigin | null {
+  if (row.status === 'not_going') return null;
+  return row.origin === 'ticket' || row.origin === 'courtesy' ? row.origin : 'before_ticket';
+}
 
 /**
  * A live event of THIS tenant, in this lane: the existence check every attendance read (and every
@@ -1777,6 +1887,8 @@ type AttendanceSummaryRow = {
   not_going_count: number;
   confirmed_count: number;
   checkin_code: string | null;
+  paid?: boolean;
+  over_limit?: boolean;
 };
 
 /**
@@ -1805,9 +1917,12 @@ export async function getAttendanceSummary(
              c.present_count,
              c.not_going_count,
              c.confirmed_count,
-             case when e.format = 'in_person' then s.checkin_code end as checkin_code
+             case when e.format = 'in_person' then s.checkin_code end as checkin_code,
+             pd.paid,
+             (pd.paid and e.capacity is not null and c.confirmed_count > e.capacity) as over_limit
         from events e
         left join event_secrets s on s.tenant_id = e.tenant_id and s.event_id = e.id
+        left join lateral (select app.event_is_paid(e.id) as paid) pd on true
         left join lateral (
           select count(*) filter (where x.status = 'going')::int as pending_confirmed_count,
                  count(*) filter (where x.status in ('checked_in','walk_in'))::int as present_count,
@@ -1845,6 +1960,10 @@ export async function getAttendanceSummary(
     notGoingCount: Number(row.not_going_count ?? 0),
     confirmedCount: Number(row.confirmed_count ?? 0),
     checkinCode: row.checkin_code,
+    // Phase 10.1-07 (D-758): the paid flag and whether the confirmed count passed the limit.
+    ...(row.paid === undefined
+      ? {}
+      : { paid: row.paid === true, overLimit: row.over_limit === true }),
   };
 }
 

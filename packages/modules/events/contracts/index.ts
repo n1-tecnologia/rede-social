@@ -607,6 +607,18 @@ export const enterResultSchema = z
   });
 export type EnterResult = z.infer<typeof enterResultSchema>;
 
+/** Phase 10.1 (D-747, D-753): the admin's stored ticket facts of one event (the edit read's `ticket`). */
+export const eventTicketAdminSchema = z
+  .object({
+    externalProductId: z.string(),
+    checkoutUrl: z.string().nullable(),
+    gatewayOpen: z.boolean(),
+    soldCount: z.number().int().nonnegative(),
+    gatewayName: z.string().nullable(),
+  })
+  .strict();
+export type EventTicketAdmin = z.infer<typeof eventTicketAdminSchema>;
+
 /**
  * `GET /v1/events/{eventId}/edit` (06-04, D-214): the event as the edit FORM needs it. Returned ONLY
  * by the manage-guarded edit read, never by a member-reachable route, which is why it may carry
@@ -647,6 +659,14 @@ export const eventEditSchema = z
      * schema only so the strict web can read an API that predates the column (see `eventDetailSchema`).
      */
     schedule: z.array(eventScheduleItemSchema).optional(),
+    /**
+     * Phase 10.1 (D-747, D-753): the stored ticket facts, read through the claim-gated
+     * `app.event_ticket_admin`, so the form shows them (and `N ingressos vendidos`) even when the payments
+     * routes answer 404. Absent for any caller but the tenant admin; `null` for an admin whose event has no
+     * mapping. `gatewayName` is the adapter's display name (null when none): the only way the form can say
+     * `{gateway}` with the module off.
+     */
+    ticket: eventTicketAdminSchema.nullable().optional(),
   })
   .strict();
 export type EventEdit = z.infer<typeof eventEditSchema>;
@@ -725,6 +745,15 @@ export const attendeeSchema = z
     respondedAt: z.string().nullable(),
     checkedInAt: z.string().nullable(),
     walkIn: z.boolean(),
+    /**
+     * Phase 10.1 (D-751, D-758, A-UI-13), PAID events only: where the presence came from (`ticket`,
+     * `courtesy`, `before_ticket`; null for a `Não vou` row), whether the ticket was refunded after check-in,
+     * and whether the presence ranks beyond the limit. A FREE event's rows carry none of the three keys, and a
+     * member can list no attendees at all (D-206).
+     */
+    origin: z.enum(VIEWER_ORIGINS).nullable().optional(),
+    refunded: z.boolean().optional(),
+    overLimit: z.boolean().optional(),
   })
   .strict();
 export type Attendee = z.infer<typeof attendeeSchema>;
@@ -757,6 +786,12 @@ export const attendanceSummarySchema = z
     notGoingCount: z.number().int().nonnegative(),
     confirmedCount: z.number().int().nonnegative(),
     checkinCode: z.string().nullable(),
+    /**
+     * Phase 10.1 (D-758), optional so a strict web reads an API that predates them: `paid` is the event's
+     * paid flag; `overLimit` is true iff the event is paid, has a `capacity`, and `confirmedCount` is above it.
+     */
+    paid: z.boolean().optional(),
+    overLimit: z.boolean().optional(),
   })
   .strict();
 export type AttendanceSummary = z.infer<typeof attendanceSummarySchema>;

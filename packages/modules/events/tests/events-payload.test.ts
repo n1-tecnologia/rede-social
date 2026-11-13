@@ -1099,6 +1099,29 @@ describe('06-07 — attendance reads and code regeneration', () => {
     });
   });
 
+  it('28b. 10.1-07: the summary carries the paid and over-limit flags when the row has them', async () => {
+    script = [
+      [
+        {
+          format: 'online',
+          pending_confirmed_count: 3,
+          present_count: 0,
+          not_going_count: 0,
+          confirmed_count: 3,
+          checkin_code: null,
+          paid: true,
+          over_limit: true,
+        },
+      ],
+    ];
+    await expect(getAttendanceSummary(context(), EVENT_ID)).resolves.toMatchObject({
+      confirmedCount: 3,
+      paid: true,
+      overLimit: true,
+    });
+    expect(statements[0]).toContain('app.event_is_paid');
+  });
+
   it('29. regeneration draws two DISTINCT candidates, emits nothing, and a miss is a bare 404', async () => {
     script = [[{ checkin_code: 'ABCD' }]];
     const ctx = context();

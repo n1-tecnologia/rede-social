@@ -305,3 +305,78 @@ describe('10.1 the list answers paid per row', () => {
     expect(paidItem).not.toHaveProperty('checkoutUrl');
   });
 });
+
+describe('10.1 the admin edit read ticket object (D-747, D-753, EP-30)', () => {
+  it('shows the stored facts and the sold count with the module on, with the module off, and no object for an unmapped event', async () => {
+    const admin = await person('admin_tenant');
+    const [buyer, refunded, guest, early] = [
+      await person(),
+      await person(),
+      await person(),
+      await person(),
+    ];
+    // The Vou before the link is written BEFORE the event is mapped (the paid door closes the Vou after).
+    const eventId = await ticketEvent(labTenantId, { title: `${PREFIX}-edit` });
+    await presence(eventId, early.userId, { origin: 'rsvp' });
+    await ticketMapping(labTenantId, eventId);
+    await adminSql`
+      update public.payment_products set checkout_url = ${LINK}
+       where kind = 'event' and event_id = ${eventId}::uuid`;
+    await adminSql`update public.events set ticket_price_cents = 8000 where id = ${eventId}::uuid`;
+    await presence(eventId, buyer.userId, { origin: 'ticket' });
+    await presence(eventId, guest.userId, { origin: 'courtesy' });
+    await presence(eventId, refunded.userId, {
+      origin: 'ticket',
+      status: 'checked_in',
+      refunded: true,
+    });
+    const [product] = await adminSql<{ external_product_id: string }[]>`
+      select external_product_id from public.payment_products
+       where kind = 'event' and event_id = ${eventId}::uuid`;
+
+    const on = await call(admin, 'GET', `/${eventId}/edit`);
+    expect(on.status, on.raw).toBe(200);
+    // EP-30: two ticket rows (the refunded checked-in one counts); the courtesy and the early Vou do not.
+    expect(on.json.ticket).toEqual({
+      externalProductId: product?.external_product_id,
+      checkoutUrl: LINK,
+      gatewayOpen: true,
+      soldCount: 2,
+      gatewayName: 'Gateway de teste',
+    });
+    expect(on.json.ticketPriceCents).toBe(8000);
+
+    // The payments module off: the stored values are still there, the gateway reads closed.
+    await setPaymentsRow(labTenantId, { enabled: false, settings: {} });
+    moduleFlags.invalidate(labTenantId);
+    const off = await call(admin, 'GET', `/${eventId}/edit`);
+    expect(off.status, off.raw).toBe(200);
+    expect(off.json.ticket).toMatchObject({
+      externalProductId: product?.external_product_id,
+      checkoutUrl: LINK,
+      gatewayOpen: false,
+      soldCount: 2,
+      gatewayName: 'Gateway de teste',
+    });
+
+    // An unmapped event: the admin gets an explicit null, never an object.
+    const free = await ticketEvent(labTenantId, { title: `${PREFIX}-edit-free` });
+    const none = await call(admin, 'GET', `/${free}/edit`);
+    expect(none.status, none.raw).toBe(200);
+    expect(none.json.ticket).toBeNull();
+  });
+
+  it('a member is refused the edit read and no ticket fact ever reaches a non-admin', async () => {
+    const member = await person();
+    const support = await person('support_tenant');
+    const eventId = await paidEvent('edit-member');
+    const asMember = await call(member, 'GET', `/${eventId}/edit`);
+    expect(asMember.status).toBe(403);
+    expect(asMember.raw).not.toContain('externalProductId');
+    expect(asMember.raw).not.toContain(LINK);
+    const asSupport = await call(support, 'GET', `/${eventId}/edit`);
+    if (asSupport.status === 200) expect(asSupport.json).not.toHaveProperty('ticket');
+    expect(asSupport.raw).not.toContain('externalProductId');
+    expect(asSupport.raw).not.toContain(LINK);
+  });
+});

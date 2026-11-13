@@ -44,8 +44,17 @@ begin;
 --    phase called with the OTHER tenant's ids in both directions, each with a positive control (EP-39); the privilege
 --    matrix and the empty search_path of all twelve functions of plans 02 and 04, by catalogue.
 --
+-- 7. OVER-LIMIT RANK (plan 07, A-UI-13, D-751, D-758, EP-26, EP-27): the rule the attendee list prints per row,
+--    copied VERBATIM from `OVER_LIMIT` in `packages/modules/events/server/service.ts` (edit both together). A
+--    presence of origin ticket or courtesy, going or checked_in, is over the limit iff its rank by
+--    `(responded_at, id)` ascending among the going and checked_in rows is above `capacity`: rank 3 of 3 at
+--    capacity 2 is flagged, a rank equal to the capacity is not, a null capacity never flags, two equal
+--    instants rank by id, a plain Vou takes a seat and is never flagged itself, a refund that frees a seat
+--    clears the next row; the summary's over-limit flag; and the correlated count rides
+--    `event_attendances_tenant_event_status_idx` BY NAME.
+--
 -- Fixture ids use the `1e310000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(312);
+select plan(322);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-tkt-a', 'Ingresso A', '1e310000-0000-4000-8000-000000000001');
@@ -1292,6 +1301,223 @@ select throws_ok($$ select * from app.event_gateway_grant(tests.tk('1'), tests.t
 select throws_ok($$ select * from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S5-L1') $$, '42501', null,
   'T-10.1-09: a member lane cannot call the gateway revoke');
 reset role;
+
+
+-- ── 7. the over-limit rank (plan 07, A-UI-13, EP-26, EP-27) ────────────────────────────────────────
+-- 701 mapped, limit 2, three tickets ranked by the instant (the LATEST row has the SMALLEST id: rank is not id order) |
+-- 702 limit 2, three tickets on ONE instant (rank by id) | 703 limit 2, two tickets (rank = limit) | 704 no limit |
+-- 705 limit 2: a Vou, a checked-in ticket, a courtesy and a Nao vou.
+reset role;
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, capacity) values
+  (tests.tk('701'), tests.tk('1'), tests.tk('10c'), 'Evento 701', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', 2),
+  (tests.tk('702'), tests.tk('1'), tests.tk('10c'), 'Evento 702', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', 2),
+  (tests.tk('703'), tests.tk('1'), tests.tk('10c'), 'Evento 703', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', 2),
+  (tests.tk('704'), tests.tk('1'), tests.tk('10c'), 'Evento 704', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null),
+  (tests.tk('705'), tests.tk('1'), tests.tk('10c'), 'Evento 705', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', 2);
+-- The plain Vou and the Nao vou of 705 are written BEFORE the event is mapped (the door closes the Vou after).
+insert into public.event_attendances (id, tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.tk('7e1'), tests.tk('1'), tests.tk('705'), tests.tk('101'), 'going', now() - interval '4 hours', 'rsvp'),
+  (tests.tk('7e5'), tests.tk('1'), tests.tk('705'), tests.tk('105'), 'not_going', now() - interval '1 hour', 'rsvp');
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values
+  (tests.tk('1'), 'fake', 'event', 'tkt-233-s7-701', tests.tk('701')),
+  (tests.tk('1'), 'fake', 'event', 'tkt-233-s7-705', tests.tk('705'));
+select tests.as_service();
+insert into public.event_attendances (id, tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values
+  (tests.tk('7b1'), tests.tk('1'), tests.tk('701'), tests.tk('101'), 'going', now() - interval '1 hour', 'ticket', 'fake', 'S7-B1'),
+  (tests.tk('7b2'), tests.tk('1'), tests.tk('701'), tests.tk('102'), 'going', now() - interval '2 hours', 'ticket', 'fake', 'S7-B2'),
+  (tests.tk('7b3'), tests.tk('1'), tests.tk('701'), tests.tk('103'), 'going', now() - interval '3 hours', 'ticket', 'fake', 'S7-B3'),
+  (tests.tk('7a1'), tests.tk('1'), tests.tk('702'), tests.tk('101'), 'going', timestamptz '2030-01-01 12:00:00+00', 'ticket', 'fake', 'S7-A1'),
+  (tests.tk('7a2'), tests.tk('1'), tests.tk('702'), tests.tk('102'), 'going', timestamptz '2030-01-01 12:00:00+00', 'ticket', 'fake', 'S7-A2'),
+  (tests.tk('7a3'), tests.tk('1'), tests.tk('702'), tests.tk('103'), 'going', timestamptz '2030-01-01 12:00:00+00', 'ticket', 'fake', 'S7-A3'),
+  (tests.tk('7c1'), tests.tk('1'), tests.tk('703'), tests.tk('101'), 'going', now() - interval '2 hours', 'ticket', 'fake', 'S7-C1'),
+  (tests.tk('7c2'), tests.tk('1'), tests.tk('703'), tests.tk('102'), 'going', now() - interval '1 hour', 'ticket', 'fake', 'S7-C2'),
+  (tests.tk('7d1'), tests.tk('1'), tests.tk('704'), tests.tk('101'), 'going', now() - interval '3 hours', 'ticket', 'fake', 'S7-D1'),
+  (tests.tk('7d2'), tests.tk('1'), tests.tk('704'), tests.tk('102'), 'going', now() - interval '2 hours', 'ticket', 'fake', 'S7-D2'),
+  (tests.tk('7d3'), tests.tk('1'), tests.tk('704'), tests.tk('103'), 'going', now() - interval '1 hour', 'ticket', 'fake', 'S7-D3');
+insert into public.event_attendances (id, tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values
+  (tests.tk('7e2'), tests.tk('1'), tests.tk('705'), tests.tk('102'), 'going', now() - interval '3 hours', 'ticket', 'fake', 'S7-E2');
+insert into public.event_attendances (id, tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.tk('7e3'), tests.tk('1'), tests.tk('705'), tests.tk('103'), 'going', now() - interval '2 hours', 'courtesy');
+reset role;
+-- The event starts, and the ticket holder of 705 checks in: a checked-in ticket still counts for the rank.
+update public.events set starts_at = now() - interval '1 hour', ends_at = now() + interval '2 hours' where id = tests.tk('705');
+update public.event_attendances set status = 'checked_in', checked_in_at = now(), checkin_via = 'online' where id = tests.tk('7e2');
+
+-- EP-26: rank 3 of 3 at limit 2 is the only flagged row, and the latest row is flagged though its id is the smallest.
+select results_eq($$
+  select a.id,
+         (ev.capacity is not null
+            and a.origin in ('ticket','courtesy')
+            and a.status in ('going','checked_in')
+            and (select count(*)::int
+                   from event_attendances r
+                  where r.tenant_id = a.tenant_id
+                    and r.event_id = a.event_id
+                    and r.status in ('going','checked_in')
+                    and (r.responded_at, r.id) <= (a.responded_at, a.id)) > ev.capacity) as over_limit
+    from event_attendances a
+    join events ev on ev.tenant_id = a.tenant_id and ev.id = a.event_id
+   where a.event_id = tests.tk('701')
+   order by a.id $$,
+  $$ values (tests.tk('7b1'), true), (tests.tk('7b2'), false), (tests.tk('7b3'), false) $$,
+  'EP-26: at limit 2 only the third ticket by instant is over the limit (rank follows responded_at, not id)');
+-- EP-27: one instant, three tickets: the rank falls back to the id, so the flagged one is always the same.
+select results_eq($$
+  select a.id,
+         (ev.capacity is not null
+            and a.origin in ('ticket','courtesy')
+            and a.status in ('going','checked_in')
+            and (select count(*)::int
+                   from event_attendances r
+                  where r.tenant_id = a.tenant_id
+                    and r.event_id = a.event_id
+                    and r.status in ('going','checked_in')
+                    and (r.responded_at, r.id) <= (a.responded_at, a.id)) > ev.capacity) as over_limit
+    from event_attendances a
+    join events ev on ev.tenant_id = a.tenant_id and ev.id = a.event_id
+   where a.event_id = tests.tk('702')
+   order by a.id $$,
+  $$ values (tests.tk('7a1'), false), (tests.tk('7a2'), false), (tests.tk('7a3'), true) $$,
+  'EP-27: three tickets on one instant at limit 2 rank by id: the largest id is the flagged one');
+-- EP-26: a rank equal to the limit is not over; a null limit never flags.
+select results_eq($$
+  select a.id,
+         (ev.capacity is not null
+            and a.origin in ('ticket','courtesy')
+            and a.status in ('going','checked_in')
+            and (select count(*)::int
+                   from event_attendances r
+                  where r.tenant_id = a.tenant_id
+                    and r.event_id = a.event_id
+                    and r.status in ('going','checked_in')
+                    and (r.responded_at, r.id) <= (a.responded_at, a.id)) > ev.capacity) as over_limit
+    from event_attendances a
+    join events ev on ev.tenant_id = a.tenant_id and ev.id = a.event_id
+   where a.event_id = tests.tk('703')
+   order by a.id $$,
+  $$ values (tests.tk('7c1'), false), (tests.tk('7c2'), false) $$,
+  'EP-26: two tickets at limit 2 (confirmed equals the limit): nobody is flagged');
+select results_eq($$
+  select a.id,
+         (ev.capacity is not null
+            and a.origin in ('ticket','courtesy')
+            and a.status in ('going','checked_in')
+            and (select count(*)::int
+                   from event_attendances r
+                  where r.tenant_id = a.tenant_id
+                    and r.event_id = a.event_id
+                    and r.status in ('going','checked_in')
+                    and (r.responded_at, r.id) <= (a.responded_at, a.id)) > ev.capacity) as over_limit
+    from event_attendances a
+    join events ev on ev.tenant_id = a.tenant_id and ev.id = a.event_id
+   where a.event_id = tests.tk('704')
+   order by a.id $$,
+  $$ values (tests.tk('7d1'), false), (tests.tk('7d2'), false), (tests.tk('7d3'), false) $$,
+  'EP-26: with no limit nobody is ever flagged');
+-- A plain Vou takes the first seat and is never flagged itself; the courtesy at rank 3 is; a Nao vou is neither.
+select results_eq($$
+  select a.id,
+         (ev.capacity is not null
+            and a.origin in ('ticket','courtesy')
+            and a.status in ('going','checked_in')
+            and (select count(*)::int
+                   from event_attendances r
+                  where r.tenant_id = a.tenant_id
+                    and r.event_id = a.event_id
+                    and r.status in ('going','checked_in')
+                    and (r.responded_at, r.id) <= (a.responded_at, a.id)) > ev.capacity) as over_limit
+    from event_attendances a
+    join events ev on ev.tenant_id = a.tenant_id and ev.id = a.event_id
+   where a.event_id = tests.tk('705')
+   order by a.id $$,
+  $$ values (tests.tk('7e1'), false), (tests.tk('7e2'), false), (tests.tk('7e3'), true), (tests.tk('7e5'), false) $$,
+  'A-UI-13: a Vou before the link holds rank 1 and is never flagged; the checked-in ticket is rank 2; the courtesy at rank 3 is over; a Nao vou is ignored');
+
+-- The summary's flag (D-758), as the admin lane reads it: paid, a limit, and the confirmed count above it.
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$
+  select pd.paid, (pd.paid and e.capacity is not null and c.confirmed_count > e.capacity) as over_limit
+    from events e
+    left join lateral (
+      select count(*) filter (where x.status in ('going','checked_in'))::int as confirmed_count
+        from event_attendances x
+       where x.tenant_id = e.tenant_id and x.event_id = e.id
+    ) c on true
+    left join lateral (select app.event_is_paid(e.id) as paid) pd on true
+   where e.id = tests.tk('701') $$,
+  $$ values (true, true) $$, 'D-758: a paid event with 3 confirmed at limit 2 reports the summary over-limit flag');
+select results_eq($$
+  select pd.paid, (pd.paid and e.capacity is not null and c.confirmed_count > e.capacity) as over_limit
+    from events e
+    left join lateral (
+      select count(*) filter (where x.status in ('going','checked_in'))::int as confirmed_count
+        from event_attendances x
+       where x.tenant_id = e.tenant_id and x.event_id = e.id
+    ) c on true
+    left join lateral (select app.event_is_paid(e.id) as paid) pd on true
+   where e.id = tests.tk('702') $$,
+  $$ values (false, false) $$, 'D-758: an UNMAPPED event is never over the limit in the summary, whatever the counts');
+reset role;
+
+-- A refund that frees a seat clears the flag of the next row (the rank is read at read time).
+delete from public.event_attendances where id = tests.tk('7b3');
+select results_eq($$
+  select a.id,
+         (ev.capacity is not null
+            and a.origin in ('ticket','courtesy')
+            and a.status in ('going','checked_in')
+            and (select count(*)::int
+                   from event_attendances r
+                  where r.tenant_id = a.tenant_id
+                    and r.event_id = a.event_id
+                    and r.status in ('going','checked_in')
+                    and (r.responded_at, r.id) <= (a.responded_at, a.id)) > ev.capacity) as over_limit
+    from event_attendances a
+    join events ev on ev.tenant_id = a.tenant_id and ev.id = a.event_id
+   where a.event_id = tests.tk('701')
+   order by a.id $$,
+  $$ values (tests.tk('7b1'), false), (tests.tk('7b2'), false) $$,
+  'A-UI-13: after the first ticket is refunded away the third becomes rank 2 and its flag clears');
+
+-- The rank count rides the status index BY NAME on a volume fixture (a handful of rows is always scanned):
+-- 100 events x 20 members = 2,000 rows of tenant A, then `analyze`.
+do $$
+begin
+  for g in 1..20 loop
+    perform tests.auth_user('vol' || g || '@tkt-7.local', ('1e310000-0000-4000-8000-' || lpad(to_hex(2048 + g), 12, '0'))::uuid);
+  end loop;
+end
+$$;
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, capacity)
+select ('1e310000-0000-4000-8001-' || lpad(g::text, 12, '0'))::uuid, tests.tk('1'), tests.tk('10c'),
+       'Volume ' || g, 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null
+  from generate_series(1, 100) g;
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin)
+select tests.tk('1'), ('1e310000-0000-4000-8001-' || lpad(g::text, 12, '0'))::uuid,
+       ('1e310000-0000-4000-8000-' || lpad(to_hex(2048 + u), 12, '0'))::uuid,
+       case u % 4 when 0 then 'not_going' else 'going' end, now() - make_interval(mins => u), 'rsvp'
+  from generate_series(1, 100) g, generate_series(1, 20) u;
+analyze public.event_attendances;
+
+create temporary table rank_plans (name text primary key, plan text);
+do $$
+declare
+  v_plan text;
+begin
+  execute
+    'explain (format json)
+     select count(*)::int
+       from event_attendances r
+      where r.tenant_id = ''1e310000-0000-4000-8000-000000000001''::uuid
+        and r.event_id = ''1e310000-0000-4000-8001-000000000042''::uuid
+        and r.status in (''going'',''checked_in'')
+        and (r.responded_at, r.id) <= (now(), ''ffffffff-ffff-4fff-8fff-ffffffffffff''::uuid)' into v_plan;
+  insert into rank_plans values ('rank', v_plan);
+end
+$$;
+select matches((select plan from rank_plans where name = 'rank'), 'event_attendances_tenant_event_status_idx',
+  'A-UI-13: the rank count is served by event_attendances_tenant_event_status_idx, BY NAME');
+select ok((select plan from rank_plans where name = 'rank') not like '%Seq Scan%', '...and it is not a sequential scan');
 
 select * from finish();
 rollback;
