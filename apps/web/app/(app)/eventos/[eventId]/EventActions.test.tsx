@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EventActionState } from '@/lib/events-view';
@@ -627,5 +627,184 @@ describe('EventActions — the paid branch (10.1-12)', () => {
     fireEvent.click(link);
     expect(rsvp).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Phase 10.1-12 (D-741, D-754, UI-D-750, UI-D-753): giving up. A paid or courtesy presence has NO
+ * "Não vou" and no "Cancelar inscrição"; a presence from before the ticket keeps the quiet button behind
+ * a danger dialog, answers nothing optimistically and refreshes into the buy state; a stale tab is told
+ * what changed and refreshed.
+ */
+describe('EventActions — giving up a paid presence (10.1-12, UI-D-750, UI-D-753)', () => {
+  const HREF = 'https://pay.example/checkout/abc';
+  const T = catalog.ticket as {
+    giveUp: { title: string; body: string; confirm: string; dismiss: string };
+  };
+  const E = (catalog.rsvp as { errors: { paid: string; ticketLocked: string } }).errors;
+  const going = (viewerOrigin: EventActionState['viewerOrigin'], overrides = {}) =>
+    state({
+      paid: true,
+      zone: null,
+      answer: 'going',
+      viewerOrigin,
+      checkoutHref: null,
+      priceLabel: null,
+      ...overrides,
+    });
+  const dialog = () => screen.queryByRole('dialog');
+
+  it('9a. a ticket or courtesy presence renders no "Não vou" and no "Cancelar inscrição", in any phase', () => {
+    for (const origin of ['ticket', 'courtesy', null] as const) {
+      for (const phase of ['P0', 'P1', 'P2'] as const) {
+        for (const format of ['in_person', 'online'] as const) {
+          const { unmount } = render(<EventActions {...going(origin, { phase, format })} />);
+          expect(unregister(), `${origin} ${phase} ${format}`).toBeNull();
+          expect(screen.queryByTestId('event-actions-unregister')).toBeNull();
+          expect(screen.queryByRole('button', { name: /não vou|cancelar inscrição/i })).toBeNull();
+          expect(screen.queryByText(/não vou|cancelar inscrição/i)).toBeNull();
+          expect(register()).toBeNull();
+          unmount();
+        }
+      }
+    }
+  });
+
+  it('9b. a presence from before the ticket keeps the quiet "Cancelar inscrição", which opens the danger dialog', () => {
+    render(<EventActions {...going('before_ticket')} />);
+    expect(dialog()).toBeNull();
+    fireEvent.click(unregister() as HTMLElement);
+    const open = dialog() as HTMLElement;
+    expect(open).not.toBeNull();
+    expect(within(open).getByRole('heading', { name: T.giveUp.title })).toBeTruthy();
+    expect(within(open).getByText(T.giveUp.body)).toBeTruthy();
+    // The safe action comes first and the dismiss label is "Manter inscrição".
+    const buttons = within(open).getAllByRole('button');
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      T.giveUp.dismiss,
+      T.giveUp.confirm,
+    ]);
+    // Nothing was written by opening the dialog.
+    expect(rsvp).not.toHaveBeenCalled();
+  });
+
+  it('9c. dismissing the dialog keeps the presence: no write, no refresh', async () => {
+    render(<EventActions {...going('before_ticket')} />);
+    fireEvent.click(unregister() as HTMLElement);
+    fireEvent.click(
+      within(dialog() as HTMLElement).getByRole('button', { name: T.giveUp.dismiss }),
+    );
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(rsvp).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(unregister()).not.toBeNull();
+  });
+
+  it('9d. confirming answers Não vou once, shows no optimistic buy state, and refreshes into the buy zone', async () => {
+    rsvp.mockResolvedValue({ ok: true });
+    const { rerender } = render(<EventActions {...going('before_ticket')} />);
+    fireEvent.click(unregister() as HTMLElement);
+    fireEvent.click(
+      within(dialog() as HTMLElement).getByRole('button', { name: T.giveUp.confirm }),
+    );
+    await waitFor(() => expect(rsvp).toHaveBeenCalledWith(ID, 'not_going'));
+    expect(rsvp).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(toast.show).not.toHaveBeenCalled();
+    // The server has not answered yet: still no buy control and no free "Garantir minha vaga".
+    expect(screen.queryByTestId('event-actions-buy')).toBeNull();
+    expect(register()).toBeNull();
+    // The refetch lands: the member is a buyer now.
+    rerender(
+      <EventActions
+        {...state({
+          paid: true,
+          zone: 'buy',
+          answer: 'not_going',
+          viewerOrigin: null,
+          checkoutHref: HREF,
+          priceLabel: null,
+        })}
+      />,
+    );
+    expect(screen.getByTestId('event-actions-buy').getAttribute('href')).toBe(HREF);
+    expect(unregister()).toBeNull();
+    expect(register()).toBeNull();
+  });
+
+  it('9e. the free event’s "Cancelar inscrição" still answers at once, with no dialog', async () => {
+    rsvp.mockResolvedValue({ ok: true });
+    render(<EventActions {...state({ answer: 'going' })} />);
+    fireEvent.click(unregister() as HTMLElement);
+    expect(dialog()).toBeNull();
+    expect(rsvp).toHaveBeenCalledWith(ID, 'not_going');
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+  });
+
+  it('10a. a stale tab hitting payment_required toasts the new sentence, refreshes and reverts', async () => {
+    rsvp.mockResolvedValue({ ok: false, error: 'payment_required' });
+    render(<EventActions {...state()} />);
+    fireEvent.click(register() as HTMLElement);
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: E.paid }),
+    );
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(E.paid).toBe('Este evento passou a ter ingresso pago. A página foi atualizada.');
+    // Reverted: the free page is back until the refresh lands.
+    expect(register()).not.toBeNull();
+  });
+
+  it('10b. a before-the-ticket member who paid meanwhile gets ticket_locked: the toast and a refresh', async () => {
+    rsvp.mockResolvedValue({ ok: false, error: 'ticket_locked' });
+    render(<EventActions {...going('before_ticket')} />);
+    fireEvent.click(unregister() as HTMLElement);
+    fireEvent.click(
+      within(dialog() as HTMLElement).getByRole('button', { name: T.giveUp.confirm }),
+    );
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: E.ticketLocked }),
+    );
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(E.ticketLocked).toBe(
+      'Sua presença já está confirmada pelo ingresso. A página foi atualizada.',
+    );
+  });
+
+  it('10c. the shipped refusals keep their own toasts next to the new ones', async () => {
+    for (const [error, message] of [
+      ['rsvp_closed', C.rsvp.errors.closed],
+      ['cancelled', C.errors.cancelled],
+      ['event_full', C.rsvp.errors.full],
+    ] as const) {
+      toast.show.mockReset();
+      refresh.mockReset();
+      rsvp.mockResolvedValue({ ok: false, error });
+      const { unmount } = render(<EventActions {...state()} />);
+      fireEvent.click(register() as HTMLElement);
+      await waitFor(() => expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message }));
+      expect(refresh).toHaveBeenCalledTimes(1);
+      unmount();
+    }
+  });
+
+  it('11. no paid-event state draws "processando" or a second brand fill', () => {
+    for (const answer of [null, 'not_going', 'going'] as const) {
+      for (const origin of [null, 'ticket', 'courtesy', 'before_ticket'] as const) {
+        const { container, unmount } = render(
+          <EventActions
+            {...state({
+              paid: true,
+              zone: answer === 'going' ? null : 'buy',
+              answer,
+              viewerOrigin: origin,
+              checkoutHref: HREF,
+            })}
+          />,
+        );
+        expect(container.textContent).not.toMatch(/processando/i);
+        expect(brandFills(container).length).toBeLessThanOrEqual(1);
+        unmount();
+      }
+    }
   });
 });

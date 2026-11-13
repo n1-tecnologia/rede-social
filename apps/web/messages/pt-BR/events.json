@@ -70,6 +70,26 @@
         "salesClosed": "A venda pelo app terminou quando o evento começou.",
         "unavailable": "Os ingressos não estão à venda no momento.",
         "onlineLink": "O link da transmissão é só para quem tem ingresso."
+      },
+      "confirmed": {
+        "title": "Presença confirmada",
+        "paid": "Ingresso pago. Para desistir, peça o reembolso na página de pagamento: sua presença sai daqui sozinha.",
+        "courtesy": "Cortesia da organização. Para desistir, fale com a equipe de {tenant}.",
+        "beforeTicket": "Sua inscrição é anterior ao ingresso, por isso não há cobrança."
+      },
+      "cancelled": {
+        "body": "A organização cancelou este evento. A venda e o check-in estão desativados.",
+        "refund": "Fale com a equipe de {tenant} sobre o reembolso do ingresso."
+      },
+      "refunded": {
+        "note": "Seu ingresso foi reembolsado e a presença saiu da lista.",
+        "afterCheckin": "Seu ingresso foi reembolsado, mas o check-in continua registrado."
+      },
+      "giveUp": {
+        "title": "Cancelar inscrição?",
+        "body": "Para voltar a este evento, você vai precisar comprar o ingresso.",
+        "confirm": "Cancelar inscrição",
+        "dismiss": "Manter inscrição"
       }
     },
     "poster": {
@@ -224,7 +244,9 @@
       "errors": {
         "failed": "Não foi possível salvar sua resposta. Tente novamente.",
         "closed": "As confirmações deste evento encerraram quando ele começou.",
-        "full": "Este evento está lotado."
+        "full": "Este evento está lotado.",
+        "paid": "Este evento passou a ter ingresso pago. A página foi atualizada.",
+        "ticketLocked": "Sua presença já está confirmada pelo ingresso. A página foi atualizada."
       }
     },
     "actions": {

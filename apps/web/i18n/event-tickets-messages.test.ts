@@ -115,9 +115,9 @@ const FORM_TICKET: Record<string, { text: string; names: string[] }> = {
 };
 
 /**
- * The member page's copy of plan 10.1-12 (UI-D-746 to UI-D-750, UI-D-753): the card, the zone and its
- * disabled states. The Presença confirmada block, the give-up dialog and the stale-tab toasts are added
- * below with their own task.
+ * The member page's copy of plan 10.1-12 (UI-D-744 to UI-D-750, UI-D-753): the card, the zone and its
+ * disabled states, the Presença confirmada block in its three variants, the cancelled and refunded
+ * lines, the give-up dialog and the two stale-tab toasts.
  */
 const MEMBER_TICKET: Record<string, { text: string; names: string[] }> = {
   'ticket.badge': { text: 'Pago', names: [] },
@@ -143,6 +143,50 @@ const MEMBER_TICKET: Record<string, { text: string; names: string[] }> = {
     text: 'O link da transmissão é só para quem tem ingresso.',
     names: [],
   },
+  'ticket.confirmed.title': { text: 'Presença confirmada', names: [] },
+  'ticket.confirmed.paid': {
+    text: 'Ingresso pago. Para desistir, peça o reembolso na página de pagamento: sua presença sai daqui sozinha.',
+    names: [],
+  },
+  'ticket.confirmed.courtesy': {
+    text: 'Cortesia da organização. Para desistir, fale com a equipe de {tenant}.',
+    names: ['tenant'],
+  },
+  'ticket.confirmed.beforeTicket': {
+    text: 'Sua inscrição é anterior ao ingresso, por isso não há cobrança.',
+    names: [],
+  },
+  'ticket.cancelled.body': {
+    text: 'A organização cancelou este evento. A venda e o check-in estão desativados.',
+    names: [],
+  },
+  'ticket.cancelled.refund': {
+    text: 'Fale com a equipe de {tenant} sobre o reembolso do ingresso.',
+    names: ['tenant'],
+  },
+  'ticket.refunded.note': {
+    text: 'Seu ingresso foi reembolsado e a presença saiu da lista.',
+    names: [],
+  },
+  'ticket.refunded.afterCheckin': {
+    text: 'Seu ingresso foi reembolsado, mas o check-in continua registrado.',
+    names: [],
+  },
+  'ticket.giveUp.title': { text: 'Cancelar inscrição?', names: [] },
+  'ticket.giveUp.body': {
+    text: 'Para voltar a este evento, você vai precisar comprar o ingresso.',
+    names: [],
+  },
+  'ticket.giveUp.confirm': { text: 'Cancelar inscrição', names: [] },
+  'ticket.giveUp.dismiss': { text: 'Manter inscrição', names: [] },
+  'rsvp.errors.paid': {
+    text: 'Este evento passou a ter ingresso pago. A página foi atualizada.',
+    names: [],
+  },
+  'rsvp.errors.ticketLocked': {
+    text: 'Sua presença já está confirmada pelo ingresso. A página foi atualizada.',
+    names: [],
+  },
 };
 
 /** The ICU plural keys and the variable each counts on. */
@@ -165,14 +209,31 @@ describe('events.json: the member page of a paid event (UI-D-744 to UI-D-749, UI
     }
   });
 
-  it('holds no key under ticket.cta or ticket.hint that the contract does not list', () => {
-    const present = Object.keys(all).filter(
-      (key) => key.startsWith('ticket.cta.') || key.startsWith('ticket.hint.'),
-    );
-    const listed = Object.keys(MEMBER_TICKET).filter(
-      (key) => key.startsWith('ticket.cta.') || key.startsWith('ticket.hint.'),
-    );
+  it('holds no key under ticket.* that the contract does not list', () => {
+    const present = Object.keys(all).filter((key) => key.startsWith('ticket.'));
+    const listed = Object.keys(MEMBER_TICKET).filter((key) => key.startsWith('ticket.'));
     expect(present.sort()).toEqual(listed.sort());
+  });
+
+  it('fills {tenant} as a plain value, markup and all, never interpreting it', () => {
+    expect(translate('ticket.confirmed.courtesy', { tenant: 'Rede <b>Demo</b>' })).toBe(
+      'Cortesia da organização. Para desistir, fale com a equipe de Rede <b>Demo</b>.',
+    );
+    expect(translate('ticket.cancelled.refund', { tenant: 'Rede Demo' })).toBe(
+      'Fale com a equipe de Rede Demo sobre o reembolso do ingresso.',
+    );
+  });
+
+  it('promises no automatic refund (A-UI-14)', () => {
+    for (const key of [
+      'ticket.confirmed.paid',
+      'ticket.cancelled.refund',
+      'ticket.refunded.note',
+    ]) {
+      expect(all[key], `events.${key}`).not.toMatch(
+        /reembolsado automaticamente|devolvemos|estorno automático/i,
+      );
+    }
   });
 
   it('fills the card suffix, the price note and the button label', () => {

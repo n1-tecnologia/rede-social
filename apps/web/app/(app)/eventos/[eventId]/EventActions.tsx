@@ -1,8 +1,8 @@
 'use client';
 
 import type { RsvpAnswer } from '@rede-social/module-events/contracts';
-import { Button, useToast } from '@rede-social/ui';
-import { Award, Lock, QrCode, Video } from 'lucide-react';
+import { Button, ConfirmDialog, useToast } from '@rede-social/ui';
+import { Award, CalendarX2, Lock, QrCode, Video } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { startTransition, useState } from 'react';
@@ -38,6 +38,14 @@ import { GOLD, GOLD_BASE, OUTLINE_CTA, Zone } from './zone';
  * (`rsvp_closed` and `cancelled` refresh into the zone the server now draws; `event_full` says the
  * event is full; `attendance_locked` refreshes into the check-in banner).
  *
+ * **A paid event (Phase 10.1-12, D-741, D-754, UI-D-746, UI-D-750, UI-D-753).** A member WITHOUT a
+ * presence gets `PaidEventZone` (the server's sale zone; no Vou, no walk-in, no `Entrar`). A member who
+ * is in keeps this zone, minus the give-up of a paid or courtesy presence (the "Presença confirmada"
+ * block says how to leave); a presence from before the ticket keeps "Cancelar inscrição" behind a danger
+ * `ConfirmDialog`, answers NOTHING optimistically and refreshes into the buy state when the server
+ * agrees. `payment_required` and `ticket_locked` (a stale tab) toast and refresh into the state the
+ * server now draws.
+ *
  * **Boundary refresh** (UI-D-203): `useBoundaryRefresh` targets the next of `checkinOpensAt` /
  * `startsAt` / `endsAt` within 24 h, so the zone changes at the venue without a pull.
  */
@@ -59,11 +67,14 @@ export function EventActions({
   zone = null,
   checkoutHref = null,
   priceLabel = null,
+  viewerOrigin = null,
 }: EventActionState & { certificate?: boolean; refundedNote?: string | null }) {
   const t = useTranslations('events');
   const router = useRouter();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  // UI-D-750: the before-the-ticket "Cancelar inscrição" asks first.
+  const [giveUpOpen, setGiveUpOpen] = useState(false);
   // The optimistic answer, valid only while the server still reports `from`.
   const [pending, setPending] = useState<{ value: RsvpAnswer; from: RsvpAnswer | null } | null>(
     null,
@@ -76,7 +87,8 @@ export function EventActions({
 
   const respond = async (value: RsvpAnswer) => {
     if (busy || cancelled || value === shown) return;
-    setPending({ value, from: answer });
+    // A paid event never answers optimistically (D-506): the zone changes when the server says so.
+    if (paid !== true) setPending({ value, from: answer });
     setBusy(true);
     const result = await rsvpEventAction(eventId, value);
     setBusy(false);
@@ -93,6 +105,14 @@ export function EventActions({
       refresh();
     } else if (result.error === 'event_full') {
       toast.show({ tone: 'error', message: t('rsvp.errors.full') });
+      refresh();
+    } else if (result.error === 'payment_required') {
+      // A page rendered before the event got a ticket (D-741): refresh into the paid zone.
+      toast.show({ tone: 'error', message: t('rsvp.errors.paid') });
+      refresh();
+    } else if (result.error === 'ticket_locked') {
+      // A before-the-ticket member who paid meanwhile is a ticket holder now (D-754).
+      toast.show({ tone: 'error', message: t('rsvp.errors.ticketLocked') });
       refresh();
     } else {
       toast.show({ tone: 'error', message: t('rsvp.errors.failed') });
@@ -186,7 +206,10 @@ export function EventActions({
 
   // Online inside the window the gold `Entrar` already records the walk-in: no second gold call.
   const register = rsvpOpen && !going && !(online && inWindow);
-  const unregister = rsvpOpen && going && !cancelled;
+  // A paid or courtesy presence has no give-up (D-754: the line of "Presença confirmada" is the whole
+  // instruction); only a presence from BEFORE the ticket keeps "Cancelar inscrição" (UI-D-750).
+  const unregister =
+    rsvpOpen && going && !cancelled && (paid !== true || viewerOrigin === 'before_ticket');
 
   if (!register && !checkinLink && enterTone === null && answeredLine === null && !unregister) {
     return null;
@@ -283,12 +306,26 @@ export function EventActions({
           data-testid="event-actions-unregister"
           disabled={busy}
           onClick={() => {
-            void respond('not_going');
+            if (paid === true) setGiveUpOpen(true);
+            else void respond('not_going');
           }}
           className="mx-auto rounded px-2 py-1 text-xs font-semibold text-text-tertiary underline-offset-2 transition-colors hover:text-text-secondary hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           {t('reine.cta.cancel')}
         </button>
+      ) : null}
+      {unregister && paid === true ? (
+        <ConfirmDialog
+          open={giveUpOpen}
+          tone="danger"
+          icon={CalendarX2}
+          title={t('ticket.giveUp.title')}
+          body={t('ticket.giveUp.body')}
+          confirmLabel={t('ticket.giveUp.confirm')}
+          cancelLabel={t('ticket.giveUp.dismiss')}
+          onConfirm={() => respond('not_going')}
+          onClose={() => setGiveUpOpen(false)}
+        />
       ) : null}
     </Zone>
   );

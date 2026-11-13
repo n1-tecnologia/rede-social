@@ -1,8 +1,8 @@
 import { revalidatePath } from 'next/cache';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClientError } from '@/lib/bootstrap';
-import { createEvent, loadEvent, updateEvent } from '@/lib/events';
-import { createEventAction, updateEventAction } from './actions';
+import { createEvent, loadEvent, putRsvp, updateEvent } from '@/lib/events';
+import { createEventAction, rsvpEventAction, updateEventAction } from './actions';
 
 /**
  * 12.3-08 — how a refused image comes back from the event write actions (NOVF-04, UI-D-693).
@@ -154,5 +154,52 @@ describe('the event poster refusals (NOVF-04, UI-D-693)', () => {
       code: 'not_found',
     });
     expect(loadEvent).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Phase 10.1-12 (D-741, D-754, UI-D-753) — how a refused RSVP comes back. The API answers a Vou in a
+ * paid event `409 details.event = 'payment_required'` and a "Não vou" from a ticket holder `409
+ * 'ticket_locked'`; both are CLOSED result codes the island maps to a toast and a refresh, never copy.
+ * The shipped four keep their codes, and an unknown code stays the generic failure.
+ */
+describe('the RSVP refusals of a paid event (D-741, D-754, UI-D-753)', () => {
+  beforeEach(() => {
+    vi.mocked(putRsvp).mockReset();
+  });
+  const refused = (event: string) => new ApiClientError(409, 'CONFLICT', { event }, 'req-1');
+
+  it('payment_required is the closed code payment_required', async () => {
+    vi.mocked(putRsvp).mockRejectedValue(refused('payment_required'));
+    expect(await rsvpEventAction(EVENT, 'going')).toEqual({ ok: false, error: 'payment_required' });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('ticket_locked is the closed code ticket_locked', async () => {
+    vi.mocked(putRsvp).mockRejectedValue(refused('ticket_locked'));
+    expect(await rsvpEventAction(EVENT, 'not_going')).toEqual({
+      ok: false,
+      error: 'ticket_locked',
+    });
+  });
+
+  it('the shipped refusals keep their codes', async () => {
+    for (const code of ['rsvp_closed', 'cancelled', 'attendance_locked', 'event_full']) {
+      vi.mocked(putRsvp).mockRejectedValue(refused(code));
+      expect(await rsvpEventAction(EVENT, 'going')).toEqual({ ok: false, error: code });
+    }
+  });
+
+  it('an unknown code, and a bare 404, stay the generic failure; copy is never returned', async () => {
+    vi.mocked(putRsvp).mockRejectedValue(refused('something_else'));
+    expect(await rsvpEventAction(EVENT, 'going')).toEqual({ ok: false, error: 'failed' });
+    vi.mocked(putRsvp).mockRejectedValue(bare404());
+    expect(await rsvpEventAction(EVENT, 'going')).toEqual({ ok: false, error: 'failed' });
+  });
+
+  it('a success still revalidates the list', async () => {
+    vi.mocked(putRsvp).mockResolvedValue({ status: 'going' } as never);
+    expect(await rsvpEventAction(EVENT, 'going')).toEqual({ ok: true, status: 'going' });
+    expect(revalidatePath).toHaveBeenCalledWith('/eventos');
   });
 });

@@ -93,8 +93,18 @@ export async function refreshEventSectionsAction(): Promise<EventSectionsResult>
  * the database decides (D-204, via the guard trigger and the API's `details.event`; `event_full`
  * since 2026-10-03, a new Vou on an event whose limit is reached) and `failed` for everything else,
  * a bare 404 included (the event vanished or was never the caller's, D-23).
+ *
+ * Phase 10.1-12 adds two, both from a page rendered before the event's ticket changed (D-741, D-754,
+ * UI-D-753): `payment_required` (a Vou in an event that now has a ticket) and `ticket_locked` (a "Não
+ * vou" from a member whose presence a payment has since made a ticket holder's).
  */
-type RsvpRefusal = 'rsvp_closed' | 'cancelled' | 'attendance_locked' | 'event_full';
+type RsvpRefusal =
+  | 'rsvp_closed'
+  | 'cancelled'
+  | 'attendance_locked'
+  | 'event_full'
+  | 'payment_required'
+  | 'ticket_locked';
 
 export type RsvpActionResult =
   | { ok: true; status: RsvpAnswer }
@@ -105,6 +115,8 @@ const RSVP_REFUSALS: ReadonlySet<string> = new Set<RsvpRefusal>([
   'cancelled',
   'attendance_locked',
   'event_full',
+  'payment_required',
+  'ticket_locked',
 ]);
 
 /**

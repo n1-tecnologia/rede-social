@@ -5,7 +5,6 @@ import { Card, EmptyState, PageHeader, SectionTitle, StatusPill } from '@rede-so
 import {
   Award,
   CalendarPlus,
-  CalendarX2,
   Camera,
   Check,
   ChevronRight,
@@ -20,7 +19,6 @@ import {
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import type { ReactNode } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { hasGoodToKnow } from '@/lib/event-extras';
 import { loadEvent, loadEventPhotos } from '@/lib/events';
@@ -29,6 +27,7 @@ import { type EventDetailView, eventActionState, eventDetailView } from '@/lib/e
 import { primaryHostOrigin } from '@/lib/tenant-host';
 import { DeleteEventControl } from './DeleteEventControl';
 import { EventActions } from './EventActions';
+import { EventBanner } from './EventBanner';
 import { EventDescription } from './EventDescription';
 import { EventLocationMap } from './EventLocationMap';
 import { EventPhotos } from './EventPhotos';
@@ -414,55 +413,6 @@ function GoodToKnow({
         ) : null}
       </Card>
     </section>
-  );
-}
-
-/**
- * The banner at the top of the card body: cancelled (danger, UI-D-202) or checked in (UI-D-207). The
- * `action` slot carries the manager's "Reativar evento" on a cancelled event before its start and,
- * since 2026-10-20, "Excluir evento" with "Em breve" on any cancelled one (a placeholder: the API
- * cannot delete an event yet).
- */
-function EventBanner({
-  banner,
-  action,
-}: {
-  banner: NonNullable<EventDetailView['banner']>;
-  action?: ReactNode;
-}) {
-  const cancelled = banner.kind === 'cancelled';
-  const Icon = cancelled ? CalendarX2 : CircleCheck;
-  return (
-    <div
-      data-testid="event-banner"
-      data-kind={banner.kind}
-      className={
-        cancelled
-          ? 'flex gap-3 rounded-xl border border-danger/30 bg-danger/10 px-3 py-3'
-          : 'flex gap-3 rounded-xl border border-success/30 bg-success/10 px-3 py-3'
-      }
-    >
-      <Icon
-        size={20}
-        aria-hidden
-        className={cancelled ? 'shrink-0 text-danger' : 'shrink-0 text-success'}
-      />
-      <div className="min-w-0">
-        <p className="text-sm font-bold text-text">{banner.title}</p>
-        <p
-          className={
-            cancelled
-              ? 'break-words text-xs text-text-secondary'
-              : 'break-words text-xs text-text-tertiary'
-          }
-        >
-          {banner.body}
-        </p>
-        {action ? (
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">{action}</div>
-        ) : null}
-      </div>
-    </div>
   );
 }
 
