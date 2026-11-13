@@ -73,6 +73,43 @@ describe('EventRow: the state in a glyph, a word and a colour (UI-D-519, UI-D-52
   });
 });
 
+describe('EventRow: the two ticket states (Phase 10.1-13, UI-D-758)', () => {
+  const TICKET_CASES = [
+    ['event_ended', 'Evento encerrado'],
+    ['event_cancelled', 'Evento cancelado'],
+  ] as const;
+
+  it.each(TICKET_CASES)(
+    '%s: a warning pill with the word the host passes and the CalendarX2 glyph',
+    (state, label) => {
+      const li = row({ state, stateLabel: label });
+      const pill = screen.getByText(label);
+      expect(pill.className).toContain('text-warning');
+      expect(pill.getAttribute('data-state')).toBe(state);
+      const disc = li.querySelector('[data-event-glyph]') as HTMLElement;
+      expect(disc.getAttribute('data-event-glyph')).toBe(state);
+      expect(disc.className).toContain('bg-bg-tertiary');
+      const svg = disc.querySelector('svg') as SVGElement;
+      expect(svg.getAttribute('aria-hidden')).toBe('true');
+      expect(svg.getAttribute('class')).toContain('lucide-calendar-x');
+      expect(svg.getAttribute('class')).toContain('text-text-secondary');
+      expect(svg.getAttribute('class')).not.toContain('text-success');
+    },
+  );
+
+  it('draws the product and effect lines the host passes, and ships no word of its own', () => {
+    const li = row({
+      state: 'event_ended',
+      stateLabel: 'Evento encerrado',
+      product: 'Ingresso · Encontro anual',
+      effect: 'Presença não confirmada: o evento já tinha terminado.',
+    });
+    expect(li.textContent).toContain('Ingresso · Encontro anual');
+    expect(li.textContent).toContain('Presença não confirmada');
+    expect(screen.getByText('Ingresso · Encontro anual').className).toContain('truncate');
+  });
+});
+
 describe('EventRow: the text column (E07 populated, partial, overflow)', () => {
   it('prints name 14/700, e-mail, product and "recebido {when}" in that order', () => {
     const li = row();

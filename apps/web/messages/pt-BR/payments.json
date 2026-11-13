@@ -150,6 +150,8 @@
       "listLabel": "Eventos recentes",
       "received": "recebido {when}",
       "idMeta": "ID {externalId}",
+      "ticketProduct": "Ingresso · {event}",
+      "ticketProductGone": "Ingresso · evento removido",
       "noEmail": "E-mail não informado",
       "grant": "Liberar manualmente",
       "register": "Cadastrar produto",
@@ -180,13 +182,22 @@
         "attendanceConfirmed": "Presença confirmada",
         "attendanceOverLimit": "Presença confirmada acima do limite",
         "attendanceRemoved": "Presença removida",
-        "attendanceKept": "Presença mantida: o check-in já foi feito"
+        "attendanceKept": "Presença mantida: o check-in já foi feito",
+        "ticketNoEffect": "Sem efeito na presença",
+        "ticketEnded": "Presença não confirmada: o evento já tinha terminado. Reembolse no {gateway} se for o caso.",
+        "ticketCancelled": "Presença não confirmada: o evento foi cancelado. Reembolse no {gateway} se for o caso."
       },
       "grantDialog": {
         "title": "Liberar {product} para {email}?",
         "body": "O produto é liberado agora, como se a compra tivesse chegado.",
         "confirm": "Liberar",
         "cancel": "Cancelar"
+      },
+      "grantTicketDialog": {
+        "title": "Confirmar presença de {email} em {event}?",
+        "body": "A presença é confirmada agora, como se o pagamento tivesse chegado.",
+        "confirm": "Confirmar presença",
+        "cancel": "Voltar"
       }
     },
     "pending": {
@@ -231,7 +242,9 @@
       "lastProduct": "Desative “Exigir assinatura para entrar” antes de remover o último produto de acesso.",
       "emailInvalid": "Informe um e-mail válido.",
       "emailBlocked": "Este e-mail está bloqueado. Desbloqueie antes de liberar.",
-      "noMembership": "Esta pessoa ainda não tem conta em {tenant}. Peça que crie a conta com o mesmo e-mail da compra."
+      "noMembership": "Esta pessoa ainda não tem conta em {tenant}. Peça que crie a conta com o mesmo e-mail da compra.",
+      "eventEnded": "Este evento já terminou. Nada foi confirmado.",
+      "eventCancelled": "Este evento foi cancelado. Nada foi confirmado."
     },
     "toasts": {
       "setupSaved": "Integração salva.",
@@ -249,7 +262,8 @@
       "unblocked": "Acesso de {email} desbloqueado.",
       "releaseRemoved": "Liberação de {email} removida.",
       "accessGone": "Este acesso não existe mais.",
-      "granted": "{product} liberado para {email}."
+      "granted": "{product} liberado para {email}.",
+      "ticketGranted": "Presença de {email} confirmada em {event}."
     }
   }
 }

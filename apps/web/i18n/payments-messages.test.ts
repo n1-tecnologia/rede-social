@@ -61,6 +61,12 @@ const EXPECTED: Record<string, string[]> = {
   'events.idMeta': ['externalId'],
   'events.empty.body': ['gateway', 'gateway'],
   'events.grantDialog.title': ['email', 'product'],
+  // Phase 10.1-13 (UI-D-758, UI-D-759): the ticket deliveries and the manual release of a presence.
+  'events.ticketProduct': ['event'],
+  'events.effects.ticketEnded': ['gateway'],
+  'events.effects.ticketCancelled': ['gateway'],
+  'events.grantTicketDialog.title': ['email', 'event'],
+  'toasts.ticketGranted': ['email', 'event'],
   'pending.bodyNoLink': ['tenant'],
   'errors.idTaken': ['gateway'],
   'errors.noMembership': ['tenant'],

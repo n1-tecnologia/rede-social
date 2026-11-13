@@ -442,8 +442,19 @@ export async function loadEventsAction(): Promise<EventsLoadResult> {
  * Why a manual grant did not do its job: `no_membership` (409, the buyer still has no account with that
  * e-mail), `not_grantable` (409, the event is not a no-account store purchase any more), `gone` (the
  * bare 404), `forbidden` (a permission lost mid-session) or `generic`.
+ *
+ * Phase 10.1-13 (D-750, UI-D-759): a TICKET delivery adds `event_ended` and `event_cancelled` (409, the paid
+ * event ended or was cancelled meanwhile, nothing confirmed): the host toasts the sentence and refreshes
+ * the row into its new state.
  */
-export type GrantFailureCode = 'no_membership' | 'not_grantable' | 'gone' | 'forbidden' | 'generic';
+export type GrantFailureCode =
+  | 'no_membership'
+  | 'not_grantable'
+  | 'event_ended'
+  | 'event_cancelled'
+  | 'gone'
+  | 'forbidden'
+  | 'generic';
 
 /** What a manual grant answers: the event as the SERVER now has it and its clock, or a code. */
 export type GrantEventOutcome =
@@ -460,6 +471,8 @@ function grantFailureOf(error: unknown): { navigate: string } | { code: GrantFai
   if (error instanceof PaymentsApiError) {
     if (error.issue === 'no_membership') return { code: 'no_membership' };
     if (error.issue === 'not_grantable') return { code: 'not_grantable' };
+    if (error.issue === 'event_ended') return { code: 'event_ended' };
+    if (error.issue === 'event_cancelled') return { code: 'event_cancelled' };
     if (error.code === 'MODULE_DISABLED') return { code: 'forbidden' };
     if (error.status === 404 && error.issue === null) return { code: 'gone' };
     if (error.status === 403 && error.code === 'FORBIDDEN') return { code: 'forbidden' };
@@ -476,7 +489,8 @@ function grantFailureOf(error: unknown): { navigate: string } | { code: GrantFai
  * `POST /v1/payments/events/{eventId}/grant` ("Liberar manualmente", D-503): only the event id travels.
  * The API grants through the store's own definer, re-checks that the buyer has an account and that the
  * event is a no-account store purchase (T-09.1-67), and answers the updated event; the host settles the
- * row from it, never optimistically. A malformed id never leaves the server action.
+ * row from it, never optimistically. A ticket delivery goes through the same call (Phase 10.1-13, D-749):
+ * the API grants the paid presence, or answers `event_ended` / `event_cancelled` and leaves the row. A malformed id never leaves the server action.
  */
 export async function grantEventAction(eventId: string): Promise<GrantEventOutcome> {
   const target = eventIdSchema.safeParse(eventId);

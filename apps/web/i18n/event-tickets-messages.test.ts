@@ -392,3 +392,92 @@ describe('notifications.json: the Presença confirmada bell row (UI-D-760, D-756
     );
   });
 });
+
+/**
+ * Phase 10.1-13 (UI-D-758, UI-D-759): the Pagamentos copy of a ticket delivery, in the `payments`
+ * namespace. Admin surface: the provider is reachable only through the `{gateway}` slot.
+ */
+describe('payments.json: the ticket deliveries and the manual release (UI-D-758, UI-D-759)', () => {
+  const payments = messages.payments as MessageTree;
+  const flat = leaves(payments);
+  const COPY: Record<string, { text: string; names: string[] }> = {
+    'events.ticketProduct': { text: 'Ingresso · {event}', names: ['event'] },
+    'events.ticketProductGone': { text: 'Ingresso · evento removido', names: [] },
+    'states.eventEnded': { text: 'Evento encerrado', names: [] },
+    'states.eventCancelled': { text: 'Evento cancelado', names: [] },
+    'events.effects.attendanceConfirmed': { text: 'Presença confirmada', names: [] },
+    'events.effects.attendanceOverLimit': {
+      text: 'Presença confirmada acima do limite',
+      names: [],
+    },
+    'events.effects.attendanceRemoved': { text: 'Presença removida', names: [] },
+    'events.effects.attendanceKept': {
+      text: 'Presença mantida: o check-in já foi feito',
+      names: [],
+    },
+    'events.effects.ticketNoEffect': { text: 'Sem efeito na presença', names: [] },
+    'events.effects.ticketEnded': {
+      text: 'Presença não confirmada: o evento já tinha terminado. Reembolse no {gateway} se for o caso.',
+      names: ['gateway'],
+    },
+    'events.effects.ticketCancelled': {
+      text: 'Presença não confirmada: o evento foi cancelado. Reembolse no {gateway} se for o caso.',
+      names: ['gateway'],
+    },
+    'events.grantTicketDialog.title': {
+      text: 'Confirmar presença de {email} em {event}?',
+      names: ['email', 'event'],
+    },
+    'events.grantTicketDialog.body': {
+      text: 'A presença é confirmada agora, como se o pagamento tivesse chegado.',
+      names: [],
+    },
+    'events.grantTicketDialog.confirm': { text: 'Confirmar presença', names: [] },
+    'events.grantTicketDialog.cancel': { text: 'Voltar', names: [] },
+    'toasts.ticketGranted': {
+      text: 'Presença de {email} confirmada em {event}.',
+      names: ['email', 'event'],
+    },
+    'errors.eventEnded': { text: 'Este evento já terminou. Nada foi confirmado.', names: [] },
+    'errors.eventCancelled': { text: 'Este evento foi cancelado. Nada foi confirmado.', names: [] },
+  };
+
+  it('carries every key with the approved sentence and its placeholders', () => {
+    for (const [key, { text, names }] of Object.entries(COPY)) {
+      expect(flat[key], `missing key payments.${key}`).toBe(text);
+      expect(placeholders(flat[key] as string), `placeholders of payments.${key}`).toEqual(
+        [...names].sort(),
+      );
+    }
+  });
+
+  it('fills {gateway}, {email} and {event} as plain values, markup and all', () => {
+    const tr = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'payments' as never,
+    }) as unknown as (key: string, values?: Record<string, unknown>) => string;
+    expect(tr('events.effects.ticketEnded', { gateway: 'Gateway Exemplo' })).toBe(
+      'Presença não confirmada: o evento já tinha terminado. Reembolse no Gateway Exemplo se for o caso.',
+    );
+    expect(
+      tr('events.grantTicketDialog.title', { email: 'a@b.test', event: '<b>Encontro</b>' }),
+    ).toBe('Confirmar presença de a@b.test em <b>Encontro</b>?');
+    expect(tr('toasts.ticketGranted', { email: 'a@b.test', event: 'Encontro' })).toBe(
+      'Presença de a@b.test confirmada em Encontro.',
+    );
+  });
+
+  it('names the provider nowhere: only the {gateway} slot (UI-D-740, TICK-20)', () => {
+    for (const [key, text] of Object.entries(flat)) {
+      expect(text, `payments.${key}`).not.toMatch(/kiwify/i);
+      expect(key, `payments.${key}`).not.toMatch(/kiwify/i);
+    }
+  });
+
+  it('the grant dialog confirms nothing the toast then contradicts: no amount, order or webhook word', () => {
+    for (const key of Object.keys(COPY).filter((k) => k.includes('grantTicketDialog'))) {
+      expect(flat[key], `payments.${key}`).not.toMatch(/R\$|pedido|webhook|reembols/i);
+    }
+  });
+});

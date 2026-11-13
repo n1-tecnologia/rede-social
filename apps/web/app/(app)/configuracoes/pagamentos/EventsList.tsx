@@ -11,7 +11,7 @@ import {
   SectionTitle,
   useToast,
 } from '@rede-social/ui';
-import { ChevronRight, ShoppingBag, Webhook } from 'lucide-react';
+import { ChevronRight, ShoppingBag, Ticket, Webhook } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -36,6 +36,9 @@ export interface EventsListProps {
   tenantName: string;
 }
 
+/** A delivery of an event product (a paid event's ticket), the one the `Ticket` dialog is for. */
+const isTicket = (item: EventItem) => item.kind === 'event';
+
 /** The event a "Liberar manualmente" dialog is asking about: the item as the server sent it and its finished view. */
 interface GrantTarget {
   item: EventItem;
@@ -53,6 +56,12 @@ interface GrantTarget {
  * - **"Liberar manualmente"** exists on a no-account row only. It opens a brand dialog, sends only the
  *   event id and settles the row IN PLACE from the server's answer (no optimistic state). A 409
  *   `no_membership` toasts the sentence with the tenant name and leaves the row as it was.
+ * - **A ticket delivery** (Phase 10.1-13, UI-D-758, UI-D-759) is the same row with the product line
+ *   "Ingresso · {evento}" and the attendance effect lines; its "Liberar manualmente" opens the `Ticket`
+ *   dialog "Confirmar presença de {email} em {evento}?". An ended or cancelled event is never released (its
+ *   state is not "Sem conta", so no action exists); if the event ended or was cancelled since the page was
+ *   rendered, the 409 toasts "Este evento já terminou." / "…foi cancelado. Nada foi confirmado." and the
+ *   row refreshes into its new state. The success toast names the event.
  * - **"Cadastrar produto"** exists on an unknown-product row only and is a LINK to the Configuração tab
  *   (a route is a link, UI-D-529).
  */
@@ -100,6 +109,8 @@ export function EventsList({ initialItems, serverNow, gatewayName, tenantName }:
 
   const [target, setTarget] = useState<GrantTarget | null>(null);
   const [grantOpen, setGrantOpen] = useState(false);
+  // Kept while the dialog closes, so its copy does not flip to the store wording mid-animation.
+  const ticketTarget = target !== null && isTicket(target.item);
 
   async function confirmGrant() {
     if (!target) return;
@@ -117,10 +128,15 @@ export function EventsList({ initialItems, serverNow, gatewayName, tenantName }:
       setClock(outcome.serverNow);
       toast.show({
         tone: 'success',
-        message: t('payments.toasts.granted', {
-          product: item.productName ?? view.product ?? '',
-          email: item.email ?? '',
-        }),
+        message: isTicket(item)
+          ? t('payments.toasts.ticketGranted', {
+              email: item.email ?? '',
+              event: item.eventTitle ?? '',
+            })
+          : t('payments.toasts.granted', {
+              product: item.productName ?? view.product ?? '',
+              email: item.email ?? '',
+            }),
       });
       return;
     }
@@ -138,6 +154,19 @@ export function EventsList({ initialItems, serverNow, gatewayName, tenantName }:
       case 'gone':
         setItems((rows) => rows.filter((row) => row.id !== item.id));
         toast.show({ tone: 'error', message: t('payments.errors.generic') });
+        router.refresh();
+        return;
+      case 'event_ended':
+      case 'event_cancelled':
+        // The paid event moved on while the dialog was open: nothing was confirmed, the row is read again.
+        toast.show({
+          tone: 'error',
+          message: t(
+            outcome.code === 'event_ended'
+              ? 'payments.errors.eventEnded'
+              : 'payments.errors.eventCancelled',
+          ),
+        });
         router.refresh();
         return;
       case 'not_grantable':
@@ -181,7 +210,7 @@ export function EventsList({ initialItems, serverNow, gatewayName, tenantName }:
             <Card className="p-0">
               <ul aria-label={t('payments.events.listLabel')} className="divide-y divide-divider">
                 {items.map((item) => {
-                  const view = eventRowView(item, tView, { serverNow: clock });
+                  const view = eventRowView(item, tView, { serverNow: clock, gatewayName });
                   let action: ReactNode;
                   if (view.canGrant) {
                     action = (
@@ -228,14 +257,33 @@ export function EventsList({ initialItems, serverNow, gatewayName, tenantName }:
       <ConfirmDialog
         open={grantOpen}
         tone="brand"
-        icon={ShoppingBag}
-        title={t('payments.events.grantDialog.title', {
-          product: target?.item.productName ?? target?.view.product ?? '',
-          email: target?.item.email ?? '',
-        })}
-        body={t('payments.events.grantDialog.body')}
-        confirmLabel={t('payments.events.grantDialog.confirm')}
-        cancelLabel={t('payments.events.grantDialog.cancel')}
+        icon={ticketTarget ? Ticket : ShoppingBag}
+        title={
+          ticketTarget
+            ? t('payments.events.grantTicketDialog.title', {
+                email: target?.item.email ?? '',
+                event: target?.item.eventTitle ?? '',
+              })
+            : t('payments.events.grantDialog.title', {
+                product: target?.item.productName ?? target?.view.product ?? '',
+                email: target?.item.email ?? '',
+              })
+        }
+        body={t(
+          ticketTarget
+            ? 'payments.events.grantTicketDialog.body'
+            : 'payments.events.grantDialog.body',
+        )}
+        confirmLabel={t(
+          ticketTarget
+            ? 'payments.events.grantTicketDialog.confirm'
+            : 'payments.events.grantDialog.confirm',
+        )}
+        cancelLabel={t(
+          ticketTarget
+            ? 'payments.events.grantTicketDialog.cancel'
+            : 'payments.events.grantDialog.cancel',
+        )}
         onConfirm={confirmGrant}
         onClose={() => setGrantOpen(false)}
       />

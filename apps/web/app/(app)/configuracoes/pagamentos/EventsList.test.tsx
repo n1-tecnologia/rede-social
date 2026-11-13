@@ -453,3 +453,298 @@ describe('EventsList: refresh and reseed', () => {
     await waitFor(() => expect(nav.refresh).toHaveBeenCalled());
   });
 });
+
+/**
+ * Phase 10.1-13 (D-749, D-750, D-757, D-758, D-759, UI-D-758, UI-D-759, T-10.1-17, T-10.1-11) — the ticket
+ * deliveries of a paid event. Same real catalog; `{gateway}` is filled by the caller with a neutral fixture.
+ */
+describe('EventsList: ticket deliveries (UI-D-758)', () => {
+  const TICKET: EventItem = {
+    id: '55555555-5555-4555-8555-555555555555',
+    type: 'purchase_approved',
+    state: 'applied',
+    email: 'dora@exemplo.com.br',
+    productName: 'Ingresso do encontro',
+    externalProductId: 'tk0001',
+    outcome: 'ticket_granted',
+    receivedAt: THREE_MIN,
+    kind: 'event',
+    eventTitle: 'Encontro anual',
+  };
+  const T_NO_ACCOUNT: EventItem = {
+    ...TICKET,
+    id: '66666666-6666-4666-8666-666666666666',
+    state: 'no_account',
+    email: 'edu@exemplo.com.br',
+    outcome: null,
+  };
+  const T_ENDED: EventItem = {
+    ...TICKET,
+    id: '77777777-7777-4777-8777-777777777777',
+    state: 'event_ended',
+    email: 'fabi@exemplo.com.br',
+    outcome: 'event_ended',
+  };
+  const T_CANCELLED: EventItem = {
+    ...TICKET,
+    id: '88888888-8888-4888-8888-888888888888',
+    state: 'event_cancelled',
+    email: 'gil@exemplo.com.br',
+    outcome: 'event_cancelled',
+  };
+  const T_GONE: EventItem = {
+    ...TICKET,
+    id: '99999999-9999-4999-8999-999999999999',
+    email: 'hana@exemplo.com.br',
+    eventTitle: null,
+  };
+  const T_IGNORED: EventItem = {
+    ...TICKET,
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    state: 'ignored',
+    email: 'ivo@exemplo.com.br',
+    outcome: 'no_effect',
+    type: 'subscription_renewed',
+  };
+  const T_REMOVED: EventItem = {
+    ...TICKET,
+    id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    email: 'jade@exemplo.com.br',
+    type: 'purchase_refunded',
+    outcome: 'ticket_revoked',
+  };
+  const T_KEPT: EventItem = {
+    ...T_REMOVED,
+    id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    email: 'kai@exemplo.com.br',
+    outcome: 'ticket_kept',
+  };
+  const T_OVER: EventItem = {
+    ...TICKET,
+    id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    email: 'lia@exemplo.com.br',
+    outcome: 'ticket_granted_over_limit',
+  };
+  const ALL = [
+    TICKET,
+    T_NO_ACCOUNT,
+    T_ENDED,
+    T_CANCELLED,
+    T_GONE,
+    T_IGNORED,
+    T_REMOVED,
+    T_KEPT,
+    T_OVER,
+  ];
+  const GATEWAY = 'Gateway Exemplo';
+
+  beforeEach(() => {
+    actions.grant.mockReset();
+  });
+
+  const ticketRows = () => mount({ initialItems: ALL, gatewayName: GATEWAY });
+
+  it('prints "Ingresso · {evento}" as the product line with the neutral type unchanged', () => {
+    ticketRows();
+    const row = rowWith('dora@exemplo.com.br');
+    expect(row.textContent).toContain('Compra aprovada');
+    expect(screen.getAllByText('Ingresso · Encontro anual').length).toBeGreaterThan(0);
+    expect(row.textContent).not.toContain('Ingresso do encontro');
+  });
+
+  it('prints "Ingresso · evento removido" when the event is gone', () => {
+    ticketRows();
+    expect(rowWith('hana@exemplo.com.br').textContent).toContain('Ingresso · evento removido');
+  });
+
+  it('truncates a long event title in the product line', () => {
+    const long = 'Encontro nacional de associados e parceiros '.repeat(4).trim();
+    mount({ initialItems: [{ ...TICKET, eventTitle: long }] });
+    const line = screen.getByText(`Ingresso · ${long}`);
+    expect(line.className).toContain('truncate');
+    expect(line.parentElement?.className).toContain('min-w-0');
+  });
+
+  it.each([
+    ['dora@exemplo.com.br', 'Aplicado', 'Presença confirmada'],
+    ['edu@exemplo.com.br', 'Sem conta', null],
+    [
+      'fabi@exemplo.com.br',
+      'Evento encerrado',
+      `Presença não confirmada: o evento já tinha terminado. Reembolse no ${GATEWAY} se for o caso.`,
+    ],
+    [
+      'gil@exemplo.com.br',
+      'Evento cancelado',
+      `Presença não confirmada: o evento foi cancelado. Reembolse no ${GATEWAY} se for o caso.`,
+    ],
+    ['ivo@exemplo.com.br', 'Ignorado', 'Sem efeito na presença'],
+    ['jade@exemplo.com.br', 'Aplicado', 'Presença removida'],
+    ['kai@exemplo.com.br', 'Aplicado', 'Presença mantida: o check-in já foi feito'],
+    ['lia@exemplo.com.br', 'Aplicado', 'Presença confirmada acima do limite'],
+  ])('%s reads %s with the effect line', (email, pill, effect) => {
+    ticketRows();
+    const row = rowWith(email);
+    expect(within(row).getByText(pill)).toBeTruthy();
+    if (effect) expect(row.textContent).toContain(effect);
+  });
+
+  it('the two new states draw the warning pill and a glyph, never colour alone', () => {
+    ticketRows();
+    for (const [email, state] of [
+      ['fabi@exemplo.com.br', 'event_ended'],
+      ['gil@exemplo.com.br', 'event_cancelled'],
+    ] as const) {
+      const row = rowWith(email);
+      expect(row.querySelector(`[data-state="${state}"]`)?.className).toContain('text-warning');
+      expect(row.querySelector('[data-event-glyph] svg')?.getAttribute('aria-hidden')).toBe('true');
+    }
+  });
+
+  it('offers "Liberar manualmente" on the Sem conta ticket row ONLY: an ended or cancelled row has none', () => {
+    ticketRows();
+    for (const email of [
+      'fabi@exemplo.com.br',
+      'gil@exemplo.com.br',
+      'dora@exemplo.com.br',
+      'ivo@exemplo.com.br',
+    ]) {
+      expect(within(rowWith(email)).queryByRole('button')).toBeNull();
+    }
+    expect(
+      within(rowWith('edu@exemplo.com.br')).getByRole('button', { name: 'Liberar manualmente' }),
+    ).toBeTruthy();
+  });
+
+  it('writes the event title and e-mail as plain text, never markup (T-10.1-17)', () => {
+    mount({
+      initialItems: [{ ...T_NO_ACCOUNT, eventTitle: '<img src=x onerror=alert(1)>' }],
+    });
+    const row = rowWith('edu@exemplo.com.br');
+    expect(row.querySelector('img')).toBeNull();
+    expect(row.textContent).toContain('<img src=x onerror=alert(1)>');
+  });
+
+  it('names no gateway in the catalog-driven copy of a member surface and draws only contract fields (T-10.1-11)', () => {
+    ticketRows();
+    expect(list().textContent).not.toMatch(/payload|signature|order|pedido/i);
+  });
+
+  it('leaves the store rows untouched when mixed with tickets', () => {
+    mount({ initialItems: [APPLIED, T_NO_ACCOUNT], gatewayName: GATEWAY });
+    expect(rowWith('ana@exemplo.com.br').textContent).toContain('Assinatura mensal');
+    expect(rowWith('ana@exemplo.com.br').textContent).toContain('Acesso liberado');
+  });
+});
+
+describe('EventsList: "Liberar manualmente" on a ticket (D-749, D-750, UI-D-759)', () => {
+  const NO_ACCOUNT_TICKET: EventItem = {
+    id: '66666666-6666-4666-8666-666666666666',
+    type: 'purchase_approved',
+    state: 'no_account',
+    email: 'edu@exemplo.com.br',
+    productName: 'Ingresso do encontro',
+    externalProductId: 'tk0001',
+    outcome: null,
+    receivedAt: ONE_HOUR,
+    kind: 'event',
+    eventTitle: 'Encontro anual',
+  };
+  const granted: EventItem = { ...NO_ACCOUNT_TICKET, state: 'applied', outcome: 'ticket_granted' };
+
+  beforeEach(() => {
+    actions.grant.mockReset();
+    nav.refresh.mockReset();
+    toast.show.mockReset();
+  });
+
+  const open = () => {
+    mount({ initialItems: [NO_ACCOUNT_TICKET, APPLIED] });
+    fireEvent.click(screen.getByRole('button', { name: 'Liberar manualmente' }));
+    return screen.getAllByRole('dialog').at(-1) as HTMLElement;
+  };
+  const confirm = async (dialog: HTMLElement) => {
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Confirmar presença' }));
+    });
+  };
+
+  it('opens the brand dialog with the Ticket disc and the approved copy, writing nothing until confirmed', () => {
+    const dialog = open();
+    expect(
+      within(dialog).getByRole('heading', {
+        name: 'Confirmar presença de edu@exemplo.com.br em Encontro anual?',
+      }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        'A presença é confirmada agora, como se o pagamento tivesse chegado.',
+      ),
+    ).toBeTruthy();
+    expect(dialog.querySelector('svg.lucide-ticket')).not.toBeNull();
+    expect(dialog.querySelector('svg.lucide-shopping-bag')).toBeNull();
+    expect(actions.grant).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Voltar' }));
+    expect(actions.grant).not.toHaveBeenCalled();
+  });
+
+  it('keeps the store dialog for a store row', () => {
+    mount({ initialItems: [{ ...APPLIED, state: 'no_account', outcome: null }] });
+    fireEvent.click(screen.getByRole('button', { name: 'Liberar manualmente' }));
+    const dialog = screen.getAllByRole('dialog').at(-1) as HTMLElement;
+    expect(dialog.querySelector('svg.lucide-shopping-bag')).not.toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Liberar' })).toBeTruthy();
+  });
+
+  it('settles the row in place from the server answer (Aplicado, Presença confirmada) and toasts the event', async () => {
+    const dialog = open();
+    let finish: (value: unknown) => void = () => {};
+    actions.grant.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    await confirm(dialog);
+    // Not before the server answers.
+    expect(within(rowWith('edu@exemplo.com.br')).getByText('Sem conta')).toBeTruthy();
+    await act(async () => finish({ ok: true, event: granted, serverNow: NOW }));
+    await waitFor(() =>
+      expect(within(rowWith('edu@exemplo.com.br')).getByText('Aplicado')).toBeTruthy(),
+    );
+    const row = rowWith('edu@exemplo.com.br');
+    expect(row.textContent).toContain('Presença confirmada');
+    expect(within(row).queryByRole('button')).toBeNull();
+    expect(actions.grant).toHaveBeenCalledWith(NO_ACCOUNT_TICKET.id);
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Presença de edu@exemplo.com.br confirmada em Encontro anual.',
+    });
+  });
+
+  it('no_membership keeps the shipped sentence and leaves the row', async () => {
+    const dialog = open();
+    actions.grant.mockResolvedValue({ ok: false, code: 'no_membership' });
+    await confirm(dialog);
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message:
+          'Esta pessoa ainda não tem conta em Rede Demo. Peça que crie a conta com o mesmo e-mail da compra.',
+      }),
+    );
+    expect(within(rowWith('edu@exemplo.com.br')).getByText('Sem conta')).toBeTruthy();
+    expect(nav.refresh).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['event_ended', 'Este evento já terminou. Nada foi confirmado.'],
+    ['event_cancelled', 'Este evento foi cancelado. Nada foi confirmado.'],
+  ])(
+    '%s toasts its sentence, confirms nothing and refreshes the row into its new state',
+    async (code, message) => {
+      const dialog = open();
+      actions.grant.mockResolvedValue({ ok: false, code });
+      await confirm(dialog);
+      await waitFor(() => expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message }));
+      expect(nav.refresh).toHaveBeenCalled();
+      expect(toast.show).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+      expect(within(rowWith('edu@exemplo.com.br')).getByText('Sem conta')).toBeTruthy();
+    },
+  );
+});
