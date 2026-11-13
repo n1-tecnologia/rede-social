@@ -749,6 +749,12 @@ describe('10.2 the opening and the mapping removal (D-793, OPEN-19)', () => {
     expect(stored, 'the opening is stored before the removal').toEqual(expect.any(String));
     expect((await presences(eventId)).map((row) => row.origin)).toEqual(['courtesy']);
 
+    // Positive control (10.2-07): while the event is paid the member's read DOES carry the three facts.
+    const paidDetail = await detailAs(guest, eventId);
+    expect(paidDetail.registrationOpensAt).toBe(stored);
+    expect(paidDetail.serverNow).toEqual(expect.any(String));
+    expect(paidDetail.saleReady).toEqual(expect.any(Boolean));
+
     const removed = await call(admin, 'DELETE', `/event-products/${eventId}`);
     expect(removed.status, removed.raw).toBe(200);
 
