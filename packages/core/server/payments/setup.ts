@@ -804,3 +804,68 @@ export async function putEventMapping(
     recurring: await hasRecurringDelivery(ctx.tenantId, externalProductId),
   };
 }
+
+/**
+ * `GET /v1/payments/event-products/{eventId}` (D-747, D-757): the mapping (or null), `connected`, how many
+ * tickets were sold, `locked` (any), and the `recurring` hint. The event lock definer is the existence and
+ * ownership check: a foreign, unknown or removed event is the bare 404. Reading takes the per-event advisory
+ * lock for the length of the read only.
+ */
+export async function getEventMapping(
+  ctx: RequestContext,
+  eventId: string,
+): Promise<EventMappingResponse> {
+  if (!UUID_SHAPE.test(eventId)) throw new ApiError(404, 'NOT_FOUND');
+  const connected = (await readIntegration(ctx.tenantId)) !== null;
+  const { sold, row } = await withTenantTx(ctx, async (tx) => {
+    const soldCount = await lockEvent(tx, eventId);
+    return { sold: soldCount, row: await eventMappingOf(tx, ctx.tenantId, eventId) };
+  });
+  return {
+    connected,
+    mapping: row
+      ? { externalProductId: row.externalProductId, checkoutUrl: row.checkoutUrl }
+      : null,
+    soldCount: sold,
+    locked: sold > 0,
+    recurring: row ? await hasRecurringDelivery(ctx.tenantId, row.externalProductId) : false,
+  };
+}
+
+/**
+ * `DELETE /v1/payments/event-products/{eventId}` (D-747): removes the mapping while nothing is sold. In ONE
+ * transaction: the event lock (`sold > 0` is `409 ticket_locked`, the same answer every time, nothing
+ * written), the delete of the row, and `app.event_ticket_reset` (a courtesy row goes back to a plain answer,
+ * so the event is the instant Vou again and the member's own Nao vou works). The reset takes no lock of its
+ * own: the lock above is the one it relies on. The central route is released after the commit. Removing
+ * what is not mapped answers the same success and runs no reset.
+ */
+export async function deleteEventMapping(
+  ctx: RequestContext,
+  eventId: string,
+): Promise<EventMappingResponse> {
+  if (!UUID_SHAPE.test(eventId)) throw new ApiError(404, 'NOT_FOUND');
+  const connected = (await readIntegration(ctx.tenantId)) !== null;
+  const removed = await withTenantTx(ctx, async (tx) => {
+    const sold = await lockEvent(tx, eventId);
+    if (sold > 0) throw ticketLocked();
+    const current = await eventMappingOf(tx, ctx.tenantId, eventId);
+    if (!current) return null;
+    await tx
+      .delete(paymentProducts)
+      .where(
+        and(
+          eq(paymentProducts.tenantId, ctx.tenantId),
+          eq(paymentProducts.kind, 'event'),
+          eq(paymentProducts.eventId, eventId),
+        ),
+      );
+    await tx.execute(sql`select app.event_ticket_reset(${eventId}::uuid)`);
+    return current;
+  });
+  // The tenant delete committed: now the central route goes (a failure only leaves a harmless orphan).
+  if (removed) {
+    await releaseProduct(ctx.tenantId, removed.provider, removed.externalProductId, 'retired');
+  }
+  return { connected, mapping: null, soldCount: 0, locked: false, recurring: false };
+}

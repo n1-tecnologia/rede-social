@@ -14,7 +14,9 @@ import { grantEventManually, listEvents } from '@rede-social/core/server/payment
 import { previewGate, setGate } from '@rede-social/core/server/payments/gate';
 import {
   createAccessProduct,
+  deleteEventMapping,
   deleteStoreMapping,
+  getEventMapping,
   getOverview,
   getStoreMapping,
   putEventMapping,
@@ -34,6 +36,7 @@ import {
   accessResultSchema,
   eventItemSchema,
   eventMappingBodySchema,
+  eventMappingResponseSchema,
   eventMappingSavedSchema,
   eventsResponseSchema,
   gateBodySchema,
@@ -323,6 +326,25 @@ const deleteStoreMappingRoute = createRoute({
 // routes below build at module load.
 const eventProductParamSchema = z.object({ eventId: z.string().min(1).max(64) });
 
+const getEventMappingRoute = createRoute({
+  method: 'get',
+  path: '/event-products/{eventId}',
+  middleware: [requirePermission('payments.manage')] as const,
+  request: { params: eventProductParamSchema },
+  responses: {
+    200: {
+      description:
+        '`{ connected, mapping, soldCount, locked, recurring }`: the gateway product that sells the ticket of this event (`externalProductId`, `checkoutUrl`) or `mapping: null`; `connected` is whether the tenant has an integration; `soldCount` the ticket presences confirmed so far; `locked` is `soldCount > 0` (the pair can no longer change or go); `recurring` is true when a delivery of that product was a subscription.',
+      content: { 'application/json': { schema: eventMappingResponseSchema } },
+    },
+    403: { description: 'The caller does not hold `payments.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the event is unknown, another tenant’s, removed or not a uuid. One bare code, no details (D-23).',
+    },
+  },
+});
+
 const putEventMappingRoute = createRoute({
   method: 'put',
   path: '/event-products/{eventId}',
@@ -349,6 +371,29 @@ const putEventMappingRoute = createRoute({
     409: {
       description:
         '`CONFLICT` with `details.payments`: `gateway_product_taken` (the gateway id is held by another registration) or `ticket_locked` (a ticket was already confirmed for this event and the pair would change; nothing is written).',
+    },
+  },
+});
+
+const deleteEventMappingRoute = createRoute({
+  method: 'delete',
+  path: '/event-products/{eventId}',
+  middleware: [requirePermission('payments.manage')] as const,
+  request: { params: eventProductParamSchema },
+  responses: {
+    200: {
+      description:
+        'Removes the mapping while no ticket exists and answers `{ connected, mapping: null, soldCount: 0, locked: false, recurring: false }`. The event goes back to the instant Vou and a courtesy presence becomes an ordinary answer again. Removing what is not mapped answers the same success.',
+      content: { 'application/json': { schema: eventMappingResponseSchema } },
+    },
+    403: { description: 'The caller does not hold `payments.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the event is unknown, another tenant’s, removed or not a uuid. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.payments: ticket_locked`: a ticket was already confirmed for this event, so the mapping cannot go. Nothing is written, and the answer is the same every time.',
     },
   },
 });
@@ -525,11 +570,17 @@ export const paymentsRoutes = payments
   .openapi(deleteStoreMappingRoute, async (c) =>
     c.json(await deleteStoreMapping(c.get('ctx'), c.req.valid('param').productId), 200),
   )
+  .openapi(getEventMappingRoute, async (c) =>
+    c.json(await getEventMapping(c.get('ctx'), c.req.valid('param').eventId), 200),
+  )
   .openapi(putEventMappingRoute, async (c) =>
     c.json(
       await putEventMapping(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('json')),
       200,
     ),
+  )
+  .openapi(deleteEventMappingRoute, async (c) =>
+    c.json(await deleteEventMapping(c.get('ctx'), c.req.valid('param').eventId), 200),
   )
   .openapi(listAccessesRoute, async (c) =>
     c.json(await listAccesses(c.get('ctx'), c.req.valid('query')), 200),

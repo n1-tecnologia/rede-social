@@ -518,6 +518,11 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/payments/events/:eventId/grant': {
     case: 'phase 09.1 sweep: payments access and events',
   },
+  // 10.1-06 (TICK-01, TICK-21, T-10.1-13): a rede-demo event id from a rede-lab admin is the bare 404 on the read,
+  // the link and the removal and changes nothing; the wrong host is TENANT_HOST_MISMATCH on all three.
+  'GET /v1/payments/event-products/:eventId': { case: 'phase 10.1 sweep: event products' },
+  'PUT /v1/payments/event-products/:eventId': { case: 'phase 10.1 sweep: event products' },
+  'DELETE /v1/payments/event-products/:eventId': { case: 'phase 10.1 sweep: event products' },
   // ── /v1/profile_form (12-08, the profile form builder API) ───────────────────────────────────
   // 12-08 (PFORM-01, PFORM-02, PFORM-17, T-12-19): the list names nothing of the other tenant, a create
   // lands only in the caller's tenant, an edit of another tenant's question id is the bare 404 and a
