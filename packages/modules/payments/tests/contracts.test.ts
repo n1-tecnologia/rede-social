@@ -64,8 +64,19 @@ describe('the closed refusal vocabulary', () => {
       'gate_requires_setup',
       'nothing_to_update',
       'not_grantable',
+      // Phase 10.1 (TICK-23): the event ticket lanes.
+      'link_required',
+      'ticket_locked',
+      'event_ended',
+      'event_cancelled',
     ]) {
       expect(PAYMENTS_ISSUE_SET.has(code), code).toBe(true);
+    }
+  });
+
+  it('every code is lowercase snake case (the neutrality walk owns the brand rule, TICK-20)', () => {
+    for (const code of PAYMENTS_ISSUES) {
+      expect(code, code).toMatch(/^[a-z][a-z0-9_]*$/);
     }
   });
 });
@@ -433,8 +444,15 @@ describe('the Eventos list contract (D-503, PAY-21)', () => {
     receivedAt: '2026-10-21T01:00:00.000000Z',
   };
 
-  it('names the four neutral states', () => {
-    expect([...EVENT_ITEM_STATES]).toEqual(['applied', 'no_account', 'unknown_product', 'ignored']);
+  it('names the six neutral states (10.1 appended event_ended and event_cancelled)', () => {
+    expect([...EVENT_ITEM_STATES]).toEqual([
+      'applied',
+      'no_account',
+      'unknown_product',
+      'ignored',
+      'event_ended',
+      'event_cancelled',
+    ]);
   });
 
   it('accepts a full item and an item with every optional field null', () => {

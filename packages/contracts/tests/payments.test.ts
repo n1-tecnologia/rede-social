@@ -7,6 +7,10 @@ import {
   ACCESS_ROW_STATUSES,
   ACCESS_SOURCES,
   ACCESS_STATES,
+  EVENT_ITEM_STATES,
+  PAYMENT_EVENT_OUTCOMES,
+  PAYMENT_PRODUCT_KINDS,
+  PAYMENTS_ISSUES,
   subscriptionStatusSchema,
 } from '../src/payments';
 
@@ -98,5 +102,52 @@ describe('09.1-10 - the member-facing reads (D-493, D-497, UI-D-532)', () => {
       publicTenantSchema.parse({ ...base, accessCheckoutUrl: 'https://pay.example.com' }),
     ).toEqual({ ...base, accessCheckoutUrl: 'https://pay.example.com' });
     expect(publicTenantSchema.safeParse({ ...base, accessCheckoutUrl: 42 }).success).toBe(false);
+  });
+});
+
+describe('10.1 - the closed vocabularies of the event ticket (D-740, D-741, TICK-23)', () => {
+  it('a mapping has three kinds: access, store_product, event', () => {
+    expect([...PAYMENT_PRODUCT_KINDS]).toEqual(['access', 'store_product', 'event']);
+  });
+
+  it('the outcome list keeps the old values in order and appends the six ticket ones', () => {
+    expect([...PAYMENT_EVENT_OUTCOMES]).toEqual([
+      'access_granted',
+      'access_cut',
+      'product_granted',
+      'product_revoked',
+      'stale',
+      'no_effect',
+      'currency_unsupported',
+      'ticket_granted',
+      'ticket_granted_over_limit',
+      'ticket_revoked',
+      'ticket_kept',
+      'event_ended',
+      'event_cancelled',
+    ]);
+  });
+
+  it('the Eventos list states are the four old ones plus event_ended and event_cancelled', () => {
+    expect([...EVENT_ITEM_STATES]).toEqual([
+      'applied',
+      'no_account',
+      'unknown_product',
+      'ignored',
+      'event_ended',
+      'event_cancelled',
+    ]);
+  });
+
+  it('the refusal list gains link_required, ticket_locked, event_ended and event_cancelled', () => {
+    for (const code of ['link_required', 'ticket_locked', 'event_ended', 'event_cancelled']) {
+      expect(PAYMENTS_ISSUES as readonly string[], code).toContain(code);
+    }
+  });
+
+  it('no new value is anything but lowercase snake case (the neutrality walk owns the brand rule, TICK-20)', () => {
+    for (const code of [...PAYMENT_PRODUCT_KINDS, ...PAYMENT_EVENT_OUTCOMES, ...PAYMENTS_ISSUES]) {
+      expect(code, code).toMatch(/^[a-z][a-z0-9_]*$/);
+    }
   });
 });
