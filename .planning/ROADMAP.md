@@ -1658,7 +1658,7 @@ Plans:
 **Goal:** A paid event (one with a linked Kiwify product) gets an optional registration-opening date set by `admin_tenant` in the event form. Before it, members see the event with an "Em breve" tag and a live countdown in days, hours and minutes to the opening, and cannot buy (the API does not return the purchase link); after it, a member who holds a presence sees a countdown to the event. A payment that arrives before the opening, through a direct link, still confirms the presence and is marked for the admin. Free events and events with no opening date behave exactly as today.
 **Scope**: Post-MVP, additive. Requested by Igor on 2026-11-13, right after Phase 10.1 closed; it extends that phase's event page, event form and Kiwify link.
 **Depends on:** Phase 10.1 (the paid event, its Kiwify product link, the `Comprar ingresso` flow and the closed doors), Phase 06 (events)
-**Requirements**: TBD
+**Requirements**: OPEN-01..OPEN-27
 **Success Criteria** (what must be TRUE):
 
   1. In the event form of a paid event, `admin_tenant` can set an optional "Abertura das inscrições" date and time, in the tenant's time zone and before the event's start. With no date, purchase opens at once and every existing event behaves as today.

@@ -375,6 +375,38 @@ Phase 10.1 lets a tenant sell an event through its payment gateway: `admin_tenan
 - [x] **TICK-23**: The new refusal codes (`payment_required`, `ticket_locked`, `ticket_required`) are published as stable strings in the contracts the native app reads *(D-741)*
 - [ ] **TICK-24**: The first real purchase of a real gateway product confirms a real presence and its refund removes it (owner proof, recorded in the ledger; the product id format is unproven) *(D-740, D-752)*
 
+### Event ticket opening (Em breve and the countdown)
+
+Phase 10.2 lets a paid event carry an optional registration-opening date: before it the member sees `Em breve` and a live countdown and cannot buy (the API returns no purchase link), at the opening the page swaps to the buy button by itself, a payment that arrives early still confirms and is marked for the admin, and a presence holder sees a live countdown to the event; free events do not change (D-780..D-794, UI-D-780..UI-D-796).
+
+- [ ] **OPEN-01**: `events` gains a nullable opening instant, added expand-only, with a CHECK that it sorts strictly before `starts_at`; every existing event has none and behaves as before *(D-781)*
+- [ ] **OPEN-02**: The opening exists only for a paid event: the list, next, detail and edit reads carry it only when the event has a linked gateway product, and a free event's payloads keep today's exact key set *(D-780)*
+- [ ] **OPEN-03**: The admin sets the opening as a wall-clock date and time in the tenant's time zone on create and on edit, converted to UTC in SQL like the start; an omitted key keeps the stored value, an explicit null clears it, and an identical body writes nothing *(D-792, D-781)*
+- [ ] **OPEN-04**: An opening at or after the event's start is refused `400 opening_after_start` by the input schema and by the database CHECK; a date already in the past is accepted and simply means open *(D-780, Claude's Discretion)*
+- [ ] **OPEN-05**: `app.event_checkout_url` returns null before the opening by the database clock and the event detail carries no `checkoutUrl` before it; at and after the opening, and for an event with no opening, it answers as today *(D-789)*
+- [ ] **OPEN-06**: Paid events carry `registrationOpensAt` and `serverNow` (the database instant of the deciding transaction) as `.optional()` keys on the strict event contracts; an answer without `serverNow` draws no count and never falls back to the device clock *(D-788)*
+- [ ] **OPEN-07**: The card and the hero show `Em breve` in place of `Pago` while the sale is closed, only to a viewer without a presence and never on a cancelled or ended event *(D-784)*
+- [ ] **OPEN-08**: The card shows a short live countdown with the reference price kept; the page replaces the buy zone with three count blocks, the exact opening date and time, the tenant time zone and the reference price *(D-785, D-786)*
+- [ ] **OPEN-09**: The countdown floors to whole minutes, drops every zero unit and reads `Menos de 1 min` in the last minute, through one pure formatter shared by the card, the page, the hero and `Meus eventos` *(D-787)*
+- [ ] **OPEN-10**: At zero the page swaps to the buy zone by itself with no reload: the count runs from the server seed, and the buy link appears only when the re-read answers it *(D-788, D-789)*
+- [ ] **OPEN-11**: The buy zone follows one precedence (cancelled, ended, under way, sale unavailable, `Em breve`, sold out, buy) and a member who holds a presence is never in `Em breve` *(Claude's Discretion, D-746, D-790)*
+- [ ] **OPEN-12**: A payment that arrives before the opening confirms the presence exactly like any other: the grant definer has no opening check *(D-782)*
+- [ ] **OPEN-13**: Every grant write path records the instant the ticket was confirmed, and "paid before the opening" is derived from that instant and the opening, which is stable because the opening is locked once a paid presence exists *(D-791, D-783)*
+- [ ] **OPEN-14**: `Participantes` marks `Antes da abertura` next to `Pago` on a paid-origin presence only, never on a courtesy or a before-the-ticket presence, and only for the admin *(D-791)*
+- [ ] **OPEN-15**: A ticket delivery in Pagamentos `Eventos recentes` carries the same marker, and no notification, push or bell row is added for an early payment or for the opening *(D-791)*
+- [ ] **OPEN-16**: Once an event has a paid presence (origin `ticket`) the opening cannot change: the database refuses it for every writer and the API answers `409 opening_locked`; a courtesy and a before-the-ticket presence do not lock it and a fully refunded sale lifts the lock *(D-783)*
+- [ ] **OPEN-17**: The form shows the opening read-only with `N ingressos vendidos` when it is locked, and a stale tab that hits the lock re-reads the section as locked *(D-794, D-783)*
+- [ ] **OPEN-18**: The `Ingresso` section holds the field `Abertura das inscrições` (date and time, clear button, helpers and inline errors) only while `Cobrar ingresso` is on, right below the reference price *(D-792)*
+- [ ] **OPEN-19**: Turning `Cobrar ingresso` off clears the opening in the same transaction as the removal of the product link, the form warns before saving, and turning the ticket on again starts with an empty field *(D-793)*
+- [ ] **OPEN-20**: A presence holder of a paid event sees a live countdown to the event on the event page and on the `Meus eventos` cards, handing over to `Acontecendo agora` at the start; a free event keeps `Faltam N dias` *(D-790)*
+- [ ] **OPEN-21**: The live counter uses no `setInterval`, arms one timeout per instance, stops while the tab is hidden, re-seeds after more than 60 s hidden, reads the device clock in one place only and announces nothing per minute *(D-788, Claude's Discretion)*
+- [ ] **OPEN-22**: The refusal codes `opening_locked` and `opening_after_start` are published as stable strings in the closed `EVENT_ISSUES` list and pinned by a contract test *(D-783)*
+- [ ] **OPEN-23**: Every changed or added definer, trigger, column and read carries a cross-tenant negative (pgTAP and integration): a payment, a read or an update of tenant A can never touch the opening, the mark or the link of tenant B *(TICK-21 extended)*
+- [ ] **OPEN-24**: The release is expand-only and ordered (migrations on every tenant database, then web, then API); the previous API revision keeps working on the migrated database and every new response key is `.optional()` *(D-781, D-788)*
+- [ ] **OPEN-25**: No gateway brand name appears in any new column, function, route, catalog key or fixture, and every user-visible string is pt-BR in the host catalogs *(TICK-20 extended)*
+- [ ] **OPEN-26**: An approved payment for an event whose opening is still in the future confirms the presence through the real webhook path and the apply job (owner proof on a real gateway, recorded in the ledger) *(D-782)*
+- [ ] **OPEN-27**: The swap at the opening and the countdown are proved on a real phone at 320 and 390 px with a wrong device clock, including how a screen reader speaks the counter (owner proof, recorded in the ledger) *(D-788)*
+
 ### Database per tenant
 
 Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase project (its own Postgres, Auth, Storage and Realtime), the current project becomes the control plane that mirrors each tenant, and the operator creates a tenant by pasting only the project ref. The registry, the routing seam, the credential custody, the bootstrap steps, the migration fan-out with a version per tenant, the per-project queues and the "move tenant" tool are the platform side; the held-out screens and the Banco tab are the panel and member side. Source: the 2026-10-22 discussion (D-533..D-547), the Phase 09.2 research and the Phase 09.2 UI-SPEC (UI-D-533..UI-D-548).
@@ -1006,6 +1038,33 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TICK-22 | Phase 10.1 | Complete |
 | TICK-23 | Phase 10.1 | Complete |
 | TICK-24 | Phase 10.1 | Pending |
+| OPEN-01 | Phase 10.2 | Pending |
+| OPEN-02 | Phase 10.2 | Pending |
+| OPEN-03 | Phase 10.2 | Pending |
+| OPEN-04 | Phase 10.2 | Pending |
+| OPEN-05 | Phase 10.2 | Pending |
+| OPEN-06 | Phase 10.2 | Pending |
+| OPEN-07 | Phase 10.2 | Pending |
+| OPEN-08 | Phase 10.2 | Pending |
+| OPEN-09 | Phase 10.2 | Pending |
+| OPEN-10 | Phase 10.2 | Pending |
+| OPEN-11 | Phase 10.2 | Pending |
+| OPEN-12 | Phase 10.2 | Pending |
+| OPEN-13 | Phase 10.2 | Pending |
+| OPEN-14 | Phase 10.2 | Pending |
+| OPEN-15 | Phase 10.2 | Pending |
+| OPEN-16 | Phase 10.2 | Pending |
+| OPEN-17 | Phase 10.2 | Pending |
+| OPEN-18 | Phase 10.2 | Pending |
+| OPEN-19 | Phase 10.2 | Pending |
+| OPEN-20 | Phase 10.2 | Pending |
+| OPEN-21 | Phase 10.2 | Pending |
+| OPEN-22 | Phase 10.2 | Pending |
+| OPEN-23 | Phase 10.2 | Pending |
+| OPEN-24 | Phase 10.2 | Pending |
+| OPEN-25 | Phase 10.2 | Pending |
+| OPEN-26 | Phase 10.2 | Pending |
+| OPEN-27 | Phase 10.2 | Pending |
 | DBT-01 | Phase 09.2 (plans 02, 14) | Complete |
 | DBT-02 | Phase 09.2 (plans 03, 14) | Complete |
 | DBT-03 | Phase 09.2 (plan 03) | Complete |
@@ -1247,8 +1306,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 516 total (492 before Phase 10.1 planning, plus TICK-01..24 from Phase 10.1 planning on 2026-11-12; 465 before Phase 10 planning, plus MCOMM-01..11, MPUB-01..07 and MSTORY-01..09 from Phase 10 planning on 2026-11-10; 454 after Phase 12.2 planning, plus NOVF-01..11 from Phase 12.3 planning on 2026-11-09; 436 after Phase 12.1 planning, plus PFORM-43..60 from Phase 12.2 planning on 2026-11-06; 420 after Phase 13 planning, plus PFORM-27..42 from Phase 12.1 planning on 2026-11-05; 384 after Phase 12 planning, plus NATIVE-01..36 from Phase 13 planning on 2026-11-04; 358 after Phase 09.4 planning, plus PFORM-01..26 from Phase 12 planning on 2026-10-29; 316 after Phase 09.3 planning, plus CTK-01..42 from Phase 09.4 planning on 2026-10-27; 302 after Phase 09.2 planning, plus PEND-01..14 from Phase 09.3 planning on 2026-10-26; 249 after Phase 09.1 planning, plus DBT-01..53 from Phase 09.2 planning on 2026-10-22; 215 after Phase 09 planning, plus PAY-01..34 from Phase 09.1 planning on 2026-10-20; 193 after Phase 08.7 planning, plus SOCIAL-01..10, FOLLOW-01..06 and EXPL-01..06 from Phase 09 planning on 2026-10-19; 172 after Phase 08.6 planning, plus INSIGHT-01..21 from Phase 08.7 planning on 2026-10-18; previously 89 after Phase 05.2 planning — recounted from the traceability table on 2026-09-25 — plus REELS-01..08 from Phase 05.3 planning on 2026-09-26, plus STORE-01..21 from Phase 08.2 planning on 2026-10-08, plus COURSE-01..15 from Phase 08.3 planning on 2026-10-13, plus STORE-22 from Phase 08.4 planning on 2026-10-14, plus COURSE-16..27 and STORE-23 from Phase 08.5 planning on 2026-10-15, plus COURSE-28..52 from Phase 08.6 planning on 2026-10-16; STORE-06 and STORE-07 amended by Phase 08.5)
-- Mapped to phases: 516
+- v1 requirements: 543 total (516 before Phase 10.2 planning, plus OPEN-01..27 from Phase 10.2 research on 2026-11-13; 492 before Phase 10.1 planning, plus TICK-01..24 from Phase 10.1 planning on 2026-11-12; 465 before Phase 10 planning, plus MCOMM-01..11, MPUB-01..07 and MSTORY-01..09 from Phase 10 planning on 2026-11-10; 454 after Phase 12.2 planning, plus NOVF-01..11 from Phase 12.3 planning on 2026-11-09; 436 after Phase 12.1 planning, plus PFORM-43..60 from Phase 12.2 planning on 2026-11-06; 420 after Phase 13 planning, plus PFORM-27..42 from Phase 12.1 planning on 2026-11-05; 384 after Phase 12 planning, plus NATIVE-01..36 from Phase 13 planning on 2026-11-04; 358 after Phase 09.4 planning, plus PFORM-01..26 from Phase 12 planning on 2026-10-29; 316 after Phase 09.3 planning, plus CTK-01..42 from Phase 09.4 planning on 2026-10-27; 302 after Phase 09.2 planning, plus PEND-01..14 from Phase 09.3 planning on 2026-10-26; 249 after Phase 09.1 planning, plus DBT-01..53 from Phase 09.2 planning on 2026-10-22; 215 after Phase 09 planning, plus PAY-01..34 from Phase 09.1 planning on 2026-10-20; 193 after Phase 08.7 planning, plus SOCIAL-01..10, FOLLOW-01..06 and EXPL-01..06 from Phase 09 planning on 2026-10-19; 172 after Phase 08.6 planning, plus INSIGHT-01..21 from Phase 08.7 planning on 2026-10-18; previously 89 after Phase 05.2 planning — recounted from the traceability table on 2026-09-25 — plus REELS-01..08 from Phase 05.3 planning on 2026-09-26, plus STORE-01..21 from Phase 08.2 planning on 2026-10-08, plus COURSE-01..15 from Phase 08.3 planning on 2026-10-13, plus STORE-22 from Phase 08.4 planning on 2026-10-14, plus COURSE-16..27 and STORE-23 from Phase 08.5 planning on 2026-10-15, plus COURSE-28..52 from Phase 08.6 planning on 2026-10-16; STORE-06 and STORE-07 amended by Phase 08.5)
+- Mapped to phases: 543
 - Unmapped: 0 ✓
 
 ---
