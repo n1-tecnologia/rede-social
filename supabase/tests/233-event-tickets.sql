@@ -26,8 +26,26 @@ begin;
 --    A6) passes with the old outcomes and keeps its origin and order; a FREE event is byte-identical; the
 --    cancelled, ended, closed and not_open outcomes still win; a direct walk_in insert is still refused.
 --
+-- 4. GATEWAY (plan 04, D-752, D-759, D-760, T-10.1-07, T-10.1-09, T-10.1-10): `app.event_gateway_grant` and
+--    `app.event_gateway_revoke` as the service role, every outcome returned and none raised: a purchase, a replay,
+--    a refund that frees the seat, the argument matrix (EP-37, EP-38), an unconfirmed e-mail and the admin's manual
+--    release, cancelled / deleted / ended / unmapped events, a sale after the start and over the limit, the
+--    upgrade of a presence made before the link, one presence per member, the same reference in two tenants
+--    (EP-36), a checked-in refund kept and flagged, and a refund that can reach only the row that carries its order.
+--
+-- 5. COURTESY (plan 04, D-743, D-747, D-753, T-10.1-12): `app.event_courtesy_grant` / `_remove`,
+--    `app.event_ticket_lock` / `_reset` and `app.event_ticket_holders` as the admin, each beside the member,
+--    support and other-tenant negatives; the courtesy works with the payments module off, over the limit and
+--    after the start; the lock takes the SAME advisory lock the grant takes; the reset returns courtesy rows
+--    to a Vou the member can edit.
+--
+-- 6. READS, HARDENING AND ISOLATION (plan 04, D-746, D-749, D-753, TICK-16, TICK-21): `app.event_is_paid`,
+--    `app.event_checkout_url` (EP-07 matrix), `app.event_ticket_admin`, `app.event_title_for`; every definer of the
+--    phase called with the OTHER tenant's ids in both directions, each with a positive control (EP-39); the privilege
+--    matrix and the empty search_path of all twelve functions of plans 02 and 04, by catalogue.
+--
 -- Fixture ids use the `1e310000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(220);
+select plan(312);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-tkt-a', 'Ingresso A', '1e310000-0000-4000-8000-000000000001');
@@ -825,7 +843,7 @@ select is((select string_agg(user_id::text || ':' || origin || ':' || status, ',
 -- ── 5. courtesy, lock, reset and holders (plan 04, task 2: `*_event_courtesy_definers.sql`) ───────────
 -- The admin's side of a paid event. Every function checks the `admin_tenant` claim INSIDE itself (T-10.1-12),
 -- is pinned to the claim tenant (T-10.1-01) and RETURNS its outcomes. Events 401 live and unlimited | 402 limit
--- one | 403 started | 404 ended | 405 cancelled | 406 free | 407 live (lock, reset, holders) of tenant A, and 408
+-- one | 403 started | 404 ended | 405 cancelled | 406 free | 407 live (lock, reset, holders) of tenant A, and 308
 -- (tenant B, section 4). Users and memberships are those of section 4. The `payments` module of tenant A is OFF
 -- since section 2 and stays off: none of this depends on it (D-743).
 insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, capacity, status, cancelled_at) values
@@ -888,7 +906,7 @@ select is(
      (4, (select outcome from app.event_courtesy_grant(tests.tk('401'), gen_random_uuid()))),
      (5, (select outcome from app.event_courtesy_grant(tests.tk('401'), null))),
      (6, (select outcome from app.event_courtesy_grant(null, tests.tk('202')))),
-     (7, (select outcome from app.event_courtesy_grant(tests.tk('408'), tests.tk('202')))),
+     (7, (select outcome from app.event_courtesy_grant(tests.tk('308'), tests.tk('202')))),
      (8, (select outcome from app.event_courtesy_grant(gen_random_uuid(), tests.tk('202'))))
    ) v(n, o)),
   'not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found',
@@ -996,7 +1014,7 @@ select is(
      (1, (select found from app.event_ticket_lock(tests.tk('306')))),
      (2, (select found from app.event_ticket_lock(gen_random_uuid()))),
      (3, (select found from app.event_ticket_lock(null))),
-     (4, (select found from app.event_ticket_lock(tests.tk('408'))))
+     (4, (select found from app.event_ticket_lock(tests.tk('308'))))
    ) v(n, f)),
   'false,false,false,false', 'D-747: a soft-deleted, an unknown, a null and a foreign event all give found false');
 reset role;
@@ -1047,6 +1065,232 @@ select tests.as_tenant(tests.tk('2'), tests.tk('10e'), 'admin_tenant');
 select is_empty($$ select * from app.event_ticket_holders(tests.tk('407'), array[tests.tk('201'), tests.tk('20d')]) $$, 'EP-39: tenant B''s admin gets nothing for tenant A''s event');
 select results_eq($$ select * from app.event_ticket_holders(tests.tk('308'), array[tests.tk('20d')]) $$, $$ values (tests.tk('20d')) $$,
   'EP-39: ...beside the control: the same admin reads its own event');
+reset role;
+
+-- ── 6. reads, hardening and isolation (plan 04, task 3: `*_event_ticket_reads.sql`) ────────────────────
+-- 6a. the tenant-pinned reads (D-746, D-753, TICK-16): `app.event_is_paid`, `app.event_checkout_url`,
+--     `app.event_ticket_admin` and `app.event_title_for`, with the EP-07 matrix (module off or on, link or no link).
+-- 6b. EP-39: every definer of the phase called with the OTHER tenant's ids, A to B and B to A, each beside a
+--     positive control.
+-- 6c. the privilege matrix and the search_path of EVERY function of plans 02 and 04, by catalogue.
+select tests.auth_user('g10f@tkt-6.local', tests.tk('10f'));
+select tests.auth_user('g110@tkt-6.local', tests.tk('110'));
+insert into public.memberships (id, tenant_id, user_id, role, status, blocked_at, deleted_at) values
+  (tests.tk('20f'), tests.tk('2'), tests.tk('10f'), 'member', 'active', null, null),
+  (tests.tk('210'), tests.tk('2'), tests.tk('110'), 'member', 'active', null, null);
+
+-- ── 6a. EP-07: nothing mapped, module off
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select results_eq($$ select app.event_is_paid(tests.tk('307')), app.event_checkout_url(tests.tk('307')) $$,
+  $$ values (false, null::text) $$, 'EP-07: an event with no mapping and the module off is not paid and has no link');
+select results_eq($$ select app.event_is_paid(tests.tk('301')), app.event_checkout_url(tests.tk('301')) $$,
+  $$ values (true, null::text) $$, 'EP-07/D-746: a mapped event with the module off is paid, with a null link');
+reset role;
+update public.payment_products set checkout_url = 'https://pay.example.test/e407' where event_id = tests.tk('407');
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select results_eq($$ select app.event_is_paid(tests.tk('407')), app.event_checkout_url(tests.tk('407')) $$,
+  $$ values (true, null::text) $$, 'D-746: a stored link is still hidden while the module is off');
+select is((select count(*)::int from public.payment_products), 0, 'T-10.1-11: a member cannot select from payment_products');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select ok((select count(*) from public.payment_products) > 0, 'T-10.1-11 control: the admin of the tenant reads payment_products');
+select results_eq($$ select external_product_id, checkout_url, gateway_open, sold from app.event_ticket_admin(tests.tk('407')) $$,
+  $$ values ('tkt-233-s5-407'::text, 'https://pay.example.test/e407'::text, false, 2) $$,
+  'D-753: the admin read answers with the module off: product id, link, gateway closed and two tickets sold');
+select is_empty($$ select * from app.event_ticket_admin(tests.tk('307')) $$, 'D-753: an event with no mapping has no admin row');
+select is_empty($$ select * from app.event_ticket_admin(null) $$, 'EP-37: a null event has no admin row');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select is_empty($$ select * from app.event_ticket_admin(tests.tk('407')) $$, 'T-10.1-11: a member gets no admin row (no product id, no link)');
+reset role;
+-- B's own admin read, before section 6b adds anything to B (one ticket sold: S4-SAME).
+select tests.as_tenant(tests.tk('2'), tests.tk('10e'), 'admin_tenant');
+select results_eq($$ select external_product_id, checkout_url, gateway_open, sold from app.event_ticket_admin(tests.tk('308')) $$,
+  $$ values ('tkt-233-s4-308'::text, null::text, false, 1) $$, 'EP-39 control: tenant B''s admin reads its own event (no link, gateway closed, one ticket)');
+select is_empty($$ select * from app.event_ticket_admin(tests.tk('407')) $$, 'EP-39: tenant B''s admin gets no admin row for tenant A''s event');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select is_empty($$ select * from app.event_ticket_admin(tests.tk('308')) $$, 'EP-39: tenant A''s admin gets no admin row for tenant B''s event');
+reset role;
+
+-- The module on, but no gateway connected yet: the mode is still closed.
+update public.tenant_modules set enabled = true where tenant_id = tests.tk('1') and module_key = 'payments';
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select results_eq($$ select app.event_is_paid(tests.tk('407')), app.event_checkout_url(tests.tk('407')) $$,
+  $$ values (true, null::text) $$, 'EP-07: the module on but no gateway connected still hides the link');
+reset role;
+insert into public.payment_integrations (tenant_id, provider, secret_sealed) values (tests.tk('1'), 'fake', 'sealed-pgtap');
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select results_eq($$ select app.event_is_paid(tests.tk('407')), app.event_checkout_url(tests.tk('407')) $$,
+  $$ values (true, 'https://pay.example.test/e407'::text) $$, 'D-746/TICK-16: the module on and a gateway connected: the member reads the stored https link');
+select results_eq($$ select app.event_is_paid(tests.tk('301')), app.event_checkout_url(tests.tk('301')) $$,
+  $$ values (true, null::text) $$, 'EP-07: a mapping inserted directly with no stored link has a null link even with the module on');
+select results_eq($$ select app.event_is_paid(tests.tk('307')), app.event_checkout_url(tests.tk('307')) $$,
+  $$ values (false, null::text) $$, 'EP-07: a free event has a null link even with the module on');
+select is((select count(*)::int from public.payment_products), 0, 'T-10.1-11: ...and the member still cannot select the table (the link came through the definer)');
+select is_empty($$ select * from app.event_ticket_admin(tests.tk('407')) $$, 'T-10.1-11: ...nor the admin read');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select gateway_open from app.event_ticket_admin(tests.tk('407')) $$, $$ values (true) $$, 'D-753: with the gateway connected the admin read reports it open');
+reset role;
+select tests.as_tenant_without_claims();
+select results_eq($$ select app.event_is_paid(tests.tk('407')), app.event_checkout_url(tests.tk('407')) $$,
+  $$ values (false, null::text) $$, 'T-10.1-01: a session with no claims is told nothing');
+reset role;
+
+-- Defence in depth: a stored link that is not https is never handed out (the table CHECK is lifted for one case).
+alter table public.payment_products drop constraint payment_products_url_chk;
+update public.payment_products set checkout_url = 'http://pay.example.test/insecure' where event_id = tests.tk('407');
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select results_eq($$ select app.event_checkout_url(tests.tk('407')) $$, $$ values (null::text) $$, 'TICK-16: a stored http link is never returned');
+reset role;
+update public.payment_products set checkout_url = 'javascript:alert(1)' where event_id = tests.tk('407');
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select results_eq($$ select app.event_checkout_url(tests.tk('407')) $$, $$ values (null::text) $$, 'TICK-16: ...nor a javascript: link');
+reset role;
+update public.payment_products set checkout_url = 'https://pay.example.test/e407' where event_id = tests.tk('407');
+alter table public.payment_products add constraint payment_products_url_chk
+  check (checkout_url is null or (checkout_url ~ '^https://[^[:space:]]+$' and length(checkout_url) <= 2048));
+
+-- Tenant B gets a connected gateway and a link of its own (the cross-tenant controls).
+update public.payment_products set checkout_url = 'https://pay.example.test/e308' where event_id = tests.tk('308');
+insert into public.tenant_modules (tenant_id, module_key, enabled) values (tests.tk('2'), 'payments', true);
+insert into public.payment_integrations (tenant_id, provider, secret_sealed) values (tests.tk('2'), 'fake', 'sealed-pgtap-b');
+select tests.as_tenant(tests.tk('2'), tests.tk('10d'));
+select results_eq($$ select app.event_is_paid(tests.tk('308')), app.event_checkout_url(tests.tk('308')) $$,
+  $$ values (true, 'https://pay.example.test/e308'::text) $$, 'EP-39 control: a member of tenant B reads tenant B''s link');
+select results_eq($$ select app.event_is_paid(tests.tk('407')), app.event_checkout_url(tests.tk('407')) $$,
+  $$ values (false, null::text) $$, 'EP-39: ...and is told nothing about tenant A''s paid event or link');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select results_eq($$ select app.event_is_paid(tests.tk('308')), app.event_checkout_url(tests.tk('308')) $$,
+  $$ values (false, null::text) $$, 'EP-39: a member of tenant A is told nothing about tenant B''s paid event or link');
+reset role;
+
+-- event_title_for: the service lane, pinned to the tenant.
+select tests.as_service();
+select results_eq($$ select app.event_title_for(tests.tk('1'), tests.tk('301')), app.event_title_for(tests.tk('2'), tests.tk('308')) $$,
+  $$ values ('Evento 301'::text, 'Evento 308'::text) $$, 'D-749 control: each tenant''s own event is titled');
+select results_eq($$ select app.event_title_for(tests.tk('2'), tests.tk('301')), app.event_title_for(tests.tk('1'), tests.tk('308')) $$,
+  $$ values (null::text, null::text) $$, 'EP-39: the other tenant''s event gives null, in both directions');
+select results_eq($$ select app.event_title_for(tests.tk('1'), tests.tk('306')), app.event_title_for(tests.tk('1'), gen_random_uuid()), app.event_title_for(null, tests.tk('301')) $$,
+  $$ values (null::text, null::text, null::text) $$, 'D-749: a soft-deleted event, an unknown one and a null tenant give null');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select throws_ok($$ select app.event_title_for(tests.tk('1'), tests.tk('301')) $$, '42501', null, 'T-10.1-11: even the tenant''s admin cannot call event_title_for (service role only)');
+reset role;
+
+-- ── 6b. EP-39: the definers of the gateway, both directions, each with a positive control
+select tests.as_service();
+select is(
+  (select string_agg(o, ',' order by n) from (values
+     (1, (select outcome from app.event_gateway_grant(tests.tk('2'), tests.tk('20f'), tests.tk('301'), 'fake', 'S6-X1'))),
+     (2, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('205'), tests.tk('308'), 'fake', 'S6-X2'))),
+     (3, (select outcome from app.event_gateway_grant(tests.tk('2'), tests.tk('201'), tests.tk('308'), 'fake', 'S6-X3'))),
+     (4, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('20f'), tests.tk('301'), 'fake', 'S6-X4')))
+   ) v(n, o)),
+  'not_mapped,not_mapped,not_found,not_found',
+  'T-10.1-01/EP-39: the grant with the other tenant''s event (not_mapped) or the other tenant''s membership (not_found), in both directions');
+select results_eq($$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('205'), tests.tk('301'), 'fake', 'S6-A1') $$, $$ values ('granted'::text) $$,
+  'EP-39 control: tenant A''s own member and event are granted');
+select results_eq($$ select outcome from app.event_gateway_grant(tests.tk('2'), tests.tk('20f'), tests.tk('308'), 'fake', 'S6-B1') $$, $$ values ('granted'::text) $$,
+  'EP-39 control: tenant B''s own member and event are granted');
+reset role;
+select is((select count(*)::int from public.event_attendances where order_ref like 'S6-X%'), 0, 'EP-39: ...and none of the four refused calls wrote a row');
+select tests.as_service();
+select results_eq($$ select a.outcome, b.outcome from app.event_gateway_revoke(tests.tk('2'), 'fake', 'S6-A1') a, app.event_gateway_revoke(tests.tk('1'), 'fake', 'S6-B1') b $$,
+  $$ values ('not_found'::text, 'not_found'::text) $$, 'T-10.1-09/EP-39: a refund naming the other tenant''s reference is not_found, in both directions');
+reset role;
+select is((select count(*)::int from public.event_attendances where order_ref in ('S6-A1', 'S6-B1')), 2, 'EP-39: ...and both presences are still there');
+select tests.as_service();
+select results_eq($$ select a.outcome, b.outcome from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S6-A1') a, app.event_gateway_revoke(tests.tk('2'), 'fake', 'S6-B1') b $$,
+  $$ values ('removed'::text, 'removed'::text) $$, 'EP-39 control: each tenant''s refund removes its own presence');
+reset role;
+
+-- The tenant-lane definers.
+select tests.as_tenant(tests.tk('2'), tests.tk('10e'), 'admin_tenant');
+select is(
+  (select string_agg(o, ',' order by n) from (values
+     (1, (select outcome from app.event_courtesy_grant(tests.tk('308'), tests.tk('201')))),
+     (2, (select outcome from app.event_courtesy_grant(tests.tk('401'), tests.tk('20f'))))
+   ) v(n, o)),
+  'not_found,not_found', 'EP-39: tenant B''s admin cannot give a courtesy with A''s membership or in A''s event');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('308'), tests.tk('210')) $$, $$ values ('granted'::text) $$, 'EP-39 control: tenant B''s admin releases its own courtesy');
+reset role;
+select set_config('tk.bcourt', (select id::text from public.event_attendances where event_id = tests.tk('308') and user_id = tests.tk('110')), true);
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('308'), tests.tk('20f')) $$, $$ values ('not_found'::text) $$, 'EP-39: tenant A''s admin cannot give a courtesy in B''s event');
+select results_eq($$ select outcome from app.event_courtesy_remove(tests.tk('308'), current_setting('tk.bcourt')::uuid) $$, $$ values ('not_found'::text) $$, 'EP-39: tenant A''s admin cannot remove tenant B''s courtesy');
+select results_eq($$ select found, sold from app.event_ticket_lock(tests.tk('308')) $$, $$ values (false, 0) $$, 'EP-39: tenant A''s admin gets found false for tenant B''s event');
+select lives_ok($$ select app.event_ticket_reset(tests.tk('308')) $$, 'EP-39: tenant A''s admin resetting tenant B''s event is accepted...');
+select is_empty($$ select * from app.event_ticket_holders(tests.tk('308'), array[tests.tk('20d'), tests.tk('210')]) $$, 'EP-39: ...and reads no holders of it');
+select results_eq($$ select found from app.event_ticket_lock(tests.tk('407')) $$, $$ values (true) $$, 'EP-39 control: tenant A''s admin locks its own event');
+reset role;
+select is((select origin from public.event_attendances where id = current_setting('tk.bcourt')::uuid), 'courtesy', 'EP-39: ...the reset did not touch B''s courtesy');
+select tests.as_tenant(tests.tk('2'), tests.tk('10e'), 'admin_tenant');
+select results_eq($$ select found from app.event_ticket_lock(tests.tk('308')) $$, $$ values (true) $$, 'EP-39 control: tenant B''s admin locks its own event');
+select results_eq($$ select outcome from app.event_courtesy_remove(tests.tk('308'), current_setting('tk.bcourt')::uuid) $$, $$ values ('removed'::text) $$, 'EP-39 control: tenant B''s admin removes its own courtesy');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('308'), tests.tk('210')) $$, $$ values ('granted'::text) $$, 'EP-39 control: ...and releases it again');
+select lives_ok($$ select app.event_ticket_reset(tests.tk('308')) $$, 'EP-39 control: tenant B''s admin resets its own event');
+reset role;
+select is((select origin from public.event_attendances where event_id = tests.tk('308') and user_id = tests.tk('110')), 'rsvp', 'EP-39 control: ...and its courtesy became rsvp');
+
+-- ── 6c. the privilege matrix and the search_path, by catalogue (plans 02 and 04, 12 functions)
+select ok(has_function_privilege(v.role, v.sig, 'execute') = v.expected,
+          v.role || (case when v.expected then ' can execute ' else ' cannot execute ' end) || v.sig)
+  from (values
+    ('anon',          'app.event_ticket_mapped(uuid, uuid)', false),
+    ('authenticated', 'app.event_ticket_mapped(uuid, uuid)', true),
+    ('service_role',  'app.event_ticket_mapped(uuid, uuid)', true),
+    ('anon',          'app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)', false),
+    ('authenticated', 'app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)', false),
+    ('service_role',  'app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)', true),
+    ('anon',          'app.event_gateway_revoke(uuid, text, text)', false),
+    ('authenticated', 'app.event_gateway_revoke(uuid, text, text)', false),
+    ('service_role',  'app.event_gateway_revoke(uuid, text, text)', true),
+    ('anon',          'app.event_title_for(uuid, uuid)', false),
+    ('authenticated', 'app.event_title_for(uuid, uuid)', false),
+    ('service_role',  'app.event_title_for(uuid, uuid)', true),
+    ('anon',          'app.event_courtesy_grant(uuid, uuid)', false),
+    ('authenticated', 'app.event_courtesy_grant(uuid, uuid)', true),
+    ('anon',          'app.event_courtesy_remove(uuid, uuid)', false),
+    ('authenticated', 'app.event_courtesy_remove(uuid, uuid)', true),
+    ('anon',          'app.event_ticket_lock(uuid)', false),
+    ('authenticated', 'app.event_ticket_lock(uuid)', true),
+    ('anon',          'app.event_ticket_reset(uuid)', false),
+    ('authenticated', 'app.event_ticket_reset(uuid)', true),
+    ('anon',          'app.event_ticket_holders(uuid, uuid[])', false),
+    ('authenticated', 'app.event_ticket_holders(uuid, uuid[])', true),
+    ('anon',          'app.event_is_paid(uuid)', false),
+    ('authenticated', 'app.event_is_paid(uuid)', true),
+    ('anon',          'app.event_checkout_url(uuid)', false),
+    ('authenticated', 'app.event_checkout_url(uuid)', true),
+    ('anon',          'app.event_ticket_admin(uuid)', false),
+    ('authenticated', 'app.event_ticket_admin(uuid)', true)
+  ) as v(role, sig, expected);
+select ok(coalesce((select p.prosecdef and p.proconfig @> array['search_path=""']
+                      from pg_proc p where p.oid = to_regprocedure(v.sig)), false),
+          v.sig || ' is SECURITY DEFINER with an empty search_path')
+  from (values
+    ('app.event_ticket_mapped(uuid, uuid)'),
+    ('app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)'),
+    ('app.event_gateway_revoke(uuid, text, text)'),
+    ('app.event_title_for(uuid, uuid)'),
+    ('app.event_courtesy_grant(uuid, uuid)'),
+    ('app.event_courtesy_remove(uuid, uuid)'),
+    ('app.event_ticket_lock(uuid)'),
+    ('app.event_ticket_reset(uuid)'),
+    ('app.event_ticket_holders(uuid, uuid[])'),
+    ('app.event_is_paid(uuid)'),
+    ('app.event_checkout_url(uuid)'),
+    ('app.event_ticket_admin(uuid)')
+  ) as v(sig);
+-- A member of the tenant cannot call a service-only definer (42501), with the admin lane's control above.
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select throws_ok($$ select * from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('301'), 'fake', 'S6-FORGED') $$, '42501', null,
+  'T-10.1-12: a member lane cannot call the gateway grant');
+select throws_ok($$ select * from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S5-L1') $$, '42501', null,
+  'T-10.1-09: a member lane cannot call the gateway revoke');
 reset role;
 
 select * from finish();
