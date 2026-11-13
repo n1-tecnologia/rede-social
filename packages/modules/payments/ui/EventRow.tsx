@@ -1,16 +1,34 @@
 import { Skeleton } from '@rede-social/ui';
-import { CircleCheck, CircleDashed, CircleHelp, type LucideIcon, UserX } from 'lucide-react';
+import {
+  CalendarX2,
+  CircleCheck,
+  CircleDashed,
+  CircleHelp,
+  type LucideIcon,
+  UserX,
+} from 'lucide-react';
 import type { ReactNode } from 'react';
 import { AccessStatePill } from './AccessStatePill';
 
-/** The four states an Eventos row can be in (UI-D-519): the glyph, the word and the colour all say it. */
-export type EventRowState = 'applied' | 'no_account' | 'unknown_product' | 'ignored';
+/**
+ * The states an Eventos row can be in (UI-D-519, and UI-D-758 for the last two): the glyph, the word and
+ * the colour all say it.
+ */
+export type EventRowState =
+  | 'applied'
+  | 'no_account'
+  | 'unknown_product'
+  | 'ignored'
+  | 'event_ended'
+  | 'event_cancelled';
 
 const GLYPH: Record<EventRowState, LucideIcon> = {
   applied: CircleCheck,
   no_account: UserX,
   unknown_product: CircleHelp,
   ignored: CircleDashed,
+  event_ended: CalendarX2,
+  event_cancelled: CalendarX2,
 };
 
 export interface EventRowProps {

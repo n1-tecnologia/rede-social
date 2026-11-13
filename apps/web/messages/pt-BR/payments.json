@@ -176,7 +176,11 @@
         "product_granted": "Produto liberado",
         "product_revoked": "Produto revogado",
         "stale": "Evento mais antigo que o último recebido",
-        "no_effect": "Evento sem efeito no acesso"
+        "no_effect": "Evento sem efeito no acesso",
+        "attendanceConfirmed": "Presença confirmada",
+        "attendanceOverLimit": "Presença confirmada acima do limite",
+        "attendanceRemoved": "Presença removida",
+        "attendanceKept": "Presença mantida: o check-in já foi feito"
       },
       "grantDialog": {
         "title": "Liberar {product} para {email}?",
@@ -202,7 +206,9 @@
       "applied": "Aplicado",
       "noAccount": "Sem conta",
       "unknownProduct": "Produto desconhecido",
-      "ignored": "Ignorado"
+      "ignored": "Ignorado",
+      "eventEnded": "Evento encerrado",
+      "eventCancelled": "Evento cancelado"
     },
     "errors": {
       "title": "Algo deu errado",

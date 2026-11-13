@@ -344,12 +344,19 @@ const EVENT_STATE_WORD: Record<EventItemState, string> = {
   no_account: 'payments.states.noAccount',
   unknown_product: 'payments.states.unknownProduct',
   ignored: 'payments.states.ignored',
+  event_ended: 'payments.states.eventEnded',
+  event_cancelled: 'payments.states.eventCancelled',
 };
 
 /**
  * The effect line of an outcome. `currency_unsupported` (a store purchase in a currency other than BRL, so
  * nothing was granted) has NO approved wording in the Copywriting Contract, so it reads as the contract's
  * "Evento sem efeito no acesso", which is true of it. A closer line needs the design team (SUMMARY).
+ *
+ * Phase 10.1-01 (TICK-23): the four ticket outcomes that need no placeholder read their approved
+ * attendance lines (UI-D-758). `event_ended` and `event_cancelled` outcomes carry the `{gateway}` refund
+ * hint, which this function cannot fill yet, so they read "Evento sem efeito no acesso" until the
+ * Pagamentos UI plan of the phase wires the gateway display name through.
  */
 const EFFECT_KEY: Record<NonNullable<EventItem['outcome']>, string> = {
   access_granted: 'access_granted',
@@ -359,6 +366,12 @@ const EFFECT_KEY: Record<NonNullable<EventItem['outcome']>, string> = {
   stale: 'stale',
   no_effect: 'no_effect',
   currency_unsupported: 'no_effect',
+  ticket_granted: 'attendanceConfirmed',
+  ticket_granted_over_limit: 'attendanceOverLimit',
+  ticket_revoked: 'attendanceRemoved',
+  ticket_kept: 'attendanceKept',
+  event_ended: 'no_effect',
+  event_cancelled: 'no_effect',
 };
 
 /**

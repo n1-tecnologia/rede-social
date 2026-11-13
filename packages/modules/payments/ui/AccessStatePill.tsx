@@ -2,8 +2,8 @@ import { StatusPill, type StatusTone } from '@rede-social/ui';
 
 /**
  * Every state word the payments screens print as a pill (UI-D-520). The first three are the access
- * states of an e-mail (Acessos, and Membros through the same vocabulary); the last four are the states
- * of a delivered event (Eventos).
+ * states of an e-mail (Acessos, and Membros through the same vocabulary); the rest are the states of a
+ * delivered event (Eventos). Phase 10.1 (UI-D-758) appended `event_ended` and `event_cancelled`.
  */
 export const ACCESS_PILL_STATES = [
   'active',
@@ -13,6 +13,8 @@ export const ACCESS_PILL_STATES = [
   'no_account',
   'unknown_product',
   'ignored',
+  'event_ended',
+  'event_cancelled',
 ] as const;
 export type AccessPillState = (typeof ACCESS_PILL_STATES)[number];
 
@@ -30,6 +32,8 @@ const TONE: Record<AccessPillState, StatusTone> = {
   unknown_product: 'warning',
   blocked: 'danger',
   ignored: 'neutral',
+  event_ended: 'warning',
+  event_cancelled: 'warning',
 };
 
 export interface AccessStatePillProps {
