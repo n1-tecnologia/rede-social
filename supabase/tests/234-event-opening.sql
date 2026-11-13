@@ -21,10 +21,19 @@ begin;
 --    one microsecond before `now()`, equal to `now()`, one microsecond after), and `app.event_sale_ready` says
 --    whether the sale is open IGNORING the clock; across the whole matrix (module on or off, gateway connected or
 --    not, link missing, not https, event soft-deleted, no mapping) the link is non-null exactly when the sale is
---    ready and the opening has come. 4. and 5. are appended by the next tasks of the plan.
+--    ready and the opening has come.
+--
+-- 4. THE LOCK TRIGGER AND THE RESET (plan 04, D-783, D-793, OPEN-16, OPEN-19, EP-33, EP-34, EP-35, T-10.2-02,
+--    T-10.2-04): `events_opening_guard` refuses (23514, constraint `events_opening_locked`, message
+--    `opening_locked`) every change of the opening once a row of origin `ticket` exists, for the superuser
+--    session, `service_role` and the tenant admin lane alike; an event with no attendance, only a courtesy or
+--    only a plain rsvp can have its opening set, moved and cleared; the same value, a title edit and a soft
+--    delete never meet it; a fully refunded sale lifts the lock (the revoke definer deletes the going ticket) and
+--    a refunded checked-in ticket (kept and flagged) keeps it; `app.event_ticket_reset` clears the opening and
+--    turns the courtesy rows back to rsvp for the admin of the tenant only. 5. is appended by the next task.
 --
 -- Fixture ids use the `1e320000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(34);
+select plan(74);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-opn-a', 'Abertura A', '1e320000-0000-4000-8000-000000000001');
@@ -240,6 +249,185 @@ reset role;
 update public.payment_products set checkout_url = 'https://pay.example.test/f9' where event_id = tests.op('f9');
 alter table public.payment_products add constraint payment_products_url_chk
   check (checkout_url is null or (checkout_url ~ '^https://[^[:space:]]+$' and length(checkout_url) <= 2048));
+
+-- ── 4. the lock trigger and the reset (plan 04, D-783, D-793, OPEN-16, OPEN-19) ────────────────
+-- `tests.try_opening` writes the opening as the CURRENT role and returns what the database answered:
+-- 'ok', or 'sqlstate|constraint|message' (the exception block rolls the failed write back).
+create function tests.try_opening(p_event uuid, p_value timestamptz) returns text
+language plpgsql as $$
+declare
+  v_state text;
+  v_con text;
+  v_msg text;
+begin
+  update public.events set registration_opens_at = p_value where id = p_event;
+  return 'ok';
+exception when others then
+  get stacked diagnostics v_state = returned_sqlstate, v_con = constraint_name, v_msg = message_text;
+  return v_state || '|' || coalesce(v_con, '') || '|' || v_msg;
+end
+$$;
+
+-- D1 no attendance | D2 only a courtesy | D3 only a plain rsvp | D4 a ticket | D5 ticket added in the same
+-- transaction | D6 one going ticket (refunded below) | D7 one checked-in ticket (refunded below; it started an hour
+-- ago, so the door was open) | D8, D9, DA reset cases | DB reset with a ticket | DC tenant B's event with a ticket.
+-- Openings 8 days ahead (the events start in 10 days) except D7.
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, registration_opens_at) values
+  (tests.op('d1'), tests.op('1'), tests.op('a1'), 'D1', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null),
+  (tests.op('d2'), tests.op('1'), tests.op('a1'), 'D2', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null),
+  (tests.op('d3'), tests.op('1'), tests.op('a1'), 'D3', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null),
+  (tests.op('d4'), tests.op('1'), tests.op('a1'), 'D4', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '8 days'),
+  (tests.op('d5'), tests.op('1'), tests.op('a1'), 'D5', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '8 days'),
+  (tests.op('d6'), tests.op('1'), tests.op('a1'), 'D6', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '8 days'),
+  (tests.op('d7'), tests.op('1'), tests.op('a1'), 'D7', 'in_person', 'Sede', 'Rua 1', now() - interval '1 hour', now() + interval '2 hours', now() - interval '2 hours'),
+  (tests.op('d8'), tests.op('1'), tests.op('a1'), 'D8', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '8 days'),
+  (tests.op('d9'), tests.op('1'), tests.op('a1'), 'D9', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '8 days'),
+  (tests.op('da'), tests.op('1'), tests.op('a1'), 'DA', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '8 days'),
+  (tests.op('db'), tests.op('1'), tests.op('a1'), 'DB', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '8 days'),
+  (tests.op('dc'), tests.op('2'), tests.op('b1'), 'DC', 'in_person', 'Sede', 'Rua B', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '8 days');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.op('1'), tests.op('d2'), tests.op('c1'), 'going', now(), 'courtesy'),
+  (tests.op('1'), tests.op('d3'), tests.op('c1'), 'going', now(), 'rsvp'),
+  (tests.op('1'), tests.op('d8'), tests.op('c5'), 'going', now(), 'courtesy'),
+  (tests.op('1'), tests.op('d9'), tests.op('c6'), 'going', now(), 'courtesy'),
+  (tests.op('1'), tests.op('da'), tests.op('c1'), 'going', now(), 'courtesy'),
+  (tests.op('1'), tests.op('db'), tests.op('c1'), 'going', now(), 'courtesy');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values
+  (tests.op('1'), tests.op('d4'), tests.op('c2'), 'going', now(), 'ticket', 'fake', 'ORD-OPN-D4'),
+  (tests.op('1'), tests.op('d6'), tests.op('c3'), 'going', now(), 'ticket', 'fake', 'ORD-OPN-D6'),
+  (tests.op('1'), tests.op('db'), tests.op('c2'), 'going', now(), 'ticket', 'fake', 'ORD-OPN-DB'),
+  (tests.op('2'), tests.op('dc'), tests.op('b1'), 'going', now(), 'ticket', 'fake', 'ORD-OPN-DC');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, checked_in_at, checkin_via, origin, order_provider, order_ref) values
+  (tests.op('1'), tests.op('d7'), tests.op('c4'), 'checked_in', now(), now(), 'code', 'ticket', 'fake', 'ORD-OPN-D7');
+
+-- EP-34: no attendance, only a courtesy and only a plain rsvp can be set, moved and cleared, by every writer.
+-- Round 1 (set): superuser on D1, tenant admin lane on D2, service role on D3.
+select is(tests.try_opening(tests.op('d1'), now() + interval '5 days'), 'ok', 'EP-34: superuser sets the opening of an event with no attendance');
+select tests.as_tenant(tests.op('1'), tests.op('a1'), 'admin_tenant');
+select is(tests.try_opening(tests.op('d2'), now() + interval '5 days'), 'ok', 'EP-34: the admin lane sets the opening of an event with only a courtesy');
+reset role;
+select set_config('request.jwt.claims', '', true);
+select tests.as_service();
+select is(tests.try_opening(tests.op('d3'), now() + interval '5 days'), 'ok', 'EP-34: the service role sets the opening of an event with only a plain rsvp');
+reset role;
+-- Round 2 (move): superuser on D2, admin lane on D3, service role on D1.
+select is(tests.try_opening(tests.op('d2'), now() + interval '6 days'), 'ok', 'EP-34: superuser moves the opening (only a courtesy)');
+select tests.as_tenant(tests.op('1'), tests.op('a1'), 'admin_tenant');
+select is(tests.try_opening(tests.op('d3'), now() + interval '6 days'), 'ok', 'EP-34: the admin lane moves the opening (only a plain rsvp)');
+reset role;
+select set_config('request.jwt.claims', '', true);
+select tests.as_service();
+select is(tests.try_opening(tests.op('d1'), now() + interval '6 days'), 'ok', 'EP-34: the service role moves the opening (no attendance)');
+reset role;
+-- Round 3 (clear): superuser on D3, admin lane on D1, service role on D2.
+select is(tests.try_opening(tests.op('d3'), null), 'ok', 'EP-34: superuser clears the opening (only a plain rsvp)');
+select tests.as_tenant(tests.op('1'), tests.op('a1'), 'admin_tenant');
+select is(tests.try_opening(tests.op('d1'), null), 'ok', 'EP-34: the admin lane clears the opening (no attendance)');
+reset role;
+select set_config('request.jwt.claims', '', true);
+select tests.as_service();
+select is(tests.try_opening(tests.op('d2'), null), 'ok', 'EP-34: the service role clears the opening (only a courtesy)');
+reset role;
+select is(
+  (select count(*)::int from public.events where id in (tests.op('d1'), tests.op('d2'), tests.op('d3')) and registration_opens_at is null),
+  3, 'EP-34: all three events read a null opening again');
+
+-- D4 holds a ticket: every writer is refused, probed by SQLSTATE, constraint name and message (T-10.2-02).
+select is(tests.try_opening(tests.op('d4'), now() + interval '5 days'), '23514|events_opening_locked|opening_locked',
+  'D-783/OPEN-16: superuser moving the opening of an event with a ticket is refused (23514, events_opening_locked, opening_locked)');
+select set_config('request.jwt.claims', '', true);
+select tests.as_service();
+select is(tests.try_opening(tests.op('d4'), now() + interval '5 days'), '23514|events_opening_locked|opening_locked',
+  'D-783/OPEN-16: the service role is refused the same way');
+reset role;
+select tests.as_tenant(tests.op('1'), tests.op('a1'), 'admin_tenant');
+select is(tests.try_opening(tests.op('d4'), now() + interval '5 days'), '23514|events_opening_locked|opening_locked',
+  'D-783/OPEN-16: the tenant admin lane is refused the same way');
+select is(tests.try_opening(tests.op('d4'), null), '23514|events_opening_locked|opening_locked',
+  'D-783: clearing the opening of an event with a ticket is refused too');
+reset role;
+select is((select registration_opens_at from public.events where id = tests.op('d4')), now() + interval '8 days',
+  'D-783: the opening of the locked event reads back unchanged');
+select is(tests.try_opening(tests.op('d4'), now() + interval '8 days'), 'ok',
+  'EP-33: setting the opening to the value it already holds is accepted even with a ticket (the WHEN clause filters it)');
+select lives_ok($$ update public.events set title = 'D4 renamed' where id = '1e320000-0000-4000-8000-0000000000d4' $$,
+  'EP-33: a title edit of the locked event never meets the trigger');
+select lives_ok($$ update public.events set deleted_at = now() where id = '1e320000-0000-4000-8000-0000000000d4' $$,
+  'EP-33: a soft delete of the locked event never meets the trigger');
+
+-- EP-33: a ticket row created in the same transaction before the edit locks it (D5 had none until now).
+select is(tests.try_opening(tests.op('d5'), now() + interval '7 days'), 'ok', 'EP-33 control: D5 has no ticket yet, so its opening moves');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values
+  (tests.op('1'), tests.op('d5'), tests.op('c3'), 'going', now(), 'ticket', 'fake', 'ORD-OPN-D5');
+select is(tests.try_opening(tests.op('d5'), now() + interval '6 days'), '23514|events_opening_locked|opening_locked',
+  'EP-33: a ticket row created in the same transaction locks the date at once');
+
+-- EP-35: sale then edit refused; refund (the revoke definer) then edit accepted.
+select is(tests.try_opening(tests.op('d6'), now() + interval '7 days'), '23514|events_opening_locked|opening_locked',
+  'EP-35: a sold event refuses the edit');
+select set_config('request.jwt.claims', '', true);
+select tests.as_service();
+select results_eq($$ select outcome from app.event_gateway_revoke(tests.op('1'), 'fake', 'ORD-OPN-D6') $$, $$ values ('removed'::text) $$,
+  'EP-35 fixture: the refund deletes the only going ticket');
+reset role;
+select is(tests.try_opening(tests.op('d6'), now() + interval '7 days'), 'ok',
+  'D-783/EP-35: after a full refund the edit is accepted (the lock is lifted)');
+select is((select registration_opens_at from public.events where id = tests.op('d6')), now() + interval '7 days',
+  'EP-35: ...and the new opening is what the row reads');
+
+-- EP-35: a refunded CHECKED-IN ticket is kept and flagged, so it still locks (the safe side).
+select set_config('request.jwt.claims', '', true);
+select tests.as_service();
+select results_eq($$ select outcome from app.event_gateway_revoke(tests.op('1'), 'fake', 'ORD-OPN-D7') $$, $$ values ('kept'::text) $$,
+  'EP-35 fixture: the refund of a checked-in ticket keeps the row');
+reset role;
+select is((select count(*)::int from public.event_attendances where event_id = tests.op('d7') and origin = 'ticket' and refunded_at is not null),
+  1, 'EP-35: the kept row is flagged refunded and is still a ticket row');
+select is(tests.try_opening(tests.op('d7'), now() - interval '90 minutes'), '23514|events_opening_locked|opening_locked',
+  'D-783/EP-35: a refunded checked-in ticket still locks the date');
+select is((select registration_opens_at from public.events where id = tests.op('d7')), now() - interval '2 hours',
+  'EP-35: ...and the opening reads back unchanged');
+
+-- T-10.2-04: a ticket row of tenant B's event never locks tenant A's event.
+select is(tests.try_opening(tests.op('d1'), now() + interval '4 days'), 'ok',
+  'T-10.2-04: tenant A''s event D1 moves its opening while tenant B''s event holds a ticket');
+select is(tests.try_opening(tests.op('dc'), now() + interval '4 days'), '23514|events_opening_locked|opening_locked',
+  'T-10.2-04 control: tenant B''s own event with its ticket is locked');
+
+-- ── the reset (D-793, OPEN-19) ────────────────────────────────────────────────────────────────
+select tests.as_tenant(tests.op('1'), tests.op('a1'), 'admin_tenant');
+select lives_ok($$ select app.event_ticket_reset('1e320000-0000-4000-8000-0000000000d8') $$, 'D-793: the admin of the tenant resets D8');
+reset role;
+select is((select registration_opens_at is null from public.events where id = tests.op('d8')), true, 'OPEN-19: the reset leaves the opening null');
+select is((select origin from public.event_attendances where event_id = tests.op('d8') and user_id = tests.op('c5')), 'rsvp',
+  'D-747 kept: ...and the courtesy row is origin rsvp again');
+
+-- A member of the tenant: accepted, nothing changes (the admin claim is checked inside).
+select tests.as_tenant(tests.op('1'), tests.op('c1'));
+select lives_ok($$ select app.event_ticket_reset('1e320000-0000-4000-8000-0000000000d9') $$, 'T-10.2-04: a member calling the reset is accepted and changes nothing');
+reset role;
+select is((select (registration_opens_at = now() + interval '8 days')::text || ':' || (select origin from public.event_attendances where event_id = tests.op('d9') and user_id = tests.op('c6'))
+             from public.events where id = tests.op('d9')),
+  'true:courtesy', 'T-10.2-04: ...the opening and the courtesy row of D9 are untouched');
+
+-- Tenant B's admin on tenant A's event: nothing changes, nothing raises (EP-48, one direction; section 5 swaps).
+select tests.as_tenant(tests.op('2'), tests.op('b1'), 'admin_tenant');
+select lives_ok($$ select app.event_ticket_reset('1e320000-0000-4000-8000-0000000000da') $$, 'T-10.2-04: tenant B''s admin resetting tenant A''s event is accepted and changes nothing');
+reset role;
+select is((select (registration_opens_at = now() + interval '8 days')::text || ':' || (select origin from public.event_attendances where event_id = tests.op('da') and user_id = tests.op('c1'))
+             from public.events where id = tests.op('da')),
+  'true:courtesy', 'T-10.2-04: ...tenant A''s opening and courtesy row of DA are untouched');
+
+-- EP-47: an unknown id changes nothing and raises nothing.
+select tests.as_tenant(tests.op('1'), tests.op('a1'), 'admin_tenant');
+select lives_ok($$ select app.event_ticket_reset(gen_random_uuid()) $$, 'EP-47: the reset of an unknown id raises nothing');
+-- The backstop: with a ticket row the reset raises the lock refusal and the whole call rolls back.
+select throws_ok($$ select app.event_ticket_reset('1e320000-0000-4000-8000-0000000000db') $$, '23514', 'opening_locked',
+  'D-783 backstop: the reset of an event that still holds a ticket raises opening_locked');
+reset role;
+select is((select (registration_opens_at = now() + interval '8 days')::text || ':' || (select origin from public.event_attendances where event_id = tests.op('db') and user_id = tests.op('c1'))
+             from public.events where id = tests.op('db')),
+  'true:courtesy', 'D-783 backstop: ...the opening stays and the courtesy row stays a courtesy (the call rolled back as a whole)');
 
 select * from finish();
 rollback;

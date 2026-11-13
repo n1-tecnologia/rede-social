@@ -89,3 +89,57 @@ $$;
 --> statement-breakpoint
 revoke all on function app.event_sale_ready(uuid) from public, anon;--> statement-breakpoint
 grant execute on function app.event_sale_ready(uuid) to authenticated;--> statement-breakpoint
+
+create or replace function app.event_opening_guard()
+returns trigger
+language plpgsql volatile security definer set search_path = '' as $$
+begin
+  if exists (
+       select 1
+         from public.event_attendances a
+        where a.tenant_id = new.tenant_id
+          and a.event_id = new.id
+          and a.origin = 'ticket'
+     ) then
+    raise exception 'opening_locked'
+      using errcode = '23514', constraint = 'events_opening_locked';
+  end if;
+  return new;
+end
+$$;
+--> statement-breakpoint
+revoke all on function app.event_opening_guard() from public, anon, authenticated;--> statement-breakpoint
+
+create or replace trigger events_opening_guard
+  before update of registration_opens_at on public.events
+  for each row
+  when (old.registration_opens_at is distinct from new.registration_opens_at)
+  execute function app.event_opening_guard();--> statement-breakpoint
+
+create or replace function app.event_ticket_reset(p_event uuid)
+returns void
+language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_t uuid := app.tenant_id();
+begin
+  if v_t is null or p_event is null or app.tenant_role() is distinct from 'admin_tenant' then
+    return;
+  end if;
+
+  update public.event_attendances a
+     set origin = 'rsvp'
+   where a.tenant_id = v_t
+     and a.event_id = p_event
+     and a.origin = 'courtesy';
+
+  -- D-793: turning the ticket off clears the date, in the mapping removal's transaction.
+  update public.events e
+     set registration_opens_at = null
+   where e.tenant_id = v_t
+     and e.id = p_event
+     and e.registration_opens_at is not null;
+end
+$$;
+--> statement-breakpoint
+revoke all on function app.event_ticket_reset(uuid) from public, anon;--> statement-breakpoint
+grant execute on function app.event_ticket_reset(uuid) to authenticated;
