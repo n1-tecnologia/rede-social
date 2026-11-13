@@ -55,12 +55,15 @@ const SEEDED_UPCOMING = {
  * adds `category` and `capacity` (and moves `address` into the list item too). 2026-11-09 (Phase 12.3,
  * plan 06) adds `posterAssetId` and `posterVariantWidths`: the tenant's optional vertical poster, never
  * member data. 2026-11-13 (Phase 10.1, plan 06) adds `ticketPriceCents`: the event's optional reference
- * price in integer cents, a label the tenant publishes, never member data.
+ * price in integer cents, a label the tenant publishes, never member data. 2026-11-13 (Phase 10.1, plan 07)
+ * adds `paid`, `checkoutUrl` (the detail's alone), `viewerOrigin` and `viewerRefunded` (the caller's OWN
+ * row only): the paid flag and the sale link are tenant facts, the other two are the caller's own.
  */
 const DETAIL_KEYS = [
   'address',
   'capacity',
   'category',
+  'checkoutUrl',
   'confirmedCount',
   'coverAssetId',
   'coverVariantWidths',
@@ -68,6 +71,7 @@ const DETAIL_KEYS = [
   'endsAt',
   'format',
   'id',
+  'paid',
   'posterAssetId',
   'posterVariantWidths',
   'presentCount',
@@ -78,6 +82,8 @@ const DETAIL_KEYS = [
   'title',
   'venueName',
   'viewerCheckedInAt',
+  'viewerOrigin',
+  'viewerRefunded',
   'viewerRespondedAt',
   'viewerStatus',
 ];
@@ -387,7 +393,9 @@ describe('events rsvp', () => {
     // a list key since 2026-10-03: the poster prints the city; the schedule is detail-only).
     const item = (await walk('upcoming')).find((entry) => entry.id === SEEDED_UPCOMING.demo);
     expect(Object.keys(item ?? {}).sort()).toEqual(
-      DETAIL_KEYS.filter((key) => !['description', 'schedule', 'viewerRespondedAt'].includes(key)),
+      DETAIL_KEYS.filter(
+        (key) => !['checkoutUrl', 'description', 'schedule', 'viewerRespondedAt'].includes(key),
+      ),
     );
   });
 

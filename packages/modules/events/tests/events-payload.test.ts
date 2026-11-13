@@ -559,6 +559,44 @@ describe('2026-10-07 — the schedule is written and read with the event, in the
     expect((await getEvent(context(), EVENT_ID)).schedule).toEqual([]);
   });
 
+  it('9k. 10.1-07: the detail maps paid, the viewer origin and the sale link; the link is read in the detail statement only', async () => {
+    script = [
+      [
+        {
+          ...row,
+          description: '',
+          viewer_responded_at: null,
+          paid: true,
+          viewer_origin: 'before_ticket',
+          viewer_refunded: false,
+          checkout_url: 'https://pay.example.com/x',
+        },
+      ],
+    ];
+    const detail = await getEvent(context(), EVENT_ID);
+    expect(detail).toMatchObject({
+      paid: true,
+      viewerOrigin: 'before_ticket',
+      viewerRefunded: false,
+      checkoutUrl: 'https://pay.example.com/x',
+    });
+    expect(statements[0]).toContain('app.event_checkout_url');
+    expect(statements[0]).toContain('app.event_is_paid');
+  });
+
+  it('9l. 10.1-07: a link that is not https is never passed on, and a row with none carries no key', async () => {
+    script = [
+      [{ ...row, description: '', viewer_responded_at: null, checkout_url: 'http://pay.test/x' }],
+    ];
+    expect((await getEvent(context(), EVENT_ID)).checkoutUrl).toBeNull();
+    script = [[{ ...row, description: '', viewer_responded_at: null, checkout_url: '' }]];
+    expect((await getEvent(context(), EVENT_ID)).checkoutUrl).toBeNull();
+    script = [[{ ...row, description: '', viewer_responded_at: null }]];
+    const bare = await getEvent(context(), EVENT_ID);
+    expect(Object.keys(bare)).not.toContain('checkoutUrl');
+    expect(Object.keys(bare)).not.toContain('paid');
+  });
+
   it('9k. getEventForEdit returns the schedule for the edit form, [] when absent', async () => {
     const edit = {
       id: EVENT_ID,

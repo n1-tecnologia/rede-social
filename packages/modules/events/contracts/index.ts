@@ -121,6 +121,14 @@ export type EventStatus = (typeof EVENT_STATUSES)[number];
  * that checked in (its `respondedAt` is kept), and `walk_in` is a check-in with no prior `going`.
  */
 export const ATTENDANCE_STATUSES = ['going', 'not_going', 'checked_in', 'walk_in'] as const;
+
+/**
+ * Phase 10.1 (D-748, D-751): where a presence in a PAID event came from. `ticket` (a gateway sale),
+ * `courtesy` (the admin's release) and `before_ticket` (a plain Vou given before the event was mapped).
+ * Derived at read time from the stored `origin` (`rsvp` | `ticket` | `courtesy`) and the paid flag.
+ */
+export const VIEWER_ORIGINS = ['ticket', 'courtesy', 'before_ticket'] as const;
+export type ViewerOrigin = (typeof VIEWER_ORIGINS)[number];
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 
 /** D-205: the two answers a member may give (`Vou` / `Não vou`). A recorded `Não vou` is a value. */
@@ -175,6 +183,9 @@ export const EVENT_ISSUES = [
   // Não vou. External contract once released: these strings are never renamed (TICK-23).
   'payment_required',
   'ticket_locked',
+  // Phase 10.1-07 (D-743): a courtesy is for a PAID event only, and only a courtesy is removable by hand.
+  'event_not_paid',
+  'not_courtesy',
 ] as const;
 export type EventIssue = (typeof EVENT_ISSUES)[number];
 
@@ -444,6 +455,19 @@ export const eventSummarySchema = z
      * API that predates the column (release order: migrations, web, API).
      */
     ticketPriceCents: z.number().int().nullable().optional(),
+    /**
+     * Phase 10.1 (D-746, D-753): true iff the event has a payment mapping, WHATEVER the `payments` module
+     * flag says (a module turned off never reopens the instant Vou). Optional like the price.
+     */
+    paid: z.boolean().optional(),
+    /**
+     * Phase 10.1 (D-748): where the CALLER's own presence came from: `ticket`, `courtesy`, `before_ticket`
+     * (a plain Vou given before the event became paid), or null (no presence, or a free event). Only the
+     * caller's own row is ever read (D-206).
+     */
+    viewerOrigin: z.enum(VIEWER_ORIGINS).nullable().optional(),
+    /** Phase 10.1 (D-751): the caller's own ticket row was refunded after check-in. */
+    viewerRefunded: z.boolean().optional(),
     startsAt: z.string(),
     endsAt: z.string(),
     status: z.enum(EVENT_STATUSES),
@@ -482,6 +506,12 @@ export const eventDetailSchema = eventSummarySchema
     description: z.string(),
     viewerRespondedAt: z.string().nullable(),
     schedule: z.array(eventScheduleItemSchema).optional(),
+    /**
+     * Phase 10.1 (D-746, TICK-16): the purchase link, from `app.event_checkout_url` per request. Non-null
+     * (and `https:`) exactly when the event is paid AND the sale is open (module on, gateway connected);
+     * null otherwise. The DETAIL's alone: the list never carries it.
+     */
+    checkoutUrl: z.string().nullable().optional(),
   })
   .strict();
 export type EventDetail = z.infer<typeof eventDetailSchema>;

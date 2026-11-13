@@ -31,6 +31,7 @@ import type {
   NextEvent,
   RsvpInput,
   RsvpResult,
+  ViewerOrigin,
 } from '../contracts/index';
 import { enterResultSchema, normaliseEventSchedule } from '../contracts/index';
 import { generateCheckinCode } from './checkin-code';
@@ -109,6 +110,10 @@ type EventRow = {
   poster_variant_widths?: number[] | null;
   /** Phase 10.1 (D-755). Optional in the TYPE only so a hand-built test row may omit it. */
   ticket_price_cents?: number | null;
+  /** Phase 10.1-07 (D-746, D-748). Optional in the TYPE only so a hand-built test row may omit them. */
+  paid?: boolean;
+  viewer_origin?: ViewerOrigin | null;
+  viewer_refunded?: boolean;
   status: EventStatus;
   starts_at: string;
   ends_at: string;
@@ -122,6 +127,8 @@ type EventRow = {
 type EventDetailRow = EventRow & {
   description: string;
   viewer_responded_at: string | null;
+  /** Phase 10.1-07 (TICK-16): the definer's answer, null unless the sale is open. */
+  checkout_url?: string | null;
   /** 2026-10-07. A jsonb array off the driver; `unknown` because only `toSchedule` may read it. */
   schedule?: unknown;
 };
@@ -171,7 +178,11 @@ export const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  *    VERBATIM into `141-event-attendances.sql` fact 10, so edit both together;
  *  - (2026-10-03) the poster's `category`, `capacity` and `address`: plain columns of the same row,
  *    so a page stays ONE statement (`feed-query-budget.test.ts`). `capacity` with the confirmed
- *    count beside it is everything "Últimas N vagas" needs.
+ *    count beside it is everything "Últimas N vagas" needs;
+ *  - (Phase 10.1-07, D-746, D-748) `paid` from `app.event_is_paid(e.id)` (a lateral, so the definer runs once
+ *    per row inside the SAME statement) and the viewer's OWN origin and refund flag from `me`: `ticket` or
+ *    `courtesy` as stored, `before_ticket` for a plain `rsvp` presence in a paid event, null otherwise. The
+ *    purchase link is NOT here: it is the detail's alone (`getEvent`), so the list never carries it.
  * `created_by_user_id`, and everything in `event_secrets`, are deliberately absent.
  */
 const eventColumns = sql`
@@ -193,7 +204,13 @@ const eventColumns = sql`
            me.status as viewer_status,
            to_char(me.checked_in_at at time zone 'utc', ${ISO_MICROSECONDS}) as viewer_checked_in_at,
            c.confirmed_count,
-           c.present_count`;
+           c.present_count,
+           pd.paid,
+           case when me.status in ('going','checked_in','walk_in') then
+                  case when me.origin in ('ticket','courtesy') then me.origin
+                       when pd.paid then 'before_ticket' end
+           end as viewer_origin,
+           (me.refunded_at is not null) as viewer_refunded`;
 
 /** The FROM clause of the projection; `viewerId` is always `ctx.userId`, never a caller's value. */
 const eventSource = (viewerId: string) => sql`
@@ -210,7 +227,8 @@ const eventSource = (viewerId: string) => sql`
           from event_attendances x
          where x.tenant_id = e.tenant_id
            and x.event_id = e.id
-      ) c on true`;
+      ) c on true
+      left join lateral (select app.event_is_paid(e.id) as paid) pd on true`;
 
 const eventProjection = (viewerId: string) => sql`
     select ${eventColumns}
@@ -243,6 +261,10 @@ const toEvent = (row: EventRow): EventSummary => ({
   // `?? 0` only covers a driver that returns nothing for an aggregate; `count(*)` is never null.
   confirmedCount: Number(row.confirmed_count ?? 0),
   presentCount: Number(row.present_count ?? 0),
+  // Phase 10.1-07: present only when the row carries them (a hand-built row may not), never computed on.
+  ...(row.paid === undefined ? {} : { paid: row.paid === true }),
+  ...(row.viewer_origin === undefined ? {} : { viewerOrigin: row.viewer_origin }),
+  ...(row.viewer_refunded === undefined ? {} : { viewerRefunded: row.viewer_refunded === true }),
 });
 
 /**
@@ -594,7 +616,8 @@ export async function getEvent(ctx: RequestContext, eventId: string): Promise<Ev
       select ${eventColumns},
              e.description,
              e.schedule,
-             to_char(me.responded_at at time zone 'utc', ${ISO_MICROSECONDS}) as viewer_responded_at
+             to_char(me.responded_at at time zone 'utc', ${ISO_MICROSECONDS}) as viewer_responded_at,
+             app.event_checkout_url(e.id) as checkout_url
       ${eventSource(ctx.userId)}
        where e.tenant_id = ${ctx.tenantId}::uuid
          and e.id = ${eventId}::uuid
@@ -608,8 +631,16 @@ export async function getEvent(ctx: RequestContext, eventId: string): Promise<Ev
     description: row.description,
     viewerRespondedAt: row.viewer_responded_at,
     schedule: toSchedule(row.schedule),
+    // TICK-16: only ever the definer's answer; an empty or non-`https:` string is never passed on.
+    ...(row.checkout_url === undefined
+      ? {}
+      : { checkoutUrl: isHttpsLink(row.checkout_url) ? row.checkout_url : null }),
   };
 }
+
+/** The sale link guard on the way out: an `https:` string or null, never anything else (TICK-16). */
+const isHttpsLink = (value: string | null | undefined): value is string =>
+  typeof value === 'string' && value.startsWith('https:');
 
 /**
  * The guard trigger's refusals (`20260927154335_event_attendance_guard.sql`), by the constraint name

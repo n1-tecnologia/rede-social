@@ -185,6 +185,8 @@ describe('eventInputSchema — the refusal vocabulary', () => {
       'photo_invalid',
       'payment_required',
       'ticket_locked',
+      'event_not_paid',
+      'not_courtesy',
     ]);
   });
 });
@@ -843,5 +845,32 @@ describe('2026-11-13 — the reference price of a ticket (10.1-06, D-755, EP-02,
     expect(
       eventEditSchema.safeParse({ ...editBody, price: 8000, posterAssetId: asset }).success,
     ).toBe(false);
+  });
+
+  it('43. 10.1-07: paid, viewerOrigin and viewerRefunded are OPTIONAL on the summary and the detail, the link on the detail alone', () => {
+    for (const schema of [eventSummarySchema, eventDetailSchema]) {
+      for (const key of ['paid', 'viewerOrigin', 'viewerRefunded'] as const) {
+        expect(Object.keys(schema.shape), key).toContain(key);
+        expect(schema.shape[key].isOptional(), key).toBe(true);
+      }
+    }
+    expect(Object.keys(eventDetailSchema.shape)).toContain('checkoutUrl');
+    expect(eventDetailSchema.shape.checkoutUrl.isOptional()).toBe(true);
+    // The list item has no sale link: a strict schema refuses the key.
+    expect(Object.keys(eventSummarySchema.shape)).not.toContain('checkoutUrl');
+    expect(eventDetailSchema.safeParse(detail).success).toBe(true);
+    for (const origin of ['ticket', 'courtesy', 'before_ticket', null]) {
+      expect(
+        eventDetailSchema.safeParse({ ...detail, paid: true, viewerOrigin: origin }).success,
+        String(origin),
+      ).toBe(true);
+    }
+    expect(eventDetailSchema.safeParse({ ...detail, viewerOrigin: 'rsvp' }).success).toBe(false);
+    expect(eventDetailSchema.safeParse({ ...detail, viewerRefunded: true }).success).toBe(true);
+    expect(
+      eventDetailSchema.safeParse({ ...detail, checkoutUrl: 'https://pay.example.com/x' }).success,
+    ).toBe(true);
+    expect(eventDetailSchema.safeParse({ ...detail, checkoutUrl: null }).success).toBe(true);
+    expect(eventDetailSchema.safeParse({ ...detail, checkoutUrl: 5 }).success).toBe(false);
   });
 });
