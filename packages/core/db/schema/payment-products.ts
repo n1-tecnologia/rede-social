@@ -29,6 +29,12 @@ const kindList = sql.raw(PAYMENT_PRODUCT_KINDS.map((kind) => `'${kind}'`).join('
  * `app.payments_checkout_url()` by name). So `target_id` has NO Drizzle reference: its foreign key to
  * `store_products(id)` is hand SQL in plan 06 (MOD-02: the kernel does not import a module's schema).
  *
+ * Phase 10.1 (D-740, D-744, D-745): the third kind `event` is the ticket of ONE event. It carries its
+ * own nullable `event_id`, NOT `target_id`: `target_id` has an unconditional foreign key to the store,
+ * so reusing it is impossible. `event_id` has NO Drizzle reference either (the kernel cannot import
+ * the events schema, MOD-02): its composite foreign key `(tenant_id, event_id) -> events (tenant_id, id)`
+ * is hand SQL in `*_event_tickets_fk.sql`. `payment_products_event_uq` allows one mapping per event.
+ *
  * THE UNIQUE INDEX IS GLOBAL, ON PURPOSE: `unique (provider, external_product_id)` means a gateway
  * product can never mean two things, and the webhook resolves tenant and kind with one lookup. A
  * second tenant that registers the same id hits it (SQLSTATE 23505); plan 09 turns that into
@@ -55,7 +61,7 @@ export const paymentProducts = pgTable(
       .references(() => tenants.id, { onDelete: 'cascade' }),
     /** A FORMAT, never an enum (D-486). */
     provider: text().notNull(),
-    /** `access` | `store_product`. */
+    /** `access` | `store_product` | `event`. */
     kind: text().notNull(),
     /** Access products only: what the admin calls it. Null for a store product. */
     name: text(),
@@ -64,6 +70,8 @@ export const paymentProducts = pgTable(
     checkoutUrl: text('checkout_url'),
     /** Store products only: the `store_products.id`. FK is hand SQL in plan 06. */
     targetId: uuid('target_id'),
+    /** Event tickets only (10.1, D-744): the `events.id`. The composite FK is hand SQL (see the header). */
+    eventId: uuid('event_id'),
     /** The admin who registered it. No foreign key, on purpose: a deleted account must not block history. */
     createdByUserId: uuid('created_by_user_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -84,6 +92,7 @@ export const paymentProducts = pgTable(
       'payment_products_target_chk',
       sql`(${t.kind} = 'store_product') = (${t.targetId} is not null)`,
     ),
+    check('payment_products_event_chk', sql`(${t.kind} = 'event') = (${t.eventId} is not null)`),
     check(
       'payment_products_url_chk',
       sql`${t.checkoutUrl} is null or (${t.checkoutUrl} ~ '^https://[^[:space:]]+$' and length(${t.checkoutUrl}) <= 2048)`,
@@ -94,6 +103,10 @@ export const paymentProducts = pgTable(
     uniqueIndex('payment_products_target_uq')
       .on(t.tenantId, t.targetId)
       .where(sql`${t.kind} = 'store_product'`),
+    // An event carries at most one mapping (D-745).
+    uniqueIndex('payment_products_event_uq')
+      .on(t.tenantId, t.eventId)
+      .where(sql`${t.kind} = 'event'`),
     // The Pagamentos list: this tenant's mappings of one kind, oldest first.
     index('payment_products_tenant_kind_idx').on(t.tenantId, t.kind, t.createdAt, t.id),
     pgPolicy('payment_products_select_admin', {

@@ -84,11 +84,21 @@ export const PAYMENT_EVENT_OUTCOMES = [
   'stale',
   'no_effect',
   'currency_unsupported',
+  // Phase 10.1 (D-741, TICK-23): what the apply job did with an event ticket.
+  'ticket_granted',
+  'ticket_granted_over_limit',
+  'ticket_revoked',
+  'ticket_kept',
+  'event_ended',
+  'event_cancelled',
 ] as const;
 export type PaymentEventOutcome = (typeof PAYMENT_EVENT_OUTCOMES)[number];
 
-/** What a gateway product id stands for (D-488): the platform door, or a store product. */
-export const PAYMENT_PRODUCT_KINDS = ['access', 'store_product'] as const;
+/**
+ * What a gateway product id stands for (D-488): the platform door, a store product, or (Phase 10.1,
+ * D-740) the ticket of one event.
+ */
+export const PAYMENT_PRODUCT_KINDS = ['access', 'store_product', 'event'] as const;
 export type PaymentProductKind = (typeof PAYMENT_PRODUCT_KINDS)[number];
 
 /**
@@ -160,6 +170,11 @@ export const PAYMENTS_ISSUES = [
   'no_membership',
   'nothing_to_update',
   'not_grantable',
+  // Phase 10.1 (D-741, TICK-23): the event ticket's mapping and apply lanes.
+  'link_required',
+  'ticket_locked',
+  'event_ended',
+  'event_cancelled',
 ] as const;
 export type PaymentsIssue = (typeof PAYMENTS_ISSUES)[number];
 
@@ -443,7 +458,14 @@ export type AccessResult = z.infer<typeof accessResultSchema>;
  * What the Eventos list says about a delivery. The apply job's `no_membership` reads `no_account` on the
  * screen; `received` (transient) and `failed` (operational) are never listed (assumption A-P29).
  */
-export const EVENT_ITEM_STATES = ['applied', 'no_account', 'unknown_product', 'ignored'] as const;
+export const EVENT_ITEM_STATES = [
+  'applied',
+  'no_account',
+  'unknown_product',
+  'ignored',
+  'event_ended',
+  'event_cancelled',
+] as const;
 export type EventItemState = (typeof EVENT_ITEM_STATES)[number];
 
 /** How many events the list answers: the latest 50, never paged, never searchable (D-503). */

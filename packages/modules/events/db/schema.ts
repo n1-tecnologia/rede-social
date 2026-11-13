@@ -105,6 +105,11 @@ export const events = pgTable(
      */
     capacity: integer(),
     /**
+     * Phase 10.1 (D-755): the ticket's REFERENCE price in cents, for display next to the paid-ticket
+     * link. NULLABLE: no price shown. Nothing reads it for any calculation; the gateway is the price.
+     */
+    ticketPriceCents: integer('ticket_price_cents'),
+    /**
      * The event's programme ("Cronograma", quick 261007-n1g): up to `EVENT_SCHEDULE_MAX_ITEMS` moments of
      * `{ day, time, title }`, written as a WHOLE with the event (the PUT is a whole-event replacement,
      * D-214) and read WITH it, never queried, filtered or joined per item. That is why it is a column
@@ -159,6 +164,11 @@ export const events = pgTable(
     ),
     // A limit of at least one seat; NULL is "no limit".
     check('events_capacity_chk', sql`${t.capacity} is null or ${t.capacity} between 1 and 100000`),
+    // D-755: a reference price of at least one cent; NULL is "no price".
+    check(
+      'events_ticket_price_chk',
+      sql`${t.ticketPriceCents} is null or ${t.ticketPriceCents} between 1 and 10000000`,
+    ),
     // The programme is an array of at most 200 well-formed moments (raised from 30 by Phase 09.3, D-558): day 1..31 (an integer), time HH:MM on
     // the 24-hour clock, a non-blank title of 1..80 characters. Extra keys inside an item are tolerated
     // here on purpose: the API's strict item schema is what forbids them. `jsonb_path_exists` is
@@ -273,6 +283,18 @@ export const eventAttendances = pgTable(
     checkedInAt: timestamp('checked_in_at', { withTimezone: true }),
     /** `'code' | 'online'`, present exactly when checked in. */
     checkinVia: text('checkin_via'),
+    /**
+     * Phase 10.1 (D-752): where the presence came from. `rsvp` is the member's own answer (the default,
+     * so every shipped writer stays valid), `ticket` a paid order, `courtesy` an admin's gift. A presence
+     * made before an event was linked to a ticket stays `rsvp`: it is derived, never backfilled.
+     */
+    origin: text().notNull().default('rsvp'),
+    /** The gateway of the order, a FORMAT like `payment_products.provider`. Null unless `origin = 'ticket'`. */
+    orderProvider: text('order_provider'),
+    /** The gateway's order reference. Present exactly when `origin = 'ticket'` (D-748). */
+    orderRef: text('order_ref'),
+    /** A refund or chargeback of the ticket (D-748). Only ever set on a ticket row. */
+    refundedAt: timestamp('refunded_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -314,6 +336,29 @@ export const eventAttendances = pgTable(
       'event_attendances_answered_chk',
       sql`${t.status} = 'walk_in' or ${t.respondedAt} is not null`,
     ),
+    // Phase 10.1 (D-752). NO status is added: the status CHECK and the count expressions stay as they were.
+    check('event_attendances_origin_chk', sql`${t.origin} in ('rsvp','ticket','courtesy')`),
+    check(
+      'event_attendances_order_pair_chk',
+      sql`(${t.orderProvider} is null) = (${t.orderRef} is null)`,
+    ),
+    check(
+      'event_attendances_order_chk',
+      sql`(${t.origin} = 'ticket') = (${t.orderRef} is not null)`,
+    ),
+    check(
+      'event_attendances_order_provider_chk',
+      sql`${t.orderProvider} is null or ${t.orderProvider} ~ '^[a-z][a-z0-9_]{1,30}$'`,
+    ),
+    check('event_attendances_refunded_chk', sql`${t.refundedAt} is null or ${t.origin} = 'ticket'`),
+    // One order is one presence, per tenant: the arbiter of the apply job's upsert (plan 04).
+    uniqueIndex('event_attendances_order_uq')
+      .on(t.tenantId, t.orderProvider, t.orderRef)
+      .where(sql`${t.orderRef} is not null`),
+    // The paid presences of one event (the Pagamentos and Presenças lookups).
+    index('event_attendances_ticket_idx')
+      .on(t.tenantId, t.eventId)
+      .where(sql`${t.origin} = 'ticket'`),
     pgPolicy('event_attendances_tenant_select', {
       for: 'select',
       to: authenticatedRole,
