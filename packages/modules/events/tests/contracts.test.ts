@@ -382,6 +382,7 @@ describe('06-06 — the online enter contract (an API-to-BFF answer)', () => {
       'confirm_first',
       'ended',
       'cancelled',
+      'ticket_required',
     ]);
     expect([...ENTER_PASSING_OUTCOMES].sort()).toEqual(['already', 'forward', 'recorded']);
     for (const outcome of ['forward', 'recorded', 'already'] as const) {
@@ -391,7 +392,7 @@ describe('06-06 — the online enter contract (an API-to-BFF answer)', () => {
         false,
       );
     }
-    for (const outcome of ['confirm_first', 'ended', 'cancelled'] as const) {
+    for (const outcome of ['confirm_first', 'ended', 'cancelled', 'ticket_required'] as const) {
       expect(enterResultSchema.safeParse({ outcome, meetingUrl: null }).success, outcome).toBe(
         true,
       );

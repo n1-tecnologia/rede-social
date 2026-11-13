@@ -19,8 +19,15 @@ begin;
 --    reference or `refunded_at` is 42501 (the policy pins the new row); turning the payments module flag
 --    off changes none of it (D-746). (Plan 02 task 2 extends this section with the paid-path exceptions.)
 --
+-- 3. DOORS (plan 03, D-742, T-10.1-05, T-10.1-06, T-10.1-22): `app.events_enter` and `app.events_check_in`
+--    answer `ticket_required` to a member with no presence (no row, or `not_going`) in a mapped event: a NULL
+--    URL, no walk-in row, and no guess counted (the attempts count is compared before and after a refused
+--    wrong-code call); a holder (a ticket, a courtesy, a Vou or a walk-in or a check-in made BEFORE the link,
+--    A6) passes with the old outcomes and keeps its origin and order; a FREE event is byte-identical; the
+--    cancelled, ended, closed and not_open outcomes still win; a direct walk_in insert is still refused.
+--
 -- Fixture ids use the `1e310000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(66);
+select plan(106);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-tkt-a', 'Ingresso A', '1e310000-0000-4000-8000-000000000001');
@@ -281,6 +288,213 @@ select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, u
   '23514', 'payment_required', 'T-10.1-05: a new walk_in row in a mapped event is payment_required (backstop)');
 select lives_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, checked_in_at, checkin_via) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000eb', '1e310000-0000-4000-8000-0000000000c7', 'walk_in', now(), 'code') $$,
   'control: the same walk_in in a free event is accepted (as pgTAP 141 proves)');
+reset role;
+
+
+-- ── 3. the two doors (plan 03, D-742, T-10.1-05, T-10.1-06, T-10.1-22) ──────────────────────────
+-- `20261113004658_event_ticket_doors.sql`: app.events_enter and app.events_check_in answer `ticket_required` to a
+-- member with no presence in a MAPPED event, with a NULL URL and before any guess is counted.
+-- f1 mapped in person, window open | f2 mapped online, window open | f3 mapped online, before the window |
+-- f4 free in person / f5 free online, window open | f9 free online, before the window |
+-- f6 mapped online cancelled | f7 mapped online ended | f8 mapped in person cancelled |
+-- fa mapped in person ended | fb mapped in person, before the window.
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, status, cancelled_at) values
+  ('1e310000-0000-4000-8000-0000000000f1', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Porta presencial paga', 'in_person', 'Sede', 'Rua A, 11', now() + interval '30 minutes', now() + interval '150 minutes', 'active', null),
+  ('1e310000-0000-4000-8000-0000000000f2', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Porta online paga', 'online', null, null, now() + interval '30 minutes', now() + interval '150 minutes', 'active', null),
+  ('1e310000-0000-4000-8000-0000000000f3', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Online pago cedo', 'online', null, null, now() + interval '5 days', now() + interval '5 days 2 hours', 'active', null),
+  ('1e310000-0000-4000-8000-0000000000f4', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Porta presencial livre', 'in_person', 'Sede', 'Rua A, 12', now() + interval '30 minutes', now() + interval '150 minutes', 'active', null),
+  ('1e310000-0000-4000-8000-0000000000f5', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Porta online livre', 'online', null, null, now() + interval '30 minutes', now() + interval '150 minutes', 'active', null),
+  ('1e310000-0000-4000-8000-0000000000f6', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Online pago cancelado', 'online', null, null, now() + interval '30 minutes', now() + interval '150 minutes', 'cancelled', now()),
+  ('1e310000-0000-4000-8000-0000000000f7', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Online pago encerrado', 'online', null, null, now() + interval '-3 hours', now() + interval '-1 minute', 'active', null),
+  ('1e310000-0000-4000-8000-0000000000f8', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Presencial pago cancelado', 'in_person', 'Sede', 'Rua A, 13', now() + interval '30 minutes', now() + interval '150 minutes', 'cancelled', now()),
+  ('1e310000-0000-4000-8000-0000000000f9', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Online livre cedo', 'online', null, null, now() + interval '5 days', now() + interval '5 days 2 hours', 'active', null),
+  ('1e310000-0000-4000-8000-0000000000fa', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Presencial pago encerrado', 'in_person', 'Sede', 'Rua A, 14', now() + interval '-3 hours', now() + interval '-1 minute', 'active', null),
+  ('1e310000-0000-4000-8000-0000000000fb', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Presencial pago cedo', 'in_person', 'Sede', 'Rua A, 15', now() + interval '5 days', now() + interval '5 days 2 hours', 'active', null);
+insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code, meeting_url) values
+  ('1e310000-0000-4000-8000-0000000000f1', '1e310000-0000-4000-8000-000000000001', 'in_person', 'K7QM', null),
+  ('1e310000-0000-4000-8000-0000000000f2', '1e310000-0000-4000-8000-000000000001', 'online', 'K7QM', 'https://meet.example.test/tkt'),
+  ('1e310000-0000-4000-8000-0000000000f3', '1e310000-0000-4000-8000-000000000001', 'online', 'K7QM', 'https://meet.example.test/tkt'),
+  ('1e310000-0000-4000-8000-0000000000f4', '1e310000-0000-4000-8000-000000000001', 'in_person', 'K7QM', null),
+  ('1e310000-0000-4000-8000-0000000000f5', '1e310000-0000-4000-8000-000000000001', 'online', 'K7QM', 'https://meet.example.test/tkt'),
+  ('1e310000-0000-4000-8000-0000000000f6', '1e310000-0000-4000-8000-000000000001', 'online', 'K7QM', 'https://meet.example.test/tkt'),
+  ('1e310000-0000-4000-8000-0000000000f7', '1e310000-0000-4000-8000-000000000001', 'online', 'K7QM', 'https://meet.example.test/tkt'),
+  ('1e310000-0000-4000-8000-0000000000f8', '1e310000-0000-4000-8000-000000000001', 'in_person', 'K7QM', null),
+  ('1e310000-0000-4000-8000-0000000000f9', '1e310000-0000-4000-8000-000000000001', 'online', 'K7QM', 'https://meet.example.test/tkt'),
+  ('1e310000-0000-4000-8000-0000000000fa', '1e310000-0000-4000-8000-000000000001', 'in_person', 'K7QM', null),
+  ('1e310000-0000-4000-8000-0000000000fb', '1e310000-0000-4000-8000-000000000001', 'in_person', 'K7QM', null);
+
+-- Presences made BEFORE the link (assumption A6): c2 not_going, c5 a plain Vou, c6 a walk-in, c7 checked in.
+select set_config('request.jwt.claims', '', true);
+select tests.as_service();
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, checked_in_at, checkin_via) values
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f1', '1e310000-0000-4000-8000-0000000000c2', 'not_going', now(), null, null),
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f1', '1e310000-0000-4000-8000-0000000000c5', 'going', now(), null, null),
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f1', '1e310000-0000-4000-8000-0000000000c6', 'walk_in', null, now(), 'code'),
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f1', '1e310000-0000-4000-8000-0000000000c7', 'checked_in', now(), now(), 'code'),
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f2', '1e310000-0000-4000-8000-0000000000c2', 'not_going', now(), null, null),
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f2', '1e310000-0000-4000-8000-0000000000c5', 'going', now(), null, null),
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f2', '1e310000-0000-4000-8000-0000000000c6', 'walk_in', null, now(), 'online'),
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f3', '1e310000-0000-4000-8000-0000000000c5', 'going', now(), null, null),
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f9', '1e310000-0000-4000-8000-0000000000c2', 'not_going', now(), null, null);
+reset role;
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-f1', '1e310000-0000-4000-8000-0000000000f1'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-f2', '1e310000-0000-4000-8000-0000000000f2'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-f3', '1e310000-0000-4000-8000-0000000000f3'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-f6', '1e310000-0000-4000-8000-0000000000f6'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-f7', '1e310000-0000-4000-8000-0000000000f7'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-f8', '1e310000-0000-4000-8000-0000000000f8'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-fa', '1e310000-0000-4000-8000-0000000000fa'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-fb', '1e310000-0000-4000-8000-0000000000fb');
+-- The paid path (as the apply job of plan 04 writes it): c3 a ticket, c4 a courtesy.
+select tests.as_service();
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f1', '1e310000-0000-4000-8000-0000000000c3', 'going', now(), 'ticket', 'fake', 'ORD-F1-T'),
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f2', '1e310000-0000-4000-8000-0000000000c3', 'going', now(), 'ticket', 'fake', 'ORD-F2-T'),
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f3', '1e310000-0000-4000-8000-0000000000c3', 'going', now(), 'ticket', 'fake', 'ORD-F3-T');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f1', '1e310000-0000-4000-8000-0000000000c4', 'going', now(), 'courtesy'),
+  ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f2', '1e310000-0000-4000-8000-0000000000c4', 'going', now(), 'courtesy');
+reset role;
+
+-- The privilege facts are unchanged by the re-creation.
+select ok((select prosecdef from pg_proc where oid = 'app.events_enter(uuid)'::regprocedure), 'T-06-43: app.events_enter is still SECURITY DEFINER');
+select ok(not has_function_privilege('anon', 'app.events_enter(uuid)', 'execute') and has_function_privilege('authenticated', 'app.events_enter(uuid)', 'execute'), 'T-06-43: ...executable by authenticated and not by anon');
+select ok((select prosecdef from pg_proc where oid = 'app.events_check_in(uuid,text)'::regprocedure), 'T-06-29: app.events_check_in is still SECURITY DEFINER');
+select ok(not has_function_privilege('anon', 'app.events_check_in(uuid,text)', 'execute') and has_function_privilege('authenticated', 'app.events_check_in(uuid,text)', 'execute'), 'T-06-29: ...executable by authenticated and not by anon');
+
+-- ── the venue-code door (f1) ───────────────────────────────────────────────────────────────────
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c1');
+select results_eq($$ select outcome, checked_in_at is null from app.events_check_in('1e310000-0000-4000-8000-0000000000f1', 'ZZZZ') $$,
+  $$ values ('ticket_required'::text, true) $$,
+  'D-742/T-10.1-06: a non-holder with a WRONG code is ticket_required');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000f1', 'K7QM') $$,
+  ARRAY['ticket_required'],
+  'D-742: ...and with the CORRECT code too (nothing about the code is learned)');
+reset role;
+select is((select count(*)::int from public.event_checkin_attempts where event_id = '1e310000-0000-4000-8000-0000000000f1'), 0,
+  'T-10.1-06: no guess was counted for the non-holder (the attempts table is unchanged)');
+select is((select count(*)::int from public.event_attendances where event_id = '1e310000-0000-4000-8000-0000000000f1' and user_id = '1e310000-0000-4000-8000-0000000000c1'), 0,
+  'T-10.1-05: ...and no walk-in row was written');
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c2');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000f1', 'K7QM') $$, ARRAY['ticket_required'],
+  'D-742: a not_going row is not a presence: ticket_required');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c5');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000f1', 'ZZZZ') $$, ARRAY['wrong_code'],
+  'control: a holder (a Vou made before the link, A6) with a wrong code gets wrong_code');
+reset role;
+select is((select count(*)::int from public.event_checkin_attempts where event_id = '1e310000-0000-4000-8000-0000000000f1'), 1,
+  'control: ...and THAT guess is counted (the counter works; the non-holder''s were not)');
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c3');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000f1', 'K7QM') $$, ARRAY['checked_in'],
+  'D-742: a ticket holder with the correct code checks in');
+reset role;
+select is((select status || '/' || origin || '/' || order_provider || '/' || order_ref from public.event_attendances where event_id = '1e310000-0000-4000-8000-0000000000f1' and user_id = '1e310000-0000-4000-8000-0000000000c3'),
+  'checked_in/ticket/fake/ORD-F1-T', 'the check-in never names the origin or the order: the ticket row keeps them');
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c4');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000f1', 'k7-qm') $$, ARRAY['checked_in'],
+  'D-742: a courtesy holder checks in');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c5');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000f1', 'K7QM') $$, ARRAY['checked_in'],
+  'A6: a Vou made before the link still checks in');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c6');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000f1', 'ZZZZ') $$, ARRAY['already'],
+  'A6: a walk-in made before the link is not unmarked: already');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c7');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000f1', 'ZZZZ') $$, ARRAY['already'],
+  'A6: a check-in made before the link is not unmarked: already');
+reset role;
+
+-- ── the online door (f2, f3) ───────────────────────────────────────────────────────────────────
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c1');
+select results_eq($$ select outcome, meeting_url is null from app.events_enter('1e310000-0000-4000-8000-0000000000f2') $$,
+  $$ values ('ticket_required'::text, true) $$,
+  'D-742/T-10.1-22: a member with no presence gets ticket_required and a NULL URL inside the window (not a walk-in)');
+reset role;
+select is((select count(*)::int from public.event_attendances where event_id = '1e310000-0000-4000-8000-0000000000f2' and user_id = '1e310000-0000-4000-8000-0000000000c1'), 0,
+  'T-10.1-05: ...and no walk-in row was written');
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c2');
+select results_eq($$ select outcome, meeting_url is null from app.events_enter('1e310000-0000-4000-8000-0000000000f2') $$,
+  $$ values ('ticket_required'::text, true) $$,
+  'D-742: a not_going row is not a presence: ticket_required, NULL URL');
+reset role;
+select is((select status from public.event_attendances where event_id = '1e310000-0000-4000-8000-0000000000f2' and user_id = '1e310000-0000-4000-8000-0000000000c2'), 'not_going',
+  '...and the not_going row is untouched');
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c3');
+select results_eq($$ select outcome, meeting_url, attendance_status from app.events_enter('1e310000-0000-4000-8000-0000000000f2') $$,
+  $$ values ('recorded'::text, 'https://meet.example.test/tkt'::text, 'checked_in'::text) $$,
+  'D-742: a ticket holder inside the window is recorded and gets the URL');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c4');
+select results_eq($$ select outcome, meeting_url from app.events_enter('1e310000-0000-4000-8000-0000000000f2') $$,
+  $$ values ('recorded'::text, 'https://meet.example.test/tkt'::text) $$,
+  'D-742: a courtesy holder inside the window is recorded and gets the URL');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c5');
+select results_eq($$ select outcome, meeting_url from app.events_enter('1e310000-0000-4000-8000-0000000000f2') $$,
+  $$ values ('recorded'::text, 'https://meet.example.test/tkt'::text) $$,
+  'A6: a Vou made before the link is recorded and gets the URL');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c6');
+select results_eq($$ select outcome, meeting_url from app.events_enter('1e310000-0000-4000-8000-0000000000f2') $$,
+  $$ values ('already'::text, 'https://meet.example.test/tkt'::text) $$,
+  'A6: a walk-in made before the link still rejoins: already, with the URL');
+reset role;
+select is((select status || '/' || origin || '/' || order_ref from public.event_attendances where event_id = '1e310000-0000-4000-8000-0000000000f2' and user_id = '1e310000-0000-4000-8000-0000000000c3'),
+  'checked_in/ticket/ORD-F2-T', 'the online check-in keeps the ticket row''s origin and order');
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c1');
+select results_eq($$ select outcome, meeting_url is null from app.events_enter('1e310000-0000-4000-8000-0000000000f3') $$,
+  $$ values ('ticket_required'::text, true) $$,
+  'D-742: before the window a non-holder is ticket_required, not confirm_first');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c3');
+select results_eq($$ select outcome, meeting_url from app.events_enter('1e310000-0000-4000-8000-0000000000f3') $$,
+  $$ values ('forward'::text, 'https://meet.example.test/tkt'::text) $$,
+  'D-742: before the window a ticket holder is forwarded with the URL and nothing is recorded');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c5');
+select results_eq($$ select outcome, meeting_url from app.events_enter('1e310000-0000-4000-8000-0000000000f3') $$,
+  $$ values ('forward'::text, 'https://meet.example.test/tkt'::text) $$,
+  'A6: before the window a Vou made before the link is forwarded with the URL');
+reset role;
+
+-- ── free events: byte-identical to today ───────────────────────────────────────────────────────
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c1');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000f4', 'K7QM') $$, ARRAY['walk_in'],
+  'D-742: a FREE in-person event still records a walk-in on the right code');
+select results_eq($$ select outcome, meeting_url from app.events_enter('1e310000-0000-4000-8000-0000000000f5') $$,
+  $$ values ('recorded'::text, 'https://meet.example.test/tkt'::text) $$,
+  'D-742: a FREE online event still records a walk-in and gives the URL');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c2');
+select results_eq($$ select outcome, meeting_url is null from app.events_enter('1e310000-0000-4000-8000-0000000000f9') $$,
+  $$ values ('confirm_first'::text, true) $$,
+  'D-742: a FREE online event before the window is still confirm_first');
+reset role;
+
+-- ── the old outcomes still win, in a mapped event ──────────────────────────────────────────────
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c1');
+select results_eq($$ select outcome from app.events_enter('1e310000-0000-4000-8000-0000000000f6') $$, ARRAY['cancelled'], 'a cancelled mapped online event is still cancelled (before ticket_required)');
+select results_eq($$ select outcome from app.events_enter('1e310000-0000-4000-8000-0000000000f7') $$, ARRAY['ended'], 'an ended mapped online event is still ended');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000f8', 'K7QM') $$, ARRAY['cancelled'], 'a cancelled mapped in-person event is still cancelled');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000fa', 'K7QM') $$, ARRAY['closed'], 'an ended mapped in-person event is still closed');
+select results_eq($$ select outcome from app.events_check_in('1e310000-0000-4000-8000-0000000000fb', 'K7QM') $$, ARRAY['not_open'], 'a mapped in-person event before the window is still not_open');
+reset role;
+
+-- ── T-10.1-05: the backstop beside the definer outcomes ────────────────────────────────────────
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c8');
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, checked_in_at, checkin_via) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f1', '1e310000-0000-4000-8000-0000000000c8', 'walk_in', now(), 'code') $$,
+  '23514', 'payment_required', 'T-10.1-05: a direct walk_in insert by a member in a mapped event is payment_required');
+reset role;
+select tests.as_service();
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, checked_in_at, checkin_via) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f1', '1e310000-0000-4000-8000-0000000000c8', 'walk_in', now(), 'code') $$,
+  '23514', 'payment_required', 'T-10.1-05: ...and by the service lane (step 6b, the last line)');
+select lives_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, checked_in_at, checkin_via) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f4', '1e310000-0000-4000-8000-0000000000c8', 'walk_in', now(), 'code') $$,
+  'control: the same walk_in in a free event is accepted');
 reset role;
 
 select * from finish();

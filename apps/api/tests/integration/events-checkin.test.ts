@@ -733,4 +733,35 @@ describe('paid event doors (D-742, T-10.1-05, T-10.1-06, T-10.1-22)', () => {
     expect(await rows(paid.id, userIds.sofia ?? '')).toHaveLength(0);
     expect(received.length).toBe(before);
   });
+
+  it('2. in person: a non-holder with the CORRECT code answers 409 payment_required and no guess is counted; a holder checks in with the same code', async () => {
+    const paid = await createEvent('porta presencial paga');
+    await openWindow(paid.id);
+    await linkTicket(paid.id);
+    const code = await codeOf(paid.id);
+    const before = received.length;
+
+    for (const typed of [code, wrongCode(code)]) {
+      const res = await checkIn(paid.id, typed, tokens.sofia);
+      expect(res.status, JSON.stringify(await res.clone().json())).toBe(409);
+      const error = await envelope(res);
+      expect(error.code).toBe('CONFLICT');
+      expect(error.details).toEqual({ event: 'payment_required' });
+    }
+    const [attempts] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.event_checkin_attempts where event_id = ${paid.id}::uuid`;
+    expect(attempts?.n).toBe(0);
+    expect(await rows(paid.id, userIds.sofia ?? '')).toHaveLength(0);
+    expect(received.length).toBe(before);
+
+    // Positive control: a ticket holder with the same code.
+    await giveTicket(paid.id, userIds.joao ?? '');
+    const ok = await checkIn(paid.id, code, tokens.joao);
+    expect(ok.status, JSON.stringify(await ok.clone().json())).toBe(200);
+    expect(((await ok.json()) as CheckinResult).outcome).toBe('checked_in');
+    expect(await rows(paid.id, userIds.joao ?? '')).toEqual([
+      { status: 'checked_in', origin: 'ticket', order_ref: expect.stringMatching(/^ORD-DOOR-/) },
+    ]);
+    expect(received.slice(before).filter((payload) => payload.eventId === paid.id)).toHaveLength(1);
+  });
 });

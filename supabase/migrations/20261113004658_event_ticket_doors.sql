@@ -29,6 +29,12 @@
 -- exactly as before, walk-ins included (D-207, D-208, D-209 keep their meaning; the calendar export is
 -- unchanged because the `/eventos/{id}/entrar` URL is still gated at click time).
 --
+-- THE HOLDER'S WRITE. The guard trigger judges the PROPOSED INSERT tuple of an upsert before the arbiter
+-- (plan 02's finding), and a free-event upsert proposes a `walk_in`, which step 6b refuses in a paid event
+-- even when the conflict path would only update a ticket holder's row. So in a paid event both functions
+-- move a `going` holder with a plain UPDATE to `checked_in` (the origin, order and refund columns are never
+-- named, so a ticket row keeps them), and the free branch keeps the exact old upsert.
+--
 -- BACKSTOP. A direct `walk_in` insert in a mapped event is still `payment_required` through the guard
 -- trigger's step 6b (plan 02), so even a definer that forgot this check could not write the row.
 --
@@ -54,6 +60,7 @@ declare
   v_answer text;
   v_present timestamptz;
   v_url text;
+  v_paid boolean;
   v_new_status text;
   v_new_at timestamptz;
 begin
@@ -97,7 +104,8 @@ begin
   -- 3b. The paid door (10.1, D-742, T-10.1-05, T-10.1-22): in an event that has a payment mapping only a
   --     holder gets on (a `going` row of any origin, or a row already present). Anyone else is refused
   --     with NO URL, before `confirm_first` and before the in-window walk-in.
-  if app.event_ticket_mapped(v_t, p_event_id)
+  v_paid := app.event_ticket_mapped(v_t, p_event_id);
+  if v_paid
      and not (coalesce(v_answer in ('going', 'checked_in', 'walk_in'), false) or v_present is not null) then
     return query select 'ticket_required'::text, null::text, v_answer, v_starts;
     return;
@@ -140,23 +148,43 @@ begin
     return;
   end if;
 
-  -- 6. The online check-in: ONE upsert. After `Vou` the row becomes `checked_in` (keeping
+  -- 6. The online check-in: ONE write. After `Vou` the row becomes `checked_in` (keeping
   --    `responded_at`); with no row or after `Não vou` it is a walk-in (D-216). The guard trigger
   --    fires on it and re-checks the window for every writer. `where a.checked_in_at is null` makes a
   --    racing second enter a no-op: it returns no row, and the re-read answers `already`.
-  insert into public.event_attendances as a
-         (tenant_id, event_id, user_id, status, checked_in_at, checkin_via)
-  values (v_t, p_event_id, v_u, 'walk_in', now(), 'online')
-  on conflict (tenant_id, event_id, user_id) do update
-     set status = case when a.status = 'going' then 'checked_in' else 'walk_in' end,
-         checked_in_at = now(),
-         checkin_via = 'online',
-         updated_at = now()
-   where a.tenant_id = v_t
-     and a.user_id = v_u
-     and a.checked_in_at is null
-  returning a.status, a.checked_in_at
-    into v_new_status, v_new_at;
+  --    PAID EVENT (10.1): only a `going` holder is here (step 3b), and the guard judges the PROPOSED
+  --    INSERT tuple of an upsert (a `walk_in`, origin `rsvp`) BEFORE the arbiter turns it into an update,
+  --    which its step 6b backstop would refuse for a ticket holder. So a holder is moved by a plain
+  --    UPDATE (`going` -> `checked_in`; the origin and order columns are never named), and the free
+  --    branch below is untouched.
+  if v_paid then
+    update public.event_attendances as a
+       set status = 'checked_in',
+           checked_in_at = now(),
+           checkin_via = 'online',
+           updated_at = now()
+     where a.tenant_id = v_t
+       and a.event_id = p_event_id
+       and a.user_id = v_u
+       and a.status = 'going'
+       and a.checked_in_at is null
+    returning a.status, a.checked_in_at
+      into v_new_status, v_new_at;
+  else
+    insert into public.event_attendances as a
+           (tenant_id, event_id, user_id, status, checked_in_at, checkin_via)
+    values (v_t, p_event_id, v_u, 'walk_in', now(), 'online')
+    on conflict (tenant_id, event_id, user_id) do update
+       set status = case when a.status = 'going' then 'checked_in' else 'walk_in' end,
+           checked_in_at = now(),
+           checkin_via = 'online',
+           updated_at = now()
+     where a.tenant_id = v_t
+       and a.user_id = v_u
+       and a.checked_in_at is null
+    returning a.status, a.checked_in_at
+      into v_new_status, v_new_at;
+  end if;
 
   if v_new_at is null then
     select a.status
@@ -165,6 +193,11 @@ begin
      where a.tenant_id = v_t
        and a.event_id = p_event_id
        and a.user_id = v_u;
+    -- A paid event whose holder row vanished under us (a refund): no presence, no URL.
+    if v_paid and not found then
+      return query select 'ticket_required'::text, null::text, null::text, v_starts;
+      return;
+    end if;
     return query select 'already'::text, v_url, v_answer, v_starts;
     return;
   end if;
@@ -189,6 +222,7 @@ declare
   v_ends timestamptz;
   v_present timestamptz;
   v_own text;
+  v_paid boolean;
   v_failed integer;
   v_window timestamptz;
   v_total integer;
@@ -236,7 +270,8 @@ begin
   --     a holder (a `going`, `checked_in` or `walk_in` row of the caller) goes on. Anyone else is refused
   --     HERE, before the advisory lock, the attempts read and the code comparison: no guess is counted
   --     and nothing about the code is learned.
-  if app.event_ticket_mapped(v_t, p_event_id) then
+  v_paid := app.event_ticket_mapped(v_t, p_event_id);
+  if v_paid then
     select a.status
       into v_own
       from public.event_attendances a
@@ -320,23 +355,43 @@ begin
     return;
   end if;
 
-  -- 7. The right code: ONE upsert. After `Vou` the row becomes `checked_in` (keeping
+  -- 7. The right code: ONE write. After `Vou` the row becomes `checked_in` (keeping
   --    `responded_at`); with no row or after `Não vou` it is a walk-in (D-216). The guard trigger
   --    fires on it and re-checks the window for every writer. `where a.checked_in_at is null` makes
   --    a racing second check-in a no-op: it returns no row, and the re-read answers `already`.
-  insert into public.event_attendances as a
-         (tenant_id, event_id, user_id, status, checked_in_at, checkin_via)
-  values (v_t, p_event_id, v_u, 'walk_in', now(), 'code')
-  on conflict (tenant_id, event_id, user_id) do update
-     set status = case when a.status = 'going' then 'checked_in' else 'walk_in' end,
-         checked_in_at = now(),
-         checkin_via = 'code',
-         updated_at = now()
-   where a.tenant_id = v_t
-     and a.user_id = v_u
-     and a.checked_in_at is null
-  returning a.status, a.checked_in_at
-    into v_new_status, v_new_at;
+  --    PAID EVENT (10.1): only a holder is here (step 3b; a present one answered `already` in step 4,
+  --    so the row is `going`). The guard judges the PROPOSED INSERT tuple of an upsert (a `walk_in`,
+  --    origin `rsvp`) before the arbiter, and its step 6b backstop would refuse it for a ticket holder;
+  --    so a holder is moved by a plain UPDATE (`going` -> `checked_in`, origin and order columns never
+  --    named), and the free branch below is untouched.
+  if v_paid then
+    update public.event_attendances as a
+       set status = 'checked_in',
+           checked_in_at = now(),
+           checkin_via = 'code',
+           updated_at = now()
+     where a.tenant_id = v_t
+       and a.event_id = p_event_id
+       and a.user_id = v_u
+       and a.status = 'going'
+       and a.checked_in_at is null
+    returning a.status, a.checked_in_at
+      into v_new_status, v_new_at;
+  else
+    insert into public.event_attendances as a
+           (tenant_id, event_id, user_id, status, checked_in_at, checkin_via)
+    values (v_t, p_event_id, v_u, 'walk_in', now(), 'code')
+    on conflict (tenant_id, event_id, user_id) do update
+       set status = case when a.status = 'going' then 'checked_in' else 'walk_in' end,
+           checked_in_at = now(),
+           checkin_via = 'code',
+           updated_at = now()
+     where a.tenant_id = v_t
+       and a.user_id = v_u
+       and a.checked_in_at is null
+    returning a.status, a.checked_in_at
+      into v_new_status, v_new_at;
+  end if;
 
   if v_new_at is null then
     select a.checked_in_at
@@ -345,6 +400,11 @@ begin
      where a.tenant_id = v_t
        and a.event_id = p_event_id
        and a.user_id = v_u;
+    -- A paid event whose holder row vanished under us (a refund): no presence to confirm.
+    if v_paid and not found then
+      return query select 'ticket_required'::text, null::timestamptz, v_starts;
+      return;
+    end if;
     return query select 'already'::text, v_present, v_starts;
     return;
   end if;
