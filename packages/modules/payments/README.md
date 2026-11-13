@@ -46,6 +46,9 @@ Routes (`/v1/payments`), every one behind `requireAuth`, `requireModule('payment
 | `GET /store-products/{productId}` | `{ connected, mapping }`: the gateway product that sells a store product, or `mapping: null` |
 | `PUT /store-products/{productId}` | upserts that mapping (`externalProductId` required, `checkoutUrl` optional); saved by the product form as a SEPARATE call after the store save |
 | `DELETE /store-products/{productId}` | removes the mapping; removing an unmapped product answers the same `{ connected, mapping: null }` |
+| `GET /event-products/{eventId}` | Phase 10.1: `{ connected, mapping, soldCount, locked, recurring }` for the ticket product of an event |
+| `PUT /event-products/{eventId}` | links the product (`externalProductId` and `checkoutUrl`, both required, `https:` only); `409 ticket_locked` once a ticket exists and the pair would change |
+| `DELETE /event-products/{eventId}` | removes the mapping while nothing is sold (courtesy presences become plain answers again); `409 ticket_locked` otherwise |
 | `GET /gate/preview` | `{ count, gatewayCut }`: the live members a release would admit (effective access none), and the members the gateway has cut, who stay cut |
 | `PUT /gate` | `{ required, releaseExisting? }`: turns the gate on (needs an integration and an access product) or off; with the release, one manual access row per `none` member in the same transaction (never one for a gateway-cut member), answering `{ required, released, gatewayCut }` |
 | `GET /accesses` | one keyset page of the e-mails that hold an access row, ONE item per e-mail (`id`, `email`, `source`, `state`, `validUntil`, `hasAccount`, `updatedAt`), ordered `(updatedAt desc, email desc)`; `q` is a contains match, `status` filters the computed state, `limit` 1 to 50; the state is `app.access_effective`, never recomputed |
