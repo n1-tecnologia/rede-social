@@ -1378,4 +1378,120 @@ describe('2026-11-13 (10.2-07) — the read models carry the opening for a paid 
     expect(Object.keys(next.event ?? {})).not.toContain('saleReady');
     expect(statements).toHaveLength(1);
   });
+
+  const edit = {
+    id: EVENT_ID,
+    title: 'Encontro anual',
+    description: '',
+    cover_asset_id: null,
+    cover_variant_widths: null,
+    category: null,
+    capacity: null,
+    format: 'online' as const,
+    venue_name: null,
+    address: null,
+    meeting_url: null,
+    start_date: '2026-10-12',
+    start_time: '19:00',
+    end_date: '2026-10-12',
+    end_time: '21:00',
+    status: 'active' as const,
+    starts_at: STARTS_AT,
+    ends_at: ENDS_AT,
+  };
+
+  it('9v. the edit read gives the wall-clock pair, the instant and the seed only to the admin of a paid event', async () => {
+    const paid = {
+      ...edit,
+      ticket_product_id: 'prod-1',
+      ticket_checkout_url: null,
+      ticket_gateway_open: true,
+      ticket_sold: 0,
+      opens_date: '2026-10-10',
+      opens_time: '09:30',
+      registration_opens_at: OPENS,
+      server_now: NOW,
+    };
+    script = [[paid]];
+    const read = await getEventForEdit(context(), EVENT_ID);
+    expect(read).toMatchObject({
+      registrationOpens: { date: '2026-10-10', time: '09:30' },
+      registrationOpensAt: OPENS,
+      serverNow: NOW,
+    });
+    expect(statements[0]).toContain('ta.external_product_id is not null');
+    expect(statements[0]).toContain('t.timezone');
+
+    // Paid with no opening: the pair is null, the instant is absent.
+    script = [[{ ...paid, opens_date: null, opens_time: null, registration_opens_at: null }]];
+    const none = await getEventForEdit(context(), EVENT_ID);
+    expect(none.registrationOpens).toBeNull();
+    expect(Object.keys(none)).not.toContain('registrationOpensAt');
+
+    // No mapping (ticket null) and a stale stored date that SQL nulled: none of the three keys.
+    script = [[{ ...edit, ticket_product_id: null }]];
+    const unmapped = await getEventForEdit(context(), EVENT_ID);
+    for (const key of ['registrationOpens', 'registrationOpensAt', 'serverNow']) {
+      expect(Object.keys(unmapped), key).not.toContain(key);
+    }
+
+    // A manage-holding non-admin: no ticket object, so no opening block either.
+    script = [[{ ...paid }]];
+    const support = await getEventForEdit({ ...context(), role: 'support_tenant' }, EVENT_ID);
+    for (const key of ['ticket', 'registrationOpens', 'registrationOpensAt', 'serverNow']) {
+      expect(Object.keys(support), key).not.toContain(key);
+    }
+  });
+
+  it('9w. the attendee mark rides the paid-origin rows only, spread when true, with the expression of pgTAP 234', async () => {
+    const attendee = (id: string, extra: Record<string, unknown>) => ({
+      id,
+      status: 'going',
+      responded_at: '2026-10-10T12:00:00.123456Z',
+      checked_in_at: null,
+      removed: false,
+      display_name: 'Iris',
+      avatar_asset_id: null,
+      avatar_variant_widths: null,
+      ...extra,
+    });
+    script = [
+      [{ id: EVENT_ID }],
+      [
+        attendee('aaaaaaaa-0000-4000-8000-000000000001', {
+          event_paid: true,
+          origin: 'ticket',
+          refunded: false,
+          over_limit: false,
+          before_opening: true,
+        }),
+        attendee('aaaaaaaa-0000-4000-8000-000000000002', {
+          event_paid: true,
+          origin: 'ticket',
+          refunded: false,
+          over_limit: false,
+          before_opening: false,
+        }),
+        attendee('aaaaaaaa-0000-4000-8000-000000000003', {
+          event_paid: false,
+          origin: 'rsvp',
+          before_opening: false,
+        }),
+        attendee('aaaaaaaa-0000-4000-8000-000000000004', {
+          event_paid: false,
+          before_opening: true,
+        }),
+      ],
+    ];
+    const page = await listAttendance(context(), EVENT_ID, { list: 'confirmed', limit: 10 });
+    expect(page.items[0]).toMatchObject({ origin: 'ticket', beforeOpening: true });
+    expect(Object.keys(page.items[1] ?? {})).not.toContain('beforeOpening');
+    expect(Object.keys(page.items[2] ?? {})).not.toContain('beforeOpening');
+    // A free event's row never carries the mark, even if a row ever said so.
+    expect(Object.keys(page.items[3] ?? {})).not.toContain('beforeOpening');
+    const collapsed = (statements[1] ?? '').replace(/\\n/g, ' ').replace(/\s+/g, ' ');
+    expect(collapsed).toContain(
+      "a.origin = 'ticket' and a.ticket_confirmed_at is not null and ev.registration_opens_at is not null and a.ticket_confirmed_at < ev.registration_opens_at",
+    );
+  });
 });

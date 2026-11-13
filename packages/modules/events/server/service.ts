@@ -964,6 +964,15 @@ type EventEditRow = {
   ticket_checkout_url?: string | null;
   ticket_gateway_open?: boolean | null;
   ticket_sold?: number | null;
+  /**
+   * Phase 10.2-07 (D-792). All four are null unless the event is paid AND the caller got the definer's row
+   * (`ta.external_product_id is not null`, admin only), so a stale stored opening of an unmapped event never
+   * reaches the form.
+   */
+  opens_date?: string | null;
+  opens_time?: string | null;
+  registration_opens_at?: string | null;
+  server_now?: string | null;
 };
 
 /**
@@ -1011,7 +1020,15 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
              ta.external_product_id as ticket_product_id,
              ta.checkout_url as ticket_checkout_url,
              ta.gateway_open as ticket_gateway_open,
-             ta.sold as ticket_sold
+             ta.sold as ticket_sold,
+             case when ta.external_product_id is not null
+                  then to_char(e.registration_opens_at at time zone t.timezone, 'YYYY-MM-DD') end as opens_date,
+             case when ta.external_product_id is not null
+                  then to_char(e.registration_opens_at at time zone t.timezone, 'HH24:MI') end as opens_time,
+             case when ta.external_product_id is not null
+                  then to_char(e.registration_opens_at at time zone 'utc', ${ISO_MICROSECONDS}) end as registration_opens_at,
+             case when ta.external_product_id is not null
+                  then to_char(now() at time zone 'utc', ${ISO_MICROSECONDS}) end as server_now
         from events e
         join tenants t on t.id = e.tenant_id
         left join media_assets a on a.id = e.cover_asset_id
@@ -1049,6 +1066,21 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
     schedule: toSchedule(row.schedule),
     // Absent for any caller but the tenant admin (D-753); `null` for an admin and an unmapped event.
     ...(ticket === undefined ? {} : { ticket }),
+    // Phase 10.2-07 (D-792, OPEN-03): only for a paid event read by the caller who got `ticket`. The wall
+    // clock pair is the exact inverse of the write (converted by Postgres in the tenant's zone); `null` says
+    // "paid, no opening". A free event, and a stale stored date of an unmapped one, carry none of the keys.
+    ...(ticket === undefined || ticket === null
+      ? {}
+      : {
+          registrationOpens:
+            typeof row.opens_date === 'string' && typeof row.opens_time === 'string'
+              ? { date: row.opens_date, time: row.opens_time }
+              : null,
+          ...(typeof row.registration_opens_at === 'string'
+            ? { registrationOpensAt: row.registration_opens_at }
+            : {}),
+          ...(typeof row.server_now === 'string' ? { serverNow: row.server_now } : {}),
+        }),
   };
 }
 
@@ -1747,6 +1779,8 @@ type AttendeeRow = {
   origin?: 'rsvp' | 'ticket' | 'courtesy';
   refunded?: boolean;
   over_limit?: boolean;
+  /** Phase 10.2-07 (D-791, OPEN-14): the derived early-payment mark. */
+  before_opening?: boolean;
 };
 
 /**
@@ -1778,6 +1812,11 @@ const OVER_LIMIT = sql.raw(`(ev.capacity is not null
  * variant ladder. It is a LEFT join on purpose: a member who has left yields `ms.id is null`, so
  * `removed` is true and the name and photo are null together, and the ROW STILL COUNTS (D-219/A5).
  * No email, no membership id and no role is projected (T-06-46).
+ *
+ * (Phase 10.2, D-791, OPEN-14) `before_opening` is the early-payment mark, DERIVED at read time and never
+ * stored: a paid-origin row confirmed strictly before the event's opening. The expression is copied VERBATIM
+ * into `234-event-opening.sql` section 8 (view `tests.op_marks`), so edit both together. A courtesy, a plain
+ * rsvp and a ticket row that predates the confirmation instant (null) are never marked.
  */
 const attendeeProjection = sql`
     select a.id,
@@ -1791,7 +1830,8 @@ const attendeeProjection = sql`
            pd.paid as event_paid,
            a.origin,
            (a.refunded_at is not null) as refunded,
-           ${OVER_LIMIT}
+           ${OVER_LIMIT},
+           (a.origin = 'ticket' and a.ticket_confirmed_at is not null and ev.registration_opens_at is not null and a.ticket_confirmed_at < ev.registration_opens_at) as before_opening
       from event_attendances a
       join events ev on ev.tenant_id = a.tenant_id and ev.id = a.event_id
       left join lateral (select app.event_is_paid(a.event_id) as paid) pd on true
@@ -1820,6 +1860,8 @@ const toAttendee = (row: AttendeeRow): Attendee => ({
         origin: attendeeOrigin(row),
         refunded: row.refunded === true,
         overLimit: row.over_limit === true,
+        // Phase 10.2-07 (D-791): spread only when true, so a paid event's ordinary rows keep their key set.
+        ...(row.before_opening === true ? { beforeOpening: true } : {}),
       }
     : {}),
 });

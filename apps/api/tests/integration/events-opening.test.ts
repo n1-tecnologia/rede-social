@@ -726,3 +726,191 @@ describe('10.2 the member read (D-780, D-788, D-789; OPEN-02, OPEN-05, OPEN-06)'
     );
   });
 });
+
+describe('10.2 the edit read gives the wall clock back, and Participantes marks the early payer (D-791, D-792; OPEN-03, OPEN-14)', () => {
+  /** The expected wall-clock pair, computed in SQL with the TENANT's zone (the exact inverse of the write). */
+  async function wallClockOf(eventId: string) {
+    const [row] = await adminSql<{ date: string; time: string; utc_day: string }[]>`
+      select to_char(registration_opens_at at time zone ${zone}, 'YYYY-MM-DD') as date,
+             to_char(registration_opens_at at time zone ${zone}, 'HH24:MI') as time,
+             to_char(registration_opens_at at time zone 'utc', 'YYYY-MM-DD') as utc_day
+        from public.events where id = ${eventId}::uuid`;
+    if (!row) throw new Error('the event is gone');
+    return row;
+  }
+
+  it('a paid event returns the typed pair of the tenant wall clock (a late-evening time crosses the UTC day), the instant and the seed', async () => {
+    const typed = { date: tenantDate(3), time: '23:30' };
+    const eventId = await created(body('edit-paid', 10, { registrationOpens: typed }));
+    await ticketMapping(labTenantId, eventId);
+
+    const res = await request(`/v1/events/${eventId}/edit`, adminToken);
+    expect(res.status, await res.clone().text()).toBe(200);
+    const json = (await res.json()) as Json;
+    const expected = await wallClockOf(eventId);
+    expect({ date: expected.date, time: expected.time }).toEqual(typed);
+    // The point of the case: in America/Sao_Paulo 23:30 is the NEXT day in UTC.
+    expect(expected.utc_day).not.toBe(typed.date);
+    expect(json.registrationOpens).toEqual(typed);
+    expect(json.registrationOpensAt).toMatch(ISO6);
+    expect(json.serverNow).toMatch(ISO6);
+    expect(json.ticket).toBeTruthy();
+  });
+
+  it('a paid event with no opening reads registrationOpens null and no instant, but still the seed', async () => {
+    const eventId = await created(body('edit-none'));
+    await ticketMapping(labTenantId, eventId);
+    const res = await request(`/v1/events/${eventId}/edit`, adminToken);
+    const json = (await res.json()) as Json;
+    expect(res.status).toBe(200);
+    expect(json.registrationOpens).toBeNull();
+    expect(json).not.toHaveProperty('registrationOpensAt');
+    expect(json.serverNow).toMatch(ISO6);
+  });
+
+  it('an event with NO mapping returns none of the three keys even when a date is stored (A-10.2-STALE-DATE)', async () => {
+    const eventId = await created(
+      body('edit-stale', 10, { registrationOpens: { date: tenantDate(3), time: '09:00' } }),
+    );
+    expect(await openingIs(eventId, { date: tenantDate(3), time: '09:00' })).toBe(true);
+    const res = await request(`/v1/events/${eventId}/edit`, adminToken);
+    const json = (await res.json()) as Json;
+    expect(res.status).toBe(200);
+    for (const key of ['registrationOpens', 'registrationOpensAt', 'serverNow']) {
+      expect(json, key).not.toHaveProperty(key);
+    }
+  });
+
+  it('a member and a support holder never get an opening block from the edit read', async () => {
+    const eventId = await created(
+      body('edit-lane', 10, { registrationOpens: { date: tenantDate(3), time: '09:00' } }),
+    );
+    await ticketMapping(labTenantId, eventId);
+    const member = await memberToken();
+    const asMember = await request(`/v1/events/${eventId}/edit`, member);
+    expect(asMember.status).toBe(403);
+    expect(await asMember.text()).not.toMatch(/registrationOpens|serverNow/);
+
+    const identity = await createSharedIdentity({
+      prefix: PREFIX,
+      memberships: [{ host: 'lab', role: 'support_tenant' }],
+    });
+    const support = await signInAs(identity.email, identity.password);
+    const asSupport = await request(`/v1/events/${eventId}/edit`, support);
+    const raw = await asSupport.text();
+    if (asSupport.status === 200) {
+      expect(JSON.parse(raw)).not.toHaveProperty('ticket');
+      expect(raw).not.toMatch(/registrationOpens|serverNow/);
+    } else {
+      expect(raw).not.toMatch(/registrationOpens|serverNow/);
+    }
+  });
+
+  /* ── the attendee mark ── */
+
+  /** The `before_opening` expression of pgTAP 234 section 8, evaluated on the stored rows (edit both together). */
+  async function markTruth(eventId: string): Promise<Map<string, boolean>> {
+    const rows = await adminSql<{ id: string; before_opening: boolean }[]>`
+      select a.id::text as id,
+             (a.origin = 'ticket' and a.ticket_confirmed_at is not null and ev.registration_opens_at is not null and a.ticket_confirmed_at < ev.registration_opens_at) as before_opening
+        from public.event_attendances a
+        join public.events ev on ev.id = a.event_id and ev.tenant_id = a.tenant_id
+       where a.event_id = ${eventId}::uuid`;
+    return new Map(rows.map((row) => [row.id, row.before_opening]));
+  }
+
+  /** A ticket row whose confirmation instant is `offset` from the event's stored opening (null: no instant). */
+  async function ticketRow(
+    eventId: string,
+    userId: string,
+    offset: string | null,
+  ): Promise<string> {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.event_attendances
+             (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref,
+              ticket_confirmed_at)
+      select ${labTenantId}::uuid, ${eventId}::uuid, ${userId}::uuid, 'going', now(), 'ticket', 'fake',
+             ${orderRef()},
+             case when ${offset}::text is null then null
+                  else ev.registration_opens_at + ${offset}::interval end
+        from public.events ev where ev.id = ${eventId}::uuid
+      returning id::text as id`;
+    if (!row) throw new Error('could not seed the ticket row');
+    return row.id;
+  }
+
+  const attendance = async (token: string, eventId: string) =>
+    readAs(token, `/v1/events/${eventId}/attendance?list=confirmed&limit=50`);
+
+  it('an early payer is marked; a late payer, the exact instant, a null instant, a courtesy and a plain Vou are not; free rows carry no paid key', async () => {
+    const eventId = await ticketEvent(labTenantId, { title: `${PREFIX}-mark`, opensInMinutes: 30 });
+    const plain = await buyer();
+    await seedPresence(eventId, plain.userId, { status: 'going', origin: 'rsvp' });
+    await ticketMapping(labTenantId, eventId);
+    const early = await buyer();
+    const late = await buyer();
+    const exact = await buyer();
+    const none = await buyer();
+    const courtesy = await buyer();
+    const micro = await buyer();
+    const ids = {
+      early: await ticketRow(eventId, early.userId, '-1 hour'),
+      micro: await ticketRow(eventId, micro.userId, '-1 microsecond'),
+      exact: await ticketRow(eventId, exact.userId, '0 seconds'),
+      late: await ticketRow(eventId, late.userId, '1 minute'),
+      none: await ticketRow(eventId, none.userId, null),
+    };
+    await seedPresence(eventId, courtesy.userId, { status: 'going', origin: 'courtesy' });
+
+    const admin = await attendance(adminToken, eventId);
+    expect(admin.status, admin.raw).toBe(200);
+    const items = admin.json.items as Json[];
+    expect(items).toHaveLength(7);
+    const marked = items.filter((item) => item.beforeOpening === true).map((item) => item.id);
+    expect(marked.sort()).toEqual([ids.early, ids.micro].sort());
+    for (const item of items) {
+      if (item.beforeOpening !== undefined) expect(item.beforeOpening).toBe(true);
+    }
+
+    // The API answer is the pgTAP 234 section 8 expression evaluated on the same rows.
+    const truth = await markTruth(eventId);
+    for (const item of items) {
+      expect(item.beforeOpening === true, String(item.id)).toBe(truth.get(item.id as string));
+    }
+
+    // A free event's rows carry none of the paid keys, even with a stale stored opening.
+    const free = await ticketEvent(labTenantId, {
+      title: `${PREFIX}-mark-free`,
+      opensInMinutes: 30,
+    });
+    const freeUser = await buyer();
+    await seedPresence(free, freeUser.userId, { status: 'going', origin: 'rsvp' });
+    const freeList = await attendance(adminToken, free);
+    const freeItems = freeList.json.items as Json[];
+    expect(freeItems).toHaveLength(1);
+    for (const key of ['origin', 'refunded', 'overLimit', 'beforeOpening']) {
+      expect(freeItems[0], key).not.toHaveProperty(key);
+    }
+
+    // A paid event with nobody: an empty page.
+    const empty = await mapped('mark-empty', { opensInMinutes: 30 });
+    const emptyList = await attendance(adminToken, empty);
+    expect(emptyList.json.items).toEqual([]);
+  });
+
+  it('a member is refused the attendance list (403) and receives no mark', async () => {
+    const eventId = await ticketEvent(labTenantId, {
+      title: `${PREFIX}-mark-member`,
+      opensInMinutes: 30,
+    });
+    await ticketMapping(labTenantId, eventId);
+    const payer = await buyer();
+    await ticketRow(eventId, payer.userId, '-1 hour');
+    const res = await attendance(await memberToken(), eventId);
+    expect(res.status).toBe(403);
+    expect(res.raw).not.toMatch(/beforeOpening/);
+    // The payer's own detail read never carries the mark either (it is the admin lane's alone).
+    const detail = await readAs(await memberToken(), `/v1/events/${eventId}`);
+    expect(detail.raw).not.toMatch(/beforeOpening/);
+  });
+});

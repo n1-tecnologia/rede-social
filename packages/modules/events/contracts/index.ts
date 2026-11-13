@@ -725,6 +725,19 @@ export const eventEditSchema = z
      * `{gateway}` with the module off.
      */
     ticket: eventTicketAdminSchema.nullable().optional(),
+    /**
+     * Phase 10.2 (D-792, OPEN-03): the stored opening read BACK as the tenant's wall clock by Postgres (the
+     * exact inverse of the write), so the web never converts a time zone; null for a paid event with none.
+     * Present only for a paid event and only to the caller who gets `ticket`; absent otherwise.
+     */
+    registrationOpens: z
+      .object({ date: z.string(), time: z.string() })
+      .strict()
+      .nullable()
+      .optional(),
+    /** Phase 10.2: the same opening as a six-digit UTC instant, and the database `now()` of the read. */
+    registrationOpensAt: z.string().optional(),
+    serverNow: z.string().optional(),
   })
   .strict();
 export type EventEdit = z.infer<typeof eventEditSchema>;
@@ -812,6 +825,13 @@ export const attendeeSchema = z
     origin: z.enum(VIEWER_ORIGINS).nullable().optional(),
     refunded: z.boolean().optional(),
     overLimit: z.boolean().optional(),
+    /**
+     * Phase 10.2 (D-791, OPEN-14): true only for a presence whose payment confirmed BEFORE the event's
+     * registration opening (a paid origin; a courtesy, a plain Vou and a pre-release ticket never carry it).
+     * Derived at read time, never stored; absent (not false) otherwise, so a free event's rows and a paid
+     * event's ordinary rows keep today's key set. Admin lane only, like the rest of this row.
+     */
+    beforeOpening: z.boolean().optional(),
   })
   .strict();
 export type Attendee = z.infer<typeof attendeeSchema>;

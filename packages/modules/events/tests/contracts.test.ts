@@ -577,6 +577,7 @@ describe('06-07 — the attendance contract (Participantes)', () => {
     expect(keys).toEqual([
       'avatarAssetId',
       'avatarVariantWidths',
+      'beforeOpening',
       'checkedInAt',
       'displayName',
       'id',
@@ -1147,6 +1148,67 @@ describe('10.2-07 — the read keys of the registration opening are additive and
     expect(eventDetailSchema.safeParse({ ...detail, saleReady: 'yes' }).success).toBe(false);
     expect(Object.keys(eventSummarySchema.shape)).not.toContain('saleReady');
     expect(Object.keys(eventSummarySchema.shape)).not.toContain('checkoutUrl');
+  });
+
+  it('51. the edit read carries the wall-clock pair or null, the two instants, all optional and strict', () => {
+    const edit = {
+      id: '11111111-1111-4111-8111-111111111111',
+      title: 'Encontro anual',
+      description: '',
+      coverAssetId: null,
+      coverVariantWidths: [],
+      category: null,
+      capacity: null,
+      format: 'online',
+      venueName: null,
+      address: null,
+      meetingUrl: null,
+      start: { date: '2026-10-12', time: '23:30' },
+      end: { date: '2026-10-13', time: '01:30' },
+      status: 'active',
+      startsAt: '2026-10-13T02:30:00.000000Z',
+      endsAt: '2026-10-13T04:30:00.000000Z',
+    };
+    expect(eventEditSchema.safeParse(edit).success).toBe(true);
+    for (const registrationOpens of [{ date: '2026-10-10', time: '09:00' }, null]) {
+      expect(
+        eventEditSchema.safeParse({
+          ...edit,
+          registrationOpens,
+          registrationOpensAt: opens,
+          serverNow: now,
+        }).success,
+      ).toBe(true);
+    }
+    expect(
+      eventEditSchema.safeParse({
+        ...edit,
+        registrationOpens: { date: '2026-10-10', time: '09:00', zone: 'x' },
+      }).success,
+    ).toBe(false);
+    for (const key of ['registrationOpens', 'registrationOpensAt', 'serverNow'] as const) {
+      expect(eventEditSchema.shape[key].isOptional(), key).toBe(true);
+    }
+  });
+
+  it('52. the attendee mark is an optional boolean and never a stored or required key', () => {
+    expect(attendeeSchema.shape.beforeOpening.isOptional()).toBe(true);
+    const row = {
+      id: '11111111-1111-4111-8111-111111111111',
+      displayName: 'Iris',
+      avatarAssetId: null,
+      avatarVariantWidths: [],
+      removed: false,
+      status: 'going',
+      respondedAt: null,
+      checkedInAt: null,
+      walkIn: false,
+    };
+    expect(attendeeSchema.safeParse(row).success).toBe(true);
+    expect(
+      attendeeSchema.safeParse({ ...row, origin: 'ticket', beforeOpening: true }).success,
+    ).toBe(true);
+    expect(attendeeSchema.safeParse({ ...row, beforeOpening: 'true' }).success).toBe(false);
   });
 
   it('53. EP-15: two instants one microsecond apart order correctly as plain strings, which Date.parse cannot do', () => {
