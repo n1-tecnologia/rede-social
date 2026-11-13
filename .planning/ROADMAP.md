@@ -50,6 +50,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 09.4: Projeto do tenant no Supabase do cliente (INSERTED)** - A tenant can run on a Supabase project in its own account: a scoped access token limited to that one project is stored sealed per project and used for every Management API call about it, with the organisation pin, the allow-list, the rate limiter, the health and the panel working per project
 - [x] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [x] **Phase 10.1: Rede Social - Ingresso pago do evento pela Kiwify (INSERTED)** - An event linked to a Kiwify product confirms a member's presence only after that product's purchase is approved (matched by gateway product id and e-mail); a refund or chargeback removes it and frees the seat; an event with no linked product keeps the automatic RSVP (completed 2026-11-13)
+- [ ] **Phase 10.2: Abertura das inscrições do evento com contagem regressiva (INSERTED)** - A paid event gets an optional registration-opening date: before it the member sees "Em breve" and a days/hours/minutes countdown and cannot buy, after it a presence holder sees the countdown to the event; free events do not change
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 - [x] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it right after their first login, members without a completed profile and members who had completed it before the form existed answer it too
 - [ ] **Phase 13: App nativo iOS e Android por tenant (white-label)** - Post-MVP, additive: each tenant gets its own native iOS and Android app (stage 1: a native shell around the web's own screens), fixed to the tenant's host, with every feature of the web app (member area and tenant admin), native push and links that open the app; the web, the PWA and the API stay as they are for a browser
@@ -1652,6 +1653,28 @@ Plans:
 
 - Precondition for every task (D-33, D-365, UI-04): `grep -q '^approved: true' .planning/sketches/021-phase-10.1-designed-screens/README.md` succeeds; if it does not, the executor stops and reports that the sketch gate of plan 10 is pending; it is also the FIRST clause of every verify command of this plan
 
+### Phase 10.2: Abertura das inscrições do evento com contagem regressiva (INSERTED)
+
+**Goal:** A paid event (one with a linked Kiwify product) gets an optional registration-opening date set by `admin_tenant` in the event form. Before it, members see the event with an "Em breve" tag and a live countdown in days, hours and minutes to the opening, and cannot buy (the API does not return the purchase link); after it, a member who holds a presence sees a countdown to the event. A payment that arrives before the opening, through a direct link, still confirms the presence and is marked for the admin. Free events and events with no opening date behave exactly as today.
+**Scope**: Post-MVP, additive. Requested by Igor on 2026-11-13, right after Phase 10.1 closed; it extends that phase's event page, event form and Kiwify link.
+**Depends on:** Phase 10.1 (the paid event, its Kiwify product link, the `Comprar ingresso` flow and the closed doors), Phase 06 (events)
+**Requirements**: TBD
+**Success Criteria** (what must be TRUE):
+
+  1. In the event form of a paid event, `admin_tenant` can set an optional "Abertura das inscrições" date and time, in the tenant's time zone and before the event's start. With no date, purchase opens at once and every existing event behaves as today.
+  2. Before the opening, the member sees the event (card and page) with an "Em breve" tag and a live countdown in days, hours and minutes to the opening. The API does not return the purchase link and the page shows no `Comprar ingresso` button. At zero the page swaps to the button by itself, with the countdown starting from server time and not from the device clock.
+  3. A payment that arrives before the opening (a direct Kiwify link) confirms the presence like any other, and the participants list marks it "antes da abertura". Refund, chargeback, courtesy and the closed doors of Phase 10.1 are unchanged.
+  4. Once the event has presences the opening date cannot be changed (the same lock as the product with tickets sold; discuss-phase fixes whether a courtesy counts). Free events show no tag and no opening countdown.
+  5. After the opening, a member who holds a presence (payment or courtesy) sees a countdown in days, hours and minutes to the event, on the event page and on the "Meus eventos" cards (today they only say "Faltam N dias").
+
+**UI hint**: yes. The "Abertura das inscrições" field in the event form, the "Em breve" tag and the countdown on the card and the page, the countdown to the event for presence holders, the "antes da abertura" mark in Participantes. Prototype-less: needs a UI-SPEC and a sketch before planning.
+**Research needed**: Light. Everything it touches exists in Phase 10.1 (event form, member page, Kiwify link, read model); the new parts are one nullable column on the event, the server-time countdown and the live swap.
+**Notes**: Igor's decisions of 2026-11-13: (1) paid events only, free events do not change; (2) the date is optional, no date means open at once; (3) a payment before the opening confirms the presence anyway and is flagged; (4) no change once there are registrants. Assumed unless he objects: the countdown to the event shows on the event page and on "Meus eventos"; no "as inscrições abriram" push. Decision block D-780..D-799 is reserved for this phase (10.1 owns D-740..D-779, Phase 11 continues from D-719). Inserted after Phase 10.1 and executed before Phase 11; the schedule artifact puts execution on 2026-11-16.
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 10.2 to break down)
+
 ### Phase 11: Rede Social - Direct Messages, Member Blocking and Reports
 
 **Goal**: With "Rede social" on, members message each other 1:1, block people they don't want to hear from, and are notified about the social activity that concerns them; members can report content and `admin_tenant` moderates member content through a reports queue.
@@ -2085,6 +2108,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 9/9 | Complete    | 2026-10-27 |
 | 10. Rede Social - Member Stories and Communities | 15/15 | Complete    | 2026-11-12 |
 | 10.1. Rede Social - Ingresso pago do evento pela Kiwify (INSERTED) | 19/19 | Complete    | 2026-11-13 |
+| 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |
