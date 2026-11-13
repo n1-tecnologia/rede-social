@@ -1671,9 +1671,58 @@ Plans:
 **Research needed**: Light. Everything it touches exists in Phase 10.1 (event form, member page, Kiwify link, read model); the new parts are one nullable column on the event, the server-time countdown and the live swap.
 **Notes**: Igor's decisions of 2026-11-13: (1) paid events only, free events do not change; (2) the date is optional, no date means open at once; (3) a payment before the opening confirms the presence anyway and is flagged; (4) no change once there are registrants. Assumed unless he objects: the countdown to the event shows on the event page and on "Meus eventos"; no "as inscrições abriram" push. Decision block D-780..D-799 is reserved for this phase (10.1 owns D-740..D-779, Phase 11 continues from D-719). Inserted after Phase 10.1 and executed before Phase 11; the schedule artifact puts execution on 2026-11-16.
 
-Plans:
+**Plans:** 0/16 plans executed (planned 2026-11-13: 16 plans in 10 waves; the database, contract, API, formatter, view-model and hook plans run before the gated UI plans; the five UI plans 12 to 16 wait for the owner's `approved: true` on sketch 022, plan 03)
 
-- [ ] TBD (run /gsd-plan-phase 10.2 to break down)
+Plans:
+**Wave 1**
+
+- [ ] 10.2-01-PLAN.md — Schema: the nullable opening on `events` and the confirmation instant on `event_attendances`, two CHECKs, one generated expand-only migration (pgTAP 234 sections 1 and 2)
+- [ ] 10.2-02-PLAN.md — Sketch 022: the 43 frames of the prototype-less Phase 10.2 surfaces
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 10.2-03-PLAN.md — Sketch 022 README, manifest row and the blocking approval checkpoint (Igor's hand)
+- [ ] 10.2-04-PLAN.md — The link decider by the database clock, the readiness definer, the lock trigger and the clear-on-reset (pgTAP 234 sections 3 to 5)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 10.2-05-PLAN.md — The grant records when a ticket was confirmed (no opening check), the guard knows the column, the delivery marker definer (pgTAP 234 sections 6 to 9)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 10.2-06-PLAN.md — Contracts and write path: `registrationOpens` in the event body, `opening_locked` and `opening_after_start` in the closed list, the two-connection lock cases
+- [ ] 10.2-08-PLAN.md — Payments: the `Eventos recentes` marker, an early delivery through the real webhook, the mapping removal clears the date, parallel deliveries
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 10.2-07-PLAN.md — Read models: the opening, the server seed and the readiness fact for paid events only, the edit wall clock, the attendee mark
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 10.2-09-PLAN.md — The pure countdown formatter, the pt-BR catalog keys and their pins
+- [ ] 10.2-11-PLAN.md — The server clock, the one-timer countdown hook with hidden-tab re-seed and the seed-aware boundary refresh
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 10.2-10-PLAN.md — View models: the `soon` sale state and precedence, the `Em breve` tag and notes, the holder countdown, the two admin marks, `next build` once
+- [ ] 10.2-12-PLAN.md — The `Abertura das inscrições` field in the Ingresso section (gated on sketch 022)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 10.2-13-PLAN.md — The live count, the `Em breve` zone and the swap by itself (gated on sketch 022)
+- [ ] 10.2-15-PLAN.md — `Antes da abertura` in Participantes and Eventos recentes (gated on sketch 022)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 10.2-14-PLAN.md — The `Em breve` card and hero, the holder's live countdown, the gallery's shared refresh (gated on sketch 022)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 10.2-16-PLAN.md — The end-to-end spec, the neutrality extension, the `Phase 10.2 release` notes with the Phase 13 note, the owner's ledger and the exit gate
+
+**Cross-cutting constraints:**
+
+- Precondition for every task of plans 12 to 15 and for the e2e task of plan 16 (D-33, D-365, UI-04): `grep -q '^approved: true' .planning/sketches/022-phase-10.2-designed-screens/README.md` succeeds; if it does not, the executor stops and reports that the sketch gate of plan 03 is pending; it is also the FIRST clause of every verify command of those tasks
 
 ### Phase 11: Rede Social - Direct Messages, Member Blocking and Reports
 
