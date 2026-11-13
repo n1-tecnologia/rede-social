@@ -1671,7 +1671,7 @@ Plans:
 **Research needed**: Light. Everything it touches exists in Phase 10.1 (event form, member page, Kiwify link, read model); the new parts are one nullable column on the event, the server-time countdown and the live swap.
 **Notes**: Igor's decisions of 2026-11-13: (1) paid events only, free events do not change; (2) the date is optional, no date means open at once; (3) a payment before the opening confirms the presence anyway and is flagged; (4) no change once there are registrants. Assumed unless he objects: the countdown to the event shows on the event page and on "Meus eventos"; no "as inscrições abriram" push. Decision block D-780..D-799 is reserved for this phase (10.1 owns D-740..D-779, Phase 11 continues from D-719). Inserted after Phase 10.1 and executed before Phase 11; the schedule artifact puts execution on 2026-11-16.
 
-**Plans:** 3/16 plans executed (planned 2026-11-13: 16 plans in 10 waves; the database, contract, API, formatter, view-model and hook plans run before the gated UI plans; the five UI plans 12 to 16 wait for the owner's `approved: true` on sketch 022, plan 03)
+**Plans:** 6/16 plans executed (planned 2026-11-13: 16 plans in 10 waves; the database, contract, API, formatter, view-model and hook plans run before the gated UI plans; the five UI plans 12 to 16 wait for the owner's `approved: true` on sketch 022, plan 03)
 
 Plans:
 **Wave 1**
@@ -1682,15 +1682,15 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 10.2-03-PLAN.md — Sketch 022 README, manifest row and the blocking approval checkpoint (Igor's hand)
-- [ ] 10.2-04-PLAN.md — The link decider by the database clock, the readiness definer, the lock trigger and the clear-on-reset (pgTAP 234 sections 3 to 5)
+- [x] 10.2-04-PLAN.md — The link decider by the database clock, the readiness definer, the lock trigger and the clear-on-reset (pgTAP 234 sections 3 to 5)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 10.2-05-PLAN.md — The grant records when a ticket was confirmed (no opening check), the guard knows the column, the delivery marker definer (pgTAP 234 sections 6 to 9)
+- [x] 10.2-05-PLAN.md — The grant records when a ticket was confirmed (no opening check), the guard knows the column, the delivery marker definer (pgTAP 234 sections 6 to 9)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 10.2-06-PLAN.md — Contracts and write path: `registrationOpens` in the event body, `opening_locked` and `opening_after_start` in the closed list, the two-connection lock cases
+- [x] 10.2-06-PLAN.md — Contracts and write path: `registrationOpens` in the event body, `opening_locked` and `opening_after_start` in the closed list, the two-connection lock cases
 - [ ] 10.2-08-PLAN.md — Payments: the `Eventos recentes` marker, an early delivery through the real webhook, the mapping removal clears the date, parallel deliveries
 
 **Wave 5** *(blocked on Wave 4 completion)*
@@ -2157,7 +2157,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 9/9 | Complete    | 2026-10-27 |
 | 10. Rede Social - Member Stories and Communities | 15/15 | Complete    | 2026-11-12 |
 | 10.1. Rede Social - Ingresso pago do evento pela Kiwify (INSERTED) | 19/19 | Complete    | 2026-11-13 |
-| 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 3/16 | In Progress|  |
+| 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 6/16 | In Progress|  |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |
