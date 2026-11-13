@@ -24,16 +24,21 @@ import { ENTER_NOTICE_REASONS, type EnterNoticeReason, EVENT_ID_RE } from '@/lib
  * (E12 long-text), so it is server-rendered with no client state (E12 loading). The body wraps inside
  * `EmptyState`'s `max-w-[260px]` (E12 overflow). No brand fill: the refusal is a state, not an action.
  */
+// Phase 10.1-08 (A-10.1-PLUMB, compile-only): `ingresso` is the screen of plan 12; until then it is not a
+// reason this page draws, so it redirects to the detail like any unknown value (D-93).
+type NoticeReason = Exclude<EnterNoticeReason, 'ingresso'>;
 const NOTICES: Readonly<
-  Record<EnterNoticeReason, { icon: LucideIcon; key: 'ended' | 'cancelled' | 'confirmFirst' }>
+  Record<NoticeReason, { icon: LucideIcon; key: 'ended' | 'cancelled' | 'confirmFirst' }>
 > = {
   encerrado: { icon: CalendarClock, key: 'ended' },
   cancelado: { icon: CalendarX2, key: 'cancelled' },
   confirmar: { icon: Lock, key: 'confirmFirst' },
 };
 
-const isReason = (value: unknown): value is EnterNoticeReason =>
-  typeof value === 'string' && (ENTER_NOTICE_REASONS as readonly string[]).includes(value);
+const isReason = (value: unknown): value is NoticeReason =>
+  typeof value === 'string' &&
+  value !== 'ingresso' &&
+  (ENTER_NOTICE_REASONS as readonly string[]).includes(value);
 
 export default async function EnterNoticePage({
   params,

@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { formatBrl } from '@rede-social/contracts/money';
 import type { Attendee, EventDetail, EventSummary } from '@rede-social/module-events/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
@@ -9,6 +10,8 @@ import {
   attendanceListFromParam,
   attendeeView,
   checkedInLine,
+  ENTER_NOTICE_FOR,
+  ENTER_NOTICE_REASONS,
   EVENT_LOW_SPOTS,
   eventActionState,
   eventCardBadge,
@@ -19,6 +22,7 @@ import {
   eventHours,
   eventMapView,
   eventPhase,
+  eventSaleState,
   eventSectionsView,
   eventTicketView,
   eventWhenLine,
@@ -1053,5 +1057,559 @@ describe('the event page keeps the horizontal cover (12.3-08, UI-D-693)', () => 
     );
     expect(view.hero.coverAssetId).toBe('0c000000-0000-4000-8000-0000000000c1');
     expect(view.hero.coverVariantWidths).toEqual([480, 960]);
+  });
+});
+
+/* ── Phase 10.1-08: the paid event as finished facts (D-742, D-746, D-750, D-751, D-753, D-754, D-755) ─── */
+
+/**
+ * The recording translator: it returns the KEY and the interpolated values, so each case asserts which
+ * catalog keys a state asks for (the catalog words are plan 12's) and which plain values it hands them.
+ */
+const rec = ((key: string, values?: Record<string, unknown>) =>
+  values === undefined ? key : `${key}${JSON.stringify(values)}`) as unknown as Parameters<
+  typeof eventCardView
+>[1]['t'];
+const k = (key: string, values?: Record<string, unknown>) =>
+  values === undefined ? key : `${key}${JSON.stringify(values)}`;
+
+const PRICE = formatBrl(8000);
+const LINK = 'https://pay.example/ingresso';
+const START = at('2026-10-12T22:00:00Z');
+const END = at('2026-10-13T00:00:00Z');
+const BEFORE = at('2026-10-05T12:00:00Z'); // P0: a week before
+const ctx = (nowMs = BEFORE) => ({ tz: SP, nowMs, t: rec });
+
+const paidEvent = (overrides: Partial<EventDetail> = {}): EventDetail =>
+  detail({
+    paid: true,
+    ticketPriceCents: 8000,
+    capacity: 50,
+    confirmedCount: 10,
+    checkoutUrl: LINK,
+    viewerOrigin: null,
+    ...overrides,
+  });
+
+describe('10.1-08 tracer: the member’s zone is a finished fact from one request instant', () => {
+  it('a paid event with a stored https link, R$ 80,00, 10 of 50 taken, seen before the start: buy, Pago tag, price-first note, buy action state', () => {
+    const e = paidEvent();
+    expect(eventSaleState(e, eventPhase(e.startsAt, e.endsAt, BEFORE))).toEqual({
+      kind: 'buy',
+      href: LINK,
+      price: PRICE,
+    });
+
+    const card = eventCardView(e, ctx());
+    expect(card.tag).toBe('ticket.badge');
+    expect(card.note).toBe(PRICE);
+
+    const view = eventDetailView(e, ctx());
+    expect(view.paid).toBe(true);
+    expect(view.tag).toBe('ticket.badge');
+    expect(view.sale).toEqual({ kind: 'buy', href: LINK, price: PRICE });
+
+    const state = eventActionState(e, view);
+    expect(state).toMatchObject({
+      paid: true,
+      zone: 'buy',
+      viewerOrigin: null,
+      checkoutHref: LINK,
+      priceLabel: PRICE,
+    });
+  });
+});
+
+describe('10.1-08 eventSaleState: the precedence of UI-D-746 (EP-08, every pair that could tie)', () => {
+  const sale = (overrides: Partial<EventDetail>, nowMs: number) => {
+    const e = paidEvent(overrides);
+    return eventSaleState(e, eventPhase(e.startsAt, e.endsAt, nowMs)).kind;
+  };
+  const NOW_P2 = at('2026-10-12T22:30:00Z');
+  const NOW_P3 = at('2026-10-13T01:00:00Z');
+
+  it('cancelled beats ended and under way', () => {
+    expect(sale({ status: 'cancelled' }, BEFORE)).toBe('none');
+    expect(sale({ status: 'cancelled' }, NOW_P2)).toBe('none');
+    expect(sale({ status: 'cancelled' }, NOW_P3)).toBe('none');
+  });
+
+  it('ended beats under way, unavailable and full', () => {
+    expect(sale({}, NOW_P3)).toBe('none');
+    expect(sale({ checkoutUrl: null }, NOW_P3)).toBe('none');
+    expect(sale({ confirmedCount: 50 }, NOW_P3)).toBe('none');
+  });
+
+  it('under way beats unavailable and full', () => {
+    expect(sale({}, NOW_P2)).toBe('salesClosed');
+    expect(sale({ checkoutUrl: null }, NOW_P2)).toBe('salesClosed');
+    expect(sale({ confirmedCount: 50 }, NOW_P2)).toBe('salesClosed');
+  });
+
+  it('unavailable beats full, and a paid event that is both shows unavailable', () => {
+    expect(sale({ checkoutUrl: null, confirmedCount: 50 }, BEFORE)).toBe('unavailable');
+    expect(sale({ checkoutUrl: null }, BEFORE)).toBe('unavailable');
+  });
+
+  it('full beats buy', () => {
+    expect(sale({ confirmedCount: 50 }, BEFORE)).toBe('soldOut');
+    expect(sale({}, BEFORE)).toBe('buy');
+  });
+
+  it('a link that is not https is unavailable, never a buy href (T-10.1-24)', () => {
+    expect(sale({ checkoutUrl: 'http://pay.example/x' }, BEFORE)).toBe('unavailable');
+    expect(sale({ checkoutUrl: 'javascript:alert(1)' }, BEFORE)).toBe('unavailable');
+    expect(sale({ checkoutUrl: 'not a url' }, BEFORE)).toBe('unavailable');
+    expect(sale({ checkoutUrl: undefined }, BEFORE)).toBe('unavailable');
+  });
+
+  it('a free event has no sale zone at all', () => {
+    const e = detail({ paid: false, checkoutUrl: LINK });
+    expect(eventSaleState(e, 'P0')).toEqual({ kind: 'none' });
+    expect(eventSaleState(detail(), 'P0')).toEqual({ kind: 'none' });
+  });
+});
+
+describe('10.1-08 eventSaleState: the millisecond and capacity boundaries (EP-22)', () => {
+  const zone = (nowMs: number, overrides: Partial<EventDetail> = {}) => {
+    const e = paidEvent(overrides);
+    return eventSaleState(e, eventPhase(e.startsAt, e.endsAt, nowMs)).kind;
+  };
+
+  it('one millisecond before starts_at it is buy, at exactly starts_at it is salesClosed, at exactly ends_at it is empty', () => {
+    expect(zone(START - 1)).toBe('buy');
+    expect(zone(START)).toBe('salesClosed');
+    expect(zone(END - 1)).toBe('salesClosed');
+    expect(zone(END)).toBe('none');
+  });
+
+  it('the check-in window (P1) still sells', () => {
+    expect(zone(START - 60 * 60_000)).toBe('buy');
+  });
+
+  it('confirmedCount = capacity - 1 is buy, = capacity is soldOut, above is soldOut, a null capacity never sells out', () => {
+    expect(zone(BEFORE, { capacity: 50, confirmedCount: 49 })).toBe('buy');
+    expect(zone(BEFORE, { capacity: 50, confirmedCount: 50 })).toBe('soldOut');
+    expect(zone(BEFORE, { capacity: 50, confirmedCount: 51 })).toBe('soldOut');
+    expect(zone(BEFORE, { capacity: null, confirmedCount: 100000 })).toBe('buy');
+  });
+});
+
+describe('10.1-08 eventSaleState: the price is a label (EP-23)', () => {
+  it('formats integer cents through formatBrl and leaves no price as null', () => {
+    const buy = (ticketPriceCents: number | null | undefined) =>
+      eventSaleState(paidEvent({ ticketPriceCents }), 'P0');
+    expect(buy(8000)).toMatchObject({ kind: 'buy', price: formatBrl(8000) });
+    expect(buy(1)).toMatchObject({ price: formatBrl(1) });
+    expect(buy(10_000_000)).toMatchObject({ price: formatBrl(10_000_000) });
+    expect(buy(null)).toMatchObject({ price: null });
+    expect(buy(undefined)).toMatchObject({ price: null });
+  });
+});
+
+describe('10.1-08 eventCardView: the Pago tag and the price-first note (D-755, UI-D-744)', () => {
+  const NOW_P2 = at('2026-10-12T22:30:00Z');
+  const NOW_P3 = at('2026-10-13T01:00:00Z');
+  const card = (overrides: Partial<EventSummary>, nowMs = BEFORE) =>
+    eventCardView(
+      { ...event(), paid: true, ticketPriceCents: 8000, capacity: 50, ...overrides },
+      ctx(nowMs),
+    );
+
+  it('draws the tag to a viewer who is not in, and not to one who is, cancelled or over', () => {
+    expect(card({}).tag).toBe('ticket.badge');
+    expect(card({ viewerStatus: 'not_going' }).tag).toBe('ticket.badge');
+    expect(card({ viewerStatus: 'going' }).tag).toBeUndefined();
+    expect(
+      card({ viewerStatus: 'checked_in', viewerCheckedInAt: '2026-10-12T21:30:00.000000Z' }, NOW_P2)
+        .tag,
+    ).toBeUndefined();
+    expect(card({ status: 'cancelled' }).tag).toBeUndefined();
+    expect(card({}, NOW_P3).tag).toBeUndefined();
+    // Under way and still not in: the tag stays (the zone says the sale ended).
+    expect(card({}, NOW_P2).tag).toBe('ticket.badge');
+  });
+
+  it('puts the price first on the poster note, wrapping with the spots line', () => {
+    expect(card({ confirmedCount: 47 }).note).toBe(
+      k('card.priceNote', { price: PRICE, note: k('card.spotsLeft', { count: 3 }) }),
+    );
+    expect(card({ confirmedCount: 50 }).note).toBe(
+      k('card.priceNote', { price: PRICE, note: 'card.soldOut' }),
+    );
+    // No spots line: the price alone.
+    expect(card({ confirmedCount: 10 }).note).toBe(PRICE);
+  });
+
+  it('without a price only the tag shows and the spots note is the shipped one', () => {
+    const view = card({ ticketPriceCents: null, confirmedCount: 47 });
+    expect(view.tag).toBe('ticket.badge');
+    expect(view.note).toBe(k('card.spotsLeft', { count: 3 }));
+  });
+
+  it('adds ", evento pago" or ", evento pago, R$ 80,00" to the accessible name', () => {
+    const base = eventCardView(event(), ctx()).ariaLabel;
+    expect(card({}).ariaLabel).toBe(`${base}${k('card.paidPrice', { price: PRICE })}`);
+    expect(card({ ticketPriceCents: null }).ariaLabel).toBe(`${base}card.paid`);
+  });
+
+  it('a viewer who is in keeps their countdown: no tag, no price, no suffix', () => {
+    const view = card({ viewerStatus: 'going' });
+    expect(view.tag).toBeUndefined();
+    expect(view.note).toBe(k('card.countdown', { count: 7 }));
+    expect(view.ariaLabel).toBe(
+      eventCardView({ ...event(), viewerStatus: 'going' }, ctx()).ariaLabel,
+    );
+  });
+
+  it('a free event’s view is byte-identical to today’s, whatever stray price it carries', () => {
+    const today = JSON.stringify(eventCardView(event({ capacity: 50, confirmedCount: 47 }), ctx()));
+    expect(
+      JSON.stringify(
+        eventCardView(
+          event({ capacity: 50, confirmedCount: 47, paid: false, ticketPriceCents: 8000 }),
+          ctx(),
+        ),
+      ),
+    ).toBe(today);
+    expect(
+      JSON.stringify(
+        eventCardView(event({ capacity: 50, confirmedCount: 47, ticketPriceCents: 8000 }), ctx()),
+      ),
+    ).toBe(today);
+    expect(Object.keys(JSON.parse(today))).toEqual([
+      'id',
+      'href',
+      'title',
+      'category',
+      'place',
+      'placeKind',
+      'badge',
+      'note',
+      'ariaLabel',
+      'coverAssetId',
+      'coverVariantWidths',
+      'posterAssetId',
+      'posterVariantWidths',
+      'coverAlt',
+      'grayscale',
+    ]);
+  });
+});
+
+describe('10.1-08 eventDetailView: the tag, the sale zone and the confirmed block (D-754, UI-D-749)', () => {
+  it('a viewer without a presence gets the tag and the zone; the refunded line only when the read says so', () => {
+    const view = eventDetailView(paidEvent(), ctx());
+    expect(view.tag).toBe('ticket.badge');
+    expect(view.sale?.kind).toBe('buy');
+    expect(view.refundedNote).toBeNull();
+    expect(view.banner).toBeNull();
+
+    const refunded = eventDetailView(paidEvent({ viewerRefunded: true }), ctx());
+    expect(refunded.refundedNote).toBe('ticket.refunded.note');
+    // Nothing to buy any more (the event is over): the note has nothing to sit above.
+    const over = eventDetailView(
+      paidEvent({ viewerRefunded: true }),
+      ctx(at('2026-10-13T01:00:00Z')),
+    );
+    expect(over.refundedNote).toBeNull();
+  });
+
+  it('a going viewer sees the confirmed block in the variant of the origin, with {tenant} as a plain value', () => {
+    const going = (viewerOrigin: 'ticket' | 'courtesy' | 'before_ticket') =>
+      eventDetailView(paidEvent({ viewerStatus: 'going', viewerOrigin }), {
+        ...ctx(),
+        tenantName: 'Rede <b>Demo</b>',
+      });
+
+    expect(going('ticket').banner).toEqual({
+      kind: 'confirmed',
+      variant: 'ticket',
+      title: 'ticket.confirmed.title',
+      body: 'ticket.confirmed.paid',
+    });
+    expect(going('courtesy').banner).toEqual({
+      kind: 'confirmed',
+      variant: 'courtesy',
+      title: 'ticket.confirmed.title',
+      body: k('ticket.confirmed.courtesy', { tenant: 'Rede <b>Demo</b>' }),
+    });
+    expect(going('before_ticket').banner).toMatchObject({
+      kind: 'confirmed',
+      variant: 'before_ticket',
+      body: 'ticket.confirmed.beforeTicket',
+    });
+    // A presence takes the viewer out of the zone, the tag and the refunded line.
+    const view = going('ticket');
+    expect(view.sale).toBeNull();
+    expect(view.tag).toBeNull();
+    expect(view.refundedNote).toBeNull();
+  });
+
+  it('a checked-in viewer sees the checked-in banner alone, plus the refund line when the read carries it', () => {
+    const base = {
+      viewerStatus: 'checked_in' as const,
+      viewerCheckedInAt: '2026-10-12T21:30:00.000000Z',
+      viewerOrigin: 'ticket' as const,
+    };
+    const now = ctx(at('2026-10-12T22:30:00Z'));
+    const plain = eventDetailView(paidEvent(base), now).banner;
+    expect(plain?.kind).toBe('checkedIn');
+    expect(plain).not.toHaveProperty('note');
+    expect(eventDetailView(paidEvent({ ...base, viewerRefunded: true }), now).banner).toMatchObject(
+      {
+        kind: 'checkedIn',
+        note: 'ticket.refunded.afterCheckin',
+      },
+    );
+  });
+
+  it('the cancelled body of a paid event is its own, with the refund sentence only for a ticket holder', () => {
+    const cancelled = (viewerOrigin: 'ticket' | 'courtesy' | null) =>
+      eventDetailView(
+        paidEvent({
+          status: 'cancelled',
+          viewerStatus: viewerOrigin ? 'going' : null,
+          viewerOrigin,
+        }),
+        { ...ctx(), tenantName: 'Rede Demo' },
+      );
+    expect(cancelled(null).banner).toEqual({
+      kind: 'cancelled',
+      title: 'cancelled.title',
+      body: 'ticket.cancelled.body',
+    });
+    expect(cancelled('courtesy').banner).toMatchObject({ body: 'ticket.cancelled.body' });
+    expect(cancelled('ticket').banner).toMatchObject({
+      body: `ticket.cancelled.body ${k('ticket.cancelled.refund', { tenant: 'Rede Demo' })}`,
+    });
+    // A cancelled paid event shows no tag and an empty zone.
+    expect(cancelled(null).tag).toBeNull();
+    expect(cancelled(null).sale).toEqual({ kind: 'none' });
+  });
+
+  it('a free event’s view carries none of the paid keys and keeps its banners', () => {
+    const view = eventDetailView(detail({ viewerStatus: 'going' }), ctx());
+    for (const key of ['paid', 'tag', 'sale', 'refundedNote']) expect(view).not.toHaveProperty(key);
+    expect(view.banner).toBeNull();
+    expect(eventDetailView(detail({ status: 'cancelled' }), ctx()).banner).toEqual({
+      kind: 'cancelled',
+      title: 'cancelled.title',
+      body: 'cancelled.body',
+    });
+  });
+});
+
+describe('10.1-08 eventActionState: the zone, the origin and the link, never the meeting URL', () => {
+  it('carries the paid facts of a paid event and none for a free one', () => {
+    const e = paidEvent({ viewerStatus: 'going', viewerOrigin: 'before_ticket' });
+    const state = eventActionState(e, eventDetailView(e, ctx()));
+    expect(state).toMatchObject({
+      paid: true,
+      zone: null,
+      viewerOrigin: 'before_ticket',
+      checkoutHref: null,
+      priceLabel: null,
+    });
+
+    const free = detail();
+    const freeState = eventActionState(free, eventDetailView(free, ctx()));
+    for (const key of ['paid', 'zone', 'viewerOrigin', 'checkoutHref', 'priceLabel']) {
+      expect(freeState).not.toHaveProperty(key);
+    }
+  });
+
+  it('names the zone for each closed state and keeps the href only in the buy zone', () => {
+    const zoneOf = (overrides: Partial<EventDetail>, nowMs = BEFORE) => {
+      const e = paidEvent(overrides);
+      return eventActionState(e, eventDetailView(e, ctx(nowMs)));
+    };
+    expect(zoneOf({ confirmedCount: 50 })).toMatchObject({ zone: 'soldOut', checkoutHref: null });
+    expect(zoneOf({ checkoutUrl: null })).toMatchObject({
+      zone: 'unavailable',
+      checkoutHref: null,
+    });
+    expect(zoneOf({}, at('2026-10-12T22:30:00Z'))).toMatchObject({ zone: 'salesClosed' });
+    expect(zoneOf({ status: 'cancelled' })).toMatchObject({ zone: 'none' });
+  });
+
+  it('is plain data: no meeting URL, no markup', () => {
+    const e = paidEvent({ format: 'online' });
+    const json = JSON.stringify(eventActionState(e, eventDetailView(e, ctx())));
+    expect(json).not.toMatch(/meeting/i);
+    expect(json).toContain(LINK);
+  });
+});
+
+describe('10.1-08 eventTicketView: the paid section of the check-in pass (D-742, UI-D-752)', () => {
+  const section = (overrides: Partial<EventDetail>, nowMs: number) =>
+    eventTicketView(paidEvent(overrides), ctx(nowMs)).section;
+  const IN_WINDOW = START - 30 * 60_000;
+
+  it('a member without a presence sees the paid section, with the buy href while the sale is open', () => {
+    expect(section({}, IN_WINDOW)).toEqual({
+      kind: 'paid',
+      sentence: 'checkin.paid',
+      buyHref: LINK,
+      price: PRICE,
+    });
+    // Well before the window: the paid sentence, never the "abre 1 hora antes" one.
+    expect(section({}, BEFORE).kind).toBe('paid');
+    // A Não vou answer is no presence.
+    expect(section({ viewerStatus: 'not_going' }, BEFORE).kind).toBe('paid');
+  });
+
+  it('offers no buy href once the sale is closed, the link is gone or the event is full', () => {
+    const underway = at('2026-10-12T22:30:00Z');
+    expect(section({}, underway)).toMatchObject({ kind: 'paid', buyHref: null, price: null });
+    expect(section({ checkoutUrl: null }, IN_WINDOW)).toMatchObject({
+      kind: 'paid',
+      buyHref: null,
+    });
+    expect(section({ confirmedCount: 50 }, IN_WINDOW)).toMatchObject({
+      kind: 'paid',
+      buyHref: null,
+    });
+  });
+
+  it('keeps the precedence done, cancelled, closed, paid, notOpenYet, open', () => {
+    expect(
+      section(
+        { viewerStatus: 'checked_in', viewerCheckedInAt: '2026-10-12T21:30:00.000000Z' },
+        IN_WINDOW,
+      ).kind,
+    ).toBe('done');
+    expect(section({ status: 'cancelled' }, IN_WINDOW).kind).toBe('cancelled');
+    // A ticket holder of a cancelled paid event: cancelled, never the code form.
+    expect(
+      section({ status: 'cancelled', viewerStatus: 'going', viewerOrigin: 'ticket' }, IN_WINDOW)
+        .kind,
+    ).toBe('cancelled');
+    expect(section({}, END).kind).toBe('closed');
+    expect(section({ viewerStatus: 'going', viewerOrigin: 'ticket' }, BEFORE).kind).toBe(
+      'notOpenYet',
+    );
+    expect(section({ viewerStatus: 'going', viewerOrigin: 'ticket' }, IN_WINDOW).kind).toBe('open');
+  });
+
+  it('a free event’s sections are unchanged', () => {
+    const free = (nowMs: number) => eventTicketView(detail(), ctx(nowMs)).section.kind;
+    expect(free(BEFORE)).toBe('notOpenYet');
+    expect(free(IN_WINDOW)).toBe('open');
+    expect(free(END)).toBe('closed');
+  });
+});
+
+describe('10.1-08 the enter gate’s fourth reason (D-742, UI-D-751)', () => {
+  it('maps ticket_required to the ingresso notice and keeps the three others', () => {
+    expect(ENTER_NOTICE_REASONS).toEqual(['encerrado', 'cancelado', 'confirmar', 'ingresso']);
+    expect(ENTER_NOTICE_FOR).toEqual({
+      ended: 'encerrado',
+      cancelled: 'cancelado',
+      confirm_first: 'confirmar',
+      ticket_required: 'ingresso',
+    });
+  });
+});
+
+describe('10.1-08 attendeeView: origin marks and the one action (D-743, D-751, D-758, UI-D-754 to UI-D-757)', () => {
+  const row = (overrides: Partial<Attendee> = {}): Attendee => ({
+    id: 'aaaaaaaa-0000-4000-8000-000000000001',
+    displayName: 'Iris Muñoz',
+    avatarAssetId: null,
+    avatarVariantWidths: [],
+    removed: false,
+    status: 'going',
+    respondedAt: '2026-10-02T15:00:00.000000Z',
+    checkedInAt: null,
+    walkIn: false,
+    ...overrides,
+  });
+  const NOW = at('2026-10-12T23:00:00Z');
+  const view = (attendee: Attendee, list: 'confirmed' | 'present' | 'not_going' = 'confirmed') =>
+    attendeeView(attendee, list, { tz: SP, nowMs: NOW, t: rec });
+  const labels = (attendee: Attendee, list: 'confirmed' | 'present' | 'not_going' = 'confirmed') =>
+    view(attendee, list).marks?.map((mark) => mark.label);
+
+  it('each origin has its pill and tone', () => {
+    expect(view(row({ origin: 'ticket' })).marks).toEqual([
+      { kind: 'paid', tone: 'success', label: 'participants.origin.paid' },
+    ]);
+    expect(view(row({ origin: 'courtesy' })).marks).toEqual([
+      { kind: 'courtesy', tone: 'neutral', label: 'participants.origin.courtesy' },
+    ]);
+    expect(view(row({ origin: 'before_ticket' })).marks).toEqual([
+      { kind: 'beforeTicket', tone: 'neutral', label: 'participants.origin.beforeTicket' },
+    ]);
+  });
+
+  it('keeps the fixed order origin, Reembolsado, Acima do limite', () => {
+    const all = row({
+      status: 'checked_in',
+      checkedInAt: '2026-10-12T21:30:00.000000Z',
+      origin: 'ticket',
+      refunded: true,
+      overLimit: true,
+    });
+    expect(labels(all, 'present')).toEqual([
+      'participants.origin.paid',
+      'participants.origin.refunded',
+      'participants.origin.overLimit',
+    ]);
+    expect(view(all, 'present').marks?.map((mark) => mark.tone)).toEqual([
+      'success',
+      'warning',
+      'warning',
+    ]);
+    expect(labels(row({ origin: 'courtesy', overLimit: true }))).toEqual([
+      'participants.origin.courtesy',
+      'participants.origin.overLimit',
+    ]);
+  });
+
+  it('removeCourtesy exists only for a courtesy that has not checked in; paid, before-the-ticket and refunded rows have none', () => {
+    expect(view(row({ origin: 'courtesy' })).action).toBe('removeCourtesy');
+    expect(
+      view(
+        row({
+          origin: 'courtesy',
+          status: 'checked_in',
+          checkedInAt: '2026-10-12T21:30:00.000000Z',
+        }),
+        'present',
+      ).action,
+    ).toBeNull();
+    expect(view(row({ origin: 'ticket' })).action).toBeNull();
+    expect(view(row({ origin: 'before_ticket' })).action).toBeNull();
+    expect(
+      view(
+        row({
+          origin: 'ticket',
+          refunded: true,
+          status: 'checked_in',
+          checkedInAt: '2026-10-12T21:30:00.000000Z',
+        }),
+        'present',
+      ).action,
+    ).toBeNull();
+  });
+
+  it('the Não vão rows of a paid event offer release and draw no pill', () => {
+    const notGoing = view(row({ status: 'not_going', origin: null }), 'not_going');
+    expect(notGoing.action).toBe('release');
+    expect(notGoing.marks).toEqual([]);
+  });
+
+  it('a free event’s row keeps today’s exact keys', () => {
+    const free = view(row());
+    expect(Object.keys(free)).toEqual(['id', 'name', 'removed', 'avatarUrl', 'meta', 'walkIn']);
+    expect(Object.keys(view(row({ status: 'not_going' }), 'not_going'))).toEqual([
+      'id',
+      'name',
+      'removed',
+      'avatarUrl',
+      'meta',
+      'walkIn',
+    ]);
   });
 });

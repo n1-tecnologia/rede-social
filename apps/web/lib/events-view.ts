@@ -7,6 +7,7 @@ import {
   type EventDetail,
   type EventSummary,
   type RsvpAnswer,
+  type ViewerOrigin,
 } from '@rede-social/module-events/contracts';
 import type { getTranslations } from 'next-intl/server';
 import { addressMapsQuery, parseEventAddress } from './event-address';
@@ -16,6 +17,7 @@ import {
   type ScheduleItem,
   splitEventDescription,
 } from './event-extras';
+import { formatTicketPrice, safeCheckoutHref } from './event-ticket';
 
 /**
  * THE formatter module for events (UI-D-203): every date, time and relative label an events surface
@@ -254,6 +256,53 @@ function rsvpOpen(event: Pick<EventSummary, 'startsAt' | 'endsAt' | 'status'>, n
 }
 
 /**
+ * The member's sale zone of a PAID event (Phase 10.1-08, D-746, D-750, D-751, D-753, UI-D-746), a
+ * finished fact the screen draws:
+ *  - `none`: nothing to sell or say (the event is cancelled or over, or it is not a paid event);
+ *  - `salesClosed`: the event is under way, the sale ended when it started (D-750);
+ *  - `unavailable`: no valid `https:` purchase link, so the module is off, the gateway is
+ *    disconnected or the link is missing or unsafe (D-746);
+ *  - `soldOut`: `confirmedCount >= capacity` (D-751);
+ *  - `buy`: the sale is open, with the validated href and the optional price label.
+ */
+export type EventSaleState =
+  | { kind: 'none' }
+  | { kind: 'salesClosed' }
+  | { kind: 'unavailable' }
+  | { kind: 'soldOut' }
+  | { kind: 'buy'; href: string; price: string | null };
+
+/**
+ * The zone, first match wins (UI-D-746): cancelled, then ended (P3), then under way (P2), then no
+ * link, then full, then buy. A paid event that is both full and unavailable shows `unavailable`,
+ * because "Esgotado" would promise a ticket the page cannot sell anyway.
+ *
+ * Pure and clock-free: `phase` is `eventPhase(startsAt, endsAt, nowMs)` from the ONE request instant,
+ * so the boundaries are the phase's (one millisecond before `starts_at` is `buy` through P0/P1, the
+ * start itself is P2, `ends_at` itself is P3). A null `capacity` is never sold out. The link is
+ * re-validated here (`safeCheckoutHref`), whatever the caller already did (T-10.1-24), and the price
+ * is only formatted, never compared or computed (EP-23).
+ */
+export function eventSaleState(
+  event: Pick<
+    EventDetail,
+    'status' | 'capacity' | 'confirmedCount' | 'paid' | 'ticketPriceCents' | 'checkoutUrl'
+  >,
+  phase: EventPhase,
+): EventSaleState {
+  if (event.paid !== true) return { kind: 'none' };
+  if (event.status === 'cancelled') return { kind: 'none' };
+  if (phase === 'P3') return { kind: 'none' };
+  if (phase === 'P2') return { kind: 'salesClosed' };
+  const href = safeCheckoutHref(event.checkoutUrl);
+  if (href === null) return { kind: 'unavailable' };
+  if (event.capacity !== null && event.confirmedCount >= event.capacity) {
+    return { kind: 'soldOut' };
+  }
+  return { kind: 'buy', href, price: formatTicketPrice(event.ticketPriceCents) };
+}
+
+/**
  * The two galleries of `/eventos` (2026-10-03, the REINE prototype's "Meus eventos" and "Outros
  * eventos"), from the two periods the API pages:
  * - `mine`: the events the viewer is in that have not ended (a "Vou" or a check-in), then the ended
@@ -406,6 +455,11 @@ export type EventCardView = {
   /** The countdown or the "Últimas N vagas" line, or undefined for none. */
   note?: string;
   ariaLabel: string;
+  /**
+   * Phase 10.1-08 (D-755, UI-D-744): the "Pago" tag, present ONLY on a paid event the viewer is not in
+   * that is neither cancelled nor over. A free event's view has no such key at all.
+   */
+  tag?: string;
   coverAssetId: string | null;
   coverVariantWidths: number[];
   /**
@@ -430,13 +484,34 @@ export function eventCardView(
 ): EventCardView {
   const online = event.format === 'online';
   const badge = eventCardBadge(event, tz, nowMs, t);
-  const note = eventCardNote(event, tz, nowMs, t);
+  const spotsNote = eventCardNote(event, tz, nowMs, t);
   const whenLine = eventWhenLine(event, tz, nowMs, t);
   const when = [
     whenLine.text,
     ...(badge.kind === 'date' || badge.kind === 'live' ? [] : [badge.label]),
-    ...(note === undefined || whenLine.live ? [] : [note]),
+    ...(spotsNote === undefined || whenLine.live ? [] : [spotsNote]),
   ].join(', ');
+  const label = t('poster.label', { title: event.title, when });
+
+  // Phase 10.1-08 (D-753, D-755, UI-D-744): the paid offer is shown to a viewer who is NOT in, on an
+  // event that is neither cancelled nor over. Everything below is skipped for a free event, so its view
+  // keeps today's exact key set.
+  const offered =
+    event.paid === true &&
+    !isViewerIn(event) &&
+    event.status !== 'cancelled' &&
+    eventPhase(event.startsAt, event.endsAt, nowMs) !== 'P3';
+  const price = offered ? formatTicketPrice(event.ticketPriceCents) : null;
+  // The price goes FIRST on the poster note ("R$ 80,00 · Últimas 3 vagas"), never truncated.
+  const note =
+    price === null
+      ? spotsNote
+      : spotsNote === undefined
+        ? price
+        : t('card.priceNote', { price, note: spotsNote });
+  const ariaLabel = offered
+    ? `${label}${price === null ? t('card.paid') : t('card.paidPrice', { price })}`
+    : label;
   return {
     id: event.id,
     href: `/eventos/${event.id}`,
@@ -446,7 +521,8 @@ export function eventCardView(
     placeKind: online ? 'online' : 'venue',
     badge,
     ...(note === undefined ? {} : { note }),
-    ariaLabel: t('poster.label', { title: event.title, when }),
+    ariaLabel,
+    ...(offered ? { tag: t('ticket.badge') } : {}),
     coverAssetId: event.coverAssetId,
     coverVariantWidths: event.coverVariantWidths,
     posterAssetId: event.posterAssetId ?? null,
@@ -709,7 +785,23 @@ function exampleSchedule(
 /** The detail's banner at the top of the hero card body (UI-D-202, UI-D-207). */
 export type EventBannerView =
   | { kind: 'cancelled'; title: string; body: string }
-  | { kind: 'checkedIn'; title: string; body: string };
+  | {
+      kind: 'checkedIn';
+      title: string;
+      body: string;
+      /** Phase 10.1-08 (D-752): "Seu ingresso foi reembolsado, mas o check-in continua registrado." */
+      note?: string;
+    }
+  | {
+      /**
+       * Phase 10.1-08 (D-754, UI-D-749): "Presença confirmada" for a viewer holding a presence in a paid
+       * event who has not checked in; `variant` is where the presence came from.
+       */
+      kind: 'confirmed';
+      variant: ViewerOrigin;
+      title: string;
+      body: string;
+    };
 
 /** Everything `/eventos/[eventId]` renders, as finished strings and ISO instants. */
 export type EventDetailView = {
@@ -728,6 +820,16 @@ export type EventDetailView = {
     coverAlt: string;
   };
   banner: EventBannerView | null;
+  /**
+   * Phase 10.1-08 (D-753, D-755, UI-D-745, UI-D-746): the paid facts. Present ONLY for a paid event (a
+   * free event's view has none of the four keys): `tag` is the hero's "Pago" tag (a viewer who is not
+   * in, event neither cancelled nor over, else null); `sale` is the zone the member without a presence
+   * sees (null for a viewer who is in); `refundedNote` is the line above the buy control after a refund.
+   */
+  paid?: true;
+  tag?: string | null;
+  sale?: EventSaleState | null;
+  refundedNote?: string | null;
   /** Plain text; `''` means "no description" and the paragraph is absent. */
   description: string;
   info: EventInfoCellView[];
@@ -839,10 +941,23 @@ function spotsCell(
  */
 export function eventDetailView(
   event: EventDetail,
-  { tz, nowMs, t }: { tz: string; nowMs: number; t: Translator },
+  {
+    tz,
+    nowMs,
+    t,
+    tenantName,
+  }: {
+    tz: string;
+    nowMs: number;
+    t: Translator;
+    /** Phase 10.1-08: the tenant's display name, the `{tenant}` of the courtesy and refund lines. */
+    tenantName?: string;
+  },
 ): EventDetailView {
   const online = event.format === 'online';
   const cancelled = event.status === 'cancelled';
+  const paid = event.paid === true;
+  const origin = event.viewerOrigin ?? null;
   const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
   const state = viewerState(event, nowMs);
   // 2026-10-06 (REINE): "Inscrito" in green while going; "Participou" once a check-in is over.
@@ -870,16 +985,54 @@ export function eventDetailView(
       ? { days: exampleDays, example: true }
       : null;
 
+  const tenant = tenantName ?? '';
   let banner: EventBannerView | null = null;
   if (cancelled) {
-    banner = { kind: 'cancelled', title: t('cancelled.title'), body: t('cancelled.body') };
+    // UI-D-749: a paid event words its own body, and a ticket holder is told whom to ask for the refund
+    // (no promise of an automatic one, A-UI-14).
+    const body = paid ? t('ticket.cancelled.body') : t('cancelled.body');
+    banner = {
+      kind: 'cancelled',
+      title: t('cancelled.title'),
+      body:
+        paid && origin === 'ticket' ? `${body} ${t('ticket.cancelled.refund', { tenant })}` : body,
+    };
   } else if (event.viewerCheckedInAt !== null) {
     banner = {
       kind: 'checkedIn',
       title: t('checkin.banner'),
       body: checkedInLine(event.viewerCheckedInAt, tz, nowMs, t),
+      ...(paid && event.viewerRefunded === true ? { note: t('ticket.refunded.afterCheckin') } : {}),
+    };
+  } else if (paid && event.viewerStatus === 'going' && origin !== null) {
+    banner = {
+      kind: 'confirmed',
+      variant: origin,
+      title: t('ticket.confirmed.title'),
+      body:
+        origin === 'ticket'
+          ? t('ticket.confirmed.paid')
+          : origin === 'courtesy'
+            ? t('ticket.confirmed.courtesy', { tenant })
+            : t('ticket.confirmed.beforeTicket'),
     };
   }
+
+  // Phase 10.1-08 (UI-D-745, UI-D-746): the paid facts, computed once from the request instant.
+  const viewerIn = isViewerIn(event);
+  const sale = paid && !viewerIn ? eventSaleState(event, phase) : null;
+  const paidFields = paid
+    ? {
+        paid: true as const,
+        tag:
+          !viewerIn && !cancelled && phase !== 'P3' ? t('ticket.badge') : (null as string | null),
+        sale,
+        refundedNote:
+          event.viewerRefunded === true && sale !== null && sale.kind !== 'none'
+            ? t('ticket.refunded.note')
+            : (null as string | null),
+      }
+    : {};
 
   const multiDay = isMultiDay(event, tz);
   const start = formatEventTime(event.startsAt, tz);
@@ -955,6 +1108,7 @@ export function eventDetailView(
       coverAlt: t('cover.alt', { title: event.title }),
     },
     banner,
+    ...paidFields,
     description,
     info,
     countIndex: extras?.dressCode ? -1 : 3,
@@ -1023,11 +1177,25 @@ export type EventActionState = {
   startsAt: string;
   endsAt: string;
   startTime: string;
+  /**
+   * Phase 10.1-08 (D-746, D-753, UI-D-746 to UI-D-750): the paid facts, ALL optional and present ONLY for a
+   * paid event, so a free event's state keeps today's key set and a host that predates them draws the
+   * zone as before. `zone` is the sale zone the SERVER computed from the request instant (null for a
+   * viewer who is already in), `viewerOrigin` where the viewer's presence came from (the give-up rule
+   * of UI-D-750), `checkoutHref` the validated `https:` buy link (only in the `buy` zone) and
+   * `priceLabel` its optional "R$ 80,00". The meeting URL never rides here (D-207).
+   */
+  paid?: true;
+  zone?: EventSaleState['kind'] | null;
+  viewerOrigin?: ViewerOrigin | null;
+  checkoutHref?: string | null;
+  priceLabel?: string | null;
 };
 
 /** `EventDetail` + its `EventDetailView` → the island's props (the view already holds the phase). */
 export function eventActionState(
-  event: Pick<EventDetail, 'id' | 'viewerStatus' | 'viewerCheckedInAt'>,
+  event: Pick<EventDetail, 'id' | 'viewerStatus' | 'viewerCheckedInAt'> &
+    Partial<Pick<EventDetail, 'viewerOrigin'>>,
   view: Pick<
     EventDetailView,
     | 'phase'
@@ -1038,7 +1206,8 @@ export function eventActionState(
     | 'startsAt'
     | 'endsAt'
     | 'startTime'
-  >,
+  > &
+    Partial<Pick<EventDetailView, 'paid' | 'sale'>>,
 ): EventActionState {
   const answer =
     event.viewerStatus === 'going' || event.viewerStatus === 'not_going'
@@ -1056,6 +1225,15 @@ export function eventActionState(
     startsAt: view.startsAt,
     endsAt: view.endsAt,
     startTime: view.startTime,
+    ...(view.paid === true
+      ? {
+          paid: true as const,
+          zone: view.sale?.kind ?? null,
+          viewerOrigin: event.viewerOrigin ?? null,
+          checkoutHref: view.sale?.kind === 'buy' ? view.sale.href : null,
+          priceLabel: view.sale?.kind === 'buy' ? view.sale.price : null,
+        }
+      : {}),
   };
 }
 
@@ -1071,7 +1249,18 @@ export type EventTicketSection =
   | { kind: 'done'; doneLine: string }
   | { kind: 'notOpenYet'; sentence: string }
   | { kind: 'closed'; sentence: string }
-  | { kind: 'cancelled'; sentence: string };
+  | { kind: 'cancelled'; sentence: string }
+  | {
+      /**
+       * Phase 10.1-08 (D-742, UI-D-752): a paid event and a viewer without a presence. `buyHref` is the
+       * validated `https:` link and `price` its optional label, both only while the sale is open (else
+       * null: the section then offers only "Ver evento").
+       */
+      kind: 'paid';
+      sentence: string;
+      buyHref: string | null;
+      price: string | null;
+    };
 
 /** Everything `/eventos/[eventId]/check-in` renders, as finished strings. */
 export type EventTicketView = {
@@ -1122,6 +1311,16 @@ export function eventTicketView(
     section = { kind: 'cancelled', sentence: t('errors.cancelled') };
   } else if (nowMs >= Date.parse(event.endsAt)) {
     section = { kind: 'closed', sentence: t('checkin.closed') };
+  } else if (event.paid === true && event.viewerStatus !== 'going') {
+    // Phase 10.1-08 (D-742, UI-D-752): after done, cancelled and closed, BEFORE the window, so a member
+    // who cannot enter never sees the code form or the "abre 1 hora antes" sentence.
+    const sale = eventSaleState(event, eventPhase(event.startsAt, event.endsAt, nowMs));
+    section = {
+      kind: 'paid',
+      sentence: t('checkin.paid'),
+      buyHref: sale.kind === 'buy' ? sale.href : null,
+      price: sale.kind === 'buy' ? sale.price : null,
+    };
   } else if (nowMs < opensAtMs) {
     const opens = new Date(opensAtMs).toISOString();
     const time = formatEventTime(opens, tz);
@@ -1166,13 +1365,22 @@ export const EVENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
  * The `?motivo=` values of `/eventos/{id}/entrar/aviso` (UI-D-209), one per refusal the gate names.
  * The aviso page accepts EXACTLY these and nothing else (D-93).
  */
-export const ENTER_NOTICE_REASONS = ['encerrado', 'cancelado', 'confirmar'] as const;
+export const ENTER_NOTICE_REASONS = ['encerrado', 'cancelado', 'confirmar', 'ingresso'] as const;
 export type EnterNoticeReason = (typeof ENTER_NOTICE_REASONS)[number];
 
 /** Which refusal screen each refusing outcome of the gate lands on. */
 export const ENTER_NOTICE_FOR: Readonly<
-  Record<Extract<EnterOutcome, 'ended' | 'cancelled' | 'confirm_first'>, EnterNoticeReason>
-> = { ended: 'encerrado', cancelled: 'cancelado', confirm_first: 'confirmar' };
+  Record<
+    Extract<EnterOutcome, 'ended' | 'cancelled' | 'confirm_first' | 'ticket_required'>,
+    EnterNoticeReason
+  >
+> = {
+  ended: 'encerrado',
+  cancelled: 'cancelado',
+  confirm_first: 'confirmar',
+  // Phase 10.1-08 (D-742, UI-D-751): a paid event and no presence yet.
+  ticket_required: 'ingresso',
+};
 
 /* ── 06-07: Participantes (UI-D-213) ─────────────────────────────────────────────────────────────── */
 
@@ -1213,6 +1421,33 @@ export type AttendeeView = {
   avatarUrl: string | null;
   meta: string;
   walkIn: boolean;
+  /**
+   * Phase 10.1-08 (D-743, D-751, D-758, UI-D-754 to UI-D-757): the pills line and the row's one action,
+   * present ONLY on the rows of a PAID event (a free event's row keeps today's exact key set).
+   */
+  marks?: AttendeeMark[];
+  action?: AttendeeAction | null;
+};
+
+/** One pill of the marks line (UI-D-754): a word, never a colour alone. */
+export type AttendeeMark = {
+  kind: 'paid' | 'courtesy' | 'beforeTicket' | 'refunded' | 'overLimit';
+  tone: 'success' | 'neutral' | 'warning';
+  label: string;
+};
+
+/**
+ * The row's action (UI-D-755, UI-D-756): `removeCourtesy` on a courtesy that has not checked in,
+ * `release` on the rows of the "Não vão" chip of a paid event. A paid, before-the-ticket, refunded or
+ * checked-in-courtesy row has NONE (D-743, D-752): the admin is never offered a remove the database
+ * would refuse.
+ */
+export type AttendeeAction = 'removeCourtesy' | 'release';
+
+const ORIGIN_MARK: Readonly<Record<ViewerOrigin, Pick<AttendeeMark, 'kind' | 'tone'>>> = {
+  ticket: { kind: 'paid', tone: 'success' },
+  courtesy: { kind: 'courtesy', tone: 'neutral' },
+  before_ticket: { kind: 'beforeTicket', tone: 'neutral' },
 };
 
 /**
@@ -1254,5 +1489,41 @@ export function attendeeView(
     avatarUrl: removed ? null : avatarUrlFor(attendee.avatarAssetId),
     meta,
     walkIn: attendee.walkIn,
+    // The API sends `origin` (null for a "Não vou" row) on the rows of a PAID event only.
+    ...(attendee.origin === undefined ? {} : paidAttendeeFields(attendee, list, t)),
   };
+}
+
+/** The marks and the action of one row of a paid event, in the fixed order of UI-D-754. */
+function paidAttendeeFields(
+  attendee: Attendee,
+  list: AttendanceList,
+  t: Translator,
+): { marks: AttendeeMark[]; action: AttendeeAction | null } {
+  const origin = attendee.origin ?? null;
+  const marks: AttendeeMark[] = [];
+  // Marks draw on Confirmados and Presentes only; a "Não vou" row holds no presence to describe.
+  if (list !== 'not_going') {
+    if (origin !== null) {
+      const { kind, tone } = ORIGIN_MARK[origin];
+      marks.push({ kind, tone, label: t(`participants.origin.${kind}`) });
+    }
+    if (attendee.refunded === true) {
+      marks.push({ kind: 'refunded', tone: 'warning', label: t('participants.origin.refunded') });
+    }
+    if (attendee.overLimit === true) {
+      marks.push({ kind: 'overLimit', tone: 'warning', label: t('participants.origin.overLimit') });
+    }
+  }
+  const checkedIn =
+    attendee.checkedInAt !== null ||
+    attendee.status === 'checked_in' ||
+    attendee.status === 'walk_in';
+  const action: AttendeeAction | null =
+    list === 'not_going'
+      ? 'release'
+      : origin === 'courtesy' && !checkedIn && attendee.refunded !== true
+        ? 'removeCourtesy'
+        : null;
+  return { marks, action };
 }
