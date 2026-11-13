@@ -698,3 +698,146 @@ describe('10.1 the races (EP-05, EP-10, T-10.1-02, T-10.1-15)', () => {
     expect(outcomes.removedThenNotMapped + outcomes.soldThenLocked).toBe(20);
   }, 180_000);
 });
+
+/* ── 10.2-08: removing the product link clears the registration opening (D-793, OPEN-19, EP-40) ── */
+
+describe('10.2 the opening and the mapping removal (D-793, OPEN-19)', () => {
+  /** An event that starts in a day and whose stored sale opening is an hour away (CHECK: opening < start). */
+  const openingEvent = (label: string) =>
+    ticketEvent(labTenantId, {
+      title: `${PREFIX}-${label}`,
+      startsInMinutes: 1_440,
+      endsInMinutes: 1_560,
+      opensInMinutes: 60,
+    });
+
+  /** The stored opening as ISO text with microseconds (null when none), read by the admin lane. */
+  const openingOf = async (eventId: string): Promise<string | null | undefined> => {
+    const [row] = await adminSql<{ opens: string | null }[]>`
+      select to_char(registration_opens_at at time zone 'utc',
+                     'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as opens
+        from public.events where id = ${eventId}::uuid`;
+    return row?.opens;
+  };
+
+  /** The member's own detail read: the sale facts the member sees. */
+  const detailAs = async (who: Person, eventId: string) => {
+    const res = await api.request(`/v1/events/${eventId}`, {
+      headers: { 'x-tenant-host': HOSTS.lab, authorization: `Bearer ${who.token}` },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    return (await res.json()) as Record<string, unknown>;
+  };
+
+  it('DELETE clears the opening, the mapping and the courtesy in one committed request, and the event reads as a free event afterwards', async () => {
+    const admin = await person('lab', 'admin_tenant');
+    const guest = await person('lab', 'member');
+    const eventId = await openingEvent('open-clear');
+    const ext = productId('oc');
+    expect(
+      (
+        await call(admin, 'PUT', `/event-products/${eventId}`, {
+          externalProductId: ext,
+          checkoutUrl: link(),
+        })
+      ).status,
+    ).toBe(200);
+    await adminSql`
+      insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin)
+      values (${labTenantId}::uuid, ${eventId}::uuid, ${guest.userId}::uuid, 'going', now(), 'courtesy')`;
+    const stored = await openingOf(eventId);
+    expect(stored, 'the opening is stored before the removal').toEqual(expect.any(String));
+    expect((await presences(eventId)).map((row) => row.origin)).toEqual(['courtesy']);
+
+    const removed = await call(admin, 'DELETE', `/event-products/${eventId}`);
+    expect(removed.status, removed.raw).toBe(200);
+
+    // everything below is read after the ONE committed request: no half state exists to observe
+    expect(await mappingRow(eventId)).toBeNull();
+    expect(await openingOf(eventId)).toBeNull();
+    expect(await presences(eventId)).toEqual([{ origin: 'rsvp', status: 'going' }]);
+    expect(await routeCount(ext), 'the central route is released').toBe(0);
+
+    // a free event: no sale link and none of the opening facts reach the member
+    const detail = await detailAs(guest, eventId);
+    expect(detail.checkoutUrl ?? null).toBeNull();
+    for (const key of ['registrationOpensAt', 'serverNow', 'saleReady']) {
+      expect(detail, key).not.toHaveProperty(key);
+    }
+  }, 90_000);
+
+  it('EP-40: with a ticket sold the removal is 409 ticket_locked and the mapping AND the opening are untouched', async () => {
+    const admin = await person('lab', 'admin_tenant');
+    const buyer = await person('lab', 'member');
+    const eventId = await openingEvent('open-locked');
+    const ext = productId('ol');
+    await call(admin, 'PUT', `/event-products/${eventId}`, {
+      externalProductId: ext,
+      checkoutUrl: link('l'),
+    });
+    // a sale before the opening (D-782): the grant never reads the opening
+    expect(await grantTicket(eventId, await membershipOf(buyer), `${PREFIX}-ol-${ext}`)).toBe(
+      'granted',
+    );
+    const mappingBefore = await mappingRow(eventId);
+    const openingBefore = await openingOf(eventId);
+    expect(openingBefore).toEqual(expect.any(String));
+
+    const refused = await call(admin, 'DELETE', `/event-products/${eventId}`);
+    expect(refused.status).toBe(409);
+    expect(paymentsIssue(refused)).toBe('ticket_locked');
+    expect(await mappingRow(eventId)).toEqual(mappingBefore);
+    expect(await openingOf(eventId)).toBe(openingBefore);
+    expect(await routeCount(ext)).toBe(1);
+    expect((await presences(eventId)).map((row) => row.origin)).toEqual(['ticket']);
+  }, 90_000);
+
+  it('removing what is not mapped is the same success and leaves an opening stored on the unpaid event alone', async () => {
+    const admin = await person('lab', 'admin_tenant');
+    const eventId = await openingEvent('open-unmapped');
+    const before = await openingOf(eventId);
+    expect(before).toEqual(expect.any(String));
+
+    const res = await call(admin, 'DELETE', `/event-products/${eventId}`);
+    expect(res.status, res.raw).toBe(200);
+    expect(res.json).toEqual({
+      connected: true,
+      mapping: null,
+      soldCount: 0,
+      locked: false,
+      recurring: false,
+    });
+    expect(await openingOf(eventId)).toBe(before);
+  }, 60_000);
+
+  it("another tenant's admin removing the mapping gets the bare 404 and the opening and mapping survive; the owner's own removal works (positive control)", async () => {
+    const admin = await person('lab', 'admin_tenant');
+    const demoAdmin = await person('demo', 'admin_tenant');
+    const eventId = await openingEvent('open-foreign');
+    const ext = productId('of');
+    await call(admin, 'PUT', `/event-products/${eventId}`, {
+      externalProductId: ext,
+      checkoutUrl: link('f'),
+    });
+    const openingBefore = await openingOf(eventId);
+    const mappingBefore = await mappingRow(eventId);
+
+    const foreign = await call(
+      demoAdmin,
+      'DELETE',
+      `/event-products/${eventId}`,
+      undefined,
+      HOSTS.demo,
+    );
+    expect(foreign.status, foreign.raw).toBe(404);
+    expect((foreign.json as { error?: { code?: string } }).error?.code).toBe('NOT_FOUND');
+    expect(await openingOf(eventId)).toBe(openingBefore);
+    expect(await mappingRow(eventId)).toEqual(mappingBefore);
+    expect(await routeCount(ext)).toBe(1);
+
+    const own = await call(admin, 'DELETE', `/event-products/${eventId}`);
+    expect(own.status).toBe(200);
+    expect(await openingOf(eventId)).toBeNull();
+    expect(await mappingRow(eventId)).toBeNull();
+  }, 90_000);
+});
