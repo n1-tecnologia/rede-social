@@ -1577,7 +1577,7 @@ Plans:
 **Goal:** An event can be linked to a Kiwify product (not a store product of the system); a member's presence is confirmed only after that product's purchase is approved, matched by the gateway product id and the buyer's e-mail; a refund or chargeback removes the presence and frees the seat; a payment that arrives at a full event still confirms; an event with no linked product keeps the automatic RSVP.
 **Requirements**: TICK-01..TICK-24
 **Depends on:** Phase 10 (and, for the base it extends, Phase 06 events and Phase 09.1 payment gateway)
-**Plans:** 9/15 plans executed
+**Plans:** 10/15 plans executed
 
 Plans:
 **Wave 1**
@@ -1588,7 +1588,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 10.1-02-PLAN.md — The closed door in the database: member-lane policies, the paid helper, the re-created guard and the RSVP refusal codes
-- [ ] 10.1-10-PLAN.md — Sketch 021 README, manifest row and the blocking approval gate (Igor's hand)
+- [x] 10.1-10-PLAN.md — Sketch 021 README, manifest row and the blocking approval gate (Igor's hand)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
