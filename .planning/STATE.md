@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
-current_plan: 3
+current_plan: 4
 status: executing
-stopped_at: Completed 10.1-02-PLAN.md
-last_updated: "2026-11-13T00:44:01.707Z"
+stopped_at: Completed 10.1-03-PLAN.md
+last_updated: "2026-11-13T00:53:56.691Z"
 last_activity: 2026-11-12
 last_activity_desc: Phase 10.1 execution started
-state_head: 4d1b13bf99777ca8bb6c89f81ea596a37205e606
+state_head: b9b1b90f67ecdc6f77f269e363ceb76b13e52c6f
 progress:
   total_phases: 32
   completed_phases: 0
   total_plans: 431
-  completed_plans: 391
+  completed_plans: 392
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — EXECUTING
-Current Plan: 3
+Current Plan: 4
 Total Plans in Phase: 15
-Plan: 3 of 15
+Plan: 4 of 15
 Status: Ready to execute
 Last activity: 2026-11-12 — Phase 10.1 execution started
 
@@ -360,6 +360,7 @@ Progress: [███████████████████░] 160/162
 | Phase 10.1 P01 | 30 min | 3 tasks | 16 files |
 | Phase 10.1 P09 | 8 min | 3 tasks | 1 files |
 | Phase 10.1 P02 | 25 min | 3 tasks | 14 files |
+| Phase 10.1 P03 | 12 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -1127,6 +1128,7 @@ Recent decisions affecting current work:
 - [Phase 10.1]: 10.1-01: event ticket mapping carried by its own nullable payment_products.event_id (not target_id); no attendance status added, origin derived and never backfilled — target_id has an unconditional store FK; a presence made before the link stays rsvp
 - [Phase 10.1]: 10.1-09: sketch 021 draws the 71 prototype-less frames; the poster price note reads {price} · {shipped note}; A-UI-1..A-UI-14 listed in the file as defaults — Plan 10 writes the README and Igor's approval line; UI plans 11 to 14 stay blocked on it, backend plans do not
 - [Phase 10.1]: 10.1-02: guard step 3b runs before 5 and 7, so a member Vou in a mapped event is always payment_required (paying passes start and capacity); event_full and rsvp_closed are proved as free-event controls — Paid path skips start and capacity, so telling the member to pay is the correct answer; bookkeeping exit compares to_jsonb minus five keys right after step 1
+- [Phase 10.1]: 10.1-03: in a mapped event both door definers move a going holder with a plain UPDATE (the free branch keeps the walk-in upsert), because the guard judges the proposed INSERT tuple before the arbiter — Step 6b of the guard would otherwise refuse a ticket holder's check-in as payment_required
 
 ### Pending Todos
 
@@ -1258,6 +1260,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-13T00:43:56.331Z
-Stopped at: Completed 10.1-02-PLAN.md
+Last session: 2026-11-13T00:53:56.393Z
+Stopped at: Completed 10.1-03-PLAN.md
 Resume file: None
