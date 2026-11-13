@@ -435,6 +435,16 @@ async function linkTicket(eventId: string): Promise<void> {
             'https://pay.example.test/checkout', ${eventId}::uuid)`;
 }
 
+/** The member's own paid presence, as the apply job of plan 04 will write it (origin ticket, going). */
+async function giveTicket(eventId: string): Promise<void> {
+  await linkTicket(eventId);
+  await adminSql`
+    insert into public.event_attendances
+           (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref)
+    values (${tenantIds.demo}::uuid, ${eventId}::uuid, ${userIds.demoMember}::uuid, 'going', now(),
+            'ticket', 'fake', ${`ORD-RSVP-${crypto.randomUUID()}`})`;
+}
+
 describe('events rsvp in a paid event (D-741)', () => {
   it('10. a member Vou in a mapped event is 409 payment_required and writes no row; a free event is still instant', async () => {
     const paid = await createEvent('paga');
@@ -454,5 +464,96 @@ describe('events rsvp in a paid event (D-741)', () => {
     const ok = await rsvp(free.id, 'going');
     expect(ok.status).toBe(200);
     expect((await ok.json()) as RsvpResult).toEqual({ status: 'going' });
+  });
+
+  it('11. a ticket holder repeating Vou is the unchanged 200: nothing written, nothing emitted, the row byte-identical', async () => {
+    const paid = await createEvent('portador repete');
+    await giveTicket(paid.id);
+    const [before] = await attendanceRows(paid.id);
+    const emitted = received.length;
+
+    const repeat = await rsvp(paid.id, 'going');
+    expect(repeat.status).toBe(200);
+    expect((await repeat.json()) as RsvpResult).toEqual({ status: 'going' });
+    const [after] = await attendanceRows(paid.id);
+    expect(after).toEqual(before);
+    expect(received.length).toBe(emitted);
+    expect((await detail(paid.id)).viewerStatus).toBe('going');
+  });
+
+  it('12. a checked-in holder repeating Vou is attendance_locked, never a payment demand', async () => {
+    const paid = await createEvent('portador presente');
+    await giveTicket(paid.id);
+    await adminSql`
+      update public.events
+         set starts_at = now() + interval '30 minutes', ends_at = now() + interval '2 hours'
+       where id = ${paid.id}::uuid`;
+    await adminSql`
+      update public.event_attendances
+         set status = 'checked_in', checked_in_at = now(), checkin_via = 'code'
+       where event_id = ${paid.id}::uuid and user_id = ${userIds.demoMember}::uuid`;
+    const res = await rsvp(paid.id, 'going');
+    expect(res.status).toBe(409);
+    expect((await envelope(res)).details).toEqual({ event: 'attendance_locked' });
+    const [row] = await attendanceRows(paid.id);
+    expect(row?.status).toBe('checked_in');
+  });
+
+  it('13. a ticket holder sending Nao vou is 409 ticket_locked and stays going (D-754)', async () => {
+    const paid = await createEvent('portador desiste');
+    await giveTicket(paid.id);
+    const [before] = await attendanceRows(paid.id);
+    const emitted = received.length;
+
+    const res = await rsvp(paid.id, 'not_going');
+    expect(res.status).toBe(409);
+    const error = await envelope(res);
+    expect(error.code).toBe('CONFLICT');
+    expect(error.details).toEqual({ event: 'ticket_locked' });
+    const [after] = await attendanceRows(paid.id);
+    expect(after).toEqual(before);
+    expect(after?.status).toBe('going');
+    expect(received.length).toBe(emitted);
+  });
+
+  it('14. a presence made before the link may be withdrawn, and then Vou is payment_required (A-UI-4)', async () => {
+    const event = await createEvent('antes do link');
+    expect((await rsvp(event.id, 'going')).status).toBe(200);
+    await linkTicket(event.id);
+
+    const withdraw = await rsvp(event.id, 'not_going');
+    expect(withdraw.status).toBe(200);
+    expect((await withdraw.json()) as RsvpResult).toEqual({ status: 'not_going' });
+
+    const back = await rsvp(event.id, 'going');
+    expect(back.status).toBe(409);
+    expect((await envelope(back)).details).toEqual({ event: 'payment_required' });
+    const [row] = await attendanceRows(event.id);
+    expect(row?.status).toBe('not_going');
+  });
+
+  it('15. EP-12: two concurrent Vou by one non-holder both answer 409 payment_required and write no row', async () => {
+    const paid = await createEvent('corrida paga');
+    await linkTicket(paid.id);
+    const results = await Promise.all([rsvp(paid.id, 'going'), rsvp(paid.id, 'going')]);
+    for (const res of results) {
+      expect(res.status).toBe(409);
+      expect((await envelope(res)).details).toEqual({ event: 'payment_required' });
+    }
+    expect(await attendanceRows(paid.id)).toHaveLength(0);
+  });
+
+  it('16. EP-12: a holder repeating Vou while a read runs leaves the row unchanged', async () => {
+    const paid = await createEvent('portador e leitura');
+    await giveTicket(paid.id);
+    const [before] = await attendanceRows(paid.id);
+    const results = await Promise.all([
+      rsvp(paid.id, 'going'),
+      request(`/v1/events/${paid.id}`, tokens.demoMember),
+      rsvp(paid.id, 'going'),
+    ]);
+    expect(results.map((res) => res.status)).toEqual([200, 200, 200]);
+    const [after] = await attendanceRows(paid.id);
+    expect(after).toEqual(before);
   });
 });
