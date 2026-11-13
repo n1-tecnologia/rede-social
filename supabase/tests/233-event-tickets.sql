@@ -27,7 +27,7 @@ begin;
 --    cancelled, ended, closed and not_open outcomes still win; a direct walk_in insert is still refused.
 --
 -- Fixture ids use the `1e310000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(161);
+select plan(220);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-tkt-a', 'Ingresso A', '1e310000-0000-4000-8000-000000000001');
@@ -821,6 +821,233 @@ reset role;
 select is((select string_agg(user_id::text || ':' || origin || ':' || status, ',' order by user_id::text) from public.event_attendances where event_id = tests.tk('30e')),
   tests.tk('101')::text || ':rsvp:going,' || tests.tk('102')::text || ':courtesy:going',
   'T-10.1-09: the Vou and the courtesy made before the link were never touched by any refund above');
+
+-- ── 5. courtesy, lock, reset and holders (plan 04, task 2: `*_event_courtesy_definers.sql`) ───────────
+-- The admin's side of a paid event. Every function checks the `admin_tenant` claim INSIDE itself (T-10.1-12),
+-- is pinned to the claim tenant (T-10.1-01) and RETURNS its outcomes. Events 401 live and unlimited | 402 limit
+-- one | 403 started | 404 ended | 405 cancelled | 406 free | 407 live (lock, reset, holders) of tenant A, and 408
+-- (tenant B, section 4). Users and memberships are those of section 4. The `payments` module of tenant A is OFF
+-- since section 2 and stays off: none of this depends on it (D-743).
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, capacity, status, cancelled_at) values
+  (tests.tk('401'), tests.tk('1'), tests.tk('10c'), 'Evento 401', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, 'active', null),
+  (tests.tk('402'), tests.tk('1'), tests.tk('10c'), 'Evento 402', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', 1, 'active', null),
+  (tests.tk('403'), tests.tk('1'), tests.tk('10c'), 'Evento 403', 'in_person', 'Sede', 'Rua 1', now() + interval '-1 hour', now() + interval '2 hours', null, 'active', null),
+  (tests.tk('404'), tests.tk('1'), tests.tk('10c'), 'Evento 404', 'in_person', 'Sede', 'Rua 1', now() + interval '-3 hours', now() + interval '-1 hour', null, 'active', null),
+  (tests.tk('405'), tests.tk('1'), tests.tk('10c'), 'Evento 405', 'in_person', 'Sede', 'Rua 1', now() + interval '5 days', now() + interval '5 days 2 hours', null, 'cancelled', now()),
+  (tests.tk('406'), tests.tk('1'), tests.tk('10c'), 'Evento 406', 'in_person', 'Sede', 'Rua 1', now() + interval '5 days', now() + interval '5 days 2 hours', null, 'active', null),
+  (tests.tk('407'), tests.tk('1'), tests.tk('10c'), 'Evento 407', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, 'active', null);
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id)
+  select tests.tk('1'), 'fake', 'event', 'tkt-233-s5-' || h, tests.tk(h)
+    from unnest(array['401','402','403','404','405','407']) as h;
+-- A Vou-less member of 401 (not_going) and a checked-in member of 403, both made before the courtesy.
+select tests.as_service();
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at) values
+  (tests.tk('1'), tests.tk('401'), tests.tk('104'), 'not_going', now());
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, checked_in_at, checkin_via) values
+  (tests.tk('1'), tests.tk('403'), tests.tk('103'), 'checked_in', now(), now(), 'code');
+reset role;
+select is((select enabled from public.tenant_modules where tenant_id = tests.tk('1') and module_key = 'payments'), false,
+  'D-743: the payments module of tenant A is off for the whole of section 5');
+
+-- ── courtesy grant
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('401'), tests.tk('201')) $$, $$ values ('granted'::text) $$,
+  'D-743: the admin releases a courtesy (with the payments module off)');
+reset role;
+select is((select status || '/' || origin || '/' || (order_provider is null)::text || '/' || (order_ref is null)::text || '/' || (responded_at is not null)::text
+             from public.event_attendances where event_id = tests.tk('401') and user_id = tests.tk('101')),
+  'going/courtesy/true/true/true', 'D-743: ...the row is going, origin courtesy, with no order columns and responded_at');
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('401'), tests.tk('201')) $$, $$ values ('already_in'::text) $$,
+  'EP-20: the same courtesy again is already_in');
+reset role;
+select is((select count(*)::int || '/' || min(status) from public.event_attendances where event_id = tests.tk('401') and user_id = tests.tk('101')), '1/going',
+  'EP-20: ...one row, the status unchanged');
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('401'), tests.tk('202')) $$, $$ values ('forbidden'::text) $$,
+  'T-10.1-12: a member cannot release a courtesy');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'support_tenant');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('401'), tests.tk('202')) $$, $$ values ('forbidden'::text) $$,
+  'T-10.1-12: ...nor can support_tenant');
+reset role;
+select tests.as_tenant_without_claims();
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('401'), tests.tk('202')) $$, $$ values ('not_found'::text) $$,
+  'T-10.1-12: ...and a session with no claims has no lane');
+reset role;
+select is((select count(*)::int from public.event_attendances where event_id = tests.tk('401') and user_id = tests.tk('102')), 0,
+  'T-10.1-12: ...none of the three wrote a row');
+
+-- Who can receive one, and where.
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select is(
+  (select string_agg(o, ',' order by n) from (values
+     (1, (select outcome from app.event_courtesy_grant(tests.tk('401'), tests.tk('20d')))),
+     (2, (select outcome from app.event_courtesy_grant(tests.tk('401'), tests.tk('209')))),
+     (3, (select outcome from app.event_courtesy_grant(tests.tk('401'), tests.tk('20a')))),
+     (4, (select outcome from app.event_courtesy_grant(tests.tk('401'), gen_random_uuid()))),
+     (5, (select outcome from app.event_courtesy_grant(tests.tk('401'), null))),
+     (6, (select outcome from app.event_courtesy_grant(null, tests.tk('202')))),
+     (7, (select outcome from app.event_courtesy_grant(tests.tk('408'), tests.tk('202')))),
+     (8, (select outcome from app.event_courtesy_grant(gen_random_uuid(), tests.tk('202'))))
+   ) v(n, o)),
+  'not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found',
+  'D-743/EP-39: another tenant''s, a blocked, a deleted and an unknown membership, null arguments, tenant B''s event and an unknown event are all not_found');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('406'), tests.tk('202')) $$, $$ values ('not_paid'::text) $$,
+  'D-743: an event with no mapping answers not_paid');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('405'), tests.tk('202')) $$, $$ values ('event_cancelled'::text) $$,
+  'D-743: a cancelled event answers event_cancelled');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('404'), tests.tk('202')) $$, $$ values ('event_ended'::text) $$,
+  'D-750: an ended event answers event_ended');
+reset role;
+select is((select count(*)::int from public.event_attendances where event_id in (tests.tk('406'), tests.tk('405'), tests.tk('404')) or (event_id = tests.tk('401') and user_id in (tests.tk('102'), tests.tk('10d'), tests.tk('109'), tests.tk('10a')))), 0,
+  'D-743: ...and none of those wrote a row');
+
+-- Capacity and the start do not stop a courtesy (A-UI-5, D-750, D-751).
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('402'), tests.tk('201')) $$, $$ values ('granted'::text) $$, 'D-751: the first courtesy of a one-seat event');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('402'), tests.tk('202')) $$, $$ values ('granted'::text) $$, 'A-UI-5: a second courtesy of the one-seat event is granted over the limit');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('403'), tests.tk('201')) $$, $$ values ('granted'::text) $$, 'D-750: a courtesy after the start is granted');
+reset role;
+select is((select count(*)::int from public.event_attendances where event_id = tests.tk('402') and status = 'going' and origin = 'courtesy'), 2,
+  'A-UI-5: ...both courtesies of the one-seat event are confirmed');
+
+-- An existing presence is never rewritten; a not_going answer is given a seat.
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('403'), tests.tk('203')) $$, $$ values ('already_in'::text) $$, 'D-743: a checked-in member is already_in');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('401'), tests.tk('204')) $$, $$ values ('granted'::text) $$, 'D-743: a member who had said Não vou is granted a courtesy');
+reset role;
+select is((select status || '/' || origin from public.event_attendances where event_id = tests.tk('403') and user_id = tests.tk('103')), 'checked_in/rsvp',
+  'D-743: ...the checked-in row is untouched');
+select is((select status || '/' || origin || '/' || (order_ref is null)::text from public.event_attendances where event_id = tests.tk('401') and user_id = tests.tk('104')), 'going/courtesy/true',
+  'D-743: ...and the Não vou row is now a going courtesy');
+select tests.as_service();
+select results_eq($$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('401'), 'fake', 'S5-T1') $$, $$ values ('granted'::text) $$, 'fixture: member 102 buys a ticket for event 401');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('401'), tests.tk('202')) $$, $$ values ('already_in'::text) $$, 'EP-20: a courtesy for a ticket holder is already_in');
+reset role;
+select is((select origin || '/' || order_ref from public.event_attendances where event_id = tests.tk('401') and user_id = tests.tk('102')), 'ticket/S5-T1',
+  'EP-20: ...and the ticket keeps its origin and its order');
+
+-- ── courtesy remove
+select set_config('tk.court', (select id::text from public.event_attendances where event_id = tests.tk('401') and user_id = tests.tk('101')), true);
+select set_config('tk.ticket', (select id::text from public.event_attendances where event_id = tests.tk('401') and user_id = tests.tk('102')), true);
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('403'), tests.tk('207')) $$, $$ values ('granted'::text) $$, 'fixture: a courtesy for member 107 in the started event 403');
+reset role;
+select tests.as_service();
+update public.event_attendances set status = 'checked_in', checked_in_at = now(), checkin_via = 'code' where event_id = tests.tk('403') and user_id = tests.tk('107');
+reset role;
+select set_config('tk.court_in', (select id::text from public.event_attendances where event_id = tests.tk('403') and user_id = tests.tk('107')), true);
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select results_eq($$ select outcome from app.event_courtesy_remove(tests.tk('401'), current_setting('tk.court')::uuid) $$, $$ values ('forbidden'::text) $$,
+  'T-10.1-12: a member cannot remove a courtesy');
+reset role;
+select tests.as_tenant(tests.tk('2'), tests.tk('10e'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_remove(tests.tk('401'), current_setting('tk.court')::uuid) $$, $$ values ('not_found'::text) $$,
+  'EP-39: tenant B''s admin cannot remove tenant A''s courtesy (not_found)');
+reset role;
+select is((select count(*)::int from public.event_attendances where id = current_setting('tk.court')::uuid), 1, 'EP-39: ...the courtesy is still there');
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_remove(tests.tk('401'), current_setting('tk.ticket')::uuid) $$, $$ values ('not_courtesy'::text) $$,
+  'D-743: a paid presence is never removable by hand (not_courtesy)');
+select results_eq($$ select outcome from app.event_courtesy_remove(tests.tk('403'), current_setting('tk.court_in')::uuid) $$, $$ values ('locked'::text) $$,
+  'D-743: a courtesy that already checked in is locked');
+select is(
+  (select string_agg(o, ',' order by n) from (values
+     (1, (select outcome from app.event_courtesy_remove(tests.tk('401'), gen_random_uuid()))),
+     (2, (select outcome from app.event_courtesy_remove(tests.tk('401'), null))),
+     (3, (select outcome from app.event_courtesy_remove(null, current_setting('tk.court')::uuid)))
+   ) v(n, o)),
+  'not_found,not_found,not_found', 'D-743: an unknown row, a null row and a null event are not_found');
+reset role;
+select is((select count(*)::int from public.event_attendances where id in (current_setting('tk.ticket')::uuid, current_setting('tk.court_in')::uuid)), 2,
+  'D-743: ...and the paid and the checked-in rows are still there');
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_remove(tests.tk('401'), current_setting('tk.court')::uuid) $$, $$ values ('removed'::text) $$,
+  'D-743: the admin removes a courtesy that has not checked in');
+reset role;
+select is((select count(*)::int from public.event_attendances where id = current_setting('tk.court')::uuid), 0, 'D-743: ...and the row is gone');
+
+-- ── lock (D-747)
+select tests.as_service();
+select results_eq($$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('407'), 'fake', 'S5-L1') $$, $$ values ('granted'::text) $$, 'fixture: ticket 1 of event 407');
+select results_eq($$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('407'), 'fake', 'S5-L2') $$, $$ values ('granted'::text) $$, 'fixture: ticket 2 of event 407');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.tk('407'), tests.tk('203')) $$, $$ values ('granted'::text) $$, 'fixture: a courtesy for member 103 in event 407');
+select results_eq($$ select found, sold from app.event_ticket_lock(tests.tk('407')) $$, $$ values (true, 2) $$,
+  'D-747: the lock confirms the event and counts the TICKETS only (two tickets, the courtesy is not counted)');
+reset role;
+select ok(exists (select 1 from pg_locks
+                   where locktype = 'advisory' and pid = pg_backend_pid() and objsubid = 1
+                     and ((classid::bigint << 32) | objid::bigint) = hashtextextended('event_ticket:' || tests.tk('407')::text, 0)),
+  'D-747: ...and the per-event advisory lock (the key the grant takes) is held by the transaction');
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select results_eq($$ select found, sold from app.event_ticket_lock(tests.tk('407')) $$, $$ values (false, 0) $$, 'T-10.1-12: a member gets found false from the lock');
+reset role;
+select tests.as_tenant(tests.tk('2'), tests.tk('10e'), 'admin_tenant');
+select results_eq($$ select found, sold from app.event_ticket_lock(tests.tk('407')) $$, $$ values (false, 0) $$, 'EP-39: tenant B''s admin gets found false for tenant A''s event');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select is(
+  (select string_agg(f::text, ',' order by n) from (values
+     (1, (select found from app.event_ticket_lock(tests.tk('306')))),
+     (2, (select found from app.event_ticket_lock(gen_random_uuid()))),
+     (3, (select found from app.event_ticket_lock(null))),
+     (4, (select found from app.event_ticket_lock(tests.tk('408'))))
+   ) v(n, f)),
+  'false,false,false,false', 'D-747: a soft-deleted, an unknown, a null and a foreign event all give found false');
+reset role;
+
+-- ── reset (D-747)
+select tests.as_tenant(tests.tk('1'), tests.tk('103'));
+select throws_ok($$ update public.event_attendances set status = 'not_going' where event_id = tests.tk('407') and user_id = tests.tk('103') $$,
+  '23514', 'ticket_locked', 'D-747: before the reset the courtesy member''s own Não vou is ticket_locked');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select lives_ok($$ select app.event_ticket_reset(tests.tk('407')) $$, 'T-10.1-12: a member calling reset is accepted and changes nothing...');
+reset role;
+select tests.as_tenant(tests.tk('2'), tests.tk('10e'), 'admin_tenant');
+select lives_ok($$ select app.event_ticket_reset(tests.tk('407')) $$, 'EP-39: ...and so is tenant B''s admin on tenant A''s event...');
+reset role;
+select is((select origin from public.event_attendances where event_id = tests.tk('407') and user_id = tests.tk('103')), 'courtesy',
+  '...the courtesy row is still a courtesy');
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select lives_ok($$ select app.event_ticket_reset(tests.tk('407')) $$, 'D-747: the admin resets the event');
+reset role;
+select is((select string_agg(user_id::text || ':' || origin, ',' order by user_id::text) from public.event_attendances where event_id = tests.tk('407')),
+  tests.tk('101')::text || ':ticket,' || tests.tk('102')::text || ':ticket,' || tests.tk('103')::text || ':rsvp',
+  'D-747: the courtesy row is origin rsvp again and the two tickets are untouched');
+select tests.as_tenant(tests.tk('1'), tests.tk('103'));
+select lives_ok($$ update public.event_attendances set status = 'not_going' where event_id = tests.tk('407') and user_id = tests.tk('103') $$,
+  'D-747: after the reset the same member''s own Não vou succeeds');
+reset role;
+select is((select status from public.event_attendances where event_id = tests.tk('407') and user_id = tests.tk('103')), 'not_going', 'D-747: ...and took effect');
+
+-- ── holders (D-753)
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select results_eq($$ select * from app.event_ticket_holders(tests.tk('407'), array[tests.tk('201'), tests.tk('203'), tests.tk('205')]) order by 1 $$,
+  $$ values (tests.tk('201')) $$,
+  'D-753: of three members only the ticket holder is returned (not_going and no row are not holders)');
+select results_eq($$ select * from app.event_ticket_holders(tests.tk('403'), array[tests.tk('201'), tests.tk('203'), tests.tk('205'), tests.tk('207')]) order by 1 $$,
+  $$ values (tests.tk('201')), (tests.tk('203')), (tests.tk('207')) $$,
+  'D-753: a going courtesy and two checked-in members all hold a presence');
+select results_eq($$ select count(*)::int from app.event_ticket_holders(tests.tk('407'), array(select gen_random_uuid() from generate_series(1, 49)) || tests.tk('201')) $$,
+  $$ values (1) $$, 'D-753: exactly 50 ids are answered');
+select is_empty($$ select * from app.event_ticket_holders(tests.tk('407'), array(select gen_random_uuid() from generate_series(1, 50)) || tests.tk('201')) $$,
+  'D-753: 51 ids return nothing');
+select is_empty($$ select * from app.event_ticket_holders(tests.tk('407'), null) $$, 'EP-37: a null list returns nothing');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select is_empty($$ select * from app.event_ticket_holders(tests.tk('407'), array[tests.tk('201')]) $$, 'T-10.1-12: a member gets no holders');
+reset role;
+select tests.as_tenant(tests.tk('2'), tests.tk('10e'), 'admin_tenant');
+select is_empty($$ select * from app.event_ticket_holders(tests.tk('407'), array[tests.tk('201'), tests.tk('20d')]) $$, 'EP-39: tenant B''s admin gets nothing for tenant A''s event');
+select results_eq($$ select * from app.event_ticket_holders(tests.tk('308'), array[tests.tk('20d')]) $$, $$ values (tests.tk('20d')) $$,
+  'EP-39: ...beside the control: the same admin reads its own event');
+reset role;
 
 select * from finish();
 rollback;
