@@ -47,11 +47,11 @@ screens:
   - participantes-antes-da-abertura
   - eventos-recentes-marcador
   - contador-leitor-de-tela
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: igor.vboas (word "aprovado" in the session, recorded by Claude)
+approved_at: 2026-11-13
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-10.2, design-review, D-33, D-365, D-417, UI-04, event-opening, countdown, kiwify, paid-events]
