@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { formatBrl } from '@rede-social/contracts/money';
 import { describe, expect, it } from 'vitest';
 import {
+  eventFormTicket,
   formatTicketPrice,
   parseTicketPrice,
   safeCheckoutHref,
@@ -221,6 +222,112 @@ describe('ticketFieldErrors: the server’s refusals as the form’s keys (UI-D-
       link: 'linkInvalid',
       price: 'priceInvalid',
     });
+  });
+});
+
+describe('eventFormTicket: the server facts of the Ingresso section (10.1-11, A-11-GATEWAY)', () => {
+  const OVERVIEW = { gatewayName: 'Gateway Exemplo', connected: true };
+  const STORED = {
+    externalProductId: 'PRD-48213',
+    checkoutUrl: 'https://pagamento.exemplo.invalid/ingresso',
+    gatewayOpen: true,
+    soldCount: 3,
+    gatewayName: 'Gateway Exemplo',
+  };
+
+  it('create mode, module on and a connected gateway: free, the overview names the gateway', () => {
+    expect(
+      eventFormTicket({ moduleOn: true, canManagePayments: true, integration: OVERVIEW }),
+    ).toEqual({
+      moduleOn: true,
+      gatewayConnected: true,
+      canManagePayments: true,
+      gatewayName: 'Gateway Exemplo',
+      saved: null,
+      soldCount: 0,
+      hasConfirmed: false,
+    });
+  });
+
+  it('create mode, module on, gateway not connected', () => {
+    const ticket = eventFormTicket({
+      moduleOn: true,
+      canManagePayments: true,
+      integration: { gatewayName: 'Gateway Exemplo', connected: false },
+    });
+    expect(ticket.gatewayConnected).toBe(false);
+    expect(ticket.gatewayName).toBe('Gateway Exemplo');
+  });
+
+  it('module off or an unreadable overview: not connected and no gateway word (the neutral fallback)', () => {
+    for (const input of [
+      { moduleOn: false, canManagePayments: false, integration: null },
+      { moduleOn: true, canManagePayments: false, integration: null },
+      { moduleOn: true, canManagePayments: true, integration: null },
+    ]) {
+      const ticket = eventFormTicket(input);
+      expect(ticket.gatewayConnected).toBe(false);
+      expect(ticket.gatewayName).toBeNull();
+    }
+  });
+
+  it('a module that is off is never connected, even if an overview slipped through', () => {
+    expect(
+      eventFormTicket({ moduleOn: false, canManagePayments: true, integration: OVERVIEW })
+        .gatewayConnected,
+    ).toBe(false);
+  });
+
+  it('edit mode with a linked product: the stored pair, the count, gatewayOpen and the read’s own name', () => {
+    const ticket = eventFormTicket({
+      moduleOn: true,
+      canManagePayments: true,
+      integration: null,
+      edit: { ticket: STORED, confirmedCount: 5 },
+    });
+    expect(ticket.saved).toEqual({
+      externalProductId: 'PRD-48213',
+      checkoutUrl: 'https://pagamento.exemplo.invalid/ingresso',
+    });
+    expect(ticket.soldCount).toBe(3);
+    expect(ticket.gatewayConnected).toBe(true);
+    expect(ticket.gatewayName).toBe('Gateway Exemplo');
+    expect(ticket.hasConfirmed).toBe(true);
+  });
+
+  it('a linked product with the module off still speaks with the gateway name and reads as not open', () => {
+    const ticket = eventFormTicket({
+      moduleOn: false,
+      canManagePayments: false,
+      integration: null,
+      edit: { ticket: { ...STORED, gatewayOpen: false }, confirmedCount: 0 },
+    });
+    expect(ticket.gatewayConnected).toBe(false);
+    expect(ticket.gatewayName).toBe('Gateway Exemplo');
+    expect(ticket.hasConfirmed).toBe(false);
+  });
+
+  it('a stored row with no link reads as an empty link, never null', () => {
+    const ticket = eventFormTicket({
+      moduleOn: true,
+      canManagePayments: true,
+      integration: OVERVIEW,
+      edit: { ticket: { ...STORED, checkoutUrl: null, gatewayName: null }, confirmedCount: 0 },
+    });
+    expect(ticket.saved?.checkoutUrl).toBe('');
+    expect(ticket.gatewayName).toBe('Gateway Exemplo');
+  });
+
+  it('edit mode with nothing linked asks the overview for the connection', () => {
+    const ticket = eventFormTicket({
+      moduleOn: true,
+      canManagePayments: true,
+      integration: OVERVIEW,
+      edit: { ticket: null, confirmedCount: 2 },
+    });
+    expect(ticket.saved).toBeNull();
+    expect(ticket.gatewayConnected).toBe(true);
+    expect(ticket.hasConfirmed).toBe(true);
   });
 });
 

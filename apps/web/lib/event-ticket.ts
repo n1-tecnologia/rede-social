@@ -2,6 +2,7 @@ import { formatBrl, parseBrlToCents } from '@rede-social/contracts/money';
 import {
   EVENT_MAX_TICKET_PRICE_CENTS,
   EVENT_MIN_TICKET_PRICE_CENTS,
+  type EventTicketAdmin,
 } from '@rede-social/module-events/contracts';
 import { priceInputText } from './store-view';
 
@@ -215,4 +216,63 @@ export function ticketFieldErrors(input: {
     errors.price = 'priceInvalid';
   }
   return errors;
+}
+
+/* ── Phase 10.1-11: what the server hands the event form's Ingresso section ───────────────────── */
+
+/** What the server knows about the event's ticket when it renders the form (the two pages build it). */
+export type EventFormTicket = {
+  /** The Pagamentos module flag of the tenant, off the bootstrap. */
+  moduleOn: boolean;
+  /** Module on AND a connected gateway (the edit read's `gatewayOpen`, else the Pagamentos overview). */
+  gatewayConnected: boolean;
+  /** The viewer holds `payments.manage` (the "Abrir Pagamentos" link needs it). */
+  canManagePayments: boolean;
+  /** The adapter's display name; `null` when the server has none (the catalog's neutral fallback). */
+  gatewayName: string | null;
+  /** The stored pair, or `null` when no product is linked. */
+  saved: { externalProductId: string; checkoutUrl: string } | null;
+  /** Paid presences so far, read once per page render (never ticking). */
+  soldCount: number;
+  /** The event already has confirmed presences (the D-748 note). */
+  hasConfirmed: boolean;
+};
+
+export type EventFormTicketInput = {
+  /** The Pagamentos module flag of the tenant, off the bootstrap. */
+  moduleOn: boolean;
+  /** The viewer holds `payments.manage`. */
+  canManagePayments: boolean;
+  /**
+   * The Pagamentos overview's integration, read only while the module is on AND the viewer holds
+   * `payments.manage` (the route's own guard); `null` when it was not asked or could not be read.
+   */
+  integration: { gatewayName: string; connected: boolean } | null;
+  /** Edit mode only: the edit read's `ticket` object and the event's confirmed count. */
+  edit?: { ticket: EventTicketAdmin | null; confirmedCount: number } | null;
+};
+
+/**
+ * The Ingresso section's server facts (UI-D-741, UI-D-742, A-11-GATEWAY), the one mapping both pages
+ * share. A linked event takes its connection from the edit read (`gatewayOpen`, already "module on and a
+ * connected gateway") and its gateway word from the read's own `gatewayName`, so the section can speak
+ * with the module off; an unlinked one asks the Pagamentos overview, which only a `payments.manage`
+ * holder with the module on can read. Whatever the server cannot know is the safe reading: not
+ * connected, no gateway name (the catalog's neutral fallback), nothing sold.
+ */
+export function eventFormTicket(input: EventFormTicketInput): EventFormTicket {
+  const stored = input.edit?.ticket ?? null;
+  return {
+    moduleOn: input.moduleOn,
+    gatewayConnected: stored
+      ? stored.gatewayOpen
+      : input.moduleOn && input.integration?.connected === true,
+    canManagePayments: input.canManagePayments,
+    gatewayName: stored?.gatewayName ?? input.integration?.gatewayName ?? null,
+    saved: stored
+      ? { externalProductId: stored.externalProductId, checkoutUrl: stored.checkoutUrl ?? '' }
+      : null,
+    soldCount: stored?.soldCount ?? 0,
+    hasConfirmed: (input.edit?.confirmedCount ?? 0) > 0,
+  };
 }
