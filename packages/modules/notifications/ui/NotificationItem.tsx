@@ -19,6 +19,7 @@ import {
   Radio,
   ShoppingBag,
   Sparkles,
+  Ticket,
 } from 'lucide-react';
 import type { MouseEventHandler, ReactNode } from 'react';
 
@@ -48,6 +49,8 @@ const GLYPHS = {
   // 09.1-17 (UI-D-526): the purchase notice, by name only. The web registry picks it per kind, so
   // this module still names no producer module (MOD-02).
   ShoppingBag,
+  // Phase 10.1-13 (UI-D-760): the paid event's "Presença confirmada", by name only, same rule.
+  Ticket,
 } as const satisfies Record<string, LucideIcon>;
 
 export type NotificationGlyph = keyof typeof GLYPHS;

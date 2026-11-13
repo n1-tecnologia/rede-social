@@ -122,6 +122,8 @@ describe('NotificationItem glyphs (08.6-12, UI-D-460)', () => {
     ['CirclePlay', 'lucide-circle-play'],
     // 09.1-17 (UI-D-526): the purchase notice, named by the web registry, no producer named here.
     ['ShoppingBag', 'lucide-shopping-bag'],
+    // Phase 10.1-13 (UI-D-760): the paid event's presence notice, same rule.
+    ['Ticket', 'lucide-ticket'],
   ] as const)('draws the %s glyph on the actor-less disc', (glyph, iconClass) => {
     const { container } = item({ leading: { glyph: true }, glyph });
     const disc = container.querySelector('.h-10.w-10.rounded-full.bg-bg-tertiary');

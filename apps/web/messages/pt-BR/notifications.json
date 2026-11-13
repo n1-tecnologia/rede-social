@@ -48,6 +48,7 @@
       "liveCancelled": "A live “{title}” de {when} foi cancelada.",
       "replayAvailable": "A gravação da live “{title}” já está disponível.",
       "purchaseConfirmed": "<b>Compra confirmada:</b> “{product}”. Seu acesso foi liberado.",
+      "ticketConfirmed": "<b>Presença confirmada</b> em “{event}”.",
       "generic": "Você tem uma nova notificação.",
       "removed": "Este conteúdo foi removido."
     },

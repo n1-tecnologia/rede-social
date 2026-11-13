@@ -605,3 +605,103 @@ describe('notificationRowView — 09.1-17 the purchase confirmed notice (UI-D-52
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
   });
 });
+
+describe('notificationRowView — 10.1-13 the paid event presence notice (D-756, UI-D-760, A-UI-9, T-10.1-17)', () => {
+  const KIND = 'payments.ticket_confirmed';
+  const EVENT = '0e000000-0000-4000-8000-000000000e02';
+  const ticket = (facts: NotificationRow['facts'], overrides: Partial<NotificationRow> = {}) =>
+    view({
+      kind: KIND,
+      subject: { type: 'event', id: EVENT },
+      actor: null,
+      facts,
+      ...overrides,
+    });
+  const LEAD = '<span class="font-bold text-text">Presença confirmada</span>';
+
+  it('the kind constant is the one the producer writes', () => {
+    expect(PAYMENTS_NOTIFICATION_KINDS.ticketConfirmed).toBe(KIND);
+  });
+
+  it('populated: the Ticket disc, the bold lead only, the quoted title, and the event link', () => {
+    const row = ticket({ eventId: EVENT, eventTitle: 'Encontro anual' });
+    expect(row?.glyph).toBe('Ticket');
+    expect(row?.leading).toEqual({ glyph: true });
+    expect(row?.href).toBe(`/eventos/${EVENT}`);
+    expect(markup(row?.sentence)).toBe(`${LEAD} em “Encontro anual”.`);
+    expect(row?.time).toBeTruthy();
+    expect(row?.removed).toBe(false);
+  });
+
+  it('stays the glyph disc even when the row names an actor', () => {
+    const row = ticket(
+      { eventId: EVENT, eventTitle: 'Encontro' },
+      { actor: { removed: false, displayName: 'Ana Souza', avatarAssetId: AVATAR } },
+    );
+    expect(row?.leading).toEqual({ glyph: true });
+  });
+
+  it('URL-encodes the id', () => {
+    expect(ticket({ eventId: 'a b/c', eventTitle: 'x' })?.href).toBe('/eventos/a%20b%2Fc');
+  });
+
+  it('E09: a missing, empty or non-string id links to /eventos, never a broken URL', () => {
+    const cases: NotificationRow['facts'][] = [
+      { eventTitle: 'x' },
+      { eventId: '', eventTitle: 'x' },
+      { eventId: 42, eventTitle: 'x' },
+      { eventId: null, eventTitle: 'x' },
+    ];
+    for (const facts of cases) {
+      expect(ticket(facts)?.href).toBe('/eventos');
+    }
+  });
+
+  it('a missing or non-string title renders an empty quoted title, never the generic row', () => {
+    const cases: NotificationRow['facts'][] = [
+      { eventId: EVENT },
+      { eventId: EVENT, eventTitle: 7 },
+    ];
+    for (const facts of cases) {
+      const row = ticket(facts);
+      expect(row?.glyph).toBe('Ticket');
+      expect(markup(row?.sentence)).toBe(`${LEAD} em “”.`);
+    }
+  });
+
+  it('a retracted notice is the shipped removed row, a button with no link', () => {
+    const row = ticket({}, { removed: true });
+    expect(row?.removed).toBe(true);
+    expect(row?.href).toBeNull();
+    expect(row?.glyph).toBe('Ticket');
+    expect(markup(row?.sentence)).toBe('Este conteúdo foi removido.');
+  });
+
+  it('T-10.1-17: a title that looks like HTML is rendered as text, never as markup', () => {
+    const html = markup(
+      ticket({ eventId: EVENT, eventTitle: '<script>alert(1)</script>' })?.sentence,
+    );
+    expect(html).not.toContain('<script');
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  it('a long title passes through whole as ONE text for the clamped row', () => {
+    const long = 'T'.repeat(120);
+    const html = markup(ticket({ eventId: EVENT, eventTitle: long })?.sentence);
+    expect(html).toBe(`${LEAD} em “${long}”.`);
+    expect(html.split(long)).toHaveLength(2);
+  });
+
+  it('carries no amount, order reference or e-mail even if the facts held one (PR-3)', () => {
+    const html = markup(
+      ticket({
+        eventId: EVENT,
+        eventTitle: 'Encontro',
+        email: 'ana@example.test',
+        amountCents: 8000,
+        orderRef: 'ORD-1',
+      })?.sentence,
+    );
+    expect(html).not.toMatch(/ana@|8000|ORD-1/);
+  });
+});

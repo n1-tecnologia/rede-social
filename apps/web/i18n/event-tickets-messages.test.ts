@@ -356,3 +356,39 @@ describe('events.json: the closed doors of a paid event (UI-D-751, UI-D-752)', (
     expect(all['enter.cta']).toBe('Ver evento');
   });
 });
+
+/**
+ * Phase 10.1-13 (UI-D-760): the bell row of the paid event, in the `notifications` namespace. Rich text:
+ * the lead is a `<b>` tag the renderer fills, the title a plain value.
+ */
+describe('notifications.json: the Presença confirmada bell row (UI-D-760, D-756)', () => {
+  const notifications = messages.notifications as MessageTree;
+  const kinds = (notifications.kinds ?? {}) as MessageTree;
+
+  it('carries kinds.ticketConfirmed with the approved sentence and the {event} placeholder', () => {
+    expect(kinds.ticketConfirmed).toBe('<b>Presença confirmada</b> em “{event}”.');
+    expect(placeholders(kinds.ticketConfirmed as string)).toEqual(['event']);
+  });
+
+  it('fills {event} as a plain value, markup and all, never interpreting it', () => {
+    const rich = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'notifications' as never,
+    }) as unknown as {
+      rich: (key: string, values: Record<string, unknown>) => unknown;
+    };
+    const out = rich.rich('kinds.ticketConfirmed', {
+      event: '<script>x</script>',
+      b: (chunks: unknown) => ['[', chunks, ']'],
+    });
+    expect(JSON.stringify(out)).toContain('<script>x</script>');
+    expect(JSON.stringify(out)).toContain('Presença confirmada');
+  });
+
+  it('never carries an amount, an order reference, an e-mail or the gateway (PR-3, TICK-20)', () => {
+    expect(kinds.ticketConfirmed as string).not.toMatch(
+      /R\$|pedido|e-mail|gateway|webhook|kiwify|\{(amount|price|order|email)/i,
+    );
+  });
+});

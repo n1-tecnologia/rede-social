@@ -237,6 +237,19 @@ const purchaseHref = (facts: Record<string, unknown>) =>
     ? `/loja/${encodeURIComponent(facts.productId)}`
     : '/loja';
 
+/**
+ * Phase 10.1-13 (D-756, UI-D-760, A-UI-9): the payer's "Presença confirmada em {evento}", the same treatment
+ * (actor-less `Ticket` disc, the lead in bold, the title in curly quotes from the catalog). It opens the
+ * event; a missing, empty or non-string id degrades to the list, never to a hand-built broken URL. The
+ * facts are the event id and title only (no amount, order reference or e-mail ever reaches a row, PR-3);
+ * the title is React text inside the catalog sentence (T-10.1-17). No retraction is declared by the source,
+ * and a retracted row would draw the shipped "Este conteúdo foi removido." like every kind.
+ */
+const ticketHref = (facts: Record<string, unknown>) =>
+  typeof facts.eventId === 'string' && facts.eventId !== ''
+    ? `/eventos/${encodeURIComponent(facts.eventId)}`
+    : '/eventos';
+
 const paymentsRenderers: Partial<Record<string, NotificationRenderer>> = {
   [PAYMENTS_NOTIFICATION_KINDS.purchaseConfirmed]: {
     glyph: 'ShoppingBag',
@@ -247,6 +260,16 @@ const paymentsRenderers: Partial<Record<string, NotificationRenderer>> = {
         b: actorBold,
       }),
     href: purchaseHref,
+  },
+  [PAYMENTS_NOTIFICATION_KINDS.ticketConfirmed]: {
+    glyph: 'Ticket',
+    leading: 'glyph',
+    sentence: (facts, t) =>
+      t.rich('kinds.ticketConfirmed', {
+        event: typeof facts.eventTitle === 'string' ? facts.eventTitle : '',
+        b: actorBold,
+      }),
+    href: ticketHref,
   },
 };
 
