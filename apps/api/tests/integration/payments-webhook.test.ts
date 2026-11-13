@@ -4,9 +4,21 @@ import { rootLogger } from '@rede-social/core/server/logging';
 import { sealSecret } from '@rede-social/core/server/payments/secret';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  attendancesOf,
+  deliverAndApply,
+  freshEmail,
+  personWithEmail,
+  removeTicketEvents,
+  ticketDelivery,
+  ticketEvent,
+  ticketMapping,
+} from './payments-apply-fixtures';
+import {
   adminSql,
   api,
+  removeIdentitiesByPrefix,
   removePaymentIntegrations,
+  removePaymentMappings,
   type SeededPaymentIntegration,
   seedPaymentIntegration,
   signedWebhook,
@@ -526,5 +538,148 @@ describe('09.1 secrecy', () => {
     expect(row?.secret_sealed).not.toBe(integration.token);
     expect(row?.secret_sealed).not.toContain(integration.token);
     expect(row?.secret_sealed.startsWith('v1:')).toBe(true);
+  });
+});
+
+/**
+ * 10.1-05 (TICK-21, T-10.1-01): a delivery signed with ONE tenant's sealed token that names ANOTHER
+ * tenant's event product id writes nothing in the other tenant. The mapping lookup is pinned to the
+ * integration's tenant, so the product is `unknown_product` in the sender's tenant, while the owner's own
+ * signed delivery for the same product confirms in the owner's tenant (the positive control).
+ */
+describe('10.1 cross-tenant event products', () => {
+  const PREFIX = 'paywhtk';
+  const TITLE = `${PREFIX}-evento`;
+
+  const sweep = async () => {
+    for (const tenantId of [labTenantId, demoTenantId]) await removePaymentIntegrations(tenantId);
+    await removeTicketEvents(PREFIX);
+    for (const tenantId of [labTenantId, demoTenantId]) await removePaymentMappings(tenantId);
+  };
+
+  beforeAll(async () => {
+    await removeIdentitiesByPrefix(PREFIX);
+    await sweep();
+  }, 60_000);
+
+  afterEach(sweep, 60_000);
+
+  afterAll(async () => {
+    await removeIdentitiesByPrefix(PREFIX);
+  }, 60_000);
+
+  it("tenant A's token naming tenant B's event product writes nothing in B, and B's own delivery confirms in B, in both directions", async () => {
+    const lab = await seed(labTenantId);
+    const demo = await seed(demoTenantId);
+    const labEvent = await ticketEvent(labTenantId, { title: `${TITLE}-lab` });
+    const demoEvent = await ticketEvent(demoTenantId, { title: `${TITLE}-demo` });
+    const labProduct = await ticketMapping(labTenantId, labEvent);
+    const demoProduct = await ticketMapping(demoTenantId, demoEvent);
+    const labBuyer = await personWithEmail(freshEmail(PREFIX, 'lab'), 'lab');
+    const demoBuyer = await personWithEmail(freshEmail(PREFIX, 'demo'), 'demo');
+    const body = (productId: string, email: string) =>
+      ticketDelivery('purchase_approved', {
+        ref: `ord-${crypto.randomUUID()}`,
+        productId,
+        email,
+      });
+
+    // lab's token, demo's product: unknown in lab, nothing in demo
+    const labToDemo = await deliverAndApply(
+      lab,
+      body(demoProduct.externalProductId, demoBuyer.email),
+    );
+    expect(labToDemo).toMatchObject({
+      tenant_id: labTenantId,
+      state: 'unknown_product',
+      outcome: null,
+      mapping_id: null,
+    });
+    expect(await attendancesOf(demoEvent)).toHaveLength(0);
+    // demo's own token, its own product: confirmed in demo (positive control)
+    const demoOwn = await deliverAndApply(
+      demo,
+      body(demoProduct.externalProductId, demoBuyer.email),
+    );
+    expect(demoOwn).toMatchObject({
+      tenant_id: demoTenantId,
+      state: 'applied',
+      outcome: 'ticket_granted',
+    });
+    expect(await attendancesOf(demoEvent)).toHaveLength(1);
+
+    // demo's token, lab's product: unknown in demo, nothing in lab
+    const demoToLab = await deliverAndApply(
+      demo,
+      body(labProduct.externalProductId, labBuyer.email),
+    );
+    expect(demoToLab).toMatchObject({
+      tenant_id: demoTenantId,
+      state: 'unknown_product',
+      outcome: null,
+    });
+    expect(await attendancesOf(labEvent)).toHaveLength(0);
+    // lab's own token, its own product: confirmed in lab (positive control)
+    const labOwn = await deliverAndApply(lab, body(labProduct.externalProductId, labBuyer.email));
+    expect(labOwn).toMatchObject({
+      tenant_id: labTenantId,
+      state: 'applied',
+      outcome: 'ticket_granted',
+    });
+    expect(await attendancesOf(labEvent)).toHaveLength(1);
+  });
+
+  it("a refund signed with tenant A's token never removes tenant B's presence, even naming B's product or B's order", async () => {
+    const lab = await seed(labTenantId);
+    const demo = await seed(demoTenantId);
+    const labEvent = await ticketEvent(labTenantId, { title: `${TITLE}-rlab` });
+    const demoEvent = await ticketEvent(demoTenantId, { title: `${TITLE}-rdemo` });
+    const labProduct = await ticketMapping(labTenantId, labEvent);
+    const demoProduct = await ticketMapping(demoTenantId, demoEvent);
+    const demoBuyer = await personWithEmail(freshEmail(PREFIX, 'rdemo'), 'demo');
+    const demoRef = `ord-${crypto.randomUUID()}`;
+    await deliverAndApply(
+      demo,
+      ticketDelivery('purchase_approved', {
+        ref: demoRef,
+        productId: demoProduct.externalProductId,
+        email: demoBuyer.email,
+      }),
+    );
+    expect(await attendancesOf(demoEvent)).toHaveLength(1);
+
+    // lab's token, demo's product and demo's order reference
+    const viaProduct = await deliverAndApply(
+      lab,
+      ticketDelivery('purchase_refunded', {
+        ref: demoRef,
+        productId: demoProduct.externalProductId,
+        email: demoBuyer.email,
+      }),
+    );
+    expect(viaProduct).toMatchObject({ state: 'unknown_product' });
+    // lab's token, lab's own product, but demo's order reference: nothing in lab carries it
+    const viaOrder = await deliverAndApply(
+      lab,
+      ticketDelivery('chargeback', {
+        ref: demoRef,
+        productId: labProduct.externalProductId,
+        email: demoBuyer.email,
+      }),
+    );
+    expect(viaOrder).toMatchObject({ state: 'applied', outcome: 'no_effect' });
+    expect(await attendancesOf(demoEvent)).toHaveLength(1);
+
+    // demo's own refund removes it (positive control)
+    const own = await deliverAndApply(
+      demo,
+      ticketDelivery('purchase_refunded', {
+        ref: demoRef,
+        productId: demoProduct.externalProductId,
+        email: demoBuyer.email,
+      }),
+    );
+    expect(own).toMatchObject({ state: 'applied', outcome: 'ticket_revoked' });
+    expect(await attendancesOf(demoEvent)).toHaveLength(0);
   });
 });
