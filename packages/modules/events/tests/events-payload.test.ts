@@ -482,6 +482,89 @@ describe('2026-10-03 — category and capacity on the writes, the poster keys on
   });
 });
 
+describe('2026-11-13 (10.2-06) — the registration opening is written with the event', () => {
+  const opens = { date: '2026-10-05', time: '09:30' };
+  const lockedWith = (stored: string | null) => [
+    {
+      cover_asset_id: null,
+      poster_asset_id: null,
+      ticket_price_cents: null,
+      registration_opens_at: stored,
+      starts_at: STARTS_AT,
+      ends_at: ENDS_AT,
+    },
+  ];
+
+  it('9m. create binds the pair and converts it in the SAME insert, with the start cast (OPEN-03)', async () => {
+    script = [[{ id: EVENT_ID }], [], [row]];
+    await createEvent(context(), { ...input, registrationOpens: opens });
+    expect(statements).toHaveLength(3);
+    expect(statements[0]).toContain('ticket_price_cents, registration_opens_at');
+    expect(statements[0]).toContain('"2026-10-05"');
+    expect(statements[0]).toContain('"09:30"');
+    expect(statements[0]).toContain('at time zone t.timezone');
+  });
+
+  it('9n. a create without the key binds nulls: the concatenation of nulls stores no opening', async () => {
+    script = [[{ id: EVENT_ID }], [], [row]];
+    await createEvent(context(), input);
+    expect(statements[0]).toContain('registration_opens_at');
+    expect(statements[0]).not.toContain('2026-10-05');
+  });
+
+  it('9o. the replacement puts the opening on BOTH sides of is-distinct-from (an opening-only edit is a change)', async () => {
+    script = [lockedWith(null), [{ starts_at: STARTS_AT, ends_at: ENDS_AT }], [], [row]];
+    await updateEvent(context(), EVENT_ID, { ...input, registrationOpens: opens });
+    expect(statements).toHaveLength(4);
+    expect(statements[0]).toContain('registration_opens_at');
+    expect(statements[1]).toContain('registration_opens_at = n.registration_opens_at');
+    expect(statements[1]).toMatch(
+      /e\.ticket_price_cents, e\.registration_opens_at\)[\s\S]*is distinct from[\s\S]*n\.ticket_price_cents, n\.registration_opens_at\)/,
+    );
+    expect(statements[1]).toContain('"2026-10-05"');
+  });
+
+  it('9p. an OMITTED key keeps the stored instant (bound back as timestamptz); an explicit null clears it (D-781)', async () => {
+    const stored = '2026-10-05T12:30:00.000000Z';
+    script = [lockedWith(stored), [], [], [row]];
+    await updateEvent(context(), EVENT_ID, input);
+    expect(statements[1]).toContain(stored);
+    expect(statements[1]).not.toContain('null::timestamptz');
+
+    statements.length = 0;
+    script = [lockedWith(stored), [{ starts_at: STARTS_AT, ends_at: ENDS_AT }], [], [row]];
+    await updateEvent(context(), EVENT_ID, { ...input, registrationOpens: null });
+    expect(statements[1]).toContain('null::timestamptz');
+    expect(statements[1]).not.toContain(stored);
+  });
+
+  it('9q. the CHECK maps to opening_after_start in both writes; the trigger maps to 409 opening_locked on update only', async () => {
+    script = [refusal('23514', 'events_registration_opens_chk')];
+    await expect(createEvent(context(), input)).rejects.toMatchObject({
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      details: { event: 'opening_after_start' },
+    });
+
+    script = [lockedWith(null), refusal('23514', 'events_registration_opens_chk')];
+    await expect(updateEvent(context(), EVENT_ID, input)).rejects.toMatchObject({
+      status: 400,
+      details: { event: 'opening_after_start' },
+    });
+
+    script = [lockedWith(null), refusal('23514', 'events_opening_locked')];
+    const ctx = context();
+    await expect(
+      updateEvent(ctx, EVENT_ID, { ...input, registrationOpens: opens }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: 'CONFLICT',
+      details: { event: 'opening_locked' },
+    });
+    expect(ctx.events).toHaveLength(0);
+  });
+});
+
 describe('2026-10-07 — the schedule is written and read with the event, in the same statements', () => {
   /** What a bound jsonb parameter looks like inside the JSON-stringified query the harness records. */
   const bound = (schedule: unknown) => JSON.stringify(JSON.stringify(schedule));

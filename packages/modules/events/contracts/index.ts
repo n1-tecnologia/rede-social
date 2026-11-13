@@ -159,6 +159,13 @@ export type EventPeriod = (typeof EVENT_PERIODS)[number];
  *  - `poster_invalid`: the vertical poster (`posterAssetId`) is an asset of THIS tenant that is not a
  *    ready `cover` image (`400`), the cover's own rule under its own code. A foreign or unknown
  *    asset stays a bare 404.
+ *
+ * 2026-11-13 (10.2-06, D-783) adds two, APPENDED so every earlier index is unchanged (EP-45):
+ *  - `opening_locked`: the registration opening cannot change once a ticket exists (`409`), decided by
+ *    the trigger `events_opening_guard` (constraint `events_opening_locked`), the only judge;
+ *  - `opening_after_start`: the opening is at or after the start (`400`), by the schema and by the
+ *    CHECK `events_registration_opens_chk`, one code for both.
+ *    External contract once released. Never `ticket_locked`: that string is already the Não vou refusal.
  */
 export const EVENT_ISSUES = [
   'name_required',
@@ -186,6 +193,12 @@ export const EVENT_ISSUES = [
   // Phase 10.1-07 (D-743): a courtesy is for a PAID event only, and only a courtesy is removable by hand.
   'event_not_paid',
   'not_courtesy',
+  // Phase 10.2 (D-783, OPEN-22): the opening date cannot move once a ticket exists (`409`, the trigger
+  // `events_opening_locked` is the only judge), and an opening at or after the start is refused (`400`).
+  // APPEND-ONLY and an external contract once released: never renamed, never reordered, and deliberately
+  // not `ticket_locked` (already the Não vou refusal and the mapping lock).
+  'opening_locked',
+  'opening_after_start',
 ] as const;
 export type EventIssue = (typeof EVENT_ISSUES)[number];
 
@@ -289,7 +302,8 @@ export function normaliseEventSchedule(
  *  - `location_required`: an in-person event without a non-blank venue AND address, or carrying a
  *    meeting URL;
  *  - `url_required`: an online event without a URL, or carrying a venue or an address;
- *  - `url_invalid`: a URL that is not `https:` (D-217), or longer than `EVENT_MAX_URL`.
+ *  - `url_invalid`: a URL that is not `https:` (D-217), or longer than `EVENT_MAX_URL`;
+ *  - `opening_after_start`: the registration opening (Phase 10.2) is at or after the start (OPEN-04).
  * Refusing the inactive side's fields is what keeps the D-213 XOR honest: only the visible side of
  * the form is ever stored.
  *
@@ -353,6 +367,16 @@ export const eventInputSchema = z
       .max(EVENT_MAX_URL, { error: 'url_invalid' })
       .nullable()
       .optional(),
+    /**
+     * Phase 10.2 (D-792, D-781, OPEN-03): when the registrations of a PAID event open, as the admin typed
+     * it (a date and a time in the tenant's zone, converted in SQL like the start). Like the price, an
+     * OMITTED key keeps the stored opening and only an explicit null clears it, so a cached older client
+     * can never wipe a date it cannot see. Deliberately `.optional()` and NOT `.default(null)`: the web
+     * sends the parsed output, and a defaulted key would grow every save by a key an OLDER, strict API
+     * rejects. A date already in the past is accepted and simply means open. An opening at or after the
+     * start is `opening_after_start` (refined below, and by the database CHECK for what Zod cannot see).
+     */
+    registrationOpens: wallClockSchema.nullable().optional(),
     start: wallClockSchema,
     end: wallClockSchema,
   })
@@ -368,6 +392,17 @@ export const eventInputSchema = z
       isRealWallClock(value.end.date, value.end.time);
     if (comparable && wallClockKey(value.end) <= wallClockKey(value.start)) {
       ctx.addIssue({ code: 'custom', path: ['end'], message: 'end_before_start' });
+    }
+    // OPEN-04: an opening at or after the start is refused. Same rule as above: only real wall clocks
+    // are compared, so an impossible one keeps its own generic issue.
+    const opens = value.registrationOpens;
+    if (
+      opens &&
+      isRealWallClock(opens.date, opens.time) &&
+      isRealWallClock(value.start.date, value.start.time) &&
+      wallClockKey(opens) >= wallClockKey(value.start)
+    ) {
+      ctx.addIssue({ code: 'custom', path: ['registrationOpens'], message: 'opening_after_start' });
     }
     if (value.format === 'in_person') {
       if (!filled(value.venueName) || !filled(value.address) || filled(value.meetingUrl)) {

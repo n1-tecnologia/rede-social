@@ -193,6 +193,8 @@ describe('eventInputSchema — the refusal vocabulary', () => {
       'ticket_locked',
       'event_not_paid',
       'not_courtesy',
+      'opening_locked',
+      'opening_after_start',
     ]);
   });
 });

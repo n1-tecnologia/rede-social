@@ -515,6 +515,10 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
   const category = orNull(input.category);
   const capacity = input.capacity ?? null;
   const ticketPriceCents = input.ticketPriceCents ?? null;
+  // Phase 10.2 (D-792): the opening is a wall-clock pair or nothing; a pair is converted by the SAME
+  // SQL cast as the start, a null pair concatenates to null. Never converted in JavaScript.
+  const opensDate = input.registrationOpens?.date ?? null;
+  const opensTime = input.registrationOpens?.time ?? null;
   const schedule = normaliseEventSchedule(input.schedule ?? []);
 
   let created: EventRow;
@@ -527,7 +531,7 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
       const inserted = await tx.execute<{ id: string }>(sql`
         insert into events (tenant_id, created_by_user_id, title, description, cover_asset_id,
                             poster_asset_id, category, capacity, schedule, format, venue_name,
-                            address, starts_at, ends_at, ticket_price_cents)
+                            address, starts_at, ends_at, ticket_price_cents, registration_opens_at)
         select ${ctx.tenantId}::uuid,
                ${ctx.userId}::uuid,
                ${input.title},
@@ -542,7 +546,8 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
                ${address},
                (${input.start.date}::text || ' ' || ${input.start.time}::text)::timestamp at time zone t.timezone,
                (${input.end.date}::text || ' ' || ${input.end.time}::text)::timestamp at time zone t.timezone,
-               ${ticketPriceCents}::int
+               ${ticketPriceCents}::int,
+               (${opensDate}::text || ' ' || ${opensTime}::text)::timestamp at time zone t.timezone
           from tenants t
          where t.id = ${ctx.tenantId}::uuid
         returning id`);
@@ -568,8 +573,13 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
       return row;
     });
   } catch (error) {
-    if (checkViolation(error) === 'events_window_chk') {
+    const violated = checkViolation(error);
+    if (violated === 'events_window_chk') {
       throw new ApiError(400, 'VALIDATION_FAILED', { event: 'end_before_start' });
+    }
+    // OPEN-04: a date-fold input the schema's comparison cannot see answers the schema's own code.
+    if (violated === 'events_registration_opens_chk') {
+      throw new ApiError(400, 'VALIDATION_FAILED', { event: 'opening_after_start' });
     }
     throw error;
   }
@@ -1063,6 +1073,8 @@ type LockedEventRow = {
   cover_asset_id: string | null;
   poster_asset_id: string | null;
   ticket_price_cents: number | null;
+  /** Microsecond ISO string (`ISO_MICROSECONDS`), cast back with `::timestamptz` (an exact round trip). */
+  registration_opens_at: string | null;
   starts_at: string;
   ends_at: string;
 };
@@ -1135,6 +1147,7 @@ export async function updateEvent(
         select cover_asset_id,
                poster_asset_id,
                ticket_price_cents,
+               to_char(registration_opens_at at time zone 'utc', ${ISO_MICROSECONDS}) as registration_opens_at,
                to_char(starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
                to_char(ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at
           from events
@@ -1174,6 +1187,18 @@ export async function updateEvent(
           ? (before.ticket_price_cents ?? null)
           : input.ticketPriceCents;
 
+      // Phase 10.2 (D-792, D-781, D-793): the opening has THREE states and the expression is chosen HERE,
+      // in TypeScript, from bound parameters only (never a spliced value, never a JavaScript zone
+      // conversion). OMITTED keeps the stored instant (read above as a microsecond ISO string, so the
+      // cast round-trips it exactly); an explicit null clears it; a pair is converted in SQL by the same
+      // cast as the start. The lock itself is the database's (trigger `events_opening_guard`), not ours.
+      const opening =
+        input.registrationOpens === undefined
+          ? sql`${before.registration_opens_at ?? null}::timestamptz`
+          : input.registrationOpens === null
+            ? sql`null::timestamptz`
+            : sql`(${input.registrationOpens.date}::text || ' ' || ${input.registrationOpens.time}::text)::timestamp at time zone t.timezone`;
+
       const updated = await tx.execute<{ starts_at: string; ends_at: string }>(sql`
         with next as (
           select ${input.title}::text as title,
@@ -1188,7 +1213,8 @@ export async function updateEvent(
                  ${address}::text as address,
                  (${input.start.date}::text || ' ' || ${input.start.time}::text)::timestamp at time zone t.timezone as starts_at,
                  (${input.end.date}::text || ' ' || ${input.end.time}::text)::timestamp at time zone t.timezone as ends_at,
-                 ${ticketPriceCents}::int as ticket_price_cents
+                 ${ticketPriceCents}::int as ticket_price_cents,
+                 ${opening} as registration_opens_at
             from tenants t
            where t.id = ${ctx.tenantId}::uuid
         )
@@ -1206,6 +1232,7 @@ export async function updateEvent(
                starts_at = n.starts_at,
                ends_at = n.ends_at,
                ticket_price_cents = n.ticket_price_cents,
+               registration_opens_at = n.registration_opens_at,
                updated_at = now()
           from next n
          where e.tenant_id = ${ctx.tenantId}::uuid
@@ -1213,11 +1240,11 @@ export async function updateEvent(
            and e.deleted_at is null
            and (e.title, e.description, e.cover_asset_id, e.poster_asset_id,
                 e.category, e.capacity, e.schedule, e.format, e.venue_name, e.address,
-                e.starts_at, e.ends_at, e.ticket_price_cents)
+                e.starts_at, e.ends_at, e.ticket_price_cents, e.registration_opens_at)
                is distinct from
                (n.title, n.description, n.cover_asset_id, n.poster_asset_id,
                 n.category, n.capacity, n.schedule, n.format, n.venue_name, n.address,
-                n.starts_at, n.ends_at, n.ticket_price_cents)
+                n.starts_at, n.ends_at, n.ticket_price_cents, n.registration_opens_at)
         returning to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
                   to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at`);
 
@@ -1262,8 +1289,18 @@ export async function updateEvent(
       };
     });
   } catch (error) {
-    if (checkViolation(error) === 'events_window_chk') {
+    const violated = checkViolation(error);
+    if (violated === 'events_window_chk') {
       throw new ApiError(400, 'VALIDATION_FAILED', { event: 'end_before_start' });
+    }
+    // OPEN-04: a start moved earlier than a kept opening, or a date-fold input the schema cannot see.
+    if (violated === 'events_registration_opens_chk') {
+      throw new ApiError(400, 'VALIDATION_FAILED', { event: 'opening_after_start' });
+    }
+    // D-783, OPEN-16: the trigger refused a change of the date once a ticket exists. The decision stays
+    // in the database, so there is no check-then-write race and no count here.
+    if (violated === 'events_opening_locked') {
+      throw new ApiError(409, 'CONFLICT', { event: 'opening_locked' });
     }
     throw error;
   }
