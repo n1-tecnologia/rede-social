@@ -61,8 +61,13 @@ begin;
 --    service role, the apply lane, the admin reset, the free-event Não vou upsert, a member update of an
 --    unrelated column); a refund still finds the row afterwards.
 --
+-- 9. THE GRANT REPLAYS FIRST (gap plan 18, WR-03, D-750, D-752, T-10.1-44): a reference that already names a
+--    presence, and a member who already holds a ticket, answer `already_in` in EVERY state of the event (ended,
+--    cancelled, soft-deleted), because a replay confirms nothing new; a first-time grant is still refused
+--    (`event_ended`, `event_cancelled`) beside each replay.
+--
 -- Fixture ids use the `1e310000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(342);
+select plan(344);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-tkt-a', 'Ingresso A', '1e310000-0000-4000-8000-000000000001');
@@ -1610,6 +1615,33 @@ select results_eq(
   $$ select outcome from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S8-T1') $$,
   $$ values ('removed'::text) $$,
   'TICK-11/D-760: the refund of S8-T1 still finds the row and answers removed after the refused strip attempts');
+reset role;
+
+-- ── 9. the grant replays first (gap plan 18, WR-03, D-750, D-752, T-10.1-44) ───────────────────────
+-- 811 ends (ended event) | 812 is cancelled | 813 is soft-deleted, each mapped and sold once while live.
+reset role;
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, capacity) values
+  (tests.tk('811'), tests.tk('1'), tests.tk('10c'), 'Evento 811', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null),
+  (tests.tk('812'), tests.tk('1'), tests.tk('10c'), 'Evento 812', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null),
+  (tests.tk('813'), tests.tk('1'), tests.tk('10c'), 'Evento 813', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null);
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values
+  (tests.tk('1'), 'fake', 'event', 'tkt-233-s9-811', tests.tk('811')),
+  (tests.tk('1'), 'fake', 'event', 'tkt-233-s9-812', tests.tk('812')),
+  (tests.tk('1'), 'fake', 'event', 'tkt-233-s9-813', tests.tk('813'));
+
+-- The tracer: sold while live, then the event ends, then the same order arrives again.
+select tests.as_service();
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('811'), 'fake', 'S9-R1') $$,
+  $$ values ('granted'::text, tests.tk('101')) $$,
+  'WR-03: an order sold while the event is live is granted');
+reset role;
+update public.events set starts_at = now() - interval '3 hours', ends_at = now() - interval '1 hour' where id = tests.tk('811');
+select tests.as_service();
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('811'), 'fake', 'S9-R1') $$,
+  $$ values ('already_in'::text, tests.tk('101')) $$,
+  'WR-03/D-750/D-752: the same order again after the event ended is already_in, not event_ended');
 reset role;
 
 -- The rank count rides the status index BY NAME on a volume fixture (a handful of rows is always scanned):
