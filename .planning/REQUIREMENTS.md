@@ -351,9 +351,9 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 Phase 10.1 lets a tenant sell an event through its payment gateway: `admin_tenant` links a gateway product (not a store product) to an event, the signed webhook of Phase 09.1 confirms the presence of the buyer only after an approved purchase, a refund or chargeback removes it, the doors (online `Entrar`, venue code) close to members without a presence, and the admin can release a courtesy (D-740..D-760, UI-D-740..UI-D-766).
 
 - [x] **TICK-01**: `payment_products` accepts a third kind `event` whose target is an event of the same tenant (composite foreign key), at most one mapping per event, the pair (provider, external product id) stays globally unique and a taken id answers `gateway_product_taken` *(D-740, D-744, D-745)*
-- [ ] **TICK-02**: The event form saves the gateway product code and the purchase link only together (both required, the link `https:`), plus an optional reference price in integer cents, the price riding the whole-event PUT as an `.optional()` key and the mapping written by a second call after the event save *(D-744, D-755)*
+- [x] **TICK-02**: The event form saves the gateway product code and the purchase link only together (both required, the link `https:`), plus an optional reference price in integer cents, the price riding the whole-event PUT as an `.optional()` key and the mapping written by a second call after the event save *(D-744, D-755)*
 - [ ] **TICK-03**: Linking a product requires the `payments` module on; with the module off or the gateway disconnected a linked event answers sale-unavailable to every member without a presence, held presences stay and nothing falls back to the instant `Vou` *(D-746)*
-- [ ] **TICK-04**: Once an event holds at least one paid presence, changing or removing its product is refused `409 ticket_locked`, serialised against concurrent grants; without paid presences the admin changes or removes it freely and removal returns the event to the instant `Vou` An event that holds paid presences can still be deleted (the soft delete): its mapping stays so a later refund still finds the presence, and an event with no paid presence releases the mapping when deleted (D-760). *(D-747)*
+- [x] **TICK-04**: Once an event holds at least one paid presence, changing or removing its product is refused `409 ticket_locked`, serialised against concurrent grants; without paid presences the admin changes or removes it freely and removal returns the event to the instant `Vou` An event that holds paid presences can still be deleted (the soft delete): its mapping stays so a later refund still finds the presence, and an event with no paid presence releases the mapping when deleted (D-760). *(D-747)*
 - [ ] **TICK-05**: Presences that exist when the product is linked stay, are not charged and read `Anterior ao ingresso`; only answers given after the link pay *(D-748)*
 - [x] **TICK-06**: In a paid event a member's own `going` is refused `409 payment_required` by the API and by the database (guard trigger and member-lane policies), a member cannot write the origin or order columns, and a holder repeating `Vou` is answered unchanged *(D-741)*
 - [x] **TICK-07**: An approved purchase of the event's product, matched by tenant, provider and product id and by the buyer's e-mail equal to a live member of the tenant, creates exactly one `going` presence with origin `ticket` and the gateway order reference; a replay or a second order by the same member changes nothing *(D-740, D-741, D-749)*
@@ -983,9 +983,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-33 | Phase 09.1 (plans 08, 20) | Complete |
 | PAY-34 | Phase 09.1 (plans 17, 19) | Complete |
 | TICK-01 | Phase 10.1 | Complete |
-| TICK-02 | Phase 10.1 | Pending |
+| TICK-02 | Phase 10.1 | Complete |
 | TICK-03 | Phase 10.1 | Pending |
-| TICK-04 | Phase 10.1 | Pending |
+| TICK-04 | Phase 10.1 | Complete |
 | TICK-05 | Phase 10.1 | Pending |
 | TICK-06 | Phase 10.1 | Complete |
 | TICK-07 | Phase 10.1 | Complete |

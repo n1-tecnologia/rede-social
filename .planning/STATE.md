@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
-current_plan: 11
+current_plan: 12
 status: executing
-stopped_at: Completed 10.1-10-PLAN.md (10/15 plans done; sketch 021 approved provisionally; next 10.1-11, wave 9)
-last_updated: "2026-11-13T11:27:12.713Z"
+stopped_at: Completed 10.1-11-PLAN.md (11/15 plans done; next 10.1-12, wave 10)
+last_updated: "2026-11-13T11:42:57.249Z"
 last_activity: 2026-11-13
-last_activity_desc: "10.1-10 complete: sketch 021 approved provisionally"
-state_head: 39fe63e80259c131ecc16b9ccb2f8690d6cb47af
+last_activity_desc: "10.1-11 complete: the Ingresso section of the event form and its second write"
+state_head: 24e190d0217c668f962d25144a713463c626002c
 progress:
   total_phases: 32
   completed_phases: 0
   total_plans: 431
-  completed_plans: 398
+  completed_plans: 399
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — EXECUTING
-Current Plan: 11
+Current Plan: 12
 Total Plans in Phase: 15
-Plan: 10 of 15 complete (10.1-10 done; next 10.1-11, wave 9)
+Plan: 11 of 15 complete (10.1-11 done; next 10.1-12, wave 10)
 Status: Ready to execute
-Last activity: 2026-11-13 — 10.1-10 complete: sketch 021 approved provisionally on Igor's instruction
+Last activity: 2026-11-13 — 10.1-11 complete: the Ingresso section of the event form and its second write
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -367,6 +367,7 @@ Progress: [███████████████████░] 160/162
 | Phase 10.1 P07 | 18 min | 3 tasks | 12 files |
 | Phase 10.1 P08 | 9 min | 3 tasks | 10 files |
 | Phase 10.1 P10 | 15 min | 2 tasks | 2 files |
+| Phase 10.1 P11 | 14 min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -1143,6 +1144,7 @@ Recent decisions affecting current work:
 - [Phase 10.1]: 10.1-07 the edit read ticket key is absent for any role but admin_tenant and null for an admin on an unmapped event; DELETE courtesy answers 204 — The form must tell no mapping from not allowed to know
 - [Phase 10.1]: 10.1-08: eventSaleState validates the link itself (safeCheckoutHref, https only) and orders cancelled, ended, under way, unavailable, full, buy; paid keys are optional and absent on free events — A free event's serialised views stay byte-identical, and no caller can hand a view an unchecked buy href (T-10.1-24).
 - [Phase 10.1]: 10.1-08: the confirmed block is not hidden after the event ends (literal UI-D-749); tenantName and gatewayName are optional context the pages of plans 12 and 13 must pass; aviso page excludes ingresso until plan 12 (A-10.1-PLUMB) — Keeps today's behaviour for ?motivo=ingresso and leaves the screen choices to the plans that draw them.
+- [Phase 10.1]: 10.1-11: a save answer carrying the recurring hint keeps the event form open so the subscription warning can be read; the price is shown disabled in the linked-but-unavailable state as sketch 021 draws it — A-UI-10 makes the hint exist only in the save answer; sketch 021 form-ingresso-vinculado-indisponivel shows every stored value disabled
 
 ### Pending Todos
 
@@ -1274,6 +1276,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-13T11:27:12.363Z
-Stopped at: Completed 10.1-10-PLAN.md
+Last session: 2026-11-13T11:42:46.454Z
+Stopped at: Completed 10.1-11-PLAN.md (11/15 plans done; next 10.1-12, wave 10)
 Resume file: None
