@@ -41,8 +41,29 @@ begin;
 --    tenants' events with the same title and the same opening instant each hand out only their own link; a
 --    tenant with no events and a random id are told nothing; a session with no claims is told nothing.
 --
+-- 6. THE GRANT RECORDS WHEN (plan 05, D-782, D-791, OPEN-12, OPEN-13, EP-49, EP-59, T-10.2-10): `app.event_gateway_grant`
+--    answers `granted` for an event whose opening is an hour ahead, 50 days ahead or in the past (it never refuses
+--    for the opening), and stamps `ticket_confirmed_at = now()` on every write path (no row, `not_going`, the upgrade
+--    of an old Vou, a courtesy, a checked-in and a walk-in row, and the manual release) while `responded_at` of an
+--    upgraded row keeps its old value; a replay and a second different order answer `already_in` and never rewrite it.
+--
+-- 7. THE MEMBER LANE (plan 05, T-10.2-03): a member changing, erasing or carrying `ticket_confirmed_at` is refused by
+--    the guard (42501, constraint `event_attendances_bookkeeping_locked`, message `bookkeeping_locked`), on a ticket
+--    row and on a plain rsvp row, with the positive controls of the grant, the admin courtesy and reset, an unrelated
+--    column and the free-event Não vou upsert.
+--
+-- 8. THE DERIVED MARK (plan 05, D-791, OPEN-13, EP-28, EP-29, EP-30): `before_opening` is strict at the boundary (one
+--    microsecond early is marked, the exact instant is not), a Vou upgraded before the opening is marked and after it
+--    is not, null instants, courtesy, rsvp and no-opening rows are never marked, the mark goes with a refunded row,
+--    the new column is in no index and equal instants keep the order by `(responded_at, id)`.
+--
+-- 9. THE DELIVERY DEFINER, HARDENING AND ISOLATION (plan 05, OPEN-15, OPEN-23, OPEN-24, EP-49, EP-50):
+--    `app.event_ticket_before_opening` over its boundary and malformed-argument matrix, both directions across tenants
+--    with a shared reference and positive controls, the empty `search_path`, the privilege matrix, the guard's trigger
+--    and the grant's lock key, by catalogue.
+--
 -- Fixture ids use the `1e320000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(151);
+select plan(176);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-opn-a', 'Abertura A', '1e320000-0000-4000-8000-000000000001');
@@ -818,6 +839,111 @@ select is(
   (select string_agg(a.user_id::text, ',' order by a.responded_at, a.id) from public.event_attendances a where a.event_id = tests.op('60f')),
   tests.op('621')::text || ',' || tests.op('620')::text,
   'EP-30: two rows confirmed in the same instant keep their order by (responded_at, id)');
+
+-- ── 9. the delivery definer, hardening and isolation (plan 05, OPEN-15, OPEN-23, OPEN-24, EP-49, EP-50) ──
+-- `app.event_ticket_before_opening` reads the section 8 rows (event 607: 610 an hour early, 611 at the exact instant,
+-- 612 one microsecond early, 613 one microsecond after, 614 a null instant, 615 a courtesy; event 608 has no
+-- opening). Tenant B gets an event b01 with the SAME order reference as 610 and an early confirmation.
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, registration_opens_at) values
+  (tests.op('b01'), tests.op('2'), tests.op('b1'), 'I1', 'in_person', 'Sede', 'Rua B', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '1 day');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref, ticket_confirmed_at)
+  select tests.op('2'), tests.op('b01'), tests.op('b2'), 'going', now(), 'ticket', 'fake', 'OPN8-610', ev.registration_opens_at - interval '1 hour'
+    from public.events ev where ev.id = tests.op('b01');
+
+select tests.as_service();
+select results_eq(
+  $$ select app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', 'OPN8-610'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', 'OPN8-612'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', E'  OPN8-610\n') $$,
+  $$ values (true, true, true) $$,
+  'OPEN-15: true for a ticket confirmed an hour before and one microsecond before the opening (the reference is trimmed)');
+select results_eq(
+  $$ select app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', 'OPN8-611'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', 'OPN8-613'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', 'OPN8-614'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('608'), 'fake', 'OPN8-NOOPEN') $$,
+  $$ values (false, false, false, false) $$,
+  'OPEN-15: false at the exact instant, one microsecond after, with a null instant and for an event with no opening');
+select results_eq(
+  $$ select app.event_ticket_before_opening(null, tests.op('607'), 'fake', 'OPN8-610'),
+            app.event_ticket_before_opening(tests.op('1'), null, 'fake', 'OPN8-610'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), null, 'OPN8-610'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', null) $$,
+  $$ values (false, false, false, false) $$,
+  'OPEN-15: a null argument is false');
+select results_eq(
+  $$ select app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', ''),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', '   '),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', E'OPN8-\x01610'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', repeat('x', 201)),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'Fake', 'OPN8-610'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'my fake', 'OPN8-610') $$,
+  $$ values (false, false, false, false, false, false) $$,
+  'OPEN-15: an empty, blank, control-character or over-long reference and a malformed provider are false (the courtesy row has no reference to ask with)');
+select results_eq(
+  $$ select app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', 'OPN8-UNKNOWN'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'other', 'OPN8-610'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('608'), 'fake', 'OPN8-610'),
+            app.event_ticket_before_opening(tests.op('1'), tests.op('609'), 'fake', 'OPN8-612') $$,
+  $$ values (false, false, false, false) $$,
+  'OPEN-15: an unknown reference, another provider and the reference of ANOTHER event passed with this event are false');
+
+-- Both directions across tenants, the fixtures swapped, a positive control each time. The same reference exists in both.
+select results_eq(
+  $$ select app.event_ticket_before_opening(tests.op('1'), tests.op('607'), 'fake', 'OPN8-610'),
+            app.event_ticket_before_opening(tests.op('2'), tests.op('b01'), 'fake', 'OPN8-610') $$,
+  $$ values (true, true) $$,
+  'T-10.2-04 positive control: each tenant with its own event and the shared reference is true');
+select results_eq(
+  $$ select app.event_ticket_before_opening(tests.op('1'), tests.op('b01'), 'fake', 'OPN8-610'),
+            app.event_ticket_before_opening(tests.op('2'), tests.op('607'), 'fake', 'OPN8-610') $$,
+  $$ values (false, false) $$,
+  'T-10.2-04: A''s tenant with B''s event and B''s tenant with A''s event are both false');
+select results_eq(
+  $$ select app.event_ticket_before_opening(tests.op('1'), tests.op('b01'), 'fake', 'OPN8-610'),
+            app.event_ticket_before_opening(tests.op('2'), tests.op('607'), 'fake', 'OPN8-610') $$,
+  $$ values (false, false) $$,
+  'EP-49: the same cross-tenant attempt repeated answers the same and raises nothing');
+reset role;
+select is(
+  (select count(*)::int || ':' || count(*) filter (where ticket_confirmed_at is not null)::int from public.event_attendances where order_ref = 'OPN8-610'),
+  '2:2', 'EP-49: ...and changed nothing (the two rows and their instants are as they were)');
+
+-- By catalogue: the empty search_path of the three functions, the privilege matrix, the guard keeps its trigger.
+select ok(coalesce((select p.proconfig @> array['search_path=""'] from pg_proc p where p.oid = to_regprocedure(v.sig)), false),
+          v.sig || ' has an empty search_path')
+  from (values
+    ('app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)'),
+    ('app.event_attendance_guard()'),
+    ('app.event_ticket_before_opening(uuid, uuid, text, text)')
+  ) as v(sig);
+select ok(coalesce((select p.prosecdef from pg_proc p where p.oid = to_regprocedure(v.sig)), false), v.sig || ' is SECURITY DEFINER')
+  from (values
+    ('app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)'),
+    ('app.event_ticket_before_opening(uuid, uuid, text, text)')
+  ) as v(sig);
+select ok(has_function_privilege(v.role, v.sig, 'execute') = v.expected,
+          v.role || (case when v.expected then ' can execute ' else ' cannot execute ' end) || v.sig)
+  from (values
+    ('service_role',  'app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)', true),
+    ('authenticated', 'app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)', false),
+    ('anon',          'app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)', false),
+    ('public',        'app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)', false),
+    ('service_role',  'app.event_ticket_before_opening(uuid, uuid, text, text)', true),
+    ('authenticated', 'app.event_ticket_before_opening(uuid, uuid, text, text)', false),
+    ('anon',          'app.event_ticket_before_opening(uuid, uuid, text, text)', false),
+    ('public',        'app.event_ticket_before_opening(uuid, uuid, text, text)', false)
+  ) as v(role, sig, expected);
+select is(
+  (select t.tgtype & 31 = 23 and t.tgenabled = 'O' and t.tgfoid = to_regprocedure('app.event_attendance_guard()')
+     from pg_trigger t where t.tgrelid = 'public.event_attendances'::regclass and t.tgname = 'event_attendances_guard' and not t.tgisinternal),
+  true, 'T-10.2-05: event_attendances_guard is still the enabled BEFORE INSERT OR UPDATE row trigger running the redefined guard');
+-- EP-50: the advisory lock key of the grant carries the event id, so two tenants' events never share a lock; the
+-- grant has no read of the opening (D-782).
+select ok(position($$hashtextextended('event_ticket:' || p_event::text, 0)$$ in pg_get_functiondef(to_regprocedure('app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)'))) > 0,
+  'EP-50: the grant''s advisory lock key reads event_ticket: plus the event id');
+select ok(position('registration_opens_at' in pg_get_functiondef(to_regprocedure('app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)'))) = 0,
+  'D-782/T-10.2-10: the grant never reads the opening');
 
 select * from finish();
 rollback;
