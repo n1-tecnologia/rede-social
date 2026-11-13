@@ -131,6 +131,7 @@ const {
   getAttendanceSummary,
   getEvent,
   getEventForEdit,
+  getNextEvent,
   listAttendance,
   regenerateCheckinCode,
   rsvpEvent,
@@ -1268,5 +1269,113 @@ describe('07-05 — event.reminder_due: ids, the window and one instant, exactly
     );
     expect(outcome).toBe('skipped');
     expect(due).toHaveLength(0);
+  });
+});
+
+describe('2026-11-13 (10.2-07) — the read models carry the opening for a paid event only', () => {
+  const OPENS = '2026-10-10T12:00:00.000001Z';
+  const NOW = '2026-10-10T11:59:59.999999Z';
+
+  beforeEach(() => {
+    script = null;
+    statements.length = 0;
+  });
+
+  it('9r. the shared projection selects both columns inside a paid-only case, in the SAME statement as the link', async () => {
+    script = [[{ ...row, description: '', viewer_responded_at: null }]];
+    await getEvent(context(), EVENT_ID);
+    const sql = statements[0] ?? '';
+    expect(sql).toContain('case when pd.paid then');
+    expect(sql).toContain('registration_opens_at');
+    expect(sql).toContain('app.event_sale_ready');
+    expect(statements).toHaveLength(1);
+  });
+
+  it('9s. a paid row spreads serverNow always and registrationOpensAt only when stored; the detail adds saleReady', async () => {
+    script = [
+      [
+        {
+          ...row,
+          description: '',
+          viewer_responded_at: null,
+          paid: true,
+          registration_opens_at: OPENS,
+          server_now: NOW,
+          checkout_url: null,
+          sale_ready: true,
+        },
+      ],
+    ];
+    expect(await getEvent(context(), EVENT_ID)).toMatchObject({
+      paid: true,
+      registrationOpensAt: OPENS,
+      serverNow: NOW,
+      checkoutUrl: null,
+      saleReady: true,
+    });
+    script = [
+      [
+        {
+          ...row,
+          description: '',
+          viewer_responded_at: null,
+          paid: true,
+          registration_opens_at: null,
+          server_now: NOW,
+          sale_ready: false,
+        },
+      ],
+    ];
+    const noOpening = await getEvent(context(), EVENT_ID);
+    expect(noOpening).toMatchObject({ serverNow: NOW, saleReady: false });
+    expect(Object.keys(noOpening)).not.toContain('registrationOpensAt');
+  });
+
+  it('9t. a FREE row (or a stale stored opening that SQL nulled) carries neither key nor saleReady', async () => {
+    script = [
+      [
+        {
+          ...row,
+          description: '',
+          viewer_responded_at: null,
+          paid: false,
+          registration_opens_at: null,
+          server_now: null,
+          checkout_url: null,
+          sale_ready: false,
+        },
+      ],
+    ];
+    const free = await getEvent(context(), EVENT_ID);
+    for (const key of ['registrationOpensAt', 'serverNow', 'saleReady']) {
+      expect(Object.keys(free), key).not.toContain(key);
+    }
+    // Even if a row ever leaked the values for an unpaid event, the mapper refuses to spread them.
+    script = [
+      [
+        {
+          ...row,
+          description: '',
+          viewer_responded_at: null,
+          paid: false,
+          registration_opens_at: OPENS,
+          server_now: NOW,
+          sale_ready: true,
+        },
+      ],
+    ];
+    const leaked = await getEvent(context(), EVENT_ID);
+    for (const key of ['registrationOpensAt', 'serverNow', 'saleReady']) {
+      expect(Object.keys(leaked), key).not.toContain(key);
+    }
+  });
+
+  it('9u. the next read maps the same two keys for a paid event and never a link or readiness', async () => {
+    script = [[{ ...row, paid: true, registration_opens_at: OPENS, server_now: NOW }]];
+    const next = await getNextEvent(context());
+    expect(next.event).toMatchObject({ registrationOpensAt: OPENS, serverNow: NOW });
+    expect(Object.keys(next.event ?? {})).not.toContain('checkoutUrl');
+    expect(Object.keys(next.event ?? {})).not.toContain('saleReady');
+    expect(statements).toHaveLength(1);
   });
 });

@@ -1,14 +1,19 @@
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { removeTicketEvents, ticketMapping } from './payments-apply-fixtures';
+import { removeTicketEvents, ticketEvent, ticketMapping } from './payments-apply-fixtures';
 import {
   adminSql,
   api,
   createSharedIdentity,
   HOSTS,
   removeIdentitiesByPrefix,
+  removePaymentIntegrations,
   removePaymentMappings,
   SEED_PASSWORD,
+  type SeededPaymentIntegration,
+  seedPaymentIntegration,
+  setPaymentsRow,
   signInAs,
 } from './setup';
 
@@ -592,5 +597,132 @@ describe('10.2 the PUT and the grant serialise on the event row, in both orders 
       await updater.end({ timeout: 5 });
       await granter.end({ timeout: 5 });
     }
+  });
+});
+
+/* ── 10.2-07: the READ half (OPEN-02, OPEN-05, OPEN-06, OPEN-14, OPEN-23, OPEN-24; D-780, D-788, D-789, D-791, D-792) ── */
+
+/** Six fractional digits, UTC, fixed width: a plain string comparison is exact to the microsecond (EP-15). */
+const ISO6 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+const LINK = 'https://pay.example.com/checkout/opn7';
+
+type Json = Record<string, unknown>;
+type Read = { status: number; json: Json; raw: string };
+
+async function readAs(token: string, path: string, host: string = HOSTS.lab): Promise<Read> {
+  const res = await api.request(path, {
+    headers: { 'x-tenant-host': host, authorization: `Bearer ${token}` },
+  });
+  const raw = await res.text();
+  let json: Json = {};
+  try {
+    json = raw ? (JSON.parse(raw) as Json) : {};
+  } catch {
+    // A non-JSON body: the status and the raw text still tell.
+  }
+  return { status: res.status, json, raw };
+}
+
+const memberToken = async (): Promise<string> => {
+  const identity = await createSharedIdentity({
+    prefix: PREFIX,
+    memberships: [{ host: 'lab', role: 'member' }],
+  });
+  return signInAs(identity.email, identity.password);
+};
+
+/**
+ * A mapped event of the lab tenant, an opening `opensInMinutes` from the DATABASE clock (the start is 60
+ * minutes ahead, so 30 is "ahead" and -30 is "past"), and a stored purchase link unless told otherwise.
+ */
+async function mapped(
+  label: string,
+  options: { opensInMinutes?: number | null; link?: boolean } = {},
+): Promise<string> {
+  const id = await ticketEvent(labTenantId, {
+    title: `${PREFIX}-${label}`,
+    opensInMinutes: options.opensInMinutes === undefined ? null : options.opensInMinutes,
+  });
+  await ticketMapping(labTenantId, id);
+  if (options.link !== false) {
+    await adminSql`
+      update public.payment_products set checkout_url = ${LINK}
+       where kind = 'event' and event_id = ${id}::uuid`;
+  }
+  return id;
+}
+
+/** Sets the opening to the database clock plus a signed interval, in SQL (never a client clock). */
+const openingAt = (eventId: string, interval: string | null) =>
+  interval === null
+    ? adminSql`update public.events set registration_opens_at = null where id = ${eventId}::uuid`
+    : adminSql`
+        update public.events set registration_opens_at = now() + ${interval}::interval
+         where id = ${eventId}::uuid`;
+
+describe('10.2 the member read (D-780, D-788, D-789; OPEN-02, OPEN-05, OPEN-06)', () => {
+  let integration: SeededPaymentIntegration | undefined;
+  let restorePayments: () => Promise<void> = async () => {};
+
+  beforeAll(async () => {
+    const [previous] = await adminSql<{ enabled: boolean; settings: Record<string, unknown> }[]>`
+      select enabled, settings from public.tenant_modules
+       where tenant_id = ${labTenantId}::uuid and module_key = 'payments'`;
+    await removePaymentIntegrations(labTenantId);
+    await setPaymentsRow(labTenantId, { enabled: true, settings: {} });
+    moduleFlags.invalidate(labTenantId);
+    integration = await seedPaymentIntegration(labTenantId);
+    restorePayments = async () => {
+      if (previous) {
+        await setPaymentsRow(labTenantId, {
+          enabled: previous.enabled,
+          settings: previous.settings,
+        });
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${labTenantId}::uuid and module_key = 'payments'`;
+      }
+      moduleFlags.invalidate(labTenantId);
+    };
+  }, 60_000);
+
+  afterAll(async () => {
+    await removePaymentIntegrations(labTenantId);
+    await restorePayments();
+  });
+
+  it('TRACER: before the opening the detail has the date, the server instant and saleReady with NO link; at the opening the link', async () => {
+    expect(integration?.provider).toBe('fake');
+    const token = await memberToken();
+    const eventId = await mapped('tracer', { opensInMinutes: 30 });
+
+    const before = await readAs(token, `/v1/events/${eventId}`);
+    expect(before.status, before.raw).toBe(200);
+    expect(before.json.registrationOpensAt).toMatch(ISO6);
+    expect(before.json.serverNow).toMatch(ISO6);
+    expect(before.json.saleReady).toBe(true);
+    expect(before.json.checkoutUrl).toBeNull();
+    // Plain string comparison: the opening is ahead of the server instant that decided the link.
+    expect((before.json.registrationOpensAt as string) > (before.json.serverNow as string)).toBe(
+      true,
+    );
+
+    const list = await readAs(token, '/v1/events?period=upcoming&limit=50');
+    const item = (list.json.items as Json[]).find((entry) => entry.id === eventId);
+    expect(item).toBeDefined();
+    expect(item?.registrationOpensAt).toBe(before.json.registrationOpensAt);
+    expect(item?.serverNow).toMatch(ISO6);
+    expect(item).not.toHaveProperty('checkoutUrl');
+    expect(item).not.toHaveProperty('saleReady');
+
+    // One second before now: the opening has come.
+    await openingAt(eventId, '-1 second');
+    const after = await readAs(token, `/v1/events/${eventId}`);
+    expect(after.json.checkoutUrl).toBe(LINK);
+    expect(after.json.saleReady).toBe(true);
+    expect((after.json.registrationOpensAt as string) <= (after.json.serverNow as string)).toBe(
+      true,
+    );
   });
 });

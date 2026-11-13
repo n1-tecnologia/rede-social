@@ -503,6 +503,21 @@ export const eventSummarySchema = z
     viewerOrigin: z.enum(VIEWER_ORIGINS).nullable().optional(),
     /** Phase 10.1 (D-751): the caller's own ticket row was refunded after check-in. */
     viewerRefunded: z.boolean().optional(),
+    /**
+     * Phase 10.2 (D-780, OPEN-02), PAID events only: the instant the registration opens, a UTC ISO string with
+     * SIX fractional digits (`YYYY-MM-DDTHH:MM:SS.ffffffZ`), present only when the admin stored one. A free
+     * event, and a paid event with no opening, carry no such key; a stored date of an event whose mapping is
+     * gone is never exposed. Optional so a strict web reads an API that predates it and an older web ignores
+     * it (release order: migrations, web, API).
+     */
+    registrationOpensAt: z.string().optional(),
+    /**
+     * Phase 10.2 (D-788, OPEN-06), PAID events only: the DATABASE instant of the statement that decided the
+     * purchase link, in the same fixed-width format, so the web's countdown seeds from the server and never
+     * from the device clock. Compared with `registrationOpensAt` as plain strings (exact to the microsecond;
+     * `Date.parse` would truncate). Absent means "draw no count".
+     */
+    serverNow: z.string().optional(),
     startsAt: z.string(),
     endsAt: z.string(),
     status: z.enum(EVENT_STATUSES),
@@ -547,6 +562,14 @@ export const eventDetailSchema = eventSummarySchema
      * null otherwise. The DETAIL's alone: the list never carries it.
      */
     checkoutUrl: z.string().nullable().optional(),
+    /**
+     * Phase 10.2 (D-789, OPEN-05), PAID events only: `app.event_sale_ready`, true when the mapping, the module,
+     * the gateway and an `https:` link are all in place whatever the clock says. It tells a sale that has not
+     * opened (`saleReady` true, `checkoutUrl` null, the opening ahead of `serverNow`) from one that is closed
+     * (`saleReady` false). `checkoutUrl` is non-null exactly when `saleReady` and the opening is not after
+     * `serverNow`. Optional, absent on a free event.
+     */
+    saleReady: z.boolean().optional(),
   })
   .strict();
 export type EventDetail = z.infer<typeof eventDetailSchema>;

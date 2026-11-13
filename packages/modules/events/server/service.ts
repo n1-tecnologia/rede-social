@@ -118,6 +118,12 @@ type EventRow = {
   paid?: boolean;
   viewer_origin?: ViewerOrigin | null;
   viewer_refunded?: boolean;
+  /**
+   * Phase 10.2-07 (D-780, D-788). Optional in the TYPE only so a hand-built test row may omit them. Both are
+   * NULL for a free event (`case when pd.paid`); `server_now` is the database instant of the statement.
+   */
+  registration_opens_at?: string | null;
+  server_now?: string | null;
   status: EventStatus;
   starts_at: string;
   ends_at: string;
@@ -133,6 +139,8 @@ type EventDetailRow = EventRow & {
   viewer_responded_at: string | null;
   /** Phase 10.1-07 (TICK-16): the definer's answer, null unless the sale is open. */
   checkout_url?: string | null;
+  /** Phase 10.2-07 (D-789): `app.event_sale_ready(e.id)`, spread only for a paid event. */
+  sale_ready?: boolean | null;
   /** 2026-10-07. A jsonb array off the driver; `unknown` because only `toSchedule` may read it. */
   schedule?: unknown;
 };
@@ -186,7 +194,13 @@ export const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  *  - (Phase 10.1-07, D-746, D-748) `paid` from `app.event_is_paid(e.id)` (a lateral, so the definer runs once
  *    per row inside the SAME statement) and the viewer's OWN origin and refund flag from `me`: `ticket` or
  *    `courtesy` as stored, `before_ticket` for a plain `rsvp` presence in a paid event, null otherwise. The
- *    purchase link is NOT here: it is the detail's alone (`getEvent`), so the list never carries it.
+ *    purchase link is NOT here: it is the detail's alone (`getEvent`), so the list never carries it;
+ *  - (Phase 10.2-07, D-780, D-788) `registration_opens_at` and `server_now`, each inside `case when pd.paid
+ *    then ... end`: an opening exists only for a paid event (a stored date of an event whose mapping is gone is
+ *    never exposed, A-10.2-STALE-DATE) and the seed of the countdown is the `now()` of THIS statement, the same
+ *    instant `app.event_checkout_url` judges by in the detail (a transaction's `now()` does not move). Both are
+ *    fixed-width UTC strings with six fractional digits, so a plain string comparison is exact to the
+ *    microsecond. No ORDER BY or WHERE is touched: the keysets and the statement count stay as they were.
  * `created_by_user_id`, and everything in `event_secrets`, are deliberately absent.
  */
 const eventColumns = sql`
@@ -210,6 +224,12 @@ const eventColumns = sql`
            c.confirmed_count,
            c.present_count,
            pd.paid,
+           case when pd.paid then
+                  to_char(e.registration_opens_at at time zone 'utc', ${ISO_MICROSECONDS})
+           end as registration_opens_at,
+           case when pd.paid then
+                  to_char(now() at time zone 'utc', ${ISO_MICROSECONDS})
+           end as server_now,
            case when me.status in ('going','checked_in','walk_in') then
                   case when me.origin in ('ticket','courtesy') then me.origin
                        when pd.paid then 'before_ticket' end
@@ -267,6 +287,12 @@ const toEvent = (row: EventRow): EventSummary => ({
   presentCount: Number(row.present_count ?? 0),
   // Phase 10.1-07: present only when the row carries them (a hand-built row may not), never computed on.
   ...(row.paid === undefined ? {} : { paid: row.paid === true }),
+  // Phase 10.2-07 (D-780, D-788): `serverNow` for EVERY paid event (a holder's countdown to the event needs it
+  // with no opening), `registrationOpensAt` only when stored; a free row carries neither key.
+  ...(row.paid === true && typeof row.server_now === 'string' ? { serverNow: row.server_now } : {}),
+  ...(row.paid === true && typeof row.registration_opens_at === 'string'
+    ? { registrationOpensAt: row.registration_opens_at }
+    : {}),
   ...(row.viewer_origin === undefined ? {} : { viewerOrigin: row.viewer_origin }),
   ...(row.viewer_refunded === undefined ? {} : { viewerRefunded: row.viewer_refunded === true }),
 });
@@ -631,7 +657,8 @@ export async function getEvent(ctx: RequestContext, eventId: string): Promise<Ev
              e.description,
              e.schedule,
              to_char(me.responded_at at time zone 'utc', ${ISO_MICROSECONDS}) as viewer_responded_at,
-             app.event_checkout_url(e.id) as checkout_url
+             app.event_checkout_url(e.id) as checkout_url,
+             app.event_sale_ready(e.id) as sale_ready
       ${eventSource(ctx.userId)}
        where e.tenant_id = ${ctx.tenantId}::uuid
          and e.id = ${eventId}::uuid
@@ -649,6 +676,10 @@ export async function getEvent(ctx: RequestContext, eventId: string): Promise<Ev
     ...(row.checkout_url === undefined
       ? {}
       : { checkoutUrl: isHttpsLink(row.checkout_url) ? row.checkout_url : null }),
+    // Phase 10.2-07 (D-789): the readiness fact tells a closed sale from one that has not opened; paid only.
+    ...(row.paid === true && typeof row.sale_ready === 'boolean'
+      ? { saleReady: row.sale_ready }
+      : {}),
   };
 }
 

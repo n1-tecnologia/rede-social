@@ -46,6 +46,7 @@ import {
   eventScheduleItemSchema,
   eventStatusUpdateSchema,
   eventSummarySchema,
+  nextEventSchema,
   normaliseEventSchedule,
   RSVP_ANSWERS,
   rsvpResultSchema,
@@ -1092,5 +1093,67 @@ describe('10.1-07 - the courtesy contracts (D-743, A-UI-6)', () => {
     expect(courtesyHoldersSchema.safeParse({ holders: [] }).success).toBe(true);
     expect(courtesyHoldersSchema.safeParse({ holders: ['x'] }).success).toBe(false);
     expect(courtesyHoldersSchema.safeParse({ holders: [id], names: [] }).success).toBe(false);
+  });
+});
+
+describe('10.2-07 — the read keys of the registration opening are additive and optional (OPEN-02, OPEN-24)', () => {
+  const summary = {
+    id: '11111111-1111-4111-8111-111111111111',
+    title: 't',
+    format: 'online',
+    category: null,
+    capacity: null,
+    venueName: null,
+    address: null,
+    coverAssetId: null,
+    coverVariantWidths: [],
+    startsAt: '2026-10-12T22:00:00.000000Z',
+    endsAt: '2026-10-13T00:00:00.000000Z',
+    status: 'active',
+    viewerStatus: null,
+    viewerCheckedInAt: null,
+    confirmedCount: 0,
+    presentCount: 0,
+  };
+  const opens = '2026-10-10T12:00:00.000001Z';
+  const now = '2026-10-10T11:59:59.999999Z';
+
+  it('49. the summary, the next item and the detail accept the two instants and parse without them', () => {
+    expect(eventSummarySchema.safeParse(summary).success).toBe(true);
+    expect(
+      eventSummarySchema.safeParse({ ...summary, registrationOpensAt: opens, serverNow: now })
+        .success,
+    ).toBe(true);
+    expect(eventSummarySchema.shape.registrationOpensAt.isOptional()).toBe(true);
+    expect(eventSummarySchema.shape.serverNow.isOptional()).toBe(true);
+    expect(
+      nextEventSchema.safeParse({
+        event: { ...summary, registrationOpensAt: opens, serverNow: now },
+      }).success,
+    ).toBe(true);
+    expect(
+      eventDetailSchema.safeParse({ ...detail, registrationOpensAt: opens, serverNow: now })
+        .success,
+    ).toBe(true);
+    expect(eventSummarySchema.safeParse({ ...summary, registrationOpensAt: null }).success).toBe(
+      false,
+    );
+    expect(eventSummarySchema.safeParse({ ...summary, opensAt: opens }).success).toBe(false);
+  });
+
+  it('50. the detail alone carries saleReady, optional, and the summary refuses it', () => {
+    expect(eventDetailSchema.shape.saleReady.isOptional()).toBe(true);
+    expect(eventDetailSchema.safeParse({ ...detail, saleReady: true }).success).toBe(true);
+    expect(eventDetailSchema.safeParse({ ...detail, saleReady: 'yes' }).success).toBe(false);
+    expect(Object.keys(eventSummarySchema.shape)).not.toContain('saleReady');
+    expect(Object.keys(eventSummarySchema.shape)).not.toContain('checkoutUrl');
+  });
+
+  it('53. EP-15: two instants one microsecond apart order correctly as plain strings, which Date.parse cannot do', () => {
+    const a = '2026-10-10T12:00:00.000001Z';
+    const b = '2026-10-10T12:00:00.000002Z';
+    expect(a < b).toBe(true);
+    expect(b < a).toBe(false);
+    expect(Date.parse(a)).toBe(Date.parse(b));
   });
 });
