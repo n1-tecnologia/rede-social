@@ -114,10 +114,83 @@ const FORM_TICKET: Record<string, { text: string; names: string[] }> = {
   },
 };
 
+/**
+ * The member page's copy of plan 10.1-12 (UI-D-746 to UI-D-750, UI-D-753): the card, the zone and its
+ * disabled states. The Presença confirmada block, the give-up dialog and the stale-tab toasts are added
+ * below with their own task.
+ */
+const MEMBER_TICKET: Record<string, { text: string; names: string[] }> = {
+  'ticket.badge': { text: 'Pago', names: [] },
+  'card.paid': { text: ', evento pago', names: [] },
+  'card.paidPrice': { text: ', evento pago, {price}', names: ['price'] },
+  'card.priceNote': { text: '{price} · {note}', names: ['note', 'price'] },
+  'ticket.cta.buy': { text: 'Comprar ingresso', names: [] },
+  'ticket.cta.buyPrice': { text: 'Comprar ingresso · {price}', names: ['price'] },
+  'ticket.cta.newTab': { text: '(abre a página de pagamento em uma nova aba)', names: [] },
+  'ticket.cta.soldOut': { text: 'Esgotado', names: [] },
+  'ticket.cta.salesClosed': { text: 'Vendas encerradas', names: [] },
+  'ticket.cta.unavailable': { text: 'Venda indisponível', names: [] },
+  'ticket.hint.afterPay': {
+    text: 'Depois de pagar, sua presença aparece aqui sozinha.',
+    names: [],
+  },
+  'ticket.hint.salesClosed': {
+    text: 'A venda pelo app terminou quando o evento começou.',
+    names: [],
+  },
+  'ticket.hint.unavailable': { text: 'Os ingressos não estão à venda no momento.', names: [] },
+  'ticket.hint.onlineLink': {
+    text: 'O link da transmissão é só para quem tem ingresso.',
+    names: [],
+  },
+};
+
 /** The ICU plural keys and the variable each counts on. */
 const PLURALS: Record<string, string> = {
   'form.ticket.soldLocked': 'count',
 };
+
+describe('events.json: the member page of a paid event (UI-D-744 to UI-D-749, UI-D-753)', () => {
+  it('carries every key with the approved sentence', () => {
+    for (const [key, { text }] of Object.entries(MEMBER_TICKET)) {
+      expect(all[key], `missing key events.${key}`).toBe(text);
+    }
+  });
+
+  it('names every placeholder of the contract, key by key', () => {
+    for (const [key, { names }] of Object.entries(MEMBER_TICKET)) {
+      expect(placeholders(all[key] as string), `placeholders of events.${key}`).toEqual(
+        [...names].sort(),
+      );
+    }
+  });
+
+  it('holds no key under ticket.cta or ticket.hint that the contract does not list', () => {
+    const present = Object.keys(all).filter(
+      (key) => key.startsWith('ticket.cta.') || key.startsWith('ticket.hint.'),
+    );
+    const listed = Object.keys(MEMBER_TICKET).filter(
+      (key) => key.startsWith('ticket.cta.') || key.startsWith('ticket.hint.'),
+    );
+    expect(present.sort()).toEqual(listed.sort());
+  });
+
+  it('fills the card suffix, the price note and the button label', () => {
+    expect(translate('card.paidPrice', { price: 'R$ 80,00' })).toBe(', evento pago, R$ 80,00');
+    expect(translate('card.priceNote', { price: 'R$ 80,00', note: 'Últimas 3 vagas' })).toBe(
+      'R$ 80,00 · Últimas 3 vagas',
+    );
+    expect(translate('ticket.cta.buyPrice', { price: 'R$ 80,00' })).toBe(
+      'Comprar ingresso · R$ 80,00',
+    );
+  });
+
+  it('never names the gateway on a member surface and says nothing of a processing state', () => {
+    for (const key of Object.keys(MEMBER_TICKET)) {
+      expect(all[key], `events.${key}`).not.toMatch(/gateway|webhook|token|pedido|processando/i);
+    }
+  });
+});
 
 describe('events.json: the Ingresso section of the event form (UI-D-741 to UI-D-743)', () => {
   it('merges into the catalog under the single root key `events`', () => {

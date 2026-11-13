@@ -552,3 +552,80 @@ describe('EventActions — the online rows and the whole table (06-06, UI-D-209)
     expect(refresh).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Phase 10.1-12 (D-741, D-753, UI-D-746): a paid event routes to the paid zone ONLY for a member without
+ * a presence; every other member keeps the shipped zone, and a free event is untouched.
+ */
+describe('EventActions — the paid branch (10.1-12)', () => {
+  const HREF = 'https://pay.example/checkout/abc';
+  const T = catalog.ticket as { cta: { buy: string; unavailable: string } };
+  const paid = (overrides: Partial<EventActionState> = {}) =>
+    state({
+      paid: true,
+      zone: 'buy',
+      checkoutHref: HREF,
+      priceLabel: null,
+      viewerOrigin: null,
+      ...overrides,
+    });
+  const buy = () => screen.queryByTestId('event-actions-buy');
+
+  it('8a. a member without a presence gets the buy control and none of the free controls', () => {
+    for (const answer of [null, 'not_going'] as const) {
+      const { container, unmount } = render(<EventActions {...paid({ answer })} />);
+      expect(buy()?.getAttribute('href')).toBe(HREF);
+      expect(buy()?.textContent).toContain(T.cta.buy);
+      expect(register()).toBeNull();
+      expect(unregister()).toBeNull();
+      expect(checkin()).toBeNull();
+      expect(screen.queryByTestId('event-actions-enter')).toBeNull();
+      expect(container.querySelectorAll('.bg-button').length).toBeLessThanOrEqual(1);
+      unmount();
+    }
+  });
+
+  it('8b. an online paid event without a presence has no Entrar, in any phase', () => {
+    for (const phase of ['P0', 'P1', 'P2'] as const) {
+      const { unmount } = render(
+        <EventActions
+          {...paid({ format: 'online', phase, zone: phase === 'P2' ? 'salesClosed' : 'buy' })}
+        />,
+      );
+      expect(screen.queryByTestId('event-actions-enter')).toBeNull();
+      expect(screen.queryByText(C.online.enter)).toBeNull();
+      unmount();
+    }
+  });
+
+  it('8c. the server’s answer routes, not the optimistic one: a member with a presence keeps the shipped zone', () => {
+    render(<EventActions {...paid({ answer: 'going', zone: null, viewerOrigin: 'ticket' })} />);
+    expect(buy()).toBeNull();
+    expect(checkin()?.textContent).toBe(C.reine.cta.checkin);
+    cleanup();
+    render(<EventActions {...paid({ checkedIn: true, zone: null })} />);
+    expect(buy()).toBeNull();
+    expect(checkin()?.textContent).toBe(C.reine.cta.checkin);
+  });
+
+  it('8d. cancelled or ended draws nothing, and a free event never shows the buy control', () => {
+    const { container, unmount } = render(<EventActions {...paid({ cancelled: true })} />);
+    expect(container.innerHTML).toBe('');
+    unmount();
+    const ended = render(<EventActions {...paid({ phase: 'P3', zone: 'none' })} />);
+    expect(ended.container.innerHTML).toBe('');
+    ended.unmount();
+    render(<EventActions {...state()} />);
+    expect(buy()).toBeNull();
+    expect(register()).not.toBeNull();
+  });
+
+  it('8e. the paid zone never calls the action by being rendered or by a tap on the anchor', () => {
+    render(<EventActions {...paid()} />);
+    const link = buy() as HTMLElement;
+    link.addEventListener('click', (event) => event.preventDefault());
+    fireEvent.click(link);
+    expect(rsvp).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+});

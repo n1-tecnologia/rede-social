@@ -5,10 +5,12 @@ import { Button, useToast } from '@rede-social/ui';
 import { Award, Lock, QrCode, Video } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { type ReactNode, startTransition, useState } from 'react';
+import { startTransition, useState } from 'react';
 import { useBoundaryRefresh } from '@/components/events/useBoundaryRefresh';
 import type { EventActionState } from '@/lib/events-view';
 import { rsvpEventAction } from '../actions';
+import { PaidEventZone } from './PaidEventZone';
+import { GOLD, GOLD_BASE, OUTLINE_CTA, Zone } from './zone';
 
 /**
  * The detail page's action zone, in the REINE prototype's shape (2026-10-06): ONE gold call to
@@ -52,7 +54,12 @@ export function EventActions({
   endsAt,
   startTime,
   certificate = false,
-}: EventActionState & { certificate?: boolean }) {
+  refundedNote = null,
+  paid,
+  zone = null,
+  checkoutHref = null,
+  priceLabel = null,
+}: EventActionState & { certificate?: boolean; refundedNote?: string | null }) {
   const t = useTranslations('events');
   const router = useRouter();
   const toast = useToast();
@@ -127,6 +134,23 @@ export function EventActions({
           {t('reine.cta.checkin')}
         </a>
       </Zone>
+    );
+  }
+
+  // Phase 10.1-12 (D-741, D-753, UI-D-746): a paid event and a member WITHOUT a presence is the paid
+  // zone's, on the SERVER's answer (never the optimistic one): there is never a Vou, a walk-in link or
+  // an `Entrar` for them, only the buy control or the disabled state the server computed.
+  if (paid === true && answer !== 'going') {
+    return (
+      <PaidEventZone
+        zone={zone}
+        phase={phase}
+        format={format}
+        cancelled={cancelled}
+        checkoutHref={checkoutHref}
+        priceLabel={priceLabel}
+        refundedNote={refundedNote}
+      />
     );
   }
 
@@ -269,26 +293,6 @@ export function EventActions({
     </Zone>
   );
 }
-
-function Zone({ phase, children }: { phase: string; children: ReactNode }) {
-  return (
-    <div data-testid="event-actions" data-phase={phase} className="flex flex-col gap-3">
-      {children}
-    </div>
-  );
-}
-
-/**
- * `Button lg fullWidth brand`, as classes on a link or a disabled span: the button colour (the
- * REINE gold wherever a tenant set it) under the gradient button's image, the focus ring on the
- * primary.
- */
-const GOLD_BASE =
-  'inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors';
-const GOLD = `${GOLD_BASE} hover:bg-button-hover hover:bg-(image:--button-image-hover) active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg`;
-/** `Button md fullWidth outline`. */
-const OUTLINE_CTA =
-  'inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
 /**
  * `Entrar` (UI-D-209, D-218): ALWAYS a plain anchor to `/eventos/{id}/entrar`, opened in a new

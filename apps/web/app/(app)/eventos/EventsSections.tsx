@@ -138,6 +138,7 @@ function Gallery({
                     placeKind={card.placeKind}
                     badge={card.badge}
                     note={card.note}
+                    tag={card.tag}
                     coverAssetId={image.assetId}
                     coverVariantWidths={image.widths}
                     coverAlt={card.coverAlt}

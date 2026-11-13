@@ -99,7 +99,12 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
 
   // ONE clock read for the whole page: every relative label comes from the same instant.
   const nowMs = Date.now();
-  const view = eventDetailView(result.event, { tz: bootstrap.tenant.timezone, nowMs, t });
+  const view = eventDetailView(result.event, {
+    tz: bootstrap.tenant.timezone,
+    nowMs,
+    t,
+    tenantName: bootstrap.tenant.displayName,
+  });
   const canManage = bootstrap.permissions.includes(EVENT_PERMISSIONS.manage);
   const canReadAttendance = bootstrap.permissions.includes(EVENT_PERMISSIONS.attendanceRead);
   const canReactivate = canManage && view.cancelled && nowMs < Date.parse(result.event.startsAt);
@@ -139,6 +144,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
                 coverAssetId={view.hero.coverAssetId}
                 coverVariantWidths={view.hero.coverVariantWidths}
                 coverAlt={view.hero.coverAlt}
+                tag={view.tag ?? undefined}
               />
               <div className="flex flex-col gap-4 p-4">
                 {view.banner ? (
@@ -183,6 +189,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
                 <EventActions
                   {...eventActionState(result.event, view)}
                   certificate={Boolean(view.extras?.certificate)}
+                  refundedNote={view.refundedNote ?? null}
                 />
               </div>
             </Card>

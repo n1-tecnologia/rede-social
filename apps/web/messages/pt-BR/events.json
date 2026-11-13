@@ -50,7 +50,27 @@
       "live": "Acontecendo agora",
       "spotsLeft": "{count, plural, one {Última vaga} other {Últimas # vagas}}",
       "soldOut": "Vagas esgotadas",
-      "city": "{city}, {state}"
+      "city": "{city}, {state}",
+      "paid": ", evento pago",
+      "paidPrice": ", evento pago, {price}",
+      "priceNote": "{price} · {note}"
+    },
+    "ticket": {
+      "badge": "Pago",
+      "cta": {
+        "buy": "Comprar ingresso",
+        "buyPrice": "Comprar ingresso · {price}",
+        "newTab": "(abre a página de pagamento em uma nova aba)",
+        "soldOut": "Esgotado",
+        "salesClosed": "Vendas encerradas",
+        "unavailable": "Venda indisponível"
+      },
+      "hint": {
+        "afterPay": "Depois de pagar, sua presença aparece aqui sozinha.",
+        "salesClosed": "A venda pelo app terminou quando o evento começou.",
+        "unavailable": "Os ingressos não estão à venda no momento.",
+        "onlineLink": "O link da transmissão é só para quem tem ingresso."
+      }
     },
     "poster": {
       "label": "{title}, {when}"

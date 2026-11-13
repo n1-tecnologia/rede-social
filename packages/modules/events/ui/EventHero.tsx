@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@rede-social/ui';
-import { MapPin, Video } from 'lucide-react';
+import { MapPin, Ticket, Video } from 'lucide-react';
 import { EventCover } from './EventCover';
 
 /**
@@ -16,6 +16,10 @@ import { EventCover } from './EventCover';
  * that the API has one): the poster's over-media ground (`bg-black/60 backdrop-blur-sm`, white,
  * 10/700 uppercase), on BOTH branches through `EventCover`'s free slot, one line that truncates
  * inside the hero (CSS only). No category, no pill: the place line already says in person or online.
+ *
+ * **The tag** (Phase 10.1-12, D-753, UI-D-745) is the poster's: the same finished word ("Pago") on the
+ * over-media ground, top right of the same row, the category pill keeping the top left. Absent or
+ * empty, the hero is byte-identical to a free event's.
  *
  * Presentational and props-only: it formats no date and **ships no words** (PWA-03). The host passes
  * the finished overline (countdown, "É hoje!", "Acontecendo agora", "Aconteceu em …"), the place
@@ -38,6 +42,8 @@ export interface EventHeroProps {
   coverAssetId: string | null;
   coverVariantWidths: readonly number[];
   coverAlt: string;
+  /** The finished "Pago" word of a paid event, top right; absent or empty draws none (UI-D-745). */
+  tag?: string;
 }
 
 export function EventHero({
@@ -49,6 +55,7 @@ export function EventHero({
   coverAssetId,
   coverVariantWidths,
   coverAlt,
+  tag,
 }: EventHeroProps) {
   const PlaceIcon = placeKind === 'online' ? Video : MapPin;
 
@@ -96,15 +103,33 @@ export function EventHero({
       overlay={bottom(true)}
       fallbackOverlay={bottom(false)}
     >
-      {category ? (
-        <span className="absolute top-3 right-4 left-3 flex">
+      {category || tag ? (
+        <span
+          className={cn(
+            'absolute top-3',
+            tag ? 'right-3' : 'right-4',
+            'left-3 flex',
+            tag && 'items-start gap-2',
+          )}
+        >
           {/* 2026-10-06 (the REINE category pill): the category in the button colour, top-left. */}
-          <span
-            data-testid="event-hero-category"
-            className="min-w-0 truncate rounded-full bg-button bg-(image:--button-image) px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-on-button"
-          >
-            {category}
-          </span>
+          {category ? (
+            <span
+              data-testid="event-hero-category"
+              className="min-w-0 truncate rounded-full bg-button bg-(image:--button-image) px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-on-button"
+            >
+              {category}
+            </span>
+          ) : null}
+          {tag ? (
+            <span
+              data-testid="event-hero-tag"
+              className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white backdrop-blur-sm"
+            >
+              <Ticket size={10} strokeWidth={3} aria-hidden />
+              {tag}
+            </span>
+          ) : null}
         </span>
       ) : null}
     </EventCover>

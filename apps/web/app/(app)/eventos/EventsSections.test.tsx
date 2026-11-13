@@ -253,3 +253,40 @@ describe('EventsSections — the poster of the list card (NOVF-04, UI-D-693)', (
     expect(screen.queryByTestId('event-cover-media')).toBeNull();
   });
 });
+
+/**
+ * Phase 10.1-12 (D-753, D-755, UI-D-744): the card's "Pago" tag and its price-first note reach the
+ * poster; a card without a `tag` key (a free event, or a viewer who is in) draws none and stays ONE
+ * anchor per card.
+ */
+describe('EventsSections — the paid card (10.1-12, UI-D-744)', () => {
+  it('9. a paid card draws the tag and the price-first note inside its one link; a free card draws none', () => {
+    render(
+      <EventsSections
+        tenantName={TENANT}
+        initial={{
+          mine: [],
+          others: [
+            card('paid', {
+              tag: 'Pago',
+              note: 'R$ 80,00 · Últimas 3 vagas',
+              ariaLabel: 'Evento paid, evento pago, R$ 80,00',
+            }),
+            card('free'),
+          ],
+        }}
+      />,
+    );
+    const items = within(gallery(sections.others.title ?? '')).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    const [paid, free] = items as [HTMLElement, HTMLElement];
+    expect(within(paid).getByTestId('event-poster-tag').textContent).toBe('Pago');
+    expect(within(paid).getByTestId('event-poster-note').textContent).toBe(
+      'R$ 80,00 · Últimas 3 vagas',
+    );
+    expect(within(paid).getAllByRole('link')).toHaveLength(1);
+    expect(within(paid).getByRole('link').getAttribute('aria-label')).toContain('evento pago');
+    expect(within(free).queryByTestId('event-poster-tag')).toBeNull();
+    expect(within(free).getAllByRole('link')).toHaveLength(1);
+  });
+});

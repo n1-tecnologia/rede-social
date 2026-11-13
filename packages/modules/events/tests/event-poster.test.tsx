@@ -94,6 +94,64 @@ describe('EventPoster', () => {
   });
 });
 
+/**
+ * Phase 10.1-12 (D-753, D-755, UI-D-744) — the optional `tag`: one finished string the host passes for a
+ * paid event, drawn top-right on the over-media ground. A free event's poster must not change by a byte.
+ */
+describe('EventPoster tag (10.1-12, UI-D-744)', () => {
+  it('7. draws the tag top-right on the over-media ground, one line, with a decorative Ticket', () => {
+    poster({ tag: 'tag-sentinel' });
+    const tag = screen.getByTestId('event-poster-tag');
+    expect(tag).toHaveTextContent('tag-sentinel');
+    expect(tag.className).toContain('bg-black/60');
+    expect(tag.className).toContain('whitespace-nowrap');
+    expect(tag.className).not.toContain('bg-danger');
+    expect(tag.parentElement?.className).toContain('top-3');
+    expect(tag.parentElement?.className).toContain('right-3');
+    expect(tag.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    // The date pill keeps the top-left; the card stays ONE anchor and the tag is not a link.
+    expect(screen.getByTestId('event-poster-pill').parentElement?.className).toContain('left-3');
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+  });
+
+  it('8. a free event renders byte-identical markup with and without the prop', () => {
+    const plain = poster().container.innerHTML;
+    cleanup();
+    const withUndefined = poster({ tag: undefined }).container.innerHTML;
+    cleanup();
+    const withEmpty = poster({ tag: '' }).container.innerHTML;
+    expect(withUndefined).toBe(plain);
+    expect(withEmpty).toBe(plain);
+    expect(plain).not.toContain('event-poster-tag');
+  });
+
+  it('9. the price-first note arrives as the host built it and wraps, with and without a spots note', () => {
+    poster({ tag: 'tag-sentinel', note: 'price-sentinel' });
+    const note = screen.getByTestId('event-poster-note');
+    expect(note).toHaveTextContent('price-sentinel');
+    // Wrapping, never truncated: no CSS truncation on the note.
+    expect(note.className).not.toContain('truncate');
+    expect(note.className).not.toContain('line-clamp');
+    cleanup();
+
+    poster({ tag: 'tag-sentinel', note: 'price-sentinel · spots-sentinel' });
+    expect(screen.getByTestId('event-poster-note')).toHaveTextContent(
+      'price-sentinel · spots-sentinel',
+    );
+    cleanup();
+
+    poster({ tag: 'tag-sentinel' });
+    expect(screen.queryByTestId('event-poster-note')).toBeNull();
+    expect(screen.getByTestId('event-poster-tag')).toBeInTheDocument();
+  });
+
+  it('10. the tag shows on the gradient branch too', () => {
+    poster({ tag: 'tag-sentinel', coverAssetId: null, coverVariantWidths: [] });
+    expect(screen.getByTestId('event-cover-fallback')).toBeInTheDocument();
+    expect(screen.getByTestId('event-poster-tag')).toHaveTextContent('tag-sentinel');
+  });
+});
+
 describe('EventCover', () => {
   it('6. thumb renders no overlay on either branch', () => {
     render(

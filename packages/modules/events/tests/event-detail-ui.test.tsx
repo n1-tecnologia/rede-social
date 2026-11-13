@@ -48,6 +48,57 @@ describe('EventHero (UI-D-204)', () => {
   });
 });
 
+/**
+ * Phase 10.1-12 (D-753, UI-D-745) — the hero's optional `tag`: the same finished string the poster
+ * takes, top-right, with the category pill keeping the top-left. Absent, the hero is unchanged.
+ */
+describe('EventHero tag (10.1-12, UI-D-745)', () => {
+  const base = {
+    title: 'title-sentinel',
+    overline: 'overline-sentinel',
+    place: 'place-sentinel',
+    placeKind: 'venue' as const,
+    coverVariantWidths: [640, 1080],
+    coverAlt: 'cover-alt',
+    coverAssetId: ASSET,
+  };
+
+  it('11. draws the tag on the over-media ground beside the category pill, one line', () => {
+    render(<EventHero {...base} category="category-sentinel" tag="tag-sentinel" />);
+    const tag = screen.getByTestId('event-hero-tag');
+    expect(tag).toHaveTextContent('tag-sentinel');
+    expect(tag.className).toContain('bg-black/60');
+    expect(tag.className).toContain('whitespace-nowrap');
+    expect(tag.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByTestId('event-hero-category')).toHaveTextContent('category-sentinel');
+    // Same row: the category first (left), the tag after it (right).
+    expect(tag.parentElement).toBe(screen.getByTestId('event-hero-category').parentElement);
+    expect(
+      screen.getByTestId('event-hero-category').compareDocumentPosition(tag) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('12. a tag with no category still draws, pushed to the right', () => {
+    render(<EventHero {...base} category={null} tag="tag-sentinel" />);
+    expect(screen.queryByTestId('event-hero-category')).toBeNull();
+    expect(screen.getByTestId('event-hero-tag').className).toContain('ml-auto');
+  });
+
+  it('13. without the prop the hero is byte-identical (a free event)', () => {
+    const plain = render(<EventHero {...base} category="category-sentinel" />).container.innerHTML;
+    cleanup();
+    const undef = render(<EventHero {...base} category="category-sentinel" tag={undefined} />)
+      .container.innerHTML;
+    cleanup();
+    const empty = render(<EventHero {...base} category="category-sentinel" tag="" />).container
+      .innerHTML;
+    expect(undef).toBe(plain);
+    expect(empty).toBe(plain);
+    expect(plain).not.toContain('event-hero-tag');
+  });
+});
+
 describe('EventInfoGrid (UI-D-204)', () => {
   const cells = [
     { icon: 'date' as const, label: 'l-date', value: 'v-date' },

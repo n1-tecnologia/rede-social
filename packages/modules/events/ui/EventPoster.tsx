@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@rede-social/ui';
-import { CalendarX2, Check, MapPin, Video } from 'lucide-react';
+import { CalendarX2, Check, MapPin, Ticket, Video } from 'lucide-react';
 import { EventCover } from './EventCover';
 
 /**
@@ -10,6 +10,12 @@ import { EventCover } from './EventCover';
  * at the bottom the category, the title, the place and the note (the countdown on an event the
  * viewer is in, "Últimas N vagas" on a limited one that is not theirs, 2026-10-03).
  * It fills the width its host gives it (the gallery's 256px slot).
+ *
+ * **The tag** (Phase 10.1-12, D-753, D-755, UI-D-744) is a second element, top right, on the same over-media
+ * ground as the date pill: `Ticket` 10 and one finished word ("Pago"), `whitespace-nowrap` so it stays one
+ * line. The HOST decides when it exists (a paid event the viewer is not in, neither cancelled nor over)
+ * and passes it with the price-first `note` and the accessible name; without the prop the markup is
+ * byte-identical to a free event's.
  *
  * Presentational and props-only: it fetches nothing, formats no date, resolves no URL and **ships no
  * words** (PWA-03). The host passes `href`, every label and the already-formatted strings; relative
@@ -60,6 +66,8 @@ export interface EventPosterProps {
   grayscale?: boolean;
   /** The first posters of a gallery load eagerly. */
   eager?: boolean;
+  /** The finished "Pago" word of a paid event, top right; absent or empty draws none (UI-D-744). */
+  tag?: string;
 }
 
 const BADGE = 'inline-flex items-center whitespace-nowrap rounded-full uppercase';
@@ -86,6 +94,7 @@ export function EventPoster({
   coverAlt,
   grayscale = false,
   eager = false,
+  tag,
 }: EventPosterProps) {
   const PlaceIcon = placeKind === 'online' ? Video : MapPin;
 
@@ -167,6 +176,14 @@ export function EventPoster({
             {badge.label}
           </span>
         </span>
+        {tag ? (
+          <span className="absolute top-3 right-3">
+            <span data-testid="event-poster-tag" className={cn(BADGE, BADGE_GROUND)}>
+              <Ticket size={10} strokeWidth={3} aria-hidden />
+              {tag}
+            </span>
+          </span>
+        ) : null}
       </EventCover>
     </a>
   );
