@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { loadCourtesyHolders } from '@/lib/events';
-import { getEventMapping } from '@/lib/payments';
+import {
+  deleteEventMapping,
+  getEventMapping,
+  loadTicketIntegration,
+  putEventMapping,
+} from '@/lib/payments';
 
 /**
  * Phase 10.1-08 — the two server loaders the paid event adds: the ticket mapping read of the event form
@@ -71,6 +76,105 @@ describe('getEventMapping (D-744, D-747, D-757)', () => {
     vi.mocked(apiFetch).mockResolvedValue(json(404, { error: { code: 'NOT_FOUND' } }));
     await getEventMapping('a/b');
     expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe('/v1/payments/event-products/a%2Fb');
+  });
+});
+
+describe('putEventMapping and deleteEventMapping (10.1-11, D-744, D-747)', () => {
+  const pair = { externalProductId: 'tk-1', checkoutUrl: 'https://pay.example/tk-1' };
+
+  it('PUTs the pair to the event path and reads the recurring hint', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, { ...pair, recurring: true }));
+    expect(await putEventMapping(EVENT, pair)).toEqual({ ok: true, recurring: true });
+    const [path, init] = vi.mocked(apiFetch).mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/payments/event-products/${EVENT}`);
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(String(init.body))).toEqual(pair);
+  });
+
+  it('an answer with no hint reads as not recurring', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, pair));
+    expect(await putEventMapping(EVENT, pair)).toEqual({ ok: true, recurring: false });
+  });
+
+  it.each([
+    ['gateway_product_taken', 409, 'id_taken'],
+    ['ticket_locked', 409, 'locked'],
+    ['link_required', 400, 'link_required'],
+    ['link_invalid', 400, 'link_invalid'],
+    ['gateway_product_id_required', 400, 'id_required'],
+  ])('maps the issue %s to %s', async (issue, status, reason) => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(status, { error: { code: 'CONFLICT', details: { payments: issue } } }),
+    );
+    expect(await putEventMapping(EVENT, pair)).toEqual({ ok: false, reason });
+  });
+
+  it('a bare 404, a 403 and anything else never throw, and the log has no id or link', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(404, { error: { code: 'MODULE_DISABLED' } }));
+    expect(await putEventMapping(EVENT, pair)).toEqual({ ok: false, reason: 'not_found' });
+    vi.mocked(apiFetch).mockResolvedValue(json(403, { error: { code: 'FORBIDDEN' } }));
+    expect(await putEventMapping(EVENT, pair)).toEqual({ ok: false, reason: 'forbidden' });
+    vi.mocked(apiFetch).mockResolvedValue(json(500, { error: { code: 'INTERNAL' } }));
+    expect(await putEventMapping(EVENT, pair)).toEqual({ ok: false, reason: 'generic' });
+    const text = JSON.stringify(logged.mock.calls);
+    expect(text).not.toContain('tk-1');
+    expect(text).not.toContain('pay.example');
+  });
+
+  it('a session the bootstrap knows is a redirect path', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(401, { error: { code: 'UNAUTHENTICATED' } }));
+    const outcome = await putEventMapping(EVENT, pair);
+    expect(outcome.ok).toBe(false);
+    expect(outcome).toMatchObject({ reason: 'redirect' });
+  });
+
+  it('DELETEs the event path and is ok without reading the body', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(new Response(null, { status: 200 }));
+    expect(await deleteEventMapping(EVENT)).toEqual({ ok: true, recurring: false });
+    const [path, init] = vi.mocked(apiFetch).mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/payments/event-products/${EVENT}`);
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('DELETE with a sale is locked', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(409, { error: { code: 'CONFLICT', details: { payments: 'ticket_locked' } } }),
+    );
+    expect(await deleteEventMapping(EVENT)).toEqual({ ok: false, reason: 'locked' });
+  });
+});
+
+describe('loadTicketIntegration (10.1-11, A-11-GATEWAY)', () => {
+  const overview = {
+    integration: {
+      provider: 'gateway_x',
+      gatewayName: 'Gateway Exemplo',
+      connected: true,
+      webhookUrl: 'https://api.example/webhook',
+      lastEventAt: null,
+    },
+    accessProducts: [],
+    gate: { required: false, canEnable: false },
+    serverNow: '2026-11-13T12:00:00.000Z',
+  };
+
+  it('asks nothing when it is not asked', async () => {
+    expect(await loadTicketIntegration(false)).toBeNull();
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('reads the gateway name and the connection from the overview', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, overview));
+    expect(await loadTicketIntegration(true)).toEqual({
+      gatewayName: 'Gateway Exemplo',
+      connected: true,
+    });
+  });
+
+  it('a failed read is null, never a throw, and the log carries a shape only', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(500, { error: { code: 'INTERNAL' } }));
+    expect(await loadTicketIntegration(true)).toBeNull();
+    expect(JSON.stringify(logged.mock.calls)).not.toContain('Gateway Exemplo');
   });
 });
 

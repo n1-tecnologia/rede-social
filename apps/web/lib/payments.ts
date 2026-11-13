@@ -9,10 +9,12 @@ import {
   accessProductSchema,
   accessResultSchema,
   type EventItem,
+  type EventMappingBody,
   type EventMappingResponse,
   type EventsResponse,
   eventItemSchema,
   eventMappingResponseSchema,
+  eventMappingSavedSchema,
   eventsResponseSchema,
   type GateBody,
   type GatePreview,
@@ -320,5 +322,116 @@ export async function getEventMapping(eventId: string): Promise<EventMappingResp
   } catch (error) {
     if (error instanceof PaymentsApiError && error.status === 404) return null;
     throw error;
+  }
+}
+
+/**
+ * Why an event-mapping write did not do its job (Phase 10.1-11, D-744, D-745, D-747): the field issues of
+ * the event form's Ingresso section, the sales lock, the bare 404 and 403, a refusal the bootstrap knows
+ * (the caller navigates) and everything else.
+ */
+export type EventMappingReason =
+  | 'id_required'
+  | 'link_required'
+  | 'link_invalid'
+  | 'id_taken'
+  | 'locked'
+  | 'not_found'
+  | 'forbidden'
+  | 'generic';
+
+/**
+ * The closed outcome of the two event-mapping writes. They NEVER throw, like the store ones: the event
+ * form maps each reason to a field error, the lock row or the save toast, and `redirect` carries the path
+ * the server action navigates to OUTSIDE its try/catch. `recurring` is the save answer's subscription
+ * hint (D-757): true only when the API said so.
+ */
+export type EventMappingOutcome =
+  | { ok: true; recurring: boolean }
+  | { ok: false; reason: EventMappingReason }
+  | { ok: false; reason: 'redirect'; path: string };
+
+/** The `details.payments` issues the Ingresso section has a place for; every other issue reads as `generic`. */
+const EVENT_MAPPING_ISSUES: Partial<Record<string, EventMappingReason>> = {
+  gateway_product_id_required: 'id_required',
+  product_id_required: 'id_required',
+  link_required: 'link_required',
+  link_invalid: 'link_invalid',
+  gateway_product_taken: 'id_taken',
+  ticket_locked: 'locked',
+};
+
+function eventMappingReasonOf(error: unknown): EventMappingOutcome {
+  if (error instanceof ApiClientError) {
+    const path = bootstrapRedirectPath(error);
+    if (path) return { ok: false, reason: 'redirect', path };
+  }
+  if (error instanceof PaymentsApiError) {
+    const issue = EVENT_MAPPING_ISSUES[error.issue ?? ''];
+    if (issue) return { ok: false, reason: issue };
+    if (error.status === 404) return { ok: false, reason: 'not_found' };
+    if (error.status === 403 && error.code === 'FORBIDDEN') {
+      return { ok: false, reason: 'forbidden' };
+    }
+  }
+  // Shape only: never the event id, the gateway id, the link or the body.
+  console.error('payments.event_mapping_failed', {
+    ...(error instanceof PaymentsApiError || error instanceof ApiClientError
+      ? { status: error.status, code: error.code }
+      : { error: error instanceof Error ? error.name : 'unknown' }),
+  });
+  return { ok: false, reason: 'generic' };
+}
+
+/**
+ * `PUT /v1/payments/event-products/{eventId}` (Phase 10.1-11, D-744, D-745): the gateway product that sells
+ * the ticket of an event, SEPARATE from and AFTER the event save. The same pair twice writes nothing the
+ * second time, so a retry is safe; once a ticket exists a CHANGED pair is `ticket_locked`.
+ */
+export async function putEventMapping(
+  eventId: string,
+  body: EventMappingBody,
+): Promise<EventMappingOutcome> {
+  try {
+    const res = await send(`/event-products/${encodeURIComponent(eventId)}`, 'PUT', body);
+    const saved = eventMappingSavedSchema.parse(await res.json());
+    return { ok: true, recurring: saved.recurring === true };
+  } catch (error) {
+    return eventMappingReasonOf(error);
+  }
+}
+
+/**
+ * `DELETE /v1/payments/event-products/{eventId}` (D-747): unlinks the product while nothing was sold; with
+ * a sale it is `ticket_locked`. Removing what is not mapped answers the same success.
+ */
+export async function deleteEventMapping(eventId: string): Promise<EventMappingOutcome> {
+  try {
+    await send(`/event-products/${encodeURIComponent(eventId)}`, 'DELETE');
+    return { ok: true, recurring: false };
+  } catch (error) {
+    return eventMappingReasonOf(error);
+  }
+}
+
+/**
+ * The event form's gateway word and connection (Phase 10.1-11, UI-D-742, A-11-GATEWAY): the Pagamentos
+ * overview's integration, or `null` when it was not asked (`ask` false: the module is off or the viewer
+ * lacks `payments.manage`, whose route guard would refuse) or could not be read. A failed read is the
+ * safe reading ("not connected", the catalog's neutral gateway word), never an error screen for an
+ * event form; the log carries the error's shape only.
+ */
+export async function loadTicketIntegration(
+  ask: boolean,
+): Promise<{ gatewayName: string; connected: boolean } | null> {
+  if (!ask) return null;
+  try {
+    const { integration } = await getOverview();
+    return { gatewayName: integration.gatewayName, connected: integration.connected };
+  } catch (error) {
+    console.error('events.ticket_integration_unavailable', {
+      error: error instanceof Error ? error.name : 'unknown',
+    });
+    return null;
   }
 }

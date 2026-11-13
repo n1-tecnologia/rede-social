@@ -1,0 +1,188 @@
+import { join } from 'node:path';
+import { createTranslator } from 'next-intl';
+import { describe, expect, it } from 'vitest';
+import { loadMessages, type MessageTree } from './messages';
+
+/**
+ * Phase 10.1-11 (UI-D-740, UI-D-765) — the paid event's `events.json` copy. This file pins what a copy
+ * edit must not break: the merge under the single root `events`, every key of the event form's
+ * Ingresso section (`form.ticket.*`), every ICU plural and every placeholder, and the neutrality rule
+ * (the provider is only ever the `{gateway}` slot). Later UI plans of the phase extend the lists below
+ * with their own keys (`ticket.*`, `card.paid*`, `participants.origin.*`, ...).
+ *
+ * Real merged catalog, real next-intl formatter: a plural that stops parsing fails here, not on a
+ * member's phone.
+ */
+
+const messages = loadMessages(join(process.cwd(), 'messages', 'pt-BR'));
+const events = messages.events as MessageTree;
+
+/** Every leaf of the namespace as `dotted.path -> string`. */
+function leaves(tree: MessageTree, prefix = ''): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(tree)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (typeof value === 'string') out[path] = value;
+    else Object.assign(out, leaves(value, path));
+  }
+  return out;
+}
+
+const all = leaves(events);
+
+/** The names a message interpolates: `{name}` and `{name, plural, …}`, not the text inside a form. */
+function placeholders(text: string): string[] {
+  return [...text.matchAll(/\{(\w+)(?:,|\})/g)].map((match) => match[1] as string).sort();
+}
+
+const translate = createTranslator({
+  locale: 'pt-BR',
+  messages,
+  namespace: 'events' as never,
+}) as unknown as (key: string, values?: Record<string, unknown>) => string;
+
+/** The copy of plan 10.1-11, key by key: the sentence and the placeholders it interpolates. */
+const FORM_TICKET: Record<string, { text: string; names: string[] }> = {
+  'form.ticket.title': { text: 'Ingresso', names: [] },
+  'form.ticket.helper': {
+    text: 'Opcional. Venda este evento pelo {gateway}: a presença é confirmada quando o pagamento for aprovado.',
+    names: ['gateway'],
+  },
+  'form.ticket.switch': { text: 'Cobrar ingresso', names: [] },
+  'form.ticket.idLabel': { text: 'ID do produto no {gateway}', names: ['gateway'] },
+  'form.ticket.idHelper': {
+    text: 'Copie o ID no painel do {gateway}. É por ele que reconhecemos a compra.',
+    names: ['gateway'],
+  },
+  'form.ticket.linkLabel': { text: 'Link de compra', names: [] },
+  'form.ticket.linkPlaceholder': { text: 'https://', names: [] },
+  'form.ticket.linkHelper': { text: 'O botão Comprar ingresso abre este link.', names: [] },
+  'form.ticket.priceLabel': { text: 'Preço de referência (R$)', names: [] },
+  'form.ticket.pricePlaceholder': { text: 'Ex.: 80,00', names: [] },
+  'form.ticket.priceHelper': {
+    text: 'Opcional. Aparece no cartão e no botão. O valor cobrado é o do {gateway}.',
+    names: ['gateway'],
+  },
+  'form.ticket.existingNote': {
+    text: 'Quem já confirmou presença continua inscrito, sem pagar. Só quem responder depois paga.',
+    names: [],
+  },
+  'form.ticket.offEffect': {
+    text: 'Sem ingresso, o evento volta a confirmar presença na hora, com Vou e Não vou.',
+    names: [],
+  },
+  'form.ticket.soldLocked': {
+    text: '{count, plural, one {# ingresso vendido} other {# ingressos vendidos}}. O produto não pode mudar nem sair enquanto houver ingressos pagos.',
+    names: ['count'],
+  },
+  'form.ticket.moduleOff': {
+    text: 'O módulo Pagamentos está desligado. Fale com a plataforma para ligá-lo e vender ingressos.',
+    names: [],
+  },
+  'form.ticket.notConnected': {
+    text: 'Conecte a integração em Pagamentos para vender ingressos.',
+    names: [],
+  },
+  'form.ticket.openPayments': { text: 'Abrir Pagamentos', names: [] },
+  'form.ticket.linkedUnavailable': {
+    text: 'Pagamentos está desligado ou desconectado. Os membros veem “Venda indisponível” até voltar.',
+    names: [],
+  },
+  'form.ticket.recurring': {
+    text: 'Este produto parece ser uma assinatura. Renovações não mudam a presença: só a primeira compra confirma.',
+    names: [],
+  },
+  'form.ticket.gatewayFallback': { text: 'gateway de pagamento', names: [] },
+  'form.ticket.errors.idRequired': { text: 'Informe o ID do produto.', names: [] },
+  'form.ticket.errors.linkRequired': { text: 'Informe o link de compra.', names: [] },
+  'form.ticket.errors.linkInvalid': { text: 'Use um link que comece com https://.', names: [] },
+  'form.ticket.errors.taken': {
+    text: 'Este ID já está em uso. Confira o ID no {gateway}.',
+    names: ['gateway'],
+  },
+  'form.ticket.errors.priceInvalid': {
+    text: 'Informe um valor em reais, como 80,00.',
+    names: [],
+  },
+  'form.ticket.errors.locked': {
+    text: 'Já há ingressos vendidos. O produto não pode mudar.',
+    names: [],
+  },
+  'form.ticket.errors.save': {
+    text: 'Evento salvo, mas não foi possível salvar o ingresso. Tente novamente.',
+    names: [],
+  },
+};
+
+/** The ICU plural keys and the variable each counts on. */
+const PLURALS: Record<string, string> = {
+  'form.ticket.soldLocked': 'count',
+};
+
+describe('events.json: the Ingresso section of the event form (UI-D-741 to UI-D-743)', () => {
+  it('merges into the catalog under the single root key `events`', () => {
+    expect(Object.keys(messages)).toContain('events');
+    expect(Object.keys(events)).toContain('form');
+  });
+
+  it('carries every key of the section with the approved sentence', () => {
+    for (const [key, { text }] of Object.entries(FORM_TICKET)) {
+      expect(all[key], `missing key events.${key}`).toBe(text);
+    }
+  });
+
+  it('holds no key under form.ticket that the contract does not list', () => {
+    const present = Object.keys(all).filter((key) => key.startsWith('form.ticket.'));
+    expect(present.sort()).toEqual(Object.keys(FORM_TICKET).sort());
+  });
+
+  it('names every placeholder of the contract, key by key', () => {
+    for (const [key, { names }] of Object.entries(FORM_TICKET)) {
+      expect(placeholders(all[key] as string), `placeholders of events.${key}`).toEqual(
+        [...names].sort(),
+      );
+    }
+  });
+
+  it('every plural carries `one` and `other` and formats both counts', () => {
+    for (const [key, variable] of Object.entries(PLURALS)) {
+      const text = all[key] as string;
+      expect(text, `events.${key} needs a one form`).toMatch(/plural,\s*one\s*\{/);
+      expect(text, `events.${key} needs an other form`).toMatch(/other\s*\{/);
+      const one = translate(key, { [variable]: 1 });
+      const many = translate(key, { [variable]: 3 });
+      expect(one).toBe(
+        '1 ingresso vendido. O produto não pode mudar nem sair enquanto houver ingressos pagos.',
+      );
+      expect(many).toBe(
+        '3 ingressos vendidos. O produto não pode mudar nem sair enquanto houver ingressos pagos.',
+      );
+    }
+  });
+
+  it('fills {gateway} with the display name the server passes, and with the neutral fallback', () => {
+    expect(translate('form.ticket.idLabel', { gateway: 'Gateway Exemplo' })).toBe(
+      'ID do produto no Gateway Exemplo',
+    );
+    const fallback = all['form.ticket.gatewayFallback'] as string;
+    expect(translate('form.ticket.errors.taken', { gateway: fallback })).toBe(
+      'Este ID já está em uso. Confira o ID no gateway de pagamento.',
+    );
+  });
+
+  it('names the provider nowhere: only the {gateway} slot (UI-D-740, TICK-20)', () => {
+    for (const [key, text] of Object.entries(all)) {
+      expect(text, `events.${key}`).not.toMatch(/kiwify/i);
+    }
+    for (const key of Object.keys(all)) {
+      expect(key, `events.${key}`).not.toMatch(/kiwify/i);
+    }
+  });
+
+  it('writes the typographic quotes of the contract, not straight ones', () => {
+    for (const key of Object.keys(FORM_TICKET)) {
+      expect(all[key], `events.${key}`).not.toContain('"');
+    }
+    expect(all['form.ticket.linkedUnavailable']).toContain('“Venda indisponível”');
+  });
+});

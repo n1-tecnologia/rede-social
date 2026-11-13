@@ -263,6 +263,37 @@
         "placeholder": "Sem limite",
         "helper": "Deixe em branco para não limitar as confirmações."
       },
+      "ticket": {
+        "title": "Ingresso",
+        "helper": "Opcional. Venda este evento pelo {gateway}: a presença é confirmada quando o pagamento for aprovado.",
+        "switch": "Cobrar ingresso",
+        "idLabel": "ID do produto no {gateway}",
+        "idHelper": "Copie o ID no painel do {gateway}. É por ele que reconhecemos a compra.",
+        "linkLabel": "Link de compra",
+        "linkPlaceholder": "https://",
+        "linkHelper": "O botão Comprar ingresso abre este link.",
+        "priceLabel": "Preço de referência (R$)",
+        "pricePlaceholder": "Ex.: 80,00",
+        "priceHelper": "Opcional. Aparece no cartão e no botão. O valor cobrado é o do {gateway}.",
+        "existingNote": "Quem já confirmou presença continua inscrito, sem pagar. Só quem responder depois paga.",
+        "offEffect": "Sem ingresso, o evento volta a confirmar presença na hora, com Vou e Não vou.",
+        "soldLocked": "{count, plural, one {# ingresso vendido} other {# ingressos vendidos}}. O produto não pode mudar nem sair enquanto houver ingressos pagos.",
+        "moduleOff": "O módulo Pagamentos está desligado. Fale com a plataforma para ligá-lo e vender ingressos.",
+        "notConnected": "Conecte a integração em Pagamentos para vender ingressos.",
+        "openPayments": "Abrir Pagamentos",
+        "linkedUnavailable": "Pagamentos está desligado ou desconectado. Os membros veem “Venda indisponível” até voltar.",
+        "recurring": "Este produto parece ser uma assinatura. Renovações não mudam a presença: só a primeira compra confirma.",
+        "gatewayFallback": "gateway de pagamento",
+        "errors": {
+          "idRequired": "Informe o ID do produto.",
+          "linkRequired": "Informe o link de compra.",
+          "linkInvalid": "Use um link que comece com https://.",
+          "taken": "Este ID já está em uso. Confira o ID no {gateway}.",
+          "priceInvalid": "Informe um valor em reais, como 80,00.",
+          "locked": "Já há ingressos vendidos. O produto não pode mudar.",
+          "save": "Evento salvo, mas não foi possível salvar o ingresso. Tente novamente."
+        }
+      },
       "when": {
         "title": "Quando",
         "startDate": "Data de início",
