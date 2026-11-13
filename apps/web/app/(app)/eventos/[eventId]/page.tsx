@@ -189,6 +189,8 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
                   {...eventActionState(result.event, view)}
                   certificate={Boolean(view.extras?.certificate)}
                   refundedNote={view.refundedNote ?? null}
+                  tenantId={bootstrap.tenant.id}
+                  userId={bootstrap.user.id}
                 />
               </div>
             </Card>

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { type BroadcastMessage, RealtimeProvider } from '@rede-social/core/ui';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -806,5 +807,156 @@ describe('EventActions — giving up a paid presence (10.1-12, UI-D-750, UI-D-75
         unmount();
       }
     }
+  });
+});
+
+/**
+ * Phase 10.1-12 (D-756, PAY-34, UI-D-747, UI-D-748): the persistent live region and the boundary of the
+ * paid zone. The wrapper and the listener exist only for a paid event the member is not in; when the
+ * server answers a presence the SAME wrapper holds the shipped zone (so the swap is announced) and no
+ * toast speaks; the buy control leaves at `starts_at` by the refresh of the server's boundary.
+ */
+describe('EventActions — the live swap of a paid event (10.1-12, UI-D-747, UI-D-748)', () => {
+  const HREF = 'https://pay.example/checkout/abc';
+  const TENANT = '0d000000-0000-4000-8000-00000000aaaa';
+  const USER = '0d000000-0000-4000-8000-00000000bbbb';
+  const TOPIC = `tenant:${TENANT}:user:${USER}`;
+
+  function fakeRealtime() {
+    const channels: { topic: string; onBroadcast?: (m: BroadcastMessage) => void }[] = [];
+    const client = {
+      setAuth: vi.fn(async () => {}),
+      channel: vi.fn((topic: string) => {
+        const channel: { topic: string; onBroadcast?: (m: BroadcastMessage) => void } = { topic };
+        channels.push(channel);
+        const handle = {
+          on: (_t: 'broadcast', _f: { event: string }, cb: (m: BroadcastMessage) => void) => {
+            channel.onBroadcast = cb;
+            return handle;
+          },
+          subscribe: () => handle,
+        };
+        return handle;
+      }),
+      removeChannel: vi.fn(async () => 'ok'),
+      disconnect: vi.fn(async () => 'ok'),
+    };
+    return {
+      client,
+      factory: vi.fn(() => client as never),
+      emit: (event: string) =>
+        act(() =>
+          [...channels]
+            .reverse()
+            .find((c) => c.topic === TOPIC)
+            ?.onBroadcast?.({ event, payload: { kind: 'payments.ticket' } }),
+        ),
+    };
+  }
+
+  const inProvider = (fake: ReturnType<typeof fakeRealtime>, props: EventActionState) => (
+    <RealtimeProvider
+      supabaseUrl="http://supabase.test"
+      publishableKey="pk"
+      tokenUrl="/api/realtime/token"
+      clientFactory={fake.factory}
+    >
+      <EventActions {...props} tenantId={TENANT} userId={USER} />
+    </RealtimeProvider>
+  );
+  const buyer = (overrides: Partial<EventActionState> = {}) =>
+    state({
+      paid: true,
+      zone: 'buy',
+      checkoutHref: HREF,
+      priceLabel: null,
+      viewerOrigin: null,
+      ...overrides,
+    });
+  const live = () => screen.queryByTestId('event-actions-live');
+
+  it('12a. the wrapper and the listener exist for a paid event the member is not in, from the first render', async () => {
+    const fake = fakeRealtime();
+    render(inProvider(fake, buyer()));
+    expect(live()?.getAttribute('aria-live')).toBe('polite');
+    await waitFor(() => expect(fake.client.channel).toHaveBeenCalledTimes(1));
+    fake.emit('notifications.changed');
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(toast.show).not.toHaveBeenCalled();
+  });
+
+  it('12b. neither the wrapper nor the listener mounts for a free event or for a member already in', async () => {
+    const fake = fakeRealtime();
+    render(inProvider(fake, state()));
+    expect(live()).toBeNull();
+    cleanup();
+    for (const props of [
+      buyer({ answer: 'going', zone: null, viewerOrigin: 'ticket' }),
+      buyer({ checkedIn: true, zone: null }),
+    ]) {
+      render(inProvider(fake, props));
+      expect(live()).toBeNull();
+      cleanup();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fake.client.channel).not.toHaveBeenCalled();
+  });
+
+  it('12c. the swap: the server answers a presence and the SAME wrapper holds the shipped zone, with no toast', async () => {
+    const fake = fakeRealtime();
+    const view = render(inProvider(fake, buyer()));
+    await waitFor(() => expect(fake.client.channel).toHaveBeenCalledTimes(1));
+    const wrapper = live() as HTMLElement;
+    expect(screen.getByTestId('event-actions-buy')).toBeTruthy();
+
+    view.rerender(inProvider(fake, buyer({ answer: 'going', zone: null, viewerOrigin: 'ticket' })));
+    expect(live()).toBe(wrapper);
+    expect(wrapper.getAttribute('aria-live')).toBe('polite');
+    expect(screen.queryByTestId('event-actions-buy')).toBeNull();
+    expect(wrapper.contains(checkin())).toBe(true);
+    expect(checkin()?.textContent).toBe(C.reine.cta.checkin);
+    expect(unregister()).toBeNull();
+    expect(toast.show).not.toHaveBeenCalled();
+    // The wait is over: a later signal refreshes nothing.
+    refresh.mockReset();
+    fake.emit('notifications.changed');
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('12d. the buy control leaves at starts_at by the boundary refresh, and the timer dies with the zone', () => {
+    const NOW = Date.parse('2026-10-12T20:30:00.000Z');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(NOW);
+    const { unmount } = render(
+      <EventActions
+        {...buyer({
+          checkinOpensAt: new Date(NOW + 30 * 60 * 1000).toISOString(),
+          startsAt: new Date(NOW + 90 * 60 * 1000).toISOString(),
+          endsAt: new Date(NOW + 3 * HOUR).toISOString(),
+        })}
+      />,
+    );
+    vi.advanceTimersByTime(30 * 60 * 1000 - 1);
+    expect(refresh).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    refresh.mockReset();
+    unmount();
+    vi.advanceTimersByTime(4 * HOUR);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('12e. a member who gives up a before-the-ticket presence ends up in the buy zone, listening', async () => {
+    const fake = fakeRealtime();
+    const view = render(
+      inProvider(fake, buyer({ answer: 'going', zone: null, viewerOrigin: 'before_ticket' })),
+    );
+    expect(live()).toBeNull();
+    view.rerender(inProvider(fake, buyer({ answer: 'not_going' })));
+    expect(screen.getByTestId('event-actions-buy').getAttribute('href')).toBe(HREF);
+    expect(live()?.getAttribute('aria-live')).toBe('polite');
+    await waitFor(() => expect(fake.client.channel).toHaveBeenCalledTimes(1));
+    fake.emit('notifications.changed');
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

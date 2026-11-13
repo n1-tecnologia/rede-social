@@ -47,9 +47,55 @@ import { GOLD, GOLD_BASE, OUTLINE_CTA, Zone } from './zone';
  * server now draws.
  *
  * **Boundary refresh** (UI-D-203): `useBoundaryRefresh` targets the next of `checkinOpensAt` /
- * `startsAt` / `endsAt` within 24 h, so the zone changes at the venue without a pull.
+ * `startsAt` / `endsAt` within 24 h, so the zone changes at the venue without a pull. It lives in the
+ * outer component, so the paid zone has it too.
  */
 export function EventActions({
+  tenantId = null,
+  userId = null,
+  ...state
+}: EventActionState & {
+  certificate?: boolean;
+  refundedNote?: string | null;
+  /** The viewer's own ids: the paid zone listens to their user topic (UI-D-748). */
+  tenantId?: string | null;
+  userId?: string | null;
+}) {
+  const { phase, cancelled, answer, checkedIn, checkinOpensAt, startsAt, endsAt } = state;
+  // One boundary refresh for every branch, the paid zone's included: the buy control leaves at
+  // `starts_at` by the SERVER's instant, never the device clock (UI-D-747).
+  useBoundaryRefresh([checkinOpensAt, startsAt, endsAt], phase);
+
+  // Phase 10.1-12 (D-741, D-756, UI-D-746, UI-D-748). A paid event and a member WITHOUT a presence is the
+  // paid zone's, on the SERVER's answer (never the optimistic one). Once a member has been in that
+  // position the live wrapper STAYS for the life of the island (sticky), so when the webhook lands and
+  // the server answers a presence, the shipped zone appears inside the same polite live region and the
+  // swap is announced, not just painted. A free event, or a member who is in from the first render,
+  // gets neither the wrapper nor the hook.
+  const waiting = state.paid === true && !checkedIn && answer !== 'going';
+  const [wrapped, setWrapped] = useState(false);
+  if (waiting && !wrapped) setWrapped(true);
+
+  if (!waiting && !wrapped) return <ActionsBody {...state} />;
+  return (
+    <PaidEventZone
+      waiting={waiting}
+      zone={state.zone ?? null}
+      phase={phase}
+      format={state.format}
+      cancelled={cancelled}
+      checkoutHref={state.checkoutHref ?? null}
+      priceLabel={state.priceLabel ?? null}
+      refundedNote={state.refundedNote ?? null}
+      tenantId={tenantId}
+      userId={userId}
+    >
+      {waiting ? null : <ActionsBody {...state} />}
+    </PaidEventZone>
+  );
+}
+
+function ActionsBody({
   eventId,
   phase,
   format,
@@ -57,18 +103,11 @@ export function EventActions({
   full = false,
   answer,
   checkedIn,
-  checkinOpensAt,
-  startsAt,
-  endsAt,
   startTime,
   certificate = false,
-  refundedNote = null,
   paid,
-  zone = null,
-  checkoutHref = null,
-  priceLabel = null,
   viewerOrigin = null,
-}: EventActionState & { certificate?: boolean; refundedNote?: string | null }) {
+}: EventActionState & { certificate?: boolean }) {
   const t = useTranslations('events');
   const router = useRouter();
   const toast = useToast();
@@ -80,8 +119,6 @@ export function EventActions({
     null,
   );
   const shown = pending !== null && pending.from === answer ? pending.value : answer;
-
-  useBoundaryRefresh([checkinOpensAt, startsAt, endsAt], phase);
 
   const refresh = () => startTransition(() => router.refresh());
 
@@ -154,23 +191,6 @@ export function EventActions({
           {t('reine.cta.checkin')}
         </a>
       </Zone>
-    );
-  }
-
-  // Phase 10.1-12 (D-741, D-753, UI-D-746): a paid event and a member WITHOUT a presence is the paid
-  // zone's, on the SERVER's answer (never the optimistic one): there is never a Vou, a walk-in link or
-  // an `Entrar` for them, only the buy control or the disabled state the server computed.
-  if (paid === true && answer !== 'going') {
-    return (
-      <PaidEventZone
-        zone={zone}
-        phase={phase}
-        format={format}
-        cancelled={cancelled}
-        checkoutHref={checkoutHref}
-        priceLabel={priceLabel}
-        refundedNote={refundedNote}
-      />
     );
   }
 

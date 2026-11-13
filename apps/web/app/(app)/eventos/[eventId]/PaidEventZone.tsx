@@ -2,7 +2,10 @@
 
 import { Button } from '@rede-social/ui';
 import { Info, Lock, Ticket } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import type { ReactNode } from 'react';
+import { useLiveRefresh } from '@/components/useLiveRefresh';
 import { safeCheckoutHref } from '@/lib/event-ticket';
 import type { EventPhase, EventSaleState } from '@/lib/events-view';
 import { GOLD, Zone } from './zone';
@@ -32,6 +35,16 @@ import { GOLD, Zone } from './zone';
  * again HERE (T-10.1-24): a non-`https:` value never reaches an anchor, it draws "Venda indisponível".
  * The control leaves at `starts_at` by the SERVER's instant, through `EventActions`' boundary refresh,
  * never by the device clock.
+ *
+ * **The live swap (D-756, PAY-34, UI-D-748).** The zone sits inside a PERSISTENT `aria-live="polite"`
+ * wrapper that exists from the first render of a paid event the member is not in, and `useLiveRefresh`
+ * (the machine `GatewayPurchase` shares) calls `router.refresh()` when the buyer's own user topic
+ * signals `notifications.changed`, so the SERVER answers a presence. The signal only requests a refetch,
+ * it never carries state, and there is no toast: the announced "Presença confirmada" block and the bell
+ * row are the confirmation. When the server does answer a presence (`waiting` false) the wrapper stays
+ * and holds `children`, the shipped zone for a member who is in, so the swap is announced, not just
+ * painted; the hook is gone by then. A cancelled or ended event has nothing to wait for: no wrapper, no
+ * hook.
  */
 export interface PaidEventZoneProps {
   /** `EventActionState.zone`: the sale zone the server computed, null for a viewer who is in. */
@@ -45,6 +58,15 @@ export interface PaidEventZoneProps {
   priceLabel: string | null;
   /** "Seu ingresso foi reembolsado e a presença saiu da lista." (A-UI-8), only when the read says it. */
   refundedNote?: string | null;
+  /**
+   * The member has no presence yet (the default): the zone and the listener are drawn. False once the
+   * server answered a presence: only `children` (the shipped zone) is drawn, inside the same live region.
+   */
+  waiting?: boolean;
+  /** The viewer's own ids: the topic is `tenant:{id}:user:{id}`; absent, only the visibility refresh runs. */
+  tenantId?: string | null;
+  userId?: string | null;
+  children?: ReactNode;
 }
 
 export function PaidEventZone({
@@ -55,16 +77,64 @@ export function PaidEventZone({
   checkoutHref,
   priceLabel,
   refundedNote = null,
+  waiting = true,
+  tenantId = null,
+  userId = null,
+  children,
 }: PaidEventZoneProps) {
-  const t = useTranslations('events');
+  // (1) cancelled and (2) ended: the zone is empty, and so is the wait.
+  const empty = cancelled || phase === 'P3' || zone === null || zone === 'none';
+  if (waiting && empty) return null;
 
-  // (1) cancelled and (2) ended: the zone is empty.
-  if (cancelled || phase === 'P3' || zone === null || zone === 'none') return null;
+  return (
+    <div aria-live="polite" data-testid="event-actions-live">
+      {waiting ? (
+        <>
+          <LiveRefresh tenantId={tenantId} userId={userId} />
+          <PaidZone
+            zone={zone}
+            phase={phase}
+            format={format}
+            checkoutHref={checkoutHref}
+            priceLabel={priceLabel}
+            refundedNote={refundedNote}
+          />
+        </>
+      ) : (
+        children
+      )}
+    </div>
+  );
+}
+
+/** The buyer's wait: a `notifications.changed` signal makes the server answer the presence (UI-D-748). */
+function LiveRefresh({ tenantId, userId }: { tenantId: string | null; userId: string | null }) {
+  const router = useRouter();
+  useLiveRefresh(tenantId, userId, () => router.refresh());
+  return null;
+}
+
+function PaidZone({
+  zone,
+  phase,
+  format,
+  checkoutHref,
+  priceLabel,
+  refundedNote,
+}: Pick<
+  PaidEventZoneProps,
+  'zone' | 'phase' | 'format' | 'checkoutHref' | 'priceLabel' | 'refundedNote'
+>) {
+  const t = useTranslations('events');
 
   const href = zone === 'buy' ? safeCheckoutHref(checkoutHref) : null;
   // A "buy" zone whose link does not survive the guard is the unavailable state, never a link.
   const state: 'buy' | 'salesClosed' | 'unavailable' | 'soldOut' =
-    zone === 'buy' && href === null ? 'unavailable' : zone;
+    zone === 'salesClosed' || zone === 'soldOut'
+      ? zone
+      : zone === 'buy' && href !== null
+        ? 'buy'
+        : 'unavailable';
   const online = format === 'online';
 
   return (

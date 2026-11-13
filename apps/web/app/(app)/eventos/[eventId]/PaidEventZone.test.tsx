@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen } from '@testing-library/react';
+import { type BroadcastMessage, RealtimeProvider } from '@rede-social/core/ui';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -17,7 +18,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *  3. an online event adds the Lock hint and never an `Entrar` button; an in-person one adds nothing;
  *  4. a member without a presence never meets Vou, Garantir minha vaga, Cancelar inscrição or the
  *     walk-in link; at most one brand fill;
- *  5. a non-`https:` href never reaches an anchor (T-10.1-24).
+ *  5. a non-`https:` href never reaches an anchor (T-10.1-24);
+ *  6. (Task 3) the zone sits in a PERSISTENT polite live region from the first render of a paid event the
+ *     member is not in, and a `notifications.changed` signal on the buyer's own topic refreshes the page
+ *     (throttled, with a trailing call) so the server answers a presence: no toast, no state in the signal.
  */
 
 const nav = vi.hoisted(() => ({ refresh: vi.fn() }));
@@ -238,5 +242,163 @@ describe('PaidEventZone — online and in person (D-742, UI-D-746)', () => {
   it('13. an in-person event adds no lock hint', () => {
     zone({ format: 'in_person' });
     expect(lock()).toBeNull();
+  });
+});
+
+/* ── Task 3: the persistent live wrapper and the refresh into the confirmed state (UI-D-748) ───── */
+
+const TENANT = '0d000000-0000-4000-8000-00000000aaaa';
+const USER = '0d000000-0000-4000-8000-00000000bbbb';
+const TOPIC = `tenant:${TENANT}:user:${USER}`;
+
+interface FakeChannel {
+  topic: string;
+  options: { config: { private: boolean } };
+  onBroadcast?: (message: BroadcastMessage) => void;
+  onStatus?: (status: string) => void;
+}
+
+function fakeRealtime() {
+  const channels: FakeChannel[] = [];
+  const client = {
+    setAuth: vi.fn(async () => {}),
+    channel: vi.fn((topic: string, options: { config: { private: boolean } }) => {
+      const channel: FakeChannel = { topic, options };
+      channels.push(channel);
+      const handle = {
+        on: (_type: 'broadcast', _filter: { event: string }, cb: (m: BroadcastMessage) => void) => {
+          channel.onBroadcast = cb;
+          return handle;
+        },
+        subscribe: (cb?: (status: string) => void) => {
+          channel.onStatus = cb;
+          return handle;
+        },
+      };
+      return handle;
+    }),
+    removeChannel: vi.fn(async () => 'ok'),
+    disconnect: vi.fn(async () => 'ok'),
+  };
+  const latest = (topic: string) => [...channels].reverse().find((c) => c.topic === topic);
+  return {
+    client,
+    factory: vi.fn(() => client as never),
+    channels,
+    emit: (topic: string, event: string, payload: unknown = { kind: 'payments.ticket' }) =>
+      act(() => latest(topic)?.onBroadcast?.({ event, payload })),
+  };
+}
+
+function live(fake: ReturnType<typeof fakeRealtime>, overrides: Partial<Props> = {}) {
+  return (
+    <RealtimeProvider
+      supabaseUrl="http://supabase.test"
+      publishableKey="pk"
+      tokenUrl="/api/realtime/token"
+      clientFactory={fake.factory}
+    >
+      <PaidEventZone
+        zone="buy"
+        phase="P0"
+        format="in_person"
+        cancelled={false}
+        checkoutHref={HREF}
+        priceLabel={null}
+        tenantId={TENANT}
+        userId={USER}
+        {...overrides}
+      />
+    </RealtimeProvider>
+  );
+}
+
+describe('PaidEventZone — the persistent live region (D-756, UI-D-748)', () => {
+  it('14. the polite wrapper is in the DOM before any signal, around the zone, for every drawn state', () => {
+    for (const [zoneKind, phase] of [
+      ['buy', 'P0'],
+      ['unavailable', 'P0'],
+      ['soldOut', 'P1'],
+      ['salesClosed', 'P2'],
+    ] as const) {
+      const { unmount } = zone({
+        zone: zoneKind,
+        phase,
+        checkoutHref: zoneKind === 'buy' ? HREF : null,
+      });
+      const wrapper = screen.getByTestId('event-actions-live');
+      expect(wrapper.getAttribute('aria-live')).toBe('polite');
+      expect(wrapper.contains(screen.getByTestId('event-actions'))).toBe(true);
+      unmount();
+    }
+  });
+
+  it('15. a cancelled or ended event has nothing to wait for: no wrapper', () => {
+    zone({ cancelled: true });
+    expect(screen.queryByTestId('event-actions-live')).toBeNull();
+    cleanup();
+    zone({ phase: 'P3', zone: 'none' });
+    expect(screen.queryByTestId('event-actions-live')).toBeNull();
+  });
+
+  it('16. joins ONLY the member own user topic, privately', async () => {
+    const fake = fakeRealtime();
+    render(live(fake));
+    await waitFor(() => expect(fake.client.channel).toHaveBeenCalledTimes(1));
+    expect(fake.channels.map((c) => c.topic)).toEqual([TOPIC]);
+    expect(fake.channels[0]?.options).toEqual({ config: { private: true } });
+  });
+
+  it('17. a notifications.changed signal refreshes the page once; another event does not', async () => {
+    const fake = fakeRealtime();
+    render(live(fake));
+    await waitFor(() => expect(fake.client.channel).toHaveBeenCalledTimes(1));
+    fake.emit(TOPIC, 'chat.message', { conversationId: 'x', seq: 1 });
+    expect(nav.refresh).not.toHaveBeenCalled();
+    fake.emit(TOPIC, 'notifications.changed');
+    expect(nav.refresh).toHaveBeenCalledTimes(1);
+    // The signal changed nothing on its own: the zone is exactly what the server last said.
+    expect(screen.getByTestId('event-actions-buy').getAttribute('href')).toBe(HREF);
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByText(/presença confirmada/i)).toBeNull();
+  });
+
+  it('18. two signals inside 1500 ms give one immediate and one trailing refresh', async () => {
+    const fake = fakeRealtime();
+    render(live(fake));
+    await waitFor(() => expect(fake.client.channel).toHaveBeenCalledTimes(1));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(Date.now() + 10_000);
+    fake.emit(TOPIC, 'notifications.changed');
+    fake.emit(TOPIC, 'notifications.changed');
+    expect(nav.refresh).toHaveBeenCalledTimes(1);
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(nav.refresh).toHaveBeenCalledTimes(2);
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(nav.refresh).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('19. once the server answers a presence the wrapper stays, holds the shipped zone and the hook is gone', async () => {
+    const fake = fakeRealtime();
+    const view = render(live(fake));
+    await waitFor(() => expect(fake.client.channel).toHaveBeenCalledTimes(1));
+    const wrapper = screen.getByTestId('event-actions-live');
+    view.rerender(
+      live(fake, { waiting: false, children: <p data-testid="shipped-zone">shipped</p> }),
+    );
+    // The SAME node: a live region that is replaced is not announced.
+    expect(screen.getByTestId('event-actions-live')).toBe(wrapper);
+    expect(wrapper.getAttribute('aria-live')).toBe('polite');
+    expect(wrapper.contains(screen.getByTestId('shipped-zone'))).toBe(true);
+    expect(screen.queryByTestId('event-actions-buy')).toBeNull();
+    // Nothing listens any more: a later signal refreshes nothing.
+    nav.refresh.mockReset();
+    fake.emit(TOPIC, 'notifications.changed');
+    expect(nav.refresh).not.toHaveBeenCalled();
   });
 });

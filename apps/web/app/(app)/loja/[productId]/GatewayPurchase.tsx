@@ -1,11 +1,9 @@
 'use client';
 
-import { REALTIME_EVENTS, userTopic } from '@rede-social/contracts/realtime';
-import { useRealtimeTopic } from '@rede-social/core/ui';
 import { buttonClasses } from '@rede-social/ui';
 import { ShoppingBag } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useRef } from 'react';
+import { LIVE_REFRESH_THROTTLE_MS, useLiveRefresh } from '@/components/useLiveRefresh';
 
 /**
  * The product page's action zone for a product sold through the tenant's payment page (09.1-17, PAY-24,
@@ -30,12 +28,13 @@ import { useCallback, useEffect, useRef } from 'react';
  * a person who paid in the other tab or a device that dropped its socket meanwhile. Outside a realtime
  * provider the topic hook is a no-op and the visibility refresh still works. The persistent
  * `aria-live` wrapper that announces the swap belongs to the page.
+ *
+ * Since Phase 10.1-12 that machine is `useLiveRefresh` (`apps/web/components`), shared with the paid
+ * event's zone (UI-D-748); this component only calls it.
  */
 
 /** One refresh per window; a burst gets one leading and at most one trailing call. */
-export const GATEWAY_REFRESH_THROTTLE_MS = 1500;
-
-const LIVE_EVENTS = [REALTIME_EVENTS.notificationsChanged];
+export const GATEWAY_REFRESH_THROTTLE_MS = LIVE_REFRESH_THROTTLE_MS;
 
 /** The finished catalog strings, read on the server (`store.purchase.gateway.*`). */
 export interface GatewayPurchaseLabels {
@@ -59,53 +58,7 @@ export function GatewayPurchase({
   labels: GatewayPurchaseLabels;
 }) {
   const router = useRouter();
-  const routerRef = useRef(router);
-  routerRef.current = router;
-  const lastAt = useRef(0);
-  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const joinedOnce = useRef(false);
-
-  const refresh = useCallback(() => {
-    const wait = lastAt.current + GATEWAY_REFRESH_THROTTLE_MS - Date.now();
-    if (wait <= 0) {
-      lastAt.current = Date.now();
-      routerRef.current.refresh();
-      return;
-    }
-    if (pending.current !== null) return;
-    pending.current = setTimeout(() => {
-      pending.current = null;
-      lastAt.current = Date.now();
-      routerRef.current.refresh();
-    }, wait);
-  }, []);
-
-  useEffect(
-    () => () => {
-      if (pending.current !== null) clearTimeout(pending.current);
-      pending.current = null;
-    },
-    [],
-  );
-
-  useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') refresh();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [refresh]);
-
-  const onSubscribed = useCallback(() => {
-    // The first join is the page's own render; every re-join is a catch-up (D-240).
-    if (!joinedOnce.current) {
-      joinedOnce.current = true;
-      return;
-    }
-    refresh();
-  }, [refresh]);
-
-  useRealtimeTopic(userTopic(tenantId, userId), LIVE_EVENTS, refresh, { onSubscribed });
+  useLiveRefresh(tenantId, userId, () => router.refresh());
 
   if (checkoutHref === null) {
     return (
