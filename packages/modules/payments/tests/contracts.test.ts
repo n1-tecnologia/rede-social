@@ -474,6 +474,25 @@ describe('the Eventos list contract (D-503, PAY-21)', () => {
     }
   });
 
+  it('a paid-event item carries kind and eventTitle as OPTIONAL keys; a store or access item carries neither (Phase 10.1, D-758)', () => {
+    // absent: the shape of every item before the paid event, still valid
+    expect(eventItemSchema.safeParse(item).success).toBe(true);
+    const ticket = { ...item, kind: 'event', eventTitle: 'Encontro de março' };
+    expect(eventItemSchema.safeParse(ticket).success).toBe(true);
+    // a gone event is a null title, not a missing item
+    expect(eventItemSchema.safeParse({ ...ticket, eventTitle: null }).success).toBe(true);
+    expect(eventItemSchema.safeParse({ ...ticket, kind: null }).success).toBe(true);
+    // the closed-event screen states are valid on an item
+    for (const state of ['event_ended', 'event_cancelled']) {
+      expect(eventItemSchema.safeParse({ ...ticket, state, outcome: state }).success, state).toBe(
+        true,
+      );
+    }
+    // the closed vocabulary still holds: an unknown kind and a non-string title are refused
+    expect(eventItemSchema.safeParse({ ...ticket, kind: 'course' }).success).toBe(false);
+    expect(eventItemSchema.safeParse({ ...ticket, eventTitle: 42 }).success).toBe(false);
+  });
+
   it('refuses a state or a type outside the vocabulary', () => {
     expect(eventItemSchema.safeParse({ ...item, state: 'received' }).success).toBe(false);
     expect(eventItemSchema.safeParse({ ...item, state: 'no_membership' }).success).toBe(false);

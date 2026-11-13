@@ -5,13 +5,18 @@ import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  attendancesOf,
   deliver,
   deliverAndApply,
   eventRow,
   freshEmail,
   type Person,
   personWithEmail,
+  removeTicketEvents,
   runApply,
+  ticketDelivery,
+  ticketEvent,
+  ticketMapping,
 } from './payments-apply-fixtures';
 import {
   adminSql,
@@ -21,6 +26,7 @@ import {
   removeIdentitiesByPrefix,
   removePaymentIntegrations,
   removePaymentMappings,
+  runNotificationJobs,
   type SeededPaymentIntegration,
   seedPaymentIntegration,
   seedPaymentMapping,
@@ -692,5 +698,324 @@ describe('09.1 events: Liberar manualmente', () => {
     expect(active).toHaveLength(1);
     expect((await eventRow(eventB)).state).toBe('applied');
     expect((await eventRow(fresh)).state).toBe('applied');
+  }, 60_000);
+});
+
+/* ── 10.1-05: paid-event deliveries in the list and in "Liberar manualmente" (D-749, D-758, D-759, TICK-19) ── */
+
+describe('10.1 events: paid-event deliveries', () => {
+  const TITLE = `${PREFIX}-evento`;
+  const TICKET_KEYS = [...EVENT_KEYS, 'eventTitle', 'kind'].sort();
+  let restoreNotifications: () => Promise<void> = async () => {};
+
+  type TicketItem = EventItem & { kind?: string | null; eventTitle?: string | null };
+
+  async function enableNotifications(tenantId: string): Promise<() => Promise<void>> {
+    const [previous] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${tenantId}::uuid and module_key = 'notifications'`;
+    await adminSql`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${tenantId}::uuid, 'notifications', true)
+      on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+    moduleFlags.invalidate(tenantId);
+    return async () => {
+      if (previous) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${previous.enabled}, updated_at = now()
+           where tenant_id = ${tenantId}::uuid and module_key = 'notifications'`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${tenantId}::uuid and module_key = 'notifications'`;
+      }
+      moduleFlags.invalidate(tenantId);
+    };
+  }
+
+  /** A paid event of the lab tenant with its mapping and a fresh integration. */
+  async function paid(options: Parameters<typeof ticketEvent>[1]) {
+    await removePaymentIntegrations(labTenantId);
+    await removePaymentMappings(labTenantId);
+    await removeTicketEvents(TITLE);
+    integration = await seedPaymentIntegration(labTenantId);
+    const eventId = await ticketEvent(labTenantId, options);
+    const mapping = await ticketMapping(labTenantId, eventId);
+    return { eventId, productId: mapping.externalProductId };
+  }
+
+  const ref = () => `ord-${crypto.randomUUID()}`;
+  const approved = (productId: string, email: string, orderRef = ref()) =>
+    ticketDelivery('purchase_approved', { ref: orderRef, productId, email });
+
+  const noticesOf = (userId: string) =>
+    adminSql<{ payload: Json }[]>`
+      select payload from public.notifications
+       where user_id = ${userId}::uuid and kind = 'payments.ticket_confirmed'`;
+
+  beforeAll(async () => {
+    restoreNotifications = await enableNotifications(labTenantId);
+  }, 60_000);
+
+  afterAll(async () => {
+    await removePaymentIntegrations(labTenantId);
+    await removePaymentMappings(labTenantId);
+    await removeTicketEvents(TITLE);
+    await restoreNotifications();
+  }, 60_000);
+
+  it('a ticket delivery lists with its kind, the event title as the product line and the neutral type; a store or access item keeps its exact shape (EP-32)', async () => {
+    const ev = await paid({ title: `${TITLE}-lista` });
+    const buyer = await personWithEmail(freshEmail(PREFIX, 'listed'), 'lab');
+    // before any ticket delivery: an ignored row lists with exactly the old key set
+    await insertEvents(labTenantId, integration.id, [{ at: '2026-01-01T00:00:00Z' }]);
+    const before = await listEvents();
+    expect(before.items.length).toBeGreaterThan(0);
+    for (const item of before.items) expect(Object.keys(item).sort()).toEqual(EVENT_KEYS);
+
+    const granted = await deliverAndApply(integration, approved(ev.productId, buyer.email));
+    expect(granted).toMatchObject({ state: 'applied', outcome: 'ticket_granted' });
+    const { items, raw } = await listEvents();
+    const item = items.find((entry) => entry.id === granted.id) as TicketItem;
+    expect(item).toMatchObject({
+      type: 'purchase_approved',
+      state: 'applied',
+      email: buyer.email,
+      productName: `${TITLE}-lista`,
+      kind: 'event',
+      eventTitle: `${TITLE}-lista`,
+      outcome: 'ticket_granted',
+    });
+    expect(Object.keys(item).sort()).toEqual(TICKET_KEYS);
+    // the old rows still list with the old shape, and no order reference or amount leaks
+    for (const other of items.filter((entry) => entry.id !== granted.id)) {
+      expect(Object.keys(other).sort()).toEqual(EVENT_KEYS);
+    }
+    expect(raw).not.toContain('amountCents');
+    expect(raw).not.toMatch(/ord-[0-9a-f]{8}/);
+  }, 60_000);
+
+  it('a delivery whose event was deleted lists with a null title and kind event (EP-32)', async () => {
+    const ev = await paid({ title: `${TITLE}-apagado` });
+    const buyer = await personWithEmail(freshEmail(PREFIX, 'gone'), 'lab');
+    const granted = await deliverAndApply(integration, approved(ev.productId, buyer.email));
+    await adminSql`update public.events set deleted_at = now() where id = ${ev.eventId}::uuid`;
+    const { items } = await listEvents();
+    const item = items.find((entry) => entry.id === granted.id) as TicketItem;
+    expect(item).toMatchObject({ kind: 'event', eventTitle: null, productName: null });
+  }, 60_000);
+
+  it('a payment for an ended or a cancelled event lists as event_ended or event_cancelled (D-758)', async () => {
+    const ended = await paid({ title: `${TITLE}-fim`, startsInMinutes: -240, endsInMinutes: -60 });
+    const buyer = await personWithEmail(freshEmail(PREFIX, 'closed'), 'lab');
+    const late = await deliverAndApply(integration, approved(ended.productId, buyer.email));
+    expect(late).toMatchObject({ state: 'ignored', outcome: 'event_ended' });
+
+    const cancelledEvent = await ticketEvent(labTenantId, {
+      title: `${TITLE}-cancelado`,
+      status: 'cancelled',
+    });
+    const cancelledMapping = await ticketMapping(labTenantId, cancelledEvent);
+    const cancelled = await deliverAndApply(
+      integration,
+      approved(cancelledMapping.externalProductId, buyer.email),
+    );
+    expect(cancelled).toMatchObject({ state: 'ignored', outcome: 'event_cancelled' });
+
+    const { items } = await listEvents();
+    expect(items.find((entry) => entry.id === late.id)).toMatchObject({
+      state: 'event_ended',
+      outcome: 'event_ended',
+      kind: 'event',
+    });
+    expect(items.find((entry) => entry.id === cancelled.id)).toMatchObject({
+      state: 'event_cancelled',
+      outcome: 'event_cancelled',
+      kind: 'event',
+    });
+  }, 60_000);
+
+  it('EP-31: two ticket deliveries received at the same instant list in id-descending order, every time', async () => {
+    const ev = await paid({ title: `${TITLE}-empate` });
+    const one = await personWithEmail(freshEmail(PREFIX, 'tie1'), 'lab');
+    const two = await personWithEmail(freshEmail(PREFIX, 'tie2'), 'lab');
+    const a = await deliverAndApply(integration, approved(ev.productId, one.email));
+    const b = await deliverAndApply(integration, approved(ev.productId, two.email));
+    await adminSql`
+      update public.payment_events set received_at = '2026-07-01T00:00:00Z'
+       where id in (${a.id}::uuid, ${b.id}::uuid)`;
+    const expected = [a.id, b.id].sort().reverse();
+    for (let round = 0; round < 3; round += 1) {
+      const { items } = await listEvents();
+      expect(items.map((item) => item.id).filter((id) => expected.includes(id))).toEqual(expected);
+    }
+  }, 60_000);
+
+  it('EP-33: ticket, access and store deliveries interleave by received time inside the unchanged 50-row cap', async () => {
+    const ev = await paid({ title: `${TITLE}-misto` });
+    const accessId = `acc-${crypto.randomUUID()}`;
+    await seedPaymentMapping(labTenantId, {
+      kind: 'access',
+      name: 'Plano',
+      externalProductId: accessId,
+    });
+    const storeId = `sp-${crypto.randomUUID()}`;
+    await seedPaymentMapping(labTenantId, {
+      kind: 'store_product',
+      targetId: storeProduct,
+      externalProductId: storeId,
+    });
+    const email = freshEmail(PREFIX, 'mixed');
+    const buyer = await personWithEmail(email, 'lab');
+    const access = await deliverAndApply(
+      integration,
+      saleBody('purchase_approved', { ref: ref(), productId: accessId, email }),
+    );
+    const store = await deliverAndApply(
+      integration,
+      saleBody('purchase_approved', { ref: ref(), productId: storeId, email }),
+    );
+    const ticket = await deliverAndApply(integration, approved(ev.productId, buyer.email));
+    // 47 older fillers, then the three in a chosen order: ticket newest, access oldest of the three
+    await insertEvents(
+      labTenantId,
+      integration.id,
+      Array.from({ length: 48 }, (_, i) => ({
+        at: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+      })),
+    );
+    await adminSql`update public.payment_events set received_at = '2026-06-01T00:00:01Z' where id = ${access.id}::uuid`;
+    await adminSql`update public.payment_events set received_at = '2026-06-01T00:00:02Z' where id = ${store.id}::uuid`;
+    await adminSql`update public.payment_events set received_at = '2026-06-01T00:00:03Z' where id = ${ticket.id}::uuid`;
+    const { items } = await listEvents();
+    expect(items).toHaveLength(50);
+    expect(items.slice(0, 3).map((item) => item.id)).toEqual([ticket.id, store.id, access.id]);
+    expect((items[0] as TicketItem).kind).toBe('event');
+    expect((items[1] as TicketItem).kind).toBeUndefined();
+    expect((items[2] as TicketItem).kind).toBeUndefined();
+  }, 60_000);
+
+  it('Liberar manualmente on a "sem conta" ticket delivery: the account now exists, the presence is confirmed, the payer is told once, a second call is idempotent', async () => {
+    const ev = await paid({ title: `${TITLE}-manual` });
+    const email = freshEmail(PREFIX, 'later');
+    const waiting = await deliverAndApply(integration, approved(ev.productId, email));
+    expect(waiting).toMatchObject({ state: 'no_membership', outcome: null });
+    expect((await grant(waiting.id)).status).toBe(409);
+    expect(codeOf(await grant(waiting.id)).details?.payments).toBe('no_membership');
+
+    const payer = await personWithEmail(email, 'lab');
+    const released = await grant(waiting.id);
+    expect(released.status, JSON.stringify(released.json)).toBe(200);
+    expect(released.json).toMatchObject({
+      id: waiting.id,
+      state: 'applied',
+      outcome: 'ticket_granted',
+    });
+    expect((released.json as TicketItem).kind).toBe('event');
+    expect(await attendancesOf(ev.eventId)).toMatchObject([
+      { user_id: payer.userId, status: 'going', origin: 'ticket', order_provider: 'fake' },
+    ]);
+
+    await runNotificationJobs(labTenantId);
+    const notices = await noticesOf(payer.userId);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.payload).toEqual({ eventId: ev.eventId, eventTitle: `${TITLE}-manual` });
+
+    const again = await grant(waiting.id);
+    expect(again.status).toBe(200);
+    expect(again.json).toMatchObject({
+      id: waiting.id,
+      state: 'applied',
+      outcome: 'ticket_granted',
+    });
+    await runNotificationJobs(labTenantId);
+    expect(await attendancesOf(ev.eventId)).toHaveLength(1);
+    expect(await noticesOf(payer.userId)).toHaveLength(1);
+  }, 60_000);
+
+  it('Liberar manualmente confirms the presence of an UNCONFIRMED account too, the only way a payment reaches it (D-759)', async () => {
+    const ev = await paid({ title: `${TITLE}-naoconf` });
+    const payer = await personWithEmail(freshEmail(PREFIX, 'unconf'), 'lab');
+    await adminSql`update auth.users set email_confirmed_at = null where id = ${payer.userId}::uuid`;
+    const waiting = await deliverAndApply(integration, approved(ev.productId, payer.email));
+    expect(waiting.state).toBe('no_membership');
+    expect(await attendancesOf(ev.eventId)).toHaveLength(0);
+
+    const released = await grant(waiting.id);
+    expect(released.status, JSON.stringify(released.json)).toBe(200);
+    expect(released.json).toMatchObject({ state: 'applied', outcome: 'ticket_granted' });
+    expect(await attendancesOf(ev.eventId)).toMatchObject([
+      { user_id: payer.userId, origin: 'ticket' },
+    ]);
+  }, 60_000);
+
+  it('after a refund of the same order the release is 409 not_grantable and the row is untouched (PAY-30, T-10.1-08)', async () => {
+    const ev = await paid({ title: `${TITLE}-estorno` });
+    const email = freshEmail(PREFIX, 'refunded');
+    const orderRef = ref();
+    const waiting = await deliverAndApply(integration, approved(ev.productId, email, orderRef));
+    const refund = await deliverAndApply(
+      integration,
+      ticketDelivery('purchase_refunded', { ref: orderRef, productId: ev.productId, email }),
+    );
+    expect(refund).toMatchObject({ state: 'applied', outcome: 'no_effect' });
+    await personWithEmail(email, 'lab');
+    const res = await grant(waiting.id);
+    expect(res.status).toBe(409);
+    expect(codeOf(res).details?.payments).toBe('not_grantable');
+    expect((await eventRow(waiting.id)).state).toBe('no_membership');
+    expect(await attendancesOf(ev.eventId)).toHaveLength(0);
+  }, 60_000);
+
+  it('an event that ended, was cancelled or was deleted since is 409 event_ended / event_cancelled and the row stays "sem conta"', async () => {
+    const ev = await paid({ title: `${TITLE}-fechado` });
+    const email = freshEmail(PREFIX, 'closing');
+    const waiting = await deliverAndApply(integration, approved(ev.productId, email));
+    await personWithEmail(email, 'lab');
+
+    await adminSql`
+      update public.events set starts_at = now() - interval '3 hours', ends_at = now() - interval '1 hour'
+       where id = ${ev.eventId}::uuid`;
+    const ended = await grant(waiting.id);
+    expect(ended.status).toBe(409);
+    expect(codeOf(ended).details?.payments).toBe('event_ended');
+    expect((await eventRow(waiting.id)).state).toBe('no_membership');
+
+    await adminSql`
+      update public.events set starts_at = now() + interval '1 hour', ends_at = now() + interval '3 hours',
+                               status = 'cancelled', cancelled_at = now()
+       where id = ${ev.eventId}::uuid`;
+    const cancelled = await grant(waiting.id);
+    expect(cancelled.status).toBe(409);
+    expect(codeOf(cancelled).details?.payments).toBe('event_cancelled');
+
+    await adminSql`
+      update public.events set status = 'active', cancelled_at = null, deleted_at = now()
+       where id = ${ev.eventId}::uuid`;
+    const deleted = await grant(waiting.id);
+    expect(deleted.status).toBe(409);
+    expect(codeOf(deleted).details?.payments).toBe('event_cancelled');
+
+    expect((await eventRow(waiting.id)).state).toBe('no_membership');
+    expect(await attendancesOf(ev.eventId)).toHaveLength(0);
+  }, 60_000);
+
+  it("another tenant's ticket delivery id is the bare 404 and a support_tenant is 403", async () => {
+    await removePaymentIntegrations(demoTenantId);
+    const demoIntegration = await seedPaymentIntegration(demoTenantId);
+    const demoEvent = await ticketEvent(demoTenantId, { title: `${TITLE}-demo` });
+    const demoMapping = await ticketMapping(demoTenantId, demoEvent);
+    const waiting = await deliverAndApply(
+      demoIntegration,
+      approved(demoMapping.externalProductId, freshEmail(PREFIX, 'demoghost')),
+    );
+    expect(waiting.state).toBe('no_membership');
+    const res = await grant(waiting.id);
+    expect(res.status).toBe(404);
+    expect(codeOf(res).code).toBe('NOT_FOUND');
+    expect((await grant(waiting.id, supportUser)).status).toBe(403);
+    expect((await eventRow(waiting.id)).state).toBe('no_membership');
+    await removePaymentIntegrations(demoTenantId);
+    await removePaymentMappings(demoTenantId);
   }, 60_000);
 });

@@ -53,8 +53,8 @@ Routes (`/v1/payments`), every one behind `requireAuth`, `requireModule('payment
 | `POST /accesses/block` | `{ email }`: a manual `blocked` row beside whatever the address holds; a block outranks every other row; answers `{ access }` |
 | `POST /accesses/unblock` | `{ email }`: deletes the manual block only, restoring the previous state; answers `{ access }` (`null` when no row remains), the bare 404 for an address with no row at all |
 | `POST /accesses/remove-release` | `{ email }`: deletes the manual `active` row only (a gateway row is never removed by hand); the bare 404 when there is none |
-| `GET /events` | the latest 50 settled events (`applied`, `no_account`, `unknown_product`, `ignored`) in `(receivedAt desc, id desc)` order, with no payload, header or signature, and `serverNow` |
-| `POST /events/{eventId}/grant` | "Liberar manualmente": releases the store product of an event waiting for an account through the existing store grant; `409 no_membership` or `409 not_grantable`; idempotent |
+| `GET /events` | the latest 50 settled events (`applied`, `no_account`, `unknown_product`, `ignored`, `event_ended`, `event_cancelled`) in `(receivedAt desc, id desc)` order, with no payload, header or signature, and `serverNow`; a paid-event delivery also carries `kind: 'event'` and `eventTitle` |
+| `POST /events/{eventId}/grant` | "Liberar manualmente": releases the store product of an event waiting for an account through the existing store grant, or confirms the presence of a paid-event delivery (an unconfirmed account included); `409 no_membership`, `409 not_grantable`, `409 event_ended` or `409 event_cancelled`; idempotent |
 
 ## Events emitted
 
@@ -66,6 +66,10 @@ None.
 - Notification sources: `payments.purchase_confirmed` (kernel, 09.1-12, D-506): the buyer's one
   "Compra confirmada" in-app notice and push. Nothing else the webhook does notifies anyone (D-500:
   a revocation, a cut, a return, a refund and an event waiting for an account are silent).
+  `payments.ticket_confirmed` (kernel, 10.1-05, D-756): the payer's one "Presença confirmada em {evento}"
+  in-app notice and push when a paid-event presence is confirmed by a payment or by the admin's manual
+  release; its facts are the event id and title only, and a courtesy, a refund, a chargeback or a payment
+  for a closed event notifies nobody (A-UI-9).
 - Notification retractions: none, on purpose (A-P30): an archived product stays readable to its
   holder, so archiving must not blank the notice.
 

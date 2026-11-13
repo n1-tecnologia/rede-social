@@ -8,6 +8,7 @@ import {
   ACCESS_SOURCES,
   ACCESS_STATES,
   EVENT_ITEM_STATES,
+  eventItemSchema,
   PAYMENT_EVENT_OUTCOMES,
   PAYMENT_PRODUCT_KINDS,
   PAYMENTS_ISSUES,
@@ -155,6 +156,41 @@ describe('10.1 - the closed vocabularies of the event ticket (D-740, D-741, TICK
     for (const code of ['link_required', 'ticket_locked', 'event_ended', 'event_cancelled']) {
       expect(PAYMENTS_ISSUES as readonly string[], code).toContain(code);
     }
+  });
+
+  it('the Eventos item stays strict: kind and eventTitle are the only keys added, both optional (D-758)', () => {
+    const base = {
+      id: '1d000000-0000-4000-8000-000000000001',
+      type: 'purchase_approved',
+      state: 'applied',
+      email: null,
+      productName: null,
+      externalProductId: null,
+      outcome: null,
+      receivedAt: '2026-11-12T00:00:00.000000Z',
+    };
+    expect(eventItemSchema.safeParse(base).success).toBe(true);
+    expect(
+      eventItemSchema.safeParse({ ...base, kind: 'event', eventTitle: 'Encontro' }).success,
+    ).toBe(true);
+    expect(eventItemSchema.safeParse({ ...base, kind: 'event', eventTitle: null }).success).toBe(
+      true,
+    );
+    expect(eventItemSchema.safeParse({ ...base, orderRef: 'x' }).success).toBe(false);
+    expect(Object.keys(eventItemSchema.shape).sort()).toEqual([
+      'email',
+      'eventTitle',
+      'externalProductId',
+      'id',
+      'kind',
+      'outcome',
+      'productName',
+      'receivedAt',
+      'state',
+      'type',
+    ]);
+    expect(eventItemSchema.shape.kind.isOptional()).toBe(true);
+    expect(eventItemSchema.shape.eventTitle.isOptional()).toBe(true);
   });
 
   it('no new value is anything but lowercase snake case (the neutrality walk owns the brand rule, TICK-20)', () => {

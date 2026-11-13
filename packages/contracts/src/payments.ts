@@ -499,6 +499,10 @@ export const eventItemSchema = z
     externalProductId: z.string().nullable(),
     outcome: z.enum(PAYMENT_EVENT_OUTCOMES).nullable(),
     receivedAt: z.string(),
+    // Phase 10.1 (D-749, D-758): a paid-event delivery names its event. OPTIONAL on purpose: the web deploys
+    // before the API, and a store or access item never carries either key.
+    kind: z.enum(PAYMENT_PRODUCT_KINDS).nullable().optional(),
+    eventTitle: z.string().nullable().optional(),
   })
   .strict();
 export type EventItem = z.infer<typeof eventItemSchema>;

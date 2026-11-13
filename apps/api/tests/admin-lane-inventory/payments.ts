@@ -43,6 +43,13 @@ export const payments: readonly AdminLaneEntry[] = [
     ['readItem', 'T', 5, undefined, 'migrated'],
     ['grantEventManually', 'T', 5, undefined, 'migrated'],
     ['grantEventManually', 'T', 5, undefined, 'migrated'],
+    [
+      'releaseTicket',
+      'T',
+      10,
+      'Phase 10.1 manual release of a paid-event delivery: app.event_gateway_grant (service_role) and the settlement in one transaction, tenant from the context',
+      'migrated',
+    ],
   ]),
   ...group('packages/core/server/payments/gate.ts', [
     ['previewGate', 'T', 5, undefined, 'migrated'],
