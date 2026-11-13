@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
-current_plan: 14
+current_plan: 15
 status: executing
-stopped_at: "Completed 10.1-13-PLAN.md (13/15 plans done; next 10.1-14)"
-last_updated: "2026-11-13T12:12:56.672Z"
+stopped_at: Completed 10.1-14-PLAN.md (14/15 plans done; next 10.1-15)
+last_updated: "2026-11-13T12:28:54.530Z"
 last_activity: 2026-11-13
-last_activity_desc: "10.1-13 complete: the two closed doors, the Presença confirmada bell row, ticket delivery rows and the manual release"
-state_head: 593b94b0071e0acb0af160f820b75ea63a8ce682
+last_activity_desc: "10.1-14 complete: Participantes origin marks, Remover cortesia, Liberar presença (sheet + Não vão row) and Acima do limite"
+state_head: a34d5d1be8cea0cfab3c20f7f5cedde59d5678f2
 progress:
   total_phases: 32
   completed_phases: 0
   total_plans: 431
-  completed_plans: 401
+  completed_plans: 402
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — EXECUTING
-Current Plan: 14
+Current Plan: 15
 Total Plans in Phase: 15
-Plan: 13 of 15 complete (10.1-13 done; next 10.1-14)
+Plan: 14 of 15 complete (10.1-14 done; next 10.1-15)
 Status: Ready to execute
-Last activity: 2026-11-13 — 10.1-13 complete: the two closed doors, the Presença confirmada bell row, ticket delivery rows and the manual release
+Last activity: 2026-11-13 — 10.1-14 complete: Participantes origin marks, Remover cortesia, Liberar presença (sheet and Não vão row) and Acima do limite
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -370,6 +370,7 @@ Progress: [███████████████████░] 160/162
 | Phase 10.1 P11 | 14 min | 3 tasks | 14 files |
 | Phase 10.1 P12 | 22min | 3 tasks | 21 files |
 | Phase 10.1 P13 | 12min | 3 tasks | 25 files |
+| Phase 10.1 P14 | 14 min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -1279,6 +1280,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-13T12:12:56.346Z
-Stopped at: Completed 10.1-13-PLAN.md (13/15 plans done; next 10.1-14)
+Last session: 2026-11-13T12:28:54.222Z
+Stopped at: Completed 10.1-14-PLAN.md (14/15 plans done; next 10.1-15)
 Resume file: None
