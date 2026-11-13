@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
-current_plan: 6
+current_plan: 7
 status: executing
-stopped_at: Completed 10.1-05-PLAN.md
-last_updated: "2026-11-13T01:41:24.389Z"
+stopped_at: Completed 10.1-06-PLAN.md
+last_updated: "2026-11-13T02:01:14.859Z"
 last_activity: 2026-11-12
 last_activity_desc: Phase 10.1 execution started
-state_head: eb65322f9ac1eec22257f9a46285fb94ae5222c2
+state_head: f2ca142d1219c3ec9d83c3b269489635d11e79f2
 progress:
   total_phases: 32
   completed_phases: 0
   total_plans: 431
-  completed_plans: 394
+  completed_plans: 395
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — EXECUTING
-Current Plan: 6
+Current Plan: 7
 Total Plans in Phase: 15
-Plan: 6 of 15
+Plan: 7 of 15
 Status: Ready to execute
 Last activity: 2026-11-12 — Phase 10.1 execution started
 
@@ -363,6 +363,7 @@ Progress: [███████████████████░] 160/162
 | Phase 10.1 P03 | 12 min | 3 tasks | 8 files |
 | Phase 10.1 P04 | 12 min | 3 tasks | 8 files |
 | Phase 10.1 P05 | 30 min | 3 tasks | 17 files |
+| Phase 10.1 P06 | 16 min | 3 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -1133,6 +1134,8 @@ Recent decisions affecting current work:
 - [Phase 10.1]: 10.1-03: in a mapped event both door definers move a going holder with a plain UPDATE (the free branch keeps the walk-in upsert), because the guard judges the proposed INSERT tuple before the arbiter — Step 6b of the guard would otherwise refuse a ticket holder's check-in as payment_required
 - [Phase 10.1]: 10.1-04: the gateway grant checks the event state (cancelled, deleted, ended) before the same-order replay, so a replay after the event ended answers event_ended; user_id and event_title come back only for granted and already_in; the tenant-lane definers are not executable by service_role — plan check order; the inbox dedupes real replays; plan 05 settles on the outcome, plan 06 calls lock then reset through withTenantTx
 - [Phase 10.1]: 10.1-05: a ticket always reads the stale fact as a one-off order (recurring=false) and the manual release of a paid-event delivery settles in one admin transaction (releaseTicket) — A late approval after a refund must never regrant whatever the body says about recurrence; one transaction cannot leave a presence without its applied row
+- [Phase 10.1]: 10.1-06 A-06-PRICE: an omitted ticketPriceCents keeps the stored price and an explicit null clears it (differs from the poster key); for Igor to confirm — An older cached client that predates the key must never wipe a price it cannot see
+- [Phase 10.1]: 10.1-06: event mapping routes lock with app.event_ticket_lock; a failed PUT compensates its central route only when no mapping of the tenant still holds the key; deleteEvent frees an unsold mapping after commit and keeps one with sales — Removal and sale are serialised by one advisory key; a refund after a delete must still find the presence (D-760)
 
 ### Pending Todos
 
@@ -1264,6 +1267,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-13T01:41:24.094Z
-Stopped at: Completed 10.1-05-PLAN.md
+Last session: 2026-11-13T02:01:14.560Z
+Stopped at: Completed 10.1-06-PLAN.md
 Resume file: None
