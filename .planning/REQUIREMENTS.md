@@ -356,12 +356,12 @@ Phase 10.1 lets a tenant sell an event through its payment gateway: `admin_tenan
 - [ ] **TICK-04**: Once an event holds at least one paid presence, changing or removing its product is refused `409 ticket_locked`, serialised against concurrent grants; without paid presences the admin changes or removes it freely and removal returns the event to the instant `Vou` An event that holds paid presences can still be deleted (the soft delete): its mapping stays so a later refund still finds the presence, and an event with no paid presence releases the mapping when deleted (D-760). *(D-747)*
 - [ ] **TICK-05**: Presences that exist when the product is linked stay, are not charged and read `Anterior ao ingresso`; only answers given after the link pay *(D-748)*
 - [x] **TICK-06**: In a paid event a member's own `going` is refused `409 payment_required` by the API and by the database (guard trigger and member-lane policies), a member cannot write the origin or order columns, and a holder repeating `Vou` is answered unchanged *(D-741)*
-- [ ] **TICK-07**: An approved purchase of the event's product, matched by tenant, provider and product id and by the buyer's e-mail equal to a live member of the tenant, creates exactly one `going` presence with origin `ticket` and the gateway order reference; a replay or a second order by the same member changes nothing *(D-740, D-741, D-749)*
+- [x] **TICK-07**: An approved purchase of the event's product, matched by tenant, provider and product id and by the buyer's e-mail equal to a live member of the tenant, creates exactly one `going` presence with origin `ticket` and the gateway order reference; a replay or a second order by the same member changes nothing *(D-740, D-741, D-749)*
 - [ ] **TICK-08**: A delivery whose e-mail matches no live member is kept as `sem conta` (final, nothing waits for an account) and `Liberar manualmente` on it creates a paid presence An account whose e-mail is not confirmed is never auto-confirmed by a payment: the delivery is kept as `sem conta` the same way (D-759). *(D-749)*
-- [ ] **TICK-09**: An approved payment confirms while the event is active and not ended, even after `starts_at`; after `ends_at`, or on a cancelled or removed event, nothing is confirmed and the delivery shows `evento encerrado` or `evento cancelado` *(D-750)*
+- [x] **TICK-09**: An approved payment confirms while the event is active and not ended, even after `starts_at`; after `ends_at`, or on a cancelled or removed event, nothing is confirmed and the delivery shows `evento encerrado` or `evento cancelado` *(D-750)*
 - [ ] **TICK-10**: An approved payment at a full event confirms anyway and is flagged `acima do limite`; a member's own `Vou` over capacity is still refused and members see `Esgotado` when `going + checked_in` reaches `capacity` *(D-751)*
-- [ ] **TICK-11**: A refund or chargeback removes the going presence and frees the seat, found by tenant, provider and order reference without a member; a checked-in row stays flagged refunded; a late approval for an order already refunded is stale *(D-752)*
-- [ ] **TICK-12**: Subscription-type deliveries (`renewed`, `late`, `canceled`) on an event product are recorded and change no presence *(D-757)*
+- [x] **TICK-11**: A refund or chargeback removes the going presence and frees the seat, found by tenant, provider and order reference without a member; a checked-in row stays flagged refunded; a late approval for an order already refunded is stale *(D-752)*
+- [x] **TICK-12**: Subscription-type deliveries (`renewed`, `late`, `canceled`) on an event product are recorded and change no presence *(D-757)*
 - [ ] **TICK-13**: In a paid event the online `Entrar` and the venue-code check-in accept only a member who already holds a presence and refuse anyone else with a stable code before any code guess is counted; for an event with no product both stay as they are, walk-ins included *(D-742)*
 - [ ] **TICK-14**: The admin releases a presence without payment to any live member of the tenant (origin `courtesy`) until `ends_at`, over capacity if need be, never on a cancelled or ended event, and can remove a courtesy presence but never a paid one by hand *(D-743)*
 - [ ] **TICK-15**: A member without a presence in a paid event sees the `Pago` badge, the optional price and a single `Comprar ingresso` link to the stored purchase link with the states `Esgotado`, `Vendas encerradas`, `Venda indisponível` and `Presença confirmada`, and a confirmed member has no `Não vou` *(D-753, D-754, D-755)*
@@ -988,12 +988,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TICK-04 | Phase 10.1 | Pending |
 | TICK-05 | Phase 10.1 | Pending |
 | TICK-06 | Phase 10.1 | Complete |
-| TICK-07 | Phase 10.1 | Pending |
+| TICK-07 | Phase 10.1 | Complete |
 | TICK-08 | Phase 10.1 | Pending |
-| TICK-09 | Phase 10.1 | Pending |
+| TICK-09 | Phase 10.1 | Complete |
 | TICK-10 | Phase 10.1 | Pending |
-| TICK-11 | Phase 10.1 | Pending |
-| TICK-12 | Phase 10.1 | Pending |
+| TICK-11 | Phase 10.1 | Complete |
+| TICK-12 | Phase 10.1 | Complete |
 | TICK-13 | Phase 10.1 | Pending |
 | TICK-14 | Phase 10.1 | Pending |
 | TICK-15 | Phase 10.1 | Pending |
