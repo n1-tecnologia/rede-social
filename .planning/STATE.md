@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
-current_plan: 12
+current_plan: 13
 status: executing
-stopped_at: Completed 10.1-11-PLAN.md (11/15 plans done; next 10.1-12, wave 10)
-last_updated: "2026-11-13T11:42:57.249Z"
+stopped_at: Completed 10.1-12-PLAN.md (12/15 plans done; next 10.1-13, wave 11)
+last_updated: "2026-11-13T11:59:26.388Z"
 last_activity: 2026-11-13
-last_activity_desc: "10.1-11 complete: the Ingresso section of the event form and its second write"
-state_head: 24e190d0217c668f962d25144a713463c626002c
+last_activity_desc: "10.1-12 complete: the member side of the paid event (tag, buy zone, Presença confirmada, live swap)"
+state_head: 78a5db30bb272a3d37eb8d2a2ab11c1789e584ad
 progress:
   total_phases: 32
   completed_phases: 0
   total_plans: 431
-  completed_plans: 399
+  completed_plans: 400
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — EXECUTING
-Current Plan: 12
+Current Plan: 13
 Total Plans in Phase: 15
-Plan: 11 of 15 complete (10.1-11 done; next 10.1-12, wave 10)
+Plan: 12 of 15 complete (10.1-12 done; next 10.1-13, wave 11)
 Status: Ready to execute
-Last activity: 2026-11-13 — 10.1-11 complete: the Ingresso section of the event form and its second write
+Last activity: 2026-11-13 — 10.1-12 complete: the member side of the paid event (tag, buy zone, Presença confirmada, live swap)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -368,6 +368,7 @@ Progress: [███████████████████░] 160/162
 | Phase 10.1 P08 | 9 min | 3 tasks | 10 files |
 | Phase 10.1 P10 | 15 min | 2 tasks | 2 files |
 | Phase 10.1 P11 | 14 min | 3 tasks | 14 files |
+| Phase 10.1 P12 | 22min | 3 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -1145,6 +1146,7 @@ Recent decisions affecting current work:
 - [Phase 10.1]: 10.1-08: eventSaleState validates the link itself (safeCheckoutHref, https only) and orders cancelled, ended, under way, unavailable, full, buy; paid keys are optional and absent on free events — A free event's serialised views stay byte-identical, and no caller can hand a view an unchecked buy href (T-10.1-24).
 - [Phase 10.1]: 10.1-08: the confirmed block is not hidden after the event ends (literal UI-D-749); tenantName and gatewayName are optional context the pages of plans 12 and 13 must pass; aviso page excludes ingresso until plan 12 (A-10.1-PLUMB) — Keeps today's behaviour for ?motivo=ingresso and leaves the screen choices to the plans that draw them.
 - [Phase 10.1]: 10.1-11: a save answer carrying the recurring hint keeps the event form open so the subscription warning can be read; the price is shown disabled in the linked-but-unavailable state as sketch 021 draws it — A-UI-10 makes the hint exist only in the save answer; sketch 021 form-ingresso-vinculado-indisponivel shows every stored value disabled
+- [Phase 10.1]: 10.1-12: the paid zone's polite live region is sticky; it holds the shipped zone after the webhook swap so the confirmation is announced; a cancelled or ended paid event draws none — A region that unmounts with the content it should announce is silent; an empty wrapper would add a gap to the card body
 
 ### Pending Todos
 
@@ -1276,6 +1278,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-13T11:42:46.454Z
-Stopped at: Completed 10.1-11-PLAN.md (11/15 plans done; next 10.1-12, wave 10)
+Last session: 2026-11-13T11:59:17.847Z
+Stopped at: Completed 10.1-12-PLAN.md (12/15 plans done; next 10.1-13, wave 11)
 Resume file: None
