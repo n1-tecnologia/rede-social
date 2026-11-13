@@ -152,6 +152,7 @@
       "idMeta": "ID {externalId}",
       "ticketProduct": "Ingresso · {event}",
       "ticketProductGone": "Ingresso · evento removido",
+      "beforeOpening": "Antes da abertura",
       "noEmail": "E-mail não informado",
       "grant": "Liberar manualmente",
       "register": "Cadastrar produto",

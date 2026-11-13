@@ -210,7 +210,10 @@ describe('events.json: the member page of a paid event (UI-D-744 to UI-D-749, UI
   });
 
   it('holds no key under ticket.* that the contract does not list', () => {
-    const present = Object.keys(all).filter((key) => key.startsWith('ticket.'));
+    // `ticket.soon.*` is the Em breve zone of Phase 10.2, pinned by its own table below.
+    const present = Object.keys(all).filter(
+      (key) => key.startsWith('ticket.') && !key.startsWith('ticket.soon.'),
+    );
     const listed = Object.keys(MEMBER_TICKET).filter((key) => key.startsWith('ticket.'));
     expect(present.sort()).toEqual(listed.sort());
   });
@@ -266,7 +269,10 @@ describe('events.json: the Ingresso section of the event form (UI-D-741 to UI-D-
   });
 
   it('holds no key under form.ticket that the contract does not list', () => {
-    const present = Object.keys(all).filter((key) => key.startsWith('form.ticket.'));
+    // `form.ticket.opensAt.*` is the opening field of Phase 10.2, pinned by its own table below.
+    const present = Object.keys(all).filter(
+      (key) => key.startsWith('form.ticket.') && !key.startsWith('form.ticket.opensAt.'),
+    );
     expect(present.sort()).toEqual(Object.keys(FORM_TICKET).sort());
   });
 
@@ -662,6 +668,253 @@ describe('payments.json: the ticket deliveries and the manual release (UI-D-758,
   it('the grant dialog confirms nothing the toast then contradicts: no amount, order or webhook word', () => {
     for (const key of Object.keys(COPY).filter((k) => k.includes('grantTicketDialog'))) {
       expect(flat[key], `payments.${key}`).not.toMatch(/R\$|pedido|webhook|reembols/i);
+    }
+  });
+});
+
+/**
+ * The names a message interpolates once the bodies of its plural and select branches are taken out: a
+ * branch body such as `{Falta}` or `{dia}` is text, not a placeholder, so the plain helper above would
+ * count it.
+ */
+function icuNames(text: string): string[] {
+  let stripped = text;
+  for (;;) {
+    const next = stripped.replace(/(?:\b(?:zero|one|two|few|many|other)|=\d+)\s*\{[^{}]*\}/g, '');
+    if (next === stripped) break;
+    stripped = next;
+  }
+  return placeholders(stripped);
+}
+
+/**
+ * Phase 10.2-09 (OPEN-25, UI-D-795, UI-D-780): every new sentence of the registration opening, copied
+ * verbatim from the UI-SPEC Copywriting Contract (curly quotes, no guillemets). Not one of them needs
+ * the `{gateway}` slot: the opening is gateway-free.
+ */
+const OPENING: Record<string, { text: string; names: string[] }> = {
+  // The Em breve zone.
+  'ticket.soon.badge': { text: 'Em breve', names: [] },
+  'ticket.soon.title': { text: 'As inscrições abrem em', names: [] },
+  'ticket.soon.opensAt': { text: 'Abertura: {date}, {time}', names: ['date', 'time'] },
+  'ticket.soon.zone': { text: 'Fuso horário: {zone}', names: ['zone'] },
+  'ticket.soon.price': { text: 'Ingresso: {price}', names: ['price'] },
+  'ticket.soon.hint': {
+    text: 'Quando abrir, o botão Comprar ingresso aparece aqui sozinho.',
+    names: [],
+  },
+  'ticket.soon.opening': { text: 'Abrindo agora', names: [] },
+  'ticket.soon.milestone.day': { text: 'As inscrições abrem em menos de 1 dia.', names: [] },
+  'ticket.soon.milestone.hour': { text: 'As inscrições abrem em menos de 1 hora.', names: [] },
+  'ticket.soon.milestone.minute': { text: 'As inscrições abrem em menos de 1 minuto.', names: [] },
+  'ticket.soon.opened': { text: 'As inscrições abriram.', names: [] },
+  // The poster card.
+  'card.soonNote': { text: 'Abre em {time}', names: ['time'] },
+  'card.soonNoteLessThanMinute': { text: 'Abre em menos de 1 min', names: [] },
+  'card.soon': { text: ', evento pago, em breve, abre {date}, {time}', names: ['date', 'time'] },
+  'card.soonPrice': {
+    text: ', evento pago, em breve, abre {date}, {time}, {price}',
+    names: ['date', 'price', 'time'],
+  },
+  // The holder's countdown to the event.
+  'card.until': {
+    text: '{lead, select, one {Falta} other {Faltam}} {time}',
+    names: ['lead', 'time'],
+  },
+  'card.untilLessThanMinute': { text: 'Falta menos de 1 min', names: [] },
+  'reine.mine.until': {
+    text: '{lead, select, one {Falta} other {Faltam}} {time}',
+    names: ['lead', 'time'],
+  },
+  'reine.mine.untilLessThanMinute': { text: 'Falta menos de 1 min', names: [] },
+  'hero.until': { text: '{until} · {when}', names: ['until', 'when'] },
+  'hero.whenTomorrow': { text: 'amanhã, {time}', names: ['time'] },
+  'hero.whenToday': { text: 'hoje, {time}', names: ['time'] },
+  // The opening field of the event form.
+  'form.ticket.opensAt.legend': { text: 'Abertura das inscrições', names: [] },
+  'form.ticket.opensAt.date': { text: 'Data', names: [] },
+  'form.ticket.opensAt.time': { text: 'Hora', names: [] },
+  'form.ticket.opensAt.helper': { text: 'Opcional. Em branco, a venda abre na hora.', names: [] },
+  'form.ticket.opensAt.filled': {
+    text: 'Os membros veem “Em breve” e a contagem até esta data.',
+    names: [],
+  },
+  'form.ticket.opensAt.past': { text: 'Essa data já passou: a venda abre na hora.', names: [] },
+  'form.ticket.opensAt.clear': { text: 'Limpar abertura', names: [] },
+  'form.ticket.opensAt.locked': {
+    text: '{count, plural, one {# ingresso vendido} other {# ingressos vendidos}}. A abertura não pode mudar.',
+    names: ['count'],
+  },
+  'form.ticket.opensAt.offWarning': {
+    text: 'Sem ingresso, a abertura das inscrições é apagada ao salvar. Para vender de novo, informe a data outra vez.',
+    names: [],
+  },
+  'form.ticket.opensAt.errors.incomplete': {
+    text: 'Informe a data e a hora da abertura.',
+    names: [],
+  },
+  'form.ticket.opensAt.errors.afterStart': {
+    text: 'A abertura precisa ser antes do início do evento.',
+    names: [],
+  },
+  'form.ticket.opensAt.errors.locked': {
+    text: 'Já há ingressos vendidos. A abertura não pode mudar.',
+    names: [],
+  },
+  // The admin's mark.
+  'participants.origin.beforeOpening': { text: 'Antes da abertura', names: [] },
+};
+
+/** The countdown formatter's own keys (`countdown.*`), pinned here beside the rest of the copy. */
+const COUNTDOWN: Record<string, { text: string; names: string[] }> = {
+  'countdown.short.days': { text: '{count} d', names: ['count'] },
+  'countdown.short.hours': { text: '{count} h', names: ['count'] },
+  'countdown.short.minutes': { text: '{count} min', names: ['count'] },
+  'countdown.short.lessThanMinute': { text: 'menos de 1 min', names: [] },
+  'countdown.block.days': { text: '{count, plural, one {dia} other {dias}}', names: ['count'] },
+  'countdown.block.hours': { text: '{count, plural, one {hora} other {horas}}', names: ['count'] },
+  'countdown.block.minutes': { text: 'min', names: [] },
+  'countdown.block.lessThanMinute': { text: 'Menos de 1 min', names: [] },
+  'countdown.spoken.opening': { text: 'Tempo restante para a abertura: {time}.', names: ['time'] },
+  'countdown.spoken.event': { text: 'Tempo restante para o evento: {time}.', names: ['time'] },
+  'countdown.spoken.days': {
+    text: '{count, plural, one {# dia} other {# dias}}',
+    names: ['count'],
+  },
+  'countdown.spoken.hours': {
+    text: '{count, plural, one {# hora} other {# horas}}',
+    names: ['count'],
+  },
+  'countdown.spoken.minutes': {
+    text: '{count, plural, one {# minuto} other {# minutos}}',
+    names: ['count'],
+  },
+  'countdown.spoken.lessThanMinute': { text: 'menos de 1 minuto', names: [] },
+};
+
+describe('events.json: the registration opening and its countdown (OPEN-25, UI-D-780, UI-D-795)', () => {
+  it('carries every key of the UI-SPEC with the approved sentence', () => {
+    for (const [key, { text }] of Object.entries({ ...OPENING, ...COUNTDOWN })) {
+      expect(all[key], `missing key events.${key}`).toBe(text);
+    }
+  });
+
+  it('names every placeholder of the contract, key by key', () => {
+    for (const [key, { names }] of Object.entries({ ...OPENING, ...COUNTDOWN })) {
+      expect(icuNames(all[key] as string), `placeholders of events.${key}`).toEqual(
+        [...names].sort(),
+      );
+    }
+  });
+
+  it('holds no key under ticket.soon, form.ticket.opensAt or countdown that the contract does not list', () => {
+    for (const prefix of ['ticket.soon.', 'form.ticket.opensAt.', 'countdown.']) {
+      const present = Object.keys(all).filter((key) => key.startsWith(prefix));
+      const listed = Object.keys({ ...OPENING, ...COUNTDOWN }).filter((key) =>
+        key.startsWith(prefix),
+      );
+      expect(present.sort(), prefix).toEqual(listed.sort());
+    }
+  });
+
+  it('writes the typographic quotes of the contract, never guillemets or straight quotes', () => {
+    expect(all['form.ticket.opensAt.filled']).toContain('“Em breve”');
+    for (const key of Object.keys({ ...OPENING, ...COUNTDOWN })) {
+      expect(all[key], `events.${key}`).not.toMatch(/["«»]/);
+    }
+  });
+
+  it('formats the locked line with the ICU plural on one and many', () => {
+    expect(translate('form.ticket.opensAt.locked', { count: 1 })).toBe(
+      '1 ingresso vendido. A abertura não pode mudar.',
+    );
+    expect(translate('form.ticket.opensAt.locked', { count: 3 })).toBe(
+      '3 ingressos vendidos. A abertura não pode mudar.',
+    );
+  });
+
+  it('pluralises the block unit labels and the spoken units on one and many', () => {
+    expect(translate('countdown.block.days', { count: 1 })).toBe('dia');
+    expect(translate('countdown.block.days', { count: 2 })).toBe('dias');
+    expect(translate('countdown.block.hours', { count: 1 })).toBe('hora');
+    expect(translate('countdown.block.hours', { count: 2 })).toBe('horas');
+    expect(translate('countdown.spoken.days', { count: 1 })).toBe('1 dia');
+    expect(translate('countdown.spoken.days', { count: 2 })).toBe('2 dias');
+    expect(translate('countdown.spoken.hours', { count: 1 })).toBe('1 hora');
+    expect(translate('countdown.spoken.hours', { count: 4 })).toBe('4 horas');
+    expect(translate('countdown.spoken.minutes', { count: 1 })).toBe('1 minuto');
+    expect(translate('countdown.spoken.minutes', { count: 13 })).toBe('13 minutos');
+  });
+
+  it('takes the singular Falta from the ICU select and the plural Faltam from everything else (E04)', () => {
+    for (const key of ['card.until', 'reine.mine.until']) {
+      expect(translate(key, { lead: 'one', time: '1 h' }), key).toBe('Falta 1 h');
+      expect(translate(key, { lead: 'other', time: '12 d 4 h 13 min' }), key).toBe(
+        'Faltam 12 d 4 h 13 min',
+      );
+      // A value outside the two branches falls to `other`, never to a missing-message error.
+      expect(translate(key, { lead: 'anything', time: '2 d' }), key).toBe('Faltam 2 d');
+    }
+  });
+
+  it('fills the card, the accessible name, the zone and the hero lines as plain values', () => {
+    expect(translate('card.soonNote', { time: '2 d 4 h 13 min' })).toBe('Abre em 2 d 4 h 13 min');
+    expect(translate('card.soon', { date: '20 nov', time: '10:00' })).toBe(
+      ', evento pago, em breve, abre 20 nov, 10:00',
+    );
+    expect(translate('card.soonPrice', { date: '20 nov', time: '10:00', price: 'R$ 80,00' })).toBe(
+      ', evento pago, em breve, abre 20 nov, 10:00, R$ 80,00',
+    );
+    expect(translate('ticket.soon.opensAt', { date: '20 nov', time: '10:00' })).toBe(
+      'Abertura: 20 nov, 10:00',
+    );
+    expect(translate('ticket.soon.zone', { zone: '<b>Horário de Brasília</b>' })).toBe(
+      'Fuso horário: <b>Horário de Brasília</b>',
+    );
+    expect(translate('ticket.soon.price', { price: 'R$ 80,00' })).toBe('Ingresso: R$ 80,00');
+    expect(
+      translate('hero.until', { until: 'Faltam 12 d 4 h 13 min', when: 'seg., 12 de out.' }),
+    ).toBe('Faltam 12 d 4 h 13 min · seg., 12 de out.');
+    expect(translate('hero.whenTomorrow', { time: '10:00' })).toBe('amanhã, 10:00');
+    expect(translate('hero.whenToday', { time: '10:00' })).toBe('hoje, 10:00');
+  });
+
+  it('keeps the shipped countdown, today and live lines of a free event untouched', () => {
+    expect(translate('card.countdown', { count: 1 })).toBe('Falta 1 dia');
+    expect(translate('card.countdown', { count: 5 })).toBe('Faltam 5 dias');
+    expect(all['card.today']).toBe('É hoje!');
+    expect(all['card.live']).toBe('Acontecendo agora');
+    expect(all['hero.today']).toBe('É hoje! · {time}');
+  });
+});
+
+describe('events.json and payments.json: no new key names the gateway or takes its slot (T-10.2-13, UI-D-780)', () => {
+  const payments = leaves(messages.payments as MessageTree);
+
+  it('does not use the {gateway} placeholder in any key added by Phase 10.2', () => {
+    for (const key of Object.keys({ ...OPENING, ...COUNTDOWN })) {
+      expect(all[key], `events.${key}`).not.toMatch(/\{gateway/);
+    }
+    expect(payments['events.beforeOpening']).not.toMatch(/\{gateway/);
+  });
+
+  it('names the provider, the gateway and its jargon nowhere in the new copy', () => {
+    for (const key of Object.keys({ ...OPENING, ...COUNTDOWN })) {
+      expect(all[key], `events.${key}`).not.toMatch(/kiwify|gateway|webhook|token|pedido/i);
+    }
+  });
+
+  it('carries payments.events.beforeOpening beside the ticket delivery row', () => {
+    expect(payments['events.beforeOpening']).toBe('Antes da abertura');
+    expect(placeholders(payments['events.beforeOpening'] as string)).toEqual([]);
+  });
+
+  it('keeps the whole namespaces free of the provider name', () => {
+    for (const [key, text] of Object.entries(all)) {
+      expect(text, `events.${key}`).not.toMatch(/kiwify/i);
+    }
+    for (const [key, text] of Object.entries(payments)) {
+      expect(text, `payments.${key}`).not.toMatch(/kiwify/i);
     }
   });
 });

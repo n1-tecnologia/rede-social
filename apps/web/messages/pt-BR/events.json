@@ -53,10 +53,31 @@
       "city": "{city}, {state}",
       "paid": ", evento pago",
       "paidPrice": ", evento pago, {price}",
-      "priceNote": "{price} · {note}"
+      "priceNote": "{price} · {note}",
+      "soonNote": "Abre em {time}",
+      "soonNoteLessThanMinute": "Abre em menos de 1 min",
+      "soon": ", evento pago, em breve, abre {date}, {time}",
+      "soonPrice": ", evento pago, em breve, abre {date}, {time}, {price}",
+      "until": "{lead, select, one {Falta} other {Faltam}} {time}",
+      "untilLessThanMinute": "Falta menos de 1 min"
     },
     "ticket": {
       "badge": "Pago",
+      "soon": {
+        "badge": "Em breve",
+        "title": "As inscrições abrem em",
+        "opensAt": "Abertura: {date}, {time}",
+        "zone": "Fuso horário: {zone}",
+        "price": "Ingresso: {price}",
+        "hint": "Quando abrir, o botão Comprar ingresso aparece aqui sozinho.",
+        "opening": "Abrindo agora",
+        "milestone": {
+          "day": "As inscrições abrem em menos de 1 dia.",
+          "hour": "As inscrições abrem em menos de 1 hora.",
+          "minute": "As inscrições abrem em menos de 1 minuto."
+        },
+        "opened": "As inscrições abriram."
+      },
       "cta": {
         "buy": "Comprar ingresso",
         "buyPrice": "Comprar ingresso · {price}",
@@ -157,7 +178,10 @@
       "tomorrow": "Amanhã · {time}",
       "today": "É hoje! · {time}",
       "live": "Acontecendo agora",
-      "happened": "Aconteceu em {date}"
+      "happened": "Aconteceu em {date}",
+      "until": "{until} · {when}",
+      "whenTomorrow": "amanhã, {time}",
+      "whenToday": "hoje, {time}"
     },
     "info": {
       "date": "Data",
@@ -340,6 +364,22 @@
           "priceInvalid": "Informe um valor em reais, como 80,00.",
           "locked": "Já há ingressos vendidos. O produto não pode mudar.",
           "save": "Evento salvo, mas não foi possível salvar o ingresso. Tente novamente."
+        },
+        "opensAt": {
+          "legend": "Abertura das inscrições",
+          "date": "Data",
+          "time": "Hora",
+          "helper": "Opcional. Em branco, a venda abre na hora.",
+          "filled": "Os membros veem “Em breve” e a contagem até esta data.",
+          "past": "Essa data já passou: a venda abre na hora.",
+          "clear": "Limpar abertura",
+          "locked": "{count, plural, one {# ingresso vendido} other {# ingressos vendidos}}. A abertura não pode mudar.",
+          "offWarning": "Sem ingresso, a abertura das inscrições é apagada ao salvar. Para vender de novo, informe a data outra vez.",
+          "errors": {
+            "incomplete": "Informe a data e a hora da abertura.",
+            "afterStart": "A abertura precisa ser antes do início do evento.",
+            "locked": "Já há ingressos vendidos. A abertura não pode mudar."
+          }
         }
       },
       "when": {
@@ -579,7 +619,8 @@
         "courtesy": "Cortesia",
         "beforeTicket": "Anterior ao ingresso",
         "refunded": "Reembolsado",
-        "overLimit": "Acima do limite"
+        "overLimit": "Acima do limite",
+        "beforeOpening": "Antes da abertura"
       },
       "release": {
         "door": "Liberar presença",
@@ -773,6 +814,8 @@
         "participated": "Participados",
         "today": "É hoje!",
         "countdown": "{count, plural, one {Falta # dia} other {Faltam # dias}}",
+        "until": "{lead, select, one {Falta} other {Faltam}} {time}",
+        "untilLessThanMinute": "Falta menos de 1 min",
         "contentHours": "{hours}h de conteúdo",
         "code": "Código {code}",
         "checkin": "Fazer check-in",
