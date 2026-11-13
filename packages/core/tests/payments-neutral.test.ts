@@ -154,9 +154,9 @@ describe('the files of the paid-event work name no gateway (EP-34, TICK-20)', ()
     web: listDir('apps/web/lib', (n) => n === 'event-ticket.ts'),
   });
 
-  it('walked the nine ticket migrations, the ticket pgTAP file, the spec and the web library', () => {
+  it('walked the eleven ticket migrations, the ticket pgTAP file, the spec and the web library', () => {
     const groups = ticketFiles();
-    expect(groups.migrations.length).toBeGreaterThanOrEqual(9);
+    expect(groups.migrations.length).toBeGreaterThanOrEqual(11);
     expect(groups.pgtap).toHaveLength(1);
     expect(groups.e2e).toHaveLength(1);
     expect(groups.web).toHaveLength(1);
