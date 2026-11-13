@@ -49,6 +49,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 09.3: Pendências de backend do FRONT.pdf (INSERTED)** - Delete an event and delete an archived community (today "Em breve"), the longer limits of the event schedule and the highlight name, and the Android app icon that fills the whole circle: the five corrections of the client's FRONT.pdf that need the backend
 - [ ] **Phase 09.4: Projeto do tenant no Supabase do cliente (INSERTED)** - A tenant can run on a Supabase project in its own account: a scoped access token limited to that one project is stored sealed per project and used for every Management API call about it, with the organisation pin, the allow-list, the rate limiter, the health and the panel working per project
 - [x] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
+- [x] **Phase 10.1: Rede Social - Ingresso pago do evento pela Kiwify (INSERTED)** - An event linked to a Kiwify product confirms a member's presence only after that product's purchase is approved (matched by gateway product id and e-mail); a refund or chargeback removes it and frees the seat; an event with no linked product keeps the automatic RSVP (completed 2026-11-13)
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 - [x] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it right after their first login, members without a completed profile and members who had completed it before the form existed answer it too
 - [ ] **Phase 13: App nativo iOS e Android por tenant (white-label)** - Post-MVP, additive: each tenant gets its own native iOS and Android app (stage 1: a native shell around the web's own screens), fixed to the tenant's host, with every feature of the web app (member area and tenant admin), native push and links that open the app; the web, the PWA and the API stay as they are for a browser
@@ -2083,6 +2084,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 09.2. Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED) | 24/28 | In Progress|  |
 | 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 9/9 | Complete    | 2026-10-27 |
 | 10. Rede Social - Member Stories and Communities | 15/15 | Complete    | 2026-11-12 |
+| 10.1. Rede Social - Ingresso pago do evento pela Kiwify (INSERTED) | 19/19 | Complete    | 2026-11-13 |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |
