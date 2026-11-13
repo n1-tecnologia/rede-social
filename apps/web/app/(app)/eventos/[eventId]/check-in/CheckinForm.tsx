@@ -11,7 +11,7 @@ import { returnAfterSave } from '@/lib/form-exit';
 import { type CheckinActionResult, checkInEventAction } from '../../actions';
 
 /** The inline refusals, by the catalog key each one prints. */
-type CheckinError = 'wrongCode' | 'tooManyAttempts' | 'notOpen' | 'cancelled' | 'failed';
+type CheckinError = 'wrongCode' | 'tooManyAttempts' | 'notOpen' | 'cancelled' | 'paid' | 'failed';
 
 /** What the member typed, in the stored shape: uppercase, no whitespace or hyphens. */
 const normalize = (raw: string) => raw.toUpperCase().replace(/[\s-]+/g, '');
@@ -42,7 +42,9 @@ const DONE_SPRING = { type: 'spring', stiffness: 420, damping: 22, delay: 0.08 }
  *  - `wrong_code`: the value stays and is SELECTED for retyping (the guess is already counted);
  *  - `too_many_attempts`: the submit stays disabled until the page is refreshed (D-217);
  *  - `checkin_not_open` / `checkin_closed` / `cancelled` (a race): the inline sentence, then
- *    `router.refresh()`, and the page swaps in the event's state.
+ *    `router.refresh()`, and the page swaps in the event's state;
+ *  - `payment_required` (Phase 10.1-13, UI-D-752): a paid event and no presence: the inline "O check-in é
+ *    só para quem tem ingresso.", then the same refresh into the `paid` section.
  *
  * **Done.** The in-place swap: the 56px brand circle springs in (`motion/react`, the prototype's
  * stiffness 420 / damping 22 / delay 0.08; no scale under `prefers-reduced-motion`), then
@@ -162,6 +164,11 @@ export function CheckinForm({
         setError('cancelled');
         startTransition(() => router.refresh());
         return;
+      case 'payment_required':
+        // Phase 10.1-13 (D-742, UI-D-752): a paid event and no presence, a race with a stale page.
+        setError('paid');
+        startTransition(() => router.refresh());
+        return;
       default:
         setError('failed');
     }
@@ -187,6 +194,7 @@ export function CheckinForm({
     tooManyAttempts: t('checkin.errors.tooManyAttempts'),
     notOpen: t('checkin.errors.notOpen'),
     cancelled: t('errors.cancelled'),
+    paid: t('checkin.paid'),
     failed: t('checkin.errors.failed'),
   };
   const message = error === null ? undefined : messages[error];

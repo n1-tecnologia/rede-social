@@ -176,7 +176,9 @@ export type CheckinRefusal =
   | 'too_many_attempts'
   | 'checkin_not_open'
   | 'checkin_closed'
-  | 'cancelled';
+  | 'cancelled'
+  // Phase 10.1-13 (D-742): the database refused a check-in in a paid event without a presence.
+  | 'payment_required';
 
 /**
  * What a check-in can answer. `doneLine` is the finished "Realizado às 18:42" (or "… em {date}, às
@@ -194,6 +196,7 @@ const CHECKIN_REFUSALS: ReadonlySet<string> = new Set<CheckinRefusal>([
   'checkin_not_open',
   'checkin_closed',
   'cancelled',
+  'payment_required',
 ]);
 
 /**

@@ -17,8 +17,9 @@ import {
  * member's answer, the online check-in and whether the meeting URL may leave the database at all:
  *  - `forward` / `recorded` / `already` → **303 to the stored meeting URL** — the ONLY moment the URL
  *    reaches the member's browser, and only as this `Location` header (D-207, T-06-35);
- *  - `ended` / `cancelled` / `confirm_first` → 303 to the ONE refusal layout,
- *    `/eventos/{id}/entrar/aviso?motivo=encerrado|cancelado|confirmar` (UI-D-209);
+ *  - `ended` / `cancelled` / `confirm_first` / `ticket_required` → 303 to the ONE refusal layout,
+ *    `/eventos/{id}/entrar/aviso?motivo=encerrado|cancelado|confirmar|ingresso` (UI-D-209; the fourth
+ *    is Phase 10.1's, D-742, UI-D-751: a paid event and no presence yet, with `meetingUrl` null);
  *  - not found (unknown, another tenant's, removed or in person) → 303 to the detail, whose not-found
  *    screen answers (D-23); a bootstrap refusal → its own path (login, blocked, host mismatch…); a
  *    failure → the detail, which renders its retry screen.
@@ -95,7 +96,7 @@ function httpsTarget(raw: string | null): string | null {
   }
 }
 
-/** The refusal layout's path for one reason; the reason is one of three literals, never input. */
+/** The refusal layout's path for one reason; the reason is one of four literals, never input. */
 function noticePath(eventId: string, reason: EnterNoticeReason): string {
   if (!ENTER_NOTICE_REASONS.includes(reason)) return `/eventos/${eventId}`;
   return `/eventos/${eventId}/entrar/aviso?motivo=${reason}`;
@@ -133,6 +134,7 @@ export async function GET(
     case 'ended':
     case 'cancelled':
     case 'confirm_first':
+    case 'ticket_required':
       // 5. The refusal names its reason on the one layout (UI-D-209).
       return seeOther(noticePath(id, ENTER_NOTICE_FOR[outcome]));
     default:

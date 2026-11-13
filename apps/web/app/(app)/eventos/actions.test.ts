@@ -1,8 +1,13 @@
 import { revalidatePath } from 'next/cache';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClientError } from '@/lib/bootstrap';
-import { createEvent, loadEvent, putRsvp, updateEvent } from '@/lib/events';
-import { createEventAction, rsvpEventAction, updateEventAction } from './actions';
+import { checkIn, createEvent, loadEvent, putRsvp, updateEvent } from '@/lib/events';
+import {
+  checkInEventAction,
+  createEventAction,
+  rsvpEventAction,
+  updateEventAction,
+} from './actions';
 
 /**
  * 12.3-08 — how a refused image comes back from the event write actions (NOVF-04, UI-D-693).
@@ -201,5 +206,41 @@ describe('the RSVP refusals of a paid event (D-741, D-754, UI-D-753)', () => {
     vi.mocked(putRsvp).mockResolvedValue({ status: 'going' } as never);
     expect(await rsvpEventAction(EVENT, 'going')).toEqual({ ok: true, status: 'going' });
     expect(revalidatePath).toHaveBeenCalledWith('/eventos');
+  });
+});
+
+/**
+ * Phase 10.1-13 (D-742, UI-D-752) — how a refused venue-code submit comes back for a paid event without a
+ * presence: `409 details.event = 'payment_required'` is the CLOSED code the form maps to its inline
+ * "O check-in é só para quem tem ingresso." and a refresh. The shipped refusals keep their codes.
+ */
+describe('the check-in refusals of a paid event (D-742, UI-D-752)', () => {
+  beforeEach(() => {
+    vi.mocked(checkIn).mockReset();
+  });
+  const refused = (event: string) => new ApiClientError(409, 'CONFLICT', { event }, 'req-1');
+
+  it('payment_required is the closed code payment_required', async () => {
+    vi.mocked(checkIn).mockRejectedValue(refused('payment_required'));
+    expect(await checkInEventAction(EVENT, 'K7QM')).toEqual({
+      ok: false,
+      error: 'payment_required',
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('the shipped refusals keep their codes; an unknown code stays the generic failure', async () => {
+    for (const code of [
+      'wrong_code',
+      'too_many_attempts',
+      'checkin_not_open',
+      'checkin_closed',
+      'cancelled',
+    ]) {
+      vi.mocked(checkIn).mockRejectedValue(refused(code));
+      expect(await checkInEventAction(EVENT, 'K7QM')).toEqual({ ok: false, error: code });
+    }
+    vi.mocked(checkIn).mockRejectedValue(refused('ticket_required'));
+    expect(await checkInEventAction(EVENT, 'K7QM')).toEqual({ ok: false, error: 'failed' });
   });
 });

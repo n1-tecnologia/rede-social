@@ -53,6 +53,7 @@ vi.mock('../../actions', () => ({ checkInEventAction: checkIn }));
 vi.mock('@/lib/form-exit', () => ({ returnAfterSave }));
 
 const { CheckinForm } = await import('./CheckinForm');
+const { CheckinState } = await import('./CheckinState');
 
 const C = catalog as {
   checkin: {
@@ -61,6 +62,9 @@ const C = catalog as {
     submitting: string;
     doneTitle: string;
     doneBack: string;
+    paid: string;
+    closed: string;
+    notOpenYet: string;
     errors: { wrongCode: string; tooManyAttempts: string; notOpen: string; failed: string };
   };
   errors: { cancelled: string };
@@ -211,6 +215,8 @@ describe('CheckinForm — the open section (UI-D-208, E08)', () => {
       ['checkin_closed', C.checkin.errors.notOpen],
       ['checkin_not_open', C.checkin.errors.notOpen],
       ['cancelled', C.errors.cancelled],
+      // Phase 10.1-13 (D-742, UI-D-752): a paid event and no presence, from a page rendered earlier.
+      ['payment_required', C.checkin.paid],
     ] as const) {
       refresh.mockReset();
       checkIn.mockResolvedValue({ ok: false, error });
@@ -292,5 +298,80 @@ describe('CheckinForm — the done state (UI-D-208, E08/populated)', () => {
     );
     expect(screen.queryByTestId('checkin-form')).toBeNull();
     expect(checkIn).not.toHaveBeenCalled();
+  });
+});
+
+describe('CheckinState — the paid section (Phase 10.1-13, D-742, UI-D-752, T-10.1-05, T-10.1-24)', () => {
+  const E = catalog as { enter: { cta: string }; ticket: { cta: { buy: string; newTab: string } } };
+  const BUY = 'https://pay.example.test/ingresso';
+  const paid = {
+    detailHref: DETAIL,
+    buyLabel: E.ticket.cta.buy,
+    newTabLabel: E.ticket.cta.newTab,
+    detailLabel: E.enter.cta,
+  };
+  const section = (buyHref: string | null) =>
+    ({ kind: 'paid', sentence: C.checkin.paid, buyHref, price: null }) as const;
+
+  it('draws the Lock block and the sentence, then the brand buy anchor above the outline "Ver evento"', () => {
+    const { container } = render(<CheckinState section={section(BUY)} paid={paid} />);
+    const state = screen.getByTestId('checkin-state');
+    expect(state.getAttribute('data-kind')).toBe('paid');
+    expect(container.querySelector('svg.lucide-lock')?.getAttribute('width')).toBe('28');
+    expect(screen.getByText(C.checkin.paid).className).toContain('max-w-[280px]');
+
+    const links = screen.getAllByRole('link');
+    expect(links).toHaveLength(2);
+    const [buy, view] = links as HTMLAnchorElement[];
+    expect(buy?.textContent).toContain(E.ticket.cta.buy);
+    expect(buy?.textContent).toContain(E.ticket.cta.newTab);
+    expect(buy?.getAttribute('href')).toBe(BUY);
+    expect(buy?.getAttribute('target')).toBe('_blank');
+    expect(buy?.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(buy?.className).toContain('bg-button');
+    expect(view?.textContent).toBe(E.enter.cta);
+    expect(view?.getAttribute('href')).toBe(DETAIL);
+    expect(view?.className).toContain('border-border-secondary');
+    expect(view?.className).not.toContain('bg-button');
+    // The card's ONE brand fill, and no controls at all.
+    expect(container.querySelectorAll('.bg-button')).toHaveLength(1);
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('without a purchase link only the outline "Ver evento" remains', () => {
+    render(<CheckinState section={section(null)} paid={paid} />);
+    const links = screen.getAllByRole('link');
+    expect(links).toHaveLength(1);
+    expect(links[0]?.textContent).toBe(E.enter.cta);
+  });
+
+  it.each([
+    ['http://pay.example.test/x'],
+    ['javascript:alert(1)'],
+    ['https://user:pw@pay.example.test/x'],
+    ['nao e uma url'],
+  ])('a link that is not a clean https: URL (%s) never becomes an anchor (T-10.1-24)', (href) => {
+    render(<CheckinState section={section(href)} paid={paid} />);
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+    expect(screen.queryByTestId('ticket-door-buy')).toBeNull();
+  });
+
+  it('shows no code form, no "abre 1 hora antes" sentence and no venue code for a non-holder (T-10.1-05)', () => {
+    const { container } = render(<CheckinState section={section(BUY)} paid={paid} />);
+    expect(screen.queryByTestId('checkin-form')).toBeNull();
+    expect(screen.queryByLabelText(C.checkin.codeLabel)).toBeNull();
+    expect(container.querySelector('input')).toBeNull();
+    expect(container.textContent).not.toMatch(/1 hora antes/);
+  });
+
+  it('the other closed sections keep their block with no actions (a free or closed event is unchanged)', () => {
+    for (const kind of ['notOpenYet', 'closed', 'cancelled'] as const) {
+      const { container, unmount } = render(
+        <CheckinState section={{ kind, sentence: 'frase' }} paid={paid} />,
+      );
+      expect(screen.getByTestId('checkin-state').getAttribute('data-kind')).toBe(kind);
+      expect(container.querySelector('a')).toBeNull();
+      unmount();
+    }
   });
 });

@@ -320,3 +320,39 @@ describe('events.json: the Ingresso section of the event form (UI-D-741 to UI-D-
     expect(all['form.ticket.linkedUnavailable']).toContain('“Venda indisponível”');
   });
 });
+
+/**
+ * Phase 10.1-13 (UI-D-751, UI-D-752): the copy of the two closed doors. Member surfaces, so the gateway
+ * is never named and no placeholder exists.
+ */
+const DOORS: Record<string, { text: string; names: string[] }> = {
+  'enter.ticketRequired.title': { text: 'Este evento tem ingresso', names: [] },
+  'enter.ticketRequired.body': {
+    text: 'O link da transmissão é só para quem tem ingresso. Compre o seu na página do evento.',
+    names: [],
+  },
+  'checkin.paid': { text: 'O check-in é só para quem tem ingresso.', names: [] },
+};
+
+describe('events.json: the closed doors of a paid event (UI-D-751, UI-D-752)', () => {
+  it('carries every key with the approved sentence and no placeholder', () => {
+    for (const [key, { text, names }] of Object.entries(DOORS)) {
+      expect(all[key], `missing key events.${key}`).toBe(text);
+      expect(placeholders(all[key] as string), `placeholders of events.${key}`).toEqual(names);
+    }
+  });
+
+  it('never names the gateway on a member surface and never hints at the link or the code', () => {
+    for (const key of Object.keys(DOORS)) {
+      expect(all[key], `events.${key}`).not.toMatch(/gateway|webhook|token|pedido|kiwify/i);
+      expect(all[key], `events.${key}`).not.toMatch(/https?:|código do evento/i);
+    }
+  });
+
+  it('keeps the three old refusal reasons and the shared "Ver evento"', () => {
+    expect(all['enter.ended.title']).toBe('Este evento já terminou');
+    expect(all['enter.cancelled.title']).toBe('Este evento foi cancelado');
+    expect(all['enter.confirmFirst.title']).toBe('Confirme sua presença');
+    expect(all['enter.cta']).toBe('Ver evento');
+  });
+});

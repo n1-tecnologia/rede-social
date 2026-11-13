@@ -21,7 +21,8 @@ import { CheckinState } from './CheckinState';
  * id (D-23): `loadEvent`'s single `not-found`, then `notFound()`, outside any try/catch.
  *
  * **ONE request instant** decides the bottom section (`eventTicketView`): done, cancelled, closed,
- * not open yet (with "…, às 18:00" or "…, em {date}, às 18:00"), or the code form. It only decides
+ * paid without a presence (Phase 10.1-13, D-742, UI-D-752: the Lock block with "Comprar ingresso" when
+ * the sale is open and "Ver evento"; no code form, no "abre 1 hora antes"), not open yet (with "…, às 18:00" or "…, em {date}, às 18:00"), or the code form. It only decides
  * what to DRAW: whether a check-in lands is `app.events_check_in`'s call, and a race (the window
  * closes or the event is cancelled while the member types) comes back as the form's inline refusal,
  * then a refresh swaps in the state. Every string is built on the server in the TENANT's timezone.
@@ -90,7 +91,15 @@ export default async function CheckinPage({ params }: { params: Promise<{ eventI
               doneLine={view.section.kind === 'done' ? view.section.doneLine : null}
             />
           ) : (
-            <CheckinState section={view.section} />
+            <CheckinState
+              section={view.section}
+              paid={{
+                detailHref,
+                buyLabel: t('ticket.cta.buy'),
+                newTabLabel: t('ticket.cta.newTab'),
+                detailLabel: t('enter.cta'),
+              }}
+            />
           )}
         </EventTicket>
         <p className="flex items-center justify-center gap-2 px-4 pt-4 text-center text-xs text-text-tertiary">

@@ -90,11 +90,22 @@ describe('/entrar — the gate’s answer becomes a 303', () => {
     ['ended', 'encerrado'],
     ['cancelled', 'cancelado'],
     ['confirm_first', 'confirmar'],
+    // Phase 10.1-13 (D-742, UI-D-751): a paid event and no presence yet.
+    ['ticket_required', 'ingresso'],
   ])('%s lands on the aviso reason %s', async (outcome, reason) => {
     enter.mockResolvedValue(ok(outcome, null));
     const res = await call();
     expect(res.status).toBe(303);
     expect(res.headers.get('location')).toBe(`/eventos/${ID}/entrar/aviso?motivo=${reason}`);
+  });
+
+  it('ticket_required never forwards: a null meeting URL, the ingresso notice, no URL anywhere', async () => {
+    enter.mockResolvedValue(ok('ticket_required', null));
+    const res = await call();
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe(`/eventos/${ID}/entrar/aviso?motivo=ingresso`);
+    expect(res.headers.get('location')).not.toContain('http');
+    expect(res.headers.get('cache-control')).toBe('no-store');
   });
 
   it('not-found and an error land on the detail; a bootstrap refusal on its own path', async () => {

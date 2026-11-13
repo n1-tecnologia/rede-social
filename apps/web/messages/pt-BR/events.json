@@ -199,6 +199,7 @@
       "opensAt": "às {time}",
       "opensOn": "em {date}, às {time}",
       "closed": "O check-in deste evento foi encerrado.",
+      "paid": "O check-in é só para quem tem ingresso.",
       "tip": "Peça o código à organização, no local do evento.",
       "errors": {
         "wrongCode": "Código incorreto. Confira o código com a organização do evento.",
@@ -225,6 +226,10 @@
       "confirmFirst": {
         "title": "Confirme sua presença",
         "body": "O link fica disponível para quem confirmou presença. A partir de 1 hora antes do início, ele abre para todos."
+      },
+      "ticketRequired": {
+        "title": "Este evento tem ingresso",
+        "body": "O link da transmissão é só para quem tem ingresso. Compre o seu na página do evento."
       },
       "cta": "Ver evento"
     },
