@@ -17,7 +17,7 @@ begin;
 --    positive control of the plain `rsvp` insert.
 --
 -- Fixture ids use the `1e320000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(12);
+select plan(24);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-opn-a', 'Abertura A', '1e320000-0000-4000-8000-000000000001');
@@ -78,6 +78,59 @@ select tests.as_tenant('1e320000-0000-4000-8000-000000000002', '1e320000-0000-40
 select is(
   (select count(*)::int from public.events where id = '1e320000-0000-4000-8000-0000000000e1'),
   0, 'T-10.2-04: a member of ANOTHER tenant cannot read the event, so not its opening');
+reset role;
+
+-- ── 2. the confirmation instant ───────────────────────────────────────────────────────────────
+select col_type_is('public', 'event_attendances', 'ticket_confirmed_at', 'timestamp with time zone', 'D-791: event_attendances.ticket_confirmed_at is timestamptz');
+select col_is_null('public', 'event_attendances', 'ticket_confirmed_at', 'D-791: event_attendances.ticket_confirmed_at is nullable (every earlier row reads null)');
+select col_hasnt_default('public', 'event_attendances', 'ticket_confirmed_at', 'D-791: event_attendances.ticket_confirmed_at has no default');
+
+-- EP-52 (populated half): rows written BEFORE the change stand in as two rows that name neither new column.
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at) values
+  ('1e320000-0000-4000-8000-000000000001', '1e320000-0000-4000-8000-0000000000e1', '1e320000-0000-4000-8000-0000000000c1', 'going', now());
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  ('1e320000-0000-4000-8000-000000000001', '1e320000-0000-4000-8000-0000000000e1', '1e320000-0000-4000-8000-0000000000c2', 'going', now(), 'courtesy');
+select is(
+  (select count(*)::int from public.event_attendances
+    where event_id = '1e320000-0000-4000-8000-0000000000e1' and ticket_confirmed_at is null)
+  + (select count(*)::int from public.events where id = '1e320000-0000-4000-8000-0000000000e2' and registration_opens_at is null),
+  3, 'EP-52: rows that existed before the change read null in both new columns (the marker treats null as not early)');
+
+-- A row written the way the shipped member lane writes it (origin rsvp, no order columns) reads null.
+select is(
+  (select ticket_confirmed_at is null and origin = 'rsvp' from public.event_attendances
+    where user_id = '1e320000-0000-4000-8000-0000000000c1'),
+  true, 'D-791: an rsvp row written the shipped way reads a null confirmation instant');
+
+-- A ticket row accepts the instant and accepts null.
+select lives_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref, ticket_confirmed_at) values ('1e320000-0000-4000-8000-000000000001', '1e320000-0000-4000-8000-0000000000e1', '1e320000-0000-4000-8000-0000000000c3', 'going', now(), 'ticket', 'fake', 'ORD-OPN-1', now()) $$,
+  'D-791: a ticket row accepts a confirmation instant');
+select lives_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values ('1e320000-0000-4000-8000-000000000001', '1e320000-0000-4000-8000-0000000000e1', '1e320000-0000-4000-8000-0000000000c4', 'going', now(), 'ticket', 'fake', 'ORD-OPN-2') $$,
+  'D-791: a ticket row accepts a null confirmation instant (a ticket confirmed before this change)');
+
+-- T-10.2-03: only a ticket row may carry the instant; the constraint name is probed.
+select throws_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, ticket_confirmed_at) values ('1e320000-0000-4000-8000-000000000001', '1e320000-0000-4000-8000-0000000000e1', '1e320000-0000-4000-8000-0000000000c5', 'going', now(), 'rsvp', now()) $$,
+  '23514', 'new row for relation "event_attendances" violates check constraint "event_attendances_ticket_confirmed_chk"',
+  'T-10.2-03: an rsvp row carrying a confirmation instant is refused (event_attendances_ticket_confirmed_chk)');
+select throws_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, ticket_confirmed_at) values ('1e320000-0000-4000-8000-000000000001', '1e320000-0000-4000-8000-0000000000e1', '1e320000-0000-4000-8000-0000000000c5', 'going', now(), 'courtesy', now()) $$,
+  '23514', 'new row for relation "event_attendances" violates check constraint "event_attendances_ticket_confirmed_chk"',
+  'T-10.2-03: a courtesy row carrying a confirmation instant is refused (event_attendances_ticket_confirmed_chk)');
+select is(
+  (select count(*)::int from pg_constraint where conname in ('events_registration_opens_chk', 'event_attendances_ticket_confirmed_chk')),
+  2, 'both CHECKs of the phase exist by name');
+
+-- No policy changed: the member lane still cannot forge a ticket, and the plain rsvp insert still works.
+select tests.as_tenant('1e320000-0000-4000-8000-000000000001', '1e320000-0000-4000-8000-0000000000c6');
+select throws_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref, ticket_confirmed_at) values ('1e320000-0000-4000-8000-000000000001', '1e320000-0000-4000-8000-0000000000e1', '1e320000-0000-4000-8000-0000000000c6', 'going', now(), 'ticket', 'fake', 'ORD-FORGED', now()) $$,
+  '42501', null, 'T-10.2-03: a member forging origin ticket is still refused by the policy');
+select lives_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at) values ('1e320000-0000-4000-8000-000000000001', '1e320000-0000-4000-8000-0000000000e1', '1e320000-0000-4000-8000-0000000000c6', 'going', now()) $$,
+  'T-10.2-03 positive control: the plain rsvp insert of a member still works');
 reset role;
 
 select * from finish();
