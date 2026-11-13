@@ -7,13 +7,19 @@ import {
   attendanceSummarySchema,
   attendeeSchema,
   CHECKIN_OUTCOMES,
+  COURTESY_OUTCOMES,
   checkinCodeSchema,
   checkinResultSchema,
   checkinSchema,
+  courtesyBodySchema,
+  courtesyHoldersQuerySchema,
+  courtesyHoldersSchema,
+  courtesyResultSchema,
   ENTER_OUTCOMES,
   ENTER_PASSING_OUTCOMES,
   EVENT_CHECKIN_FAILED_WINDOW_MINUTES,
   EVENT_CHECKIN_MAX_FAILED,
+  EVENT_COURTESY_MAX_HOLDER_IDS,
   EVENT_ISSUE_SET,
   EVENT_ISSUES,
   EVENT_MAX_CAPACITY,
@@ -915,5 +921,67 @@ describe('2026-11-13 — the reference price of a ticket (10.1-06, D-755, EP-02,
     for (const key of ['paid', 'overLimit'] as const) {
       expect(attendanceSummarySchema.shape[key].isOptional(), key).toBe(true);
     }
+  });
+});
+
+describe('10.1-07 - the courtesy contracts (D-743, A-UI-6)', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const other = '22222222-2222-4222-8222-222222222222';
+
+  it('45. the body is EITHER a membershipId OR an attendanceId, strict on both arms', () => {
+    expect(courtesyBodySchema.safeParse({ membershipId: id }).success).toBe(true);
+    expect(courtesyBodySchema.safeParse({ attendanceId: id }).success).toBe(true);
+    for (const bad of [
+      {},
+      { membershipId: id, attendanceId: other },
+      { membershipId: id, userId: other },
+      { membershipId: id, origin: 'ticket' },
+      { membershipId: 'not-a-uuid' },
+      { attendanceId: 5 },
+      { tenantId: id },
+    ]) {
+      expect(courtesyBodySchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('46. the answer is exactly granted | already_in and nothing else', () => {
+    expect([...COURTESY_OUTCOMES]).toEqual(['granted', 'already_in']);
+    expect(courtesyResultSchema.safeParse({ outcome: 'granted' }).success).toBe(true);
+    expect(courtesyResultSchema.safeParse({ outcome: 'already_in' }).success).toBe(true);
+    expect(courtesyResultSchema.safeParse({ outcome: 'removed' }).success).toBe(false);
+    expect(courtesyResultSchema.safeParse({ outcome: 'granted', userId: id }).success).toBe(false);
+  });
+
+  it('47. the holders query takes 0..50 comma-separated uuids and refuses a 51st or a malformed id', () => {
+    expect(EVENT_COURTESY_MAX_HOLDER_IDS).toBe(50);
+    expect(courtesyHoldersQuerySchema.parse({}).membershipIds).toEqual([]);
+    expect(courtesyHoldersQuerySchema.parse({ membershipIds: '' }).membershipIds).toEqual([]);
+    expect(
+      courtesyHoldersQuerySchema.parse({ membershipIds: `${id},${other}` }).membershipIds,
+    ).toEqual([id, other]);
+    const many = (count: number) =>
+      Array.from(
+        { length: count },
+        (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      );
+    expect(
+      courtesyHoldersQuerySchema.safeParse({ membershipIds: many(50).join(',') }).success,
+    ).toBe(true);
+    expect(
+      courtesyHoldersQuerySchema.safeParse({ membershipIds: many(51).join(',') }).success,
+    ).toBe(false);
+    for (const bad of ['x', `${id},x`, `${id},,${other}`, 'a'.repeat(3000)]) {
+      expect(courtesyHoldersQuerySchema.safeParse({ membershipIds: bad }).success, bad).toBe(false);
+    }
+    expect(courtesyHoldersQuerySchema.safeParse({ membershipIds: id, extra: 1 }).success).toBe(
+      false,
+    );
+  });
+
+  it('48. the holders answer carries membership ids only', () => {
+    expect(courtesyHoldersSchema.safeParse({ holders: [id] }).success).toBe(true);
+    expect(courtesyHoldersSchema.safeParse({ holders: [] }).success).toBe(true);
+    expect(courtesyHoldersSchema.safeParse({ holders: ['x'] }).success).toBe(false);
+    expect(courtesyHoldersSchema.safeParse({ holders: [id], names: [] }).success).toBe(false);
   });
 });
