@@ -4586,7 +4586,7 @@ event in the event form. Until that last step an event behaves exactly as before
 
 ### What ships
 
-- **Nine migrations, all expand-only, applied in timestamp order** (TICK-22; the order `ls supabase/migrations`
+- **Eleven migrations, all expand-only, applied in timestamp order** (TICK-22; the order `ls supabase/migrations`
   prints, all after `20261112182228_member_content_write_gates.sql`). Each applies on an EMPTY tenant project and on
   an existing one: defaults backfill and no row is required by any of them.
   1. `20261113001315_event_tickets.sql` (generated): the third mapping kind `event` with its own `event_id` column on
@@ -4609,6 +4609,12 @@ event in the event form. Until that last step an event behaves exactly as before
      the sales lock, the reset and the holders read.
   9. `20261113010607_event_ticket_reads.sql` (hand-written): four tenant-pinned reads (`event_is_paid`,
      `event_checkout_url`, `event_ticket_admin`, `event_title_for`).
+  10. `20261113141716_event_ticket_bookkeeping_lock.sql` (hand-written): the attendance guard refuses a member's change
+     of the origin or order columns of the member's own row, constraint `event_attendances_bookkeeping_locked` (gap
+     CR-01, TICK-06). It replaces the function that item 5 created, so it applies after item 9.
+  11. `20261113144645_event_gateway_grant_replay_first.sql` (hand-written): the gateway grant answers an order that
+     already holds a presence as already confirmed in every state of the event, marker `WR-03 replay first` (gap
+     WR-03, TICK-09). It replaces the function that item 7 created, so it applies after item 10.
 - **The web.** The event form's Ingresso section, the Pago tag, the Comprar ingresso zone and the Presença
   confirmada block with its live swap, the two closed doors, the bell row, Participantes with its origin marks and
   Liberar presença, and the ticket rows of Pagamentos. The web reads every new key of the API as optional.
@@ -4630,7 +4636,8 @@ select column_name from information_schema.columns
 -- B. Which of this release's versions are already recorded? (expected before the release: no row)
 select version from supabase_migrations.schema_migrations
  where version in ('20261113001315', '20261113001325', '20261113003640', '20261113003644', '20261113003918',
-                   '20261113004658', '20261113005835', '20261113010200', '20261113010607') order by version;
+                   '20261113004658', '20261113005835', '20261113010200', '20261113010607', '20261113141716',
+                   '20261113144645') order by version;
 -- C. Which tenants have the payments module on (the only ones that can link a product to an event)?
 select tenant_id, enabled from public.tenant_modules where module_key = 'payments';
 ```
@@ -4638,8 +4645,8 @@ select tenant_id, enabled from public.tenant_modules where module_key = 'payment
 Then, from the repository, the two local checks that need no project:
 
 - `pnpm db:migrate-all -- --dry-run` lists the pending versions per project and writes nothing; on a project that
-  already has the Phase 12.3 release the nine files above are the pending ones.
-- The expand-only grep over the nine files prints nothing:
+  already has the Phase 12.3 release the eleven files above are the pending ones.
+- The expand-only grep over the eleven files prints nothing:
   `grep -inE 'drop (table|column)|rename|set not null|alter column .* type' supabase/migrations/*_event_ticket*.sql
   supabase/migrations/*_event_gateway*.sql supabase/migrations/*_event_courtesy*.sql`.
   **The documented exception** is not matched by that pattern and is not a drop of data: the generated file
@@ -4649,7 +4656,7 @@ Then, from the repository, the two local checks that need no project:
 
 ### Order
 
-1. Migrations on every tenant database first, through the ledgered fan-out (the Phase 09.2 Cloud Run Job `migrateAll`, D-544: databases before the services); the nine files apply in the order of their names, the runner is serialised per database and idempotent, so a re-run is safe. Locally, `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole tenant set to an empty second local database.
+1. Migrations on every tenant database first, through the ledgered fan-out (the Phase 09.2 Cloud Run Job `migrateAll`, D-544: databases before the services); the eleven files apply in the order of their names, the runner is serialised per database and idempotent, so a re-run is safe. Locally, `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole tenant set to an empty second local database.
 2. Web second, once every project is current.
 3. API and worker last and together, from a REBUILT image (the image bakes the migrations manifest built by `scripts/build-migrations-manifest.mjs`; an image built before these files does not know them, and a production boot without the manifest stops with `migrations manifest empty`).
 
@@ -4668,6 +4675,11 @@ the API step is done.
 - **Old code writes the default origin.** The previous API inserts attendances without the new columns, so they take
   `origin = 'rsvp'` and no order columns, which is exactly what the pinned member policies accept.
 - **The old code never selects the new columns, tables or functions**, so it keeps working against the new database.
+- **The two function replacements of the gap round are safe during the fan-out.** Items 10 and 11 replace functions
+  with unchanged signatures and change no table, column, grant or API contract. The previous API revision never
+  writes the guarded columns as a member and reaches the grant only through the apply job's unchanged call, so it
+  keeps working against the new database. The one visible difference: a re-sent approval of an order already
+  confirmed settles as no effect instead of "evento encerrado" once the event is over.
 - **The closed outcome list is widened, never narrowed.** An older reader of `payment_events` keeps reading every row
   written before the first ticket sells (see the rollback limit below for the rows after it).
 
@@ -4708,6 +4720,16 @@ select count(*) from public.event_attendances where origin <> 'rsvp';
 -- 0 on a project where no ticket was ever sold
 ```
 
+And two more read-only queries, which only read, to prove that the two gap-round replacements (items 10 and 11)
+reached the project (ledger row P20):
+
+```sql
+select pg_get_functiondef('app.event_attendance_guard()'::regprocedure) like '%event_attendances_bookkeeping_locked%';
+-- t
+select pg_get_functiondef('app.event_gateway_grant(uuid,uuid,uuid,text,text,boolean)'::regprocedure) like '%WR-03 replay first%';
+-- t
+```
+
 And in the app, on a test event of a tenant with the payments module on and a gateway connected:
 
 - Link a product to a new test event in the event form (Cobrar ingresso: product id, https link, reference price).
@@ -4723,6 +4745,12 @@ And in the app, on a test event of a tenant with the payments module on and a ga
 - **The first real sale and its real refund are unproven** (the product id format and the refund's order id have
   only been seen in the gateway's test deliveries). Ledger row TICK-24.
 - **`putStoreMapping` has a latent compensation race** noticed during the phase; worth a quick task.
+- **Three review findings remain open advisories for the developer to decide** (ledger row P21): WR-02 (a gateway
+  product can stay bound to a deleted event when the release after the delete fails), WR-04 (a failed second write on
+  creating a paid event leaves it published with the free Vou open until the product is linked; the accepted order of
+  D-744) and IN-01 (the tenant-wide select policy lets a member lane that can run direct SQL read other members'
+  origin and order references; the Data API is closed; it needs a quick task or an accepted-risk record beside
+  D-206).
 
 ### Manual proofs (hosted)
 
