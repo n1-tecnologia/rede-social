@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
-current_plan: 0
+current_plan: 2
 status: executing
-stopped_at: "Phase 10.1 planned: 15 plans, plan-checker 0 blockers, ready to execute (plans 09 and 10 produce sketch 021; its approval is Igor's)"
-last_updated: "2026-11-12T23:04:58.757Z"
+stopped_at: Completed 10.1-01-PLAN.md
+last_updated: "2026-11-13T00:19:29.493Z"
 last_activity: 2026-11-12
-last_activity_desc: Phase 10.1 planned (15 plans)
-state_head: eff5ec34111402c6db7b12c0b34622eef044fb5e
+last_activity_desc: Phase 10.1 execution started
+state_head: 20b42cd82e578587031ebcacd2eff5fd7baab6f1
 progress:
   total_phases: 32
   completed_phases: 0
   total_plans: 431
-  completed_plans: 388
+  completed_plans: 389
   percent: 0
 ---
 
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — READY TO EXECUTE
-Current Plan: 0
+Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — EXECUTING
+Current Plan: 2
 Total Plans in Phase: 15
-Plan: 0 of 15
-Status: Ready to execute Phase 10.1 (15 plans in 13 waves; plans 11-14 wait for the sketch 021 approval)
-Last activity: 2026-11-12 — Phase 10.1 planned (15 plans)
+Plan: 2 of 15
+Status: Ready to execute
+Last activity: 2026-11-12 — Phase 10.1 execution started
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -357,6 +357,7 @@ Progress: [███████████████████░] 160/162
 | Phase 13 P13 | 22min | 3 tasks | 19 files |
 | Phase 13 P14 | 24 min | 3 tasks | 22 files |
 | Phase 13 P31 | 33 min | 3 tasks | 24 files |
+| Phase 10.1 P01 | 30 min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -1121,6 +1122,7 @@ Recent decisions affecting current work:
 - [Phase 13]: 13-14: the blocked-author predicate sits in the shared feedPage (main, Explorar, community, Reels), the post detail, comment roots, replies and thread; the social service has no content read and is untouched
 - [Phase 13]: 13-31: the reviewer account is a plain member created in the tenant's own project under a per-tenant advisory lock, its 24-character password sealed as reviewer_password and rotatable; no_primary_host and reviewer_missing travel as 409 CONFLICT with details.reason; the store contact is an operator input (--contact-*) refused with contact_missing before any store call, since no tenant support contact is stored
 - [Phase 13]: 13-31: the listing description comes from a fixed module table with no sentence for store, payments or social, the Review Notes say purchases happen outside the app, and the listing push calls only typed client methods (no review submission, price, territory or track endpoint exists); publish pushes the listing first unless --skip-listing
+- [Phase 10.1]: 10.1-01: event ticket mapping carried by its own nullable payment_products.event_id (not target_id); no attendance status added, origin derived and never backfilled — target_id has an unconditional store FK; a presence made before the link stays rsvp
 
 ### Pending Todos
 
@@ -1252,6 +1254,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-12T23:04:40.617Z
-Stopped at: Phase 10.1 planned: 15 plans, plan-checker 0 blockers, ready to execute (plans 09 and 10 produce sketch 021; its approval is Igor's)
-Resume file: .planning/phases/10.1-rede-social-ingresso-pago-do-evento-pela-kiwify/10.1-01-PLAN.md
+Last session: 2026-11-13T00:19:29.192Z
+Stopped at: Completed 10.1-01-PLAN.md
+Resume file: None

@@ -1577,12 +1577,12 @@ Plans:
 **Goal:** An event can be linked to a Kiwify product (not a store product of the system); a member's presence is confirmed only after that product's purchase is approved, matched by the gateway product id and the buyer's e-mail; a refund or chargeback removes the presence and frees the seat; a payment that arrives at a full event still confirms; an event with no linked product keeps the automatic RSVP.
 **Requirements**: TICK-01..TICK-24
 **Depends on:** Phase 10 (and, for the base it extends, Phase 06 events and Phase 09.1 payment gateway)
-**Plans:** 15 plans
+**Plans:** 1/15 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 10.1-01-PLAN.md — Schema and vocabularies: the `event` mapping kind, the origin and order columns, the reference price (expand-only migrations, pgTAP 205 and 233)
+- [x] 10.1-01-PLAN.md — Schema and vocabularies: the `event` mapping kind, the origin and order columns, the reference price (expand-only migrations, pgTAP 205 and 233)
 - [ ] 10.1-09-PLAN.md — Sketch 021: the 71 frames of the prototype-less Phase 10.1 surfaces
 
 **Wave 2** *(blocked on Wave 1 completion)*
