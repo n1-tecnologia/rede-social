@@ -6,6 +6,9 @@ import {
   accessProductPatchSchema,
   EVENT_ITEM_STATES,
   eventItemSchema,
+  eventMappingBodySchema,
+  eventMappingResponseSchema,
+  eventMappingSavedSchema,
   eventsResponseSchema,
   gateBodySchema,
   gatePreviewSchema,
@@ -375,6 +378,86 @@ describe('storeMappingBodySchema (A-P12, UI-D-524)', () => {
     expect(
       storeMappingBodySchema.parse({ externalProductId: 'p', checkoutUrl: '' }).checkoutUrl,
     ).toBeNull();
+  });
+});
+
+describe('eventMappingBodySchema (Phase 10.1, D-744, D-745)', () => {
+  const link = 'https://pay.example.com/ingresso';
+
+  it('accepts a trimmed id with a link', () => {
+    expect(
+      eventMappingBodySchema.parse({ externalProductId: ' p-1 ', checkoutUrl: ` ${link} ` }),
+    ).toEqual({ externalProductId: 'p-1', checkoutUrl: link });
+  });
+
+  it('needs BOTH fields: a body with only one of them is refused with that field\u2019s own code', () => {
+    const onlyId = eventMappingBodySchema.safeParse({ externalProductId: 'p-1' });
+    expect(onlyId.success).toBe(false);
+    expect(issuesOf(onlyId)).toEqual(['link_required']);
+    const onlyLink = eventMappingBodySchema.safeParse({ checkoutUrl: link });
+    expect(onlyLink.success).toBe(false);
+    expect(issuesOf(onlyLink)).toEqual(['gateway_product_id_required']);
+    expect(issuesOf(eventMappingBodySchema.safeParse({}))).toEqual([
+      'gateway_product_id_required',
+      'link_required',
+    ]);
+  });
+
+  it('an empty or blank value is the required code alone, never a second shape issue', () => {
+    expect(
+      issuesOf(eventMappingBodySchema.safeParse({ externalProductId: 'p', checkoutUrl: '' })),
+    ).toEqual(['link_required']);
+    expect(
+      issuesOf(eventMappingBodySchema.safeParse({ externalProductId: 'p', checkoutUrl: '   ' })),
+    ).toEqual(['link_required']);
+    expect(
+      issuesOf(eventMappingBodySchema.safeParse({ externalProductId: '  ', checkoutUrl: link })),
+    ).toEqual(['gateway_product_id_required']);
+  });
+
+  it('refuses a link that is not https with link_invalid and an over-long id with product_id_too_long', () => {
+    for (const bad of [
+      'http://x.com/a',
+      'javascript:alert(1)',
+      'pay.example.com/a',
+      'https://a b',
+    ]) {
+      expect(
+        issuesOf(eventMappingBodySchema.safeParse({ externalProductId: 'p', checkoutUrl: bad })),
+        bad,
+      ).toEqual(['link_invalid']);
+    }
+    expect(
+      issuesOf(
+        eventMappingBodySchema.safeParse({ externalProductId: 'x'.repeat(129), checkoutUrl: link }),
+      ),
+    ).toEqual(['product_id_too_long']);
+  });
+
+  it('is strict: an unknown key fails the parse', () => {
+    expect(
+      eventMappingBodySchema.safeParse({ externalProductId: 'p', checkoutUrl: link, provider: 'x' })
+        .success,
+    ).toBe(false);
+  });
+
+  it('the answer schemas list only the pair and the hints (T-10.1-11), the PUT hint optional', () => {
+    expect(Object.keys(eventMappingResponseSchema.shape).sort()).toEqual([
+      'connected',
+      'locked',
+      'mapping',
+      'recurring',
+      'soldCount',
+    ]);
+    expect(Object.keys(eventMappingSavedSchema.shape).sort()).toEqual([
+      'checkoutUrl',
+      'externalProductId',
+      'recurring',
+    ]);
+    expect(eventMappingSavedSchema.shape.recurring.isOptional()).toBe(true);
+    expect(
+      eventMappingSavedSchema.safeParse({ externalProductId: 'p', checkoutUrl: link }).success,
+    ).toBe(true);
   });
 });
 

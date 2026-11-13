@@ -78,6 +78,13 @@ export const payments: readonly AdminLaneEntry[] = [
     ['saveIntegration', 'T', 5, undefined, 'migrated'],
     ['saveIntegration', 'T', 10, 'the write after the central route was reserved', 'migrated'],
     ['releaseOrphanIntegrationRoute', 'T', 10, 'compensation read', 'migrated'],
+    [
+      'hasRecurringDelivery',
+      'T',
+      6,
+      'Phase 10.1 recurring hint of an event mapping: payment_events has no policy, so a tenant-pinned read of one product id, tenant from the context',
+      'migrated',
+    ],
   ]),
   ...group('packages/core/server/payments/status.ts', [
     ['getSubscriptionStatus', 'T', 5, undefined, 'migrated'],

@@ -301,6 +301,28 @@ export const storeMappingBodySchema = z
   });
 export type StoreMappingBody = z.infer<typeof storeMappingBodySchema>;
 
+/**
+ * `PUT /v1/payments/event-products/{eventId}` (Phase 10.1, D-744, D-745): the gateway product that sells the
+ * ticket of an event. BOTH fields are required (the event form is the single writer): the gateway's product
+ * id, and the purchase link the member opens, which is `https:` only. Each refusal is its own machine code.
+ */
+export const eventMappingBodySchema = z
+  .object({
+    externalProductId: z
+      .string({ error: 'gateway_product_id_required' })
+      .trim()
+      .min(1, 'gateway_product_id_required')
+      .max(PAYMENTS_MAX_PRODUCT_ID, 'product_id_too_long'),
+    checkoutUrl: z
+      .string({ error: 'link_required' })
+      .trim()
+      .min(1, 'link_required')
+      // An empty value is `link_required` alone; the shape rule never adds a second issue to it.
+      .refine((value) => value === '' || isCheckoutLink(value), 'link_invalid'),
+  })
+  .strict();
+export type EventMappingBody = z.infer<typeof eventMappingBodySchema>;
+
 /** `PUT /v1/payments/gate`: the switch, and whether to release the members who already exist (D-491, PAY-31). */
 export const gateBodySchema = z
   .object({ required: z.boolean(), releaseExisting: z.boolean().optional() })
@@ -356,6 +378,38 @@ export const storeMappingResponseSchema = z.object({
   mapping: storeMappingSchema.nullable(),
 });
 export type StoreMappingResponse = z.infer<typeof storeMappingResponseSchema>;
+
+/**
+ * The stored pair of an event ticket (Phase 10.1, D-744). `checkoutUrl` is nullable in the READ only: a row
+ * seeded by hand may carry none; the PUT requires one. Never the sealed token, a payload or another tenant's
+ * id (T-10.1-11): these two keys are everything a mapping answer says about the product.
+ */
+export const eventMappingSchema = z.object({
+  externalProductId: z.string(),
+  checkoutUrl: z.string().nullable(),
+});
+export type EventMapping = z.infer<typeof eventMappingSchema>;
+
+/**
+ * `GET` and `DELETE /v1/payments/event-products/{eventId}` (D-747, D-757): the mapping (or null), whether the
+ * tenant has an integration, how many ticket presences exist (`soldCount`), `locked` (`soldCount > 0`: the
+ * pair can no longer change or go) and `recurring` (a delivery of that product was a subscription, the only
+ * honest source of the form's subscription warning).
+ */
+export const eventMappingResponseSchema = z.object({
+  connected: z.boolean(),
+  mapping: eventMappingSchema.nullable(),
+  soldCount: z.number().int().min(0),
+  locked: z.boolean(),
+  recurring: z.boolean(),
+});
+export type EventMappingResponse = z.infer<typeof eventMappingResponseSchema>;
+
+/** The `PUT` answer: the saved pair plus the same `recurring` hint, optional so an older web still parses it. */
+export const eventMappingSavedSchema = eventMappingSchema.extend({
+  recurring: z.boolean().optional(),
+});
+export type EventMappingSaved = z.infer<typeof eventMappingSavedSchema>;
 
 export const gatePreviewSchema = z.object({
   /**

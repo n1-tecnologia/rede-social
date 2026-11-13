@@ -17,6 +17,7 @@ import {
   deleteStoreMapping,
   getOverview,
   getStoreMapping,
+  putEventMapping,
   putStoreMapping,
   removeAccessProduct,
   saveIntegration,
@@ -32,6 +33,8 @@ import {
   accessProductSchema,
   accessResultSchema,
   eventItemSchema,
+  eventMappingBodySchema,
+  eventMappingSavedSchema,
   eventsResponseSchema,
   gateBodySchema,
   gatePreviewSchema,
@@ -315,6 +318,41 @@ const deleteStoreMappingRoute = createRoute({
   },
 });
 
+// A path id that is not a uuid is the same bare 404 as an unknown one (D-23), so the service checks the shape
+// instead of the router answering a 400. Declared HERE (not beside `eventParamSchema` further down) because the
+// routes below build at module load.
+const eventProductParamSchema = z.object({ eventId: z.string().min(1).max(64) });
+
+const putEventMappingRoute = createRoute({
+  method: 'put',
+  path: '/event-products/{eventId}',
+  middleware: [requirePermission('payments.manage')] as const,
+  request: {
+    params: eventProductParamSchema,
+    body: { content: { 'application/json': { schema: eventMappingBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'Links the gateway product that sells the ticket of an event (Phase 10.1, D-744, D-745). BOTH `externalProductId` (1 to 128 characters after trimming) and `checkoutUrl` (an `https:` URL, at most 2048 characters) are required. Answers the saved pair plus `recurring`, true when a delivery of that product was a subscription (the form warns). Saving the same pair twice writes nothing the second time. Once a ticket exists the pair cannot change (`409 ticket_locked`), but sending the SAME pair is still a success.',
+      content: { 'application/json': { schema: eventMappingSavedSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.payments`: `gateway_product_id_required`, `link_required`, `link_invalid` (not `https:`, a space, a userinfo) or `product_id_too_long`; an unknown key is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `payments.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the event is unknown, another tenant’s, removed or not a uuid. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.payments`: `gateway_product_taken` (the gateway id is held by another registration) or `ticket_locked` (a ticket was already confirmed for this event and the pair would change; nothing is written).',
+    },
+  },
+});
+
 const listAccessesRoute = createRoute({
   method: 'get',
   path: '/accesses',
@@ -486,6 +524,12 @@ export const paymentsRoutes = payments
   )
   .openapi(deleteStoreMappingRoute, async (c) =>
     c.json(await deleteStoreMapping(c.get('ctx'), c.req.valid('param').productId), 200),
+  )
+  .openapi(putEventMappingRoute, async (c) =>
+    c.json(
+      await putEventMapping(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('json')),
+      200,
+    ),
   )
   .openapi(listAccessesRoute, async (c) =>
     c.json(await listAccesses(c.get('ctx'), c.req.valid('query')), 200),

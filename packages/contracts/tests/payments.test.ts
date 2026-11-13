@@ -9,6 +9,7 @@ import {
   ACCESS_STATES,
   EVENT_ITEM_STATES,
   eventItemSchema,
+  eventMappingBodySchema,
   PAYMENT_EVENT_OUTCOMES,
   PAYMENT_PRODUCT_KINDS,
   PAYMENTS_ISSUES,
@@ -197,5 +198,39 @@ describe('10.1 - the closed vocabularies of the event ticket (D-740, D-741, TICK
     for (const code of [...PAYMENT_PRODUCT_KINDS, ...PAYMENT_EVENT_OUTCOMES, ...PAYMENTS_ISSUES]) {
       expect(code, code).toMatch(/^[a-z][a-z0-9_]*$/);
     }
+  });
+});
+
+describe('10.1 - the event mapping body (D-744, D-745, TICK-23)', () => {
+  const link = 'https://pay.example.com/ingresso';
+  const messages = (value: unknown) =>
+    eventMappingBodySchema.safeParse(value).error?.issues.map((issue) => issue.message) ?? [];
+
+  it('is strict and needs BOTH fields: one alone is refused with its own code', () => {
+    expect(
+      eventMappingBodySchema.safeParse({ externalProductId: 'p', checkoutUrl: link }).success,
+    ).toBe(true);
+    expect(messages({ externalProductId: 'p' })).toEqual(['link_required']);
+    expect(messages({ checkoutUrl: link })).toEqual(['gateway_product_id_required']);
+    expect(messages({ externalProductId: 'p', checkoutUrl: link, extra: 1 })).not.toEqual([]);
+  });
+
+  it('EP-02: the product id boundary is 128 characters and the link boundary 2048, https only', () => {
+    const ok = (externalProductId: string, checkoutUrl: string) =>
+      eventMappingBodySchema.safeParse({ externalProductId, checkoutUrl }).success;
+    expect(ok('x'.repeat(128), link)).toBe(true);
+    expect(ok('x'.repeat(129), link)).toBe(false);
+    const prefix = 'https://pay.example.com/';
+    expect(ok('p', prefix + 'a'.repeat(2048 - prefix.length))).toBe(true);
+    expect(ok('p', prefix + 'a'.repeat(2049 - prefix.length))).toBe(false);
+    expect(messages({ externalProductId: 'p', checkoutUrl: 'http://pay.example.com/a' })).toEqual([
+      'link_invalid',
+    ]);
+    expect(messages({ externalProductId: 'p', checkoutUrl: 'javascript:alert(1)' })).toEqual([
+      'link_invalid',
+    ]);
+    expect(messages({ externalProductId: 'p', checkoutUrl: 'pay.example.com/a' })).toEqual([
+      'link_invalid',
+    ]);
   });
 });

@@ -2,6 +2,9 @@ import type {
   AccessProduct,
   AccessProductBody,
   AccessProductPatch,
+  EventMappingBody,
+  EventMappingResponse,
+  EventMappingSaved,
   PaymentsOverview,
   RemoveAccessProductResult,
   SaveIntegrationBody,
@@ -10,7 +13,7 @@ import type {
 } from '@rede-social/contracts/payments';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
-import { paymentIntegrations, paymentProducts } from '../../db/schema';
+import { paymentEvents, paymentIntegrations, paymentProducts } from '../../db/schema';
 import { type Tx, withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 import { env } from '../env';
@@ -630,4 +633,174 @@ export async function deleteStoreMapping(
     await releaseProduct(ctx.tenantId, removed.provider, removed.externalProductId, 'retired');
   }
   return { connected, mapping: null };
+}
+
+// ── Phase 10.1: the mapping of a paid event (D-744 to D-747, D-755, D-757, D-760) ─────────────────────
+
+/**
+ * THE LOCK. `app.event_ticket_lock(event)` (plan 04) answers `found` (the event is the caller's, live, and the
+ * caller is an `admin_tenant`: a foreign, unknown or removed event is `found = false`, so the bare 404) and
+ * `sold` (the ticket presences) AFTER taking the per-event advisory lock that the sale's grant definer takes
+ * too. Every mapping write and read of an event starts here, so a removal and a grant of one event are
+ * serialised: one of them sees the other's outcome. The lock is transaction-scoped; it ends with the tx.
+ */
+async function lockEvent(tx: Tx, eventId: string): Promise<number> {
+  const [row] = rowsOf<{ found: boolean; sold: number }>(
+    await tx.execute(sql`select found, sold from app.event_ticket_lock(${eventId}::uuid)`),
+  );
+  if (!row?.found) throw new ApiError(404, 'NOT_FOUND');
+  return Number(row.sold);
+}
+
+/** `ticket_locked`: the pair cannot change or go once a ticket exists. A stale tab changes nothing. */
+const ticketLocked = () => new ApiError(409, 'CONFLICT', { payments: 'ticket_locked' });
+
+type EventMappingRow = {
+  provider: string;
+  externalProductId: string;
+  checkoutUrl: string | null;
+};
+
+/** The event's one mapping row, tenant pinned (the unique `(tenant_id, event_id) where kind = 'event'`). */
+async function eventMappingOf(
+  tx: Tx,
+  tenantId: string,
+  eventId: string,
+): Promise<EventMappingRow | null> {
+  const [row] = await tx
+    .select({
+      provider: paymentProducts.provider,
+      externalProductId: paymentProducts.externalProductId,
+      checkoutUrl: paymentProducts.checkoutUrl,
+    })
+    .from(paymentProducts)
+    .where(
+      and(
+        eq(paymentProducts.tenantId, tenantId),
+        eq(paymentProducts.kind, 'event'),
+        eq(paymentProducts.eventId, eventId),
+      ),
+    );
+  return row ?? null;
+}
+
+/**
+ * D-757: whether any delivery of that gateway product was a subscription (`recurring = true`). The only
+ * honest source of the form's "this product charges every month" warning. `payment_events` has no policy,
+ * so this is the tenant-pinned admin lane; the product id is globally unique per provider, and the tenant
+ * predicate keeps another tenant's deliveries out.
+ */
+async function hasRecurringDelivery(tenantId: string, externalProductId: string): Promise<boolean> {
+  const rows = await withAdminTx({ tenantId }, (tx) =>
+    tx
+      .select({ id: paymentEvents.id })
+      .from(paymentEvents)
+      .where(
+        and(
+          eq(paymentEvents.tenantId, tenantId),
+          eq(paymentEvents.externalProductId, externalProductId),
+          eq(paymentEvents.recurring, true),
+        ),
+      )
+      .limit(1),
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Whether ANY mapping of the tenant still holds that gateway key. A failed PUT compensates the central
+ * route it inserted, but the same tenant can reserve one key twice (the second sees `inserted: false`), so
+ * the winner of a race may be holding the very route the loser would delete: the compensation runs only when
+ * no mapping holds the key (EP-05).
+ */
+async function keyIsMapped(
+  ctx: RequestContext,
+  provider: string,
+  externalProductId: string,
+): Promise<boolean> {
+  return withTenantTx(ctx, async (tx) => {
+    const [row] = await tx
+      .select({ id: paymentProducts.id })
+      .from(paymentProducts)
+      .where(
+        and(
+          eq(paymentProducts.tenantId, ctx.tenantId),
+          eq(paymentProducts.provider, provider),
+          eq(paymentProducts.externalProductId, externalProductId),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  });
+}
+
+/**
+ * `PUT /v1/payments/event-products/{eventId}` (D-744, D-745, D-747): upserts THE mapping of that event.
+ * `putStoreMapping` line by line, with the sales lock added:
+ *  1. the central route is reserved FIRST (a product id another registration holds is `gateway_product_taken`
+ *     before any tenant row exists);
+ *  2. one `withTenantTx` takes the event lock (a foreign or unknown event is the bare 404), refuses a CHANGED
+ *     pair when `sold > 0` (`ticket_locked`, nothing written; the SAME pair is idempotent success), and
+ *     upserts on `(tenant_id, event_id) where kind = 'event'`;
+ *  3. an error compensates the reservation it inserted and a unique violation on the global index is
+ *     `gateway_product_taken`;
+ *  4. the previous key is retired after commit.
+ * Saving the same pair again writes nothing (`updated_at` stays), the event form being the single writer.
+ */
+export async function putEventMapping(
+  ctx: RequestContext,
+  eventId: string,
+  body: EventMappingBody,
+): Promise<EventMappingSaved> {
+  if (!UUID_SHAPE.test(eventId)) throw new ApiError(404, 'NOT_FOUND');
+  const integration = await readIntegration(ctx.tenantId);
+  const provider = integration?.provider ?? defaultProvider();
+  const { externalProductId, checkoutUrl } = body;
+  // Reserve the gateway id centrally FIRST (D-488); the previous mapping's route is retired after the commit.
+  const inserted = await reserveProduct(ctx.tenantId, provider, externalProductId);
+  let previous: EventMappingRow | null = null;
+  try {
+    await withTenantTx(ctx, async (tx) => {
+      const sold = await lockEvent(tx, eventId);
+      previous = await eventMappingOf(tx, ctx.tenantId, eventId);
+      const same =
+        previous !== null &&
+        previous.provider === provider &&
+        previous.externalProductId === externalProductId &&
+        previous.checkoutUrl === checkoutUrl;
+      if (same) return;
+      if (sold > 0) throw ticketLocked();
+      await tx
+        .insert(paymentProducts)
+        .values({
+          tenantId: ctx.tenantId,
+          provider,
+          kind: 'event',
+          eventId,
+          externalProductId,
+          checkoutUrl,
+          createdByUserId: ctx.userId,
+        })
+        .onConflictDoUpdate({
+          target: [paymentProducts.tenantId, paymentProducts.eventId],
+          targetWhere: sql`kind = 'event'`,
+          set: { provider, externalProductId, checkoutUrl, updatedAt: new Date() },
+        });
+    });
+  } catch (error) {
+    if (inserted && !(await keyIsMapped(ctx, provider, externalProductId))) {
+      await releaseProduct(ctx.tenantId, provider, externalProductId, 'compensation');
+    }
+    if (isProductTaken(error)) throw gatewayProductTaken();
+    throw error;
+  }
+  const old = previous as EventMappingRow | null;
+  if (old && (old.provider !== provider || old.externalProductId !== externalProductId)) {
+    await releaseProduct(ctx.tenantId, old.provider, old.externalProductId, 'retired');
+  }
+  return {
+    externalProductId,
+    checkoutUrl,
+    recurring: await hasRecurringDelivery(ctx.tenantId, externalProductId),
+  };
 }
