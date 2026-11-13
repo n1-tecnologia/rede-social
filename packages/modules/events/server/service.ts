@@ -615,6 +615,11 @@ const GUARD_ISSUES: Readonly<Record<string, EventIssue>> = {
   event_attendances_locked: 'attendance_locked',
   event_attendances_checkin_window: 'checkin_not_open',
   event_attendances_capacity: 'event_full',
+  // Phase 10.1 (`*_event_ticket_guard*.sql`): the closed door of a paid event (D-741), the lock on a
+  // paid or courtesy presence (D-754) and the paid path's own end (D-750).
+  event_attendances_payment_required: 'payment_required',
+  event_attendances_ticket_locked: 'ticket_locked',
+  event_attendances_event_ended: 'event_ended',
 };
 
 /**
@@ -687,6 +692,34 @@ async function fullEventAnswer(
     throw new ApiError(409, 'CONFLICT', { event: 'attendance_locked' });
   }
   throw new ApiError(409, 'CONFLICT', { event: 'event_full' });
+}
+
+/**
+ * What a `payment_required` refusal means for THIS caller (10.1, D-741), read in a fresh transaction
+ * exactly as `fullEventAnswer` does. The guard judges the proposed INSERT tuple before the arbiter, so
+ * a holder who answers Vou again trips it too: an existing `going` is the repeat answer it always was
+ * (200, nothing written, nothing emitted), a check-in is `attendance_locked`, and anything else is
+ * `409 payment_required`.
+ */
+async function paymentRequiredAnswer(
+  ctx: RequestContext,
+  eventId: string,
+): Promise<{ status: AttendanceStatus; changed: null }> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<{ status: AttendanceStatus }>(sql`
+      select status
+        from event_attendances
+       where tenant_id = ${ctx.tenantId}::uuid
+         and event_id = ${eventId}::uuid
+         and user_id = ${ctx.userId}::uuid
+       limit 1`),
+  );
+  const status = rows[0]?.status;
+  if (status === 'going') return { status, changed: null };
+  if (status === 'checked_in' || status === 'walk_in') {
+    throw new ApiError(409, 'CONFLICT', { event: 'attendance_locked' });
+  }
+  throw new ApiError(409, 'CONFLICT', { event: 'payment_required' });
 }
 
 /**
@@ -779,6 +812,8 @@ export async function rsvpEvent(
     if (issue === 'not_found') throw new ApiError(404, 'NOT_FOUND');
     if (issue === 'event_full') {
       outcome = await fullEventAnswer(ctx, eventId);
+    } else if (issue === 'payment_required') {
+      outcome = await paymentRequiredAnswer(ctx, eventId);
     } else if (issue) {
       throw new ApiError(409, 'CONFLICT', { event: issue });
     } else {

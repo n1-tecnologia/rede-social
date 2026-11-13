@@ -242,6 +242,15 @@ export const eventSecrets = pgTable(
 const SELF_RSVP = sql`tenant_id = app.tenant_id() and user_id = app.user_id() and status in ('going','not_going')`;
 
 /**
+ * Phase 10.1 (D-741, T-10.1-04): the member lane can write NEITHER the origin NOR the order columns.
+ * The with-check of both RSVP write policies is `SELF_RSVP` plus this pin, so a member cannot forge
+ * `origin = 'ticket'` or `'courtesy'` (which would skip the start, capacity and payment rules) or an
+ * order reference. The update `using` stays `SELF_RSVP`, so the guard trigger still runs first and the
+ * named refusal beats a bare 42501.
+ */
+const SELF_RSVP_PLAIN = sql`tenant_id = app.tenant_id() and user_id = app.user_id() and status in ('going','not_going') and origin = 'rsvp' and order_ref is null and refunded_at is null`;
+
+/**
  * One member's attendance at one event (EVENT-03, D-216): their RSVP answer and, later, their
  * check-in. THREE THINGS A REVIEWER MUST NOT "FIX":
  *
@@ -367,13 +376,13 @@ export const eventAttendances = pgTable(
     pgPolicy('event_attendances_self_rsvp_insert', {
       for: 'insert',
       to: authenticatedRole,
-      withCheck: SELF_RSVP,
+      withCheck: SELF_RSVP_PLAIN,
     }),
     pgPolicy('event_attendances_self_rsvp_update', {
       for: 'update',
       to: authenticatedRole,
       using: SELF_RSVP,
-      withCheck: SELF_RSVP,
+      withCheck: SELF_RSVP_PLAIN,
     }),
   ],
 ).enableRLS();

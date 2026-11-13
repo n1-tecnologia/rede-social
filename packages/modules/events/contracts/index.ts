@@ -168,6 +168,10 @@ export const EVENT_ISSUES = [
   'event_ended',
   'event_full',
   'photo_invalid',
+  // Phase 10.1 (D-741, D-754): a paid event takes no own Vou, and a ticket is not given back by a
+  // Não vou. External contract once released: these strings are never renamed (TICK-23).
+  'payment_required',
+  'ticket_locked',
 ] as const;
 export type EventIssue = (typeof EVENT_ISSUES)[number];
 

@@ -420,3 +420,39 @@ describe('events rsvp', () => {
     expect(read.startsAt).toBe(event.startsAt);
   });
 });
+
+/**
+ * Phase 10.1 (plan 02, D-741): the closed door. A mapping row of kind `event` is linked to an event
+ * with direct SQL (the `fake` provider; the neutral layer names no gateway), after which a member's
+ * own Vou is refused by the guard trigger and answered `409 payment_required` by the API, with no
+ * row written. A free event is the positive control: it stays instant.
+ */
+async function linkTicket(eventId: string): Promise<void> {
+  await adminSql`
+    insert into public.payment_products
+           (tenant_id, provider, kind, external_product_id, checkout_url, event_id)
+    values (${tenantIds.demo}::uuid, 'fake', 'event', ${`tkt-${crypto.randomUUID()}`},
+            'https://pay.example.test/checkout', ${eventId}::uuid)`;
+}
+
+describe('events rsvp in a paid event (D-741)', () => {
+  it('10. a member Vou in a mapped event is 409 payment_required and writes no row; a free event is still instant', async () => {
+    const paid = await createEvent('paga');
+    await linkTicket(paid.id);
+    const before = received.length;
+
+    const res = await rsvp(paid.id, 'going');
+    expect(res.status).toBe(409);
+    const error = await envelope(res);
+    expect(error.code).toBe('CONFLICT');
+    expect(error.details).toEqual({ event: 'payment_required' });
+    expect(await attendanceRows(paid.id)).toHaveLength(0);
+    expect(received.length).toBe(before);
+
+    // Positive control: the same member's Vou in a free event.
+    const free = await createEvent('gratis');
+    const ok = await rsvp(free.id, 'going');
+    expect(ok.status).toBe(200);
+    expect((await ok.json()) as RsvpResult).toEqual({ status: 'going' });
+  });
+});

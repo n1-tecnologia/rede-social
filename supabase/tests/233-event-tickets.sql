@@ -12,8 +12,15 @@ begin;
 --    `events.ticket_price_cents` accepts 1 and 10000000, refuses 0 and 10000001 and accepts null; NO status
 --    was added (the status CHECK still lists exactly going, not_going, checked_in, walk_in).
 --
+-- 2. GATE (plan 02, D-741, T-10.1-03, T-10.1-04, T-10.1-21): `app.event_ticket_mapped` is true for a mapped
+--    event and false for a free one, and answers false to a member of ANOTHER tenant; a member's own
+--    `going` in a mapped event is 23514 `payment_required` (the named code beats the policy), the same
+--    insert in a free event succeeds; a member forging `origin` (`ticket`, `courtesy`) or writing an order
+--    reference or `refunded_at` is 42501 (the policy pins the new row); turning the payments module flag
+--    off changes none of it (D-746). (Plan 02 task 2 extends this section with the paid-path exceptions.)
+--
 -- Fixture ids use the `1e310000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(30);
+select plan(42);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-tkt-a', 'Ingresso A', '1e310000-0000-4000-8000-000000000001');
@@ -117,6 +124,60 @@ select is(
 select throws_ok(
   $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e1', '1e310000-0000-4000-8000-0000000000c6', 'paid', now()) $$,
   '23514', null, 'D-752: a paid status does not exist');
+
+-- ── 2. gate ────────────────────────────────────────────────────────────────────────────────────
+-- E_paid (mapped) and E_free (not mapped), both in tenant A and both a week away.
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at) values
+  ('1e310000-0000-4000-8000-0000000000e3', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Evento pago', 'in_person', 'Sede', 'Rua A, 3', now() + interval '7 days', now() + interval '7 days 2 hours'),
+  ('1e310000-0000-4000-8000-0000000000e4', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Evento livre', 'in_person', 'Sede', 'Rua A, 4', now() + interval '7 days', now() + interval '7 days 2 hours');
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-e3', '1e310000-0000-4000-8000-0000000000e3');
+
+-- The paid fact, with no claims (the service lane) and from each member lane.
+select set_config('request.jwt.claims', '', true);
+select is(app.event_ticket_mapped('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e3'),
+  true, 'D-741: app.event_ticket_mapped is true for an event that has a mapping');
+select is(app.event_ticket_mapped('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e4'),
+  false, 'D-741: ...and false for an event that has none');
+select tests.as_tenant('1e310000-0000-4000-8000-000000000002', '1e310000-0000-4000-8000-0000000000d1');
+select is(app.event_ticket_mapped('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e3'),
+  false, 'T-10.1-21: a member of ANOTHER tenant is told false, never another tenant''s mapping');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c5');
+select is(app.event_ticket_mapped('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e3'),
+  true, 'D-741: a member of the same tenant is told true');
+
+-- The closed door, from the member lane (RLS is on: the role is `authenticated`).
+select throws_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e3', '1e310000-0000-4000-8000-0000000000c5', 'going', now()) $$,
+  '23514', 'payment_required', 'D-741/T-10.1-03: a member''s own going in a mapped event is payment_required (the named code, not a bare 42501)');
+select lives_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e4', '1e310000-0000-4000-8000-0000000000c5', 'going', now()) $$,
+  'D-741: the same insert in an event with no mapping is accepted (a free event is unchanged)');
+select throws_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e3', '1e310000-0000-4000-8000-0000000000c6', 'going', now(), 'ticket', 'fake', 'ORD-FORGED') $$,
+  '42501', null, 'T-10.1-04: a member forging origin ticket with an order reference in a mapped event is refused by the policy');
+select throws_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e4', '1e310000-0000-4000-8000-0000000000c6', 'going', now(), 'courtesy') $$,
+  '42501', null, 'T-10.1-04: a member forging origin courtesy is refused by the policy');
+select throws_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, order_provider, order_ref) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e4', '1e310000-0000-4000-8000-0000000000c6', 'going', now(), 'fake', 'ORD-FORGED-2') $$,
+  '42501', null, 'T-10.1-04: a member writing an order reference of its own is refused by the policy');
+select throws_ok(
+  $$ update public.event_attendances set refunded_at = now() where event_id = '1e310000-0000-4000-8000-0000000000e4' and user_id = '1e310000-0000-4000-8000-0000000000c5' $$,
+  '42501', null, 'T-10.1-04: a member writing refunded_at on its own row is refused by the policy');
+reset role;
+
+-- D-746: the payments module flag off changes nothing; the paid fact does not read it.
+insert into public.tenant_modules (tenant_id, module_key, enabled) values
+  ('1e310000-0000-4000-8000-000000000001', 'payments', false);
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c5');
+select is(app.event_ticket_mapped('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e3'),
+  true, 'D-746: with the payments module off the event is still mapped');
+select throws_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e3', '1e310000-0000-4000-8000-0000000000c5', 'going', now()) $$,
+  '23514', 'payment_required', 'D-746: ...and the free Vou stays closed');
+reset role;
 
 select * from finish();
 rollback;

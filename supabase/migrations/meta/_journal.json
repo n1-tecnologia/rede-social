@@ -1275,6 +1275,20 @@
       "when": 1794528805373,
       "tag": "20261113001325_event_tickets_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 182,
+      "version": "7",
+      "when": 1794530200902,
+      "tag": "20261113003640_event_ticket_member_lane",
+      "breakpoints": true
+    },
+    {
+      "idx": 183,
+      "version": "7",
+      "when": 1794530204618,
+      "tag": "20261113003644_event_ticket_guard",
+      "breakpoints": true
     }
   ]
 }
