@@ -16,8 +16,15 @@ begin;
 --    read null in both new columns; the member insert policy still refuses a forged origin `ticket` (42501) with a
 --    positive control of the plain `rsvp` insert.
 --
+-- 3. THE LINK MATRIX (plan 04, D-789, OPEN-05, EP-13, EP-33, EP-47, T-10.2-01): `app.event_checkout_url` hands the
+--    stored link to a member only while the opening is null or not after the DATABASE clock (the boundary trio:
+--    one microsecond before `now()`, equal to `now()`, one microsecond after), and `app.event_sale_ready` says
+--    whether the sale is open IGNORING the clock; across the whole matrix (module on or off, gateway connected or
+--    not, link missing, not https, event soft-deleted, no mapping) the link is non-null exactly when the sale is
+--    ready and the opening has come. 4. and 5. are appended by the next tasks of the plan.
+--
 -- Fixture ids use the `1e320000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(24);
+select plan(34);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-opn-a', 'Abertura A', '1e320000-0000-4000-8000-000000000001');
@@ -132,6 +139,107 @@ select lives_ok(
   $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at) values ('1e320000-0000-4000-8000-000000000001', '1e320000-0000-4000-8000-0000000000e1', '1e320000-0000-4000-8000-0000000000c6', 'going', now()) $$,
   'T-10.2-03 positive control: the plain rsvp insert of a member still works');
 reset role;
+
+-- ── 3. the link matrix (plan 04, D-789, OPEN-05) ───────────────────────────────────────────────
+-- Ids: `tests.op('<hex>')` is `1e320000-0000-4000-8000-<hex, zero-padded>`; op('1') is tenant A, op('2') tenant B.
+create function tests.op(n text) returns uuid language sql immutable as
+  $$ select ('1e320000-0000-4000-8000-' || lpad(n, 12, '0'))::uuid $$;
+
+-- Tenant A: payments module on and a gateway connected (the gateway mode is true).
+insert into public.tenant_modules (tenant_id, module_key, enabled) values (tests.op('1'), 'payments', true);
+insert into public.payment_integrations (tenant_id, provider, secret_sealed) values (tests.op('1'), 'fake', 'sealed-pgtap-opn');
+
+-- F1 no opening | F2 an hour ahead | F3 exactly now() | F4 one microsecond ahead | F5 one microsecond behind |
+-- F6 three days behind | F7 soft-deleted | F8 mapped with no link | F9 mapped, link https | FA no mapping (free).
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, registration_opens_at, deleted_at) values
+  (tests.op('f1'), tests.op('1'), tests.op('a1'), 'F1', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, null),
+  (tests.op('f2'), tests.op('1'), tests.op('a1'), 'F2', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '1 hour', null),
+  (tests.op('f3'), tests.op('1'), tests.op('a1'), 'F3', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now(), null),
+  (tests.op('f4'), tests.op('1'), tests.op('a1'), 'F4', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '1 microsecond', null),
+  (tests.op('f5'), tests.op('1'), tests.op('a1'), 'F5', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() - interval '1 microsecond', null),
+  (tests.op('f6'), tests.op('1'), tests.op('a1'), 'F6', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() - interval '3 days', null),
+  (tests.op('f7'), tests.op('1'), tests.op('a1'), 'F7', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, now()),
+  (tests.op('f8'), tests.op('1'), tests.op('a1'), 'F8', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, null),
+  (tests.op('f9'), tests.op('1'), tests.op('a1'), 'F9', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, null),
+  (tests.op('fa'), tests.op('1'), tests.op('a1'), 'FA', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, null);
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id, checkout_url)
+  select tests.op('1'), 'fake', 'event', 'opn-234-' || h, tests.op(h), 'https://pay.example.test/' || h
+    from unnest(array['f1','f2','f3','f4','f5','f6','f7','f9']) as h;
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id, checkout_url) values
+  (tests.op('1'), 'fake', 'event', 'opn-234-f8', tests.op('f8'), null);
+
+-- State 1: module on, gateway connected. The row-by-row expectation `title:link handed out:sale ready`.
+select tests.as_tenant(tests.op('1'), tests.op('c1'));
+select results_eq(
+  $$ select string_agg(e.title || ':' || (app.event_checkout_url(e.id) is not null)::text || ':' || app.event_sale_ready(e.id)::text, ',' order by e.title)
+       from public.events e where e.id in (select tests.op(h) from unnest(array['f1','f2','f3','f4','f5','f6','f7','f8','f9','fa']) h) $$,
+  $$ values ('F1:true:true,F2:false:true,F3:true:true,F4:false:true,F5:true:true,F6:true:true,F7:false:false,F8:false:false,F9:true:true,FA:false:false'::text) $$,
+  'D-789/OPEN-05: no opening, past, one microsecond behind and exactly now() hand the link; an hour ahead and one microsecond ahead do not; readiness ignores the clock (F7 deleted, F8 no link, FA no mapping are not ready)');
+select results_eq(
+  $$ select app.event_checkout_url(tests.op('f1')), app.event_checkout_url(tests.op('f2')), app.event_checkout_url(tests.op('f3')),
+            app.event_checkout_url(tests.op('f4')), app.event_checkout_url(tests.op('f5')), app.event_checkout_url(tests.op('f6')) $$,
+  $$ values ('https://pay.example.test/f1'::text, null::text, 'https://pay.example.test/f3'::text, null::text, 'https://pay.example.test/f5'::text, 'https://pay.example.test/f6'::text) $$,
+  'D-789: the link itself is the stored one, and null while the opening is still ahead (the boundary trio is F5, F3, F4)');
+select results_eq(
+  $$ select count(*) filter (where (app.event_checkout_url(e.id) is not null)
+                               is distinct from (app.event_sale_ready(e.id) and (e.registration_opens_at is null or e.registration_opens_at <= now()))),
+            count(*) from public.events e where e.id in (select tests.op(h) from unnest(array['f1','f2','f3','f4','f5','f6','f7','f8','f9','fa']) h) $$,
+  $$ values (0::bigint, 10::bigint) $$,
+  'OPEN-05: over all ten rows the link is non-null if and only if the sale is ready and the opening is null or not after now()');
+select results_eq($$ select app.event_checkout_url(gen_random_uuid()), app.event_sale_ready(gen_random_uuid()) $$,
+  $$ values (null::text, false) $$, 'EP-47: a random event id has no link and is not ready');
+reset role;
+
+-- State 2: the payments module off (the opening of F6 is long past and still no link: D-746 holds).
+update public.tenant_modules set enabled = false where tenant_id = tests.op('1') and module_key = 'payments';
+select tests.as_tenant(tests.op('1'), tests.op('c1'));
+select results_eq(
+  $$ select string_agg(e.title || ':' || (app.event_checkout_url(e.id) is not null)::text || ':' || app.event_sale_ready(e.id)::text, ',' order by e.title)
+       from public.events e where e.id in (select tests.op(h) from unnest(array['f1','f2','f3','f4','f5','f6','f7','f8','f9','fa']) h) $$,
+  $$ values ('F1:false:false,F2:false:false,F3:false:false,F4:false:false,F5:false:false,F6:false:false,F7:false:false,F8:false:false,F9:false:false,FA:false:false'::text) $$,
+  'OPEN-05: with the payments module off no link is handed out, even with the opening past, and no sale is ready');
+select results_eq(
+  $$ select count(*) filter (where (app.event_checkout_url(e.id) is not null)
+                               is distinct from (app.event_sale_ready(e.id) and (e.registration_opens_at is null or e.registration_opens_at <= now()))),
+            count(*) from public.events e where e.id in (select tests.op(h) from unnest(array['f1','f2','f3','f4','f5','f6','f7','f8','f9','fa']) h) $$,
+  $$ values (0::bigint, 10::bigint) $$, 'OPEN-05: the equivalence holds with the module off');
+reset role;
+
+-- State 3: the module back on but the gateway disconnected.
+update public.tenant_modules set enabled = true where tenant_id = tests.op('1') and module_key = 'payments';
+delete from public.payment_integrations where tenant_id = tests.op('1');
+select tests.as_tenant(tests.op('1'), tests.op('c1'));
+select results_eq(
+  $$ select string_agg(e.title || ':' || (app.event_checkout_url(e.id) is not null)::text || ':' || app.event_sale_ready(e.id)::text, ',' order by e.title)
+       from public.events e where e.id in (select tests.op(h) from unnest(array['f1','f2','f3','f4','f5','f6','f7','f8','f9','fa']) h) $$,
+  $$ values ('F1:false:false,F2:false:false,F3:false:false,F4:false:false,F5:false:false,F6:false:false,F7:false:false,F8:false:false,F9:false:false,FA:false:false'::text) $$,
+  'OPEN-05: with no gateway connected no link is handed out and no sale is ready');
+select results_eq(
+  $$ select count(*) filter (where (app.event_checkout_url(e.id) is not null)
+                               is distinct from (app.event_sale_ready(e.id) and (e.registration_opens_at is null or e.registration_opens_at <= now()))),
+            count(*) from public.events e where e.id in (select tests.op(h) from unnest(array['f1','f2','f3','f4','f5','f6','f7','f8','f9','fa']) h) $$,
+  $$ values (0::bigint, 10::bigint) $$, 'OPEN-05: the equivalence holds with the gateway down');
+reset role;
+
+-- State 4: connected again, and F9 now holds a link that is not https (the table CHECK is lifted for this case only).
+insert into public.payment_integrations (tenant_id, provider, secret_sealed) values (tests.op('1'), 'fake', 'sealed-pgtap-opn');
+alter table public.payment_products drop constraint payment_products_url_chk;
+update public.payment_products set checkout_url = 'http://pay.example.test/insecure' where event_id = tests.op('f9');
+select tests.as_tenant(tests.op('1'), tests.op('c1'));
+select results_eq(
+  $$ select string_agg(e.title || ':' || (app.event_checkout_url(e.id) is not null)::text || ':' || app.event_sale_ready(e.id)::text, ',' order by e.title)
+       from public.events e where e.id in (select tests.op(h) from unnest(array['f1','f2','f3','f4','f5','f6','f7','f8','f9','fa']) h) $$,
+  $$ values ('F1:true:true,F2:false:true,F3:true:true,F4:false:true,F5:true:true,F6:true:true,F7:false:false,F8:false:false,F9:false:false,FA:false:false'::text) $$,
+  'TICK-16: a stored http link is neither handed out nor ready; the rest of the matrix is as in state 1');
+select results_eq(
+  $$ select count(*) filter (where (app.event_checkout_url(e.id) is not null)
+                               is distinct from (app.event_sale_ready(e.id) and (e.registration_opens_at is null or e.registration_opens_at <= now()))),
+            count(*) from public.events e where e.id in (select tests.op(h) from unnest(array['f1','f2','f3','f4','f5','f6','f7','f8','f9','fa']) h) $$,
+  $$ values (0::bigint, 10::bigint) $$, 'OPEN-05: the equivalence holds with a non-https link');
+reset role;
+update public.payment_products set checkout_url = 'https://pay.example.test/f9' where event_id = tests.op('f9');
+alter table public.payment_products add constraint payment_products_url_chk
+  check (checkout_url is null or (checkout_url ~ '^https://[^[:space:]]+$' and length(checkout_url) <= 2048));
 
 select * from finish();
 rollback;
