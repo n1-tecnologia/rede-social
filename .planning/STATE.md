@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
 current_plan: 19
-status: executing
-stopped_at: 10.1-16, 17 and 18 done (waves 14 and 15 closed, gates green after load-flake reruns); next 10.1-19 (release notes, ledger P20/P21, exit gate)
+status: ready_for_verification
+stopped_at: Gap round 10.1-16..19 executed (19/19 plans); next the phase re-verification, then Phase 11 only after it closes
 last_updated: "2026-11-13T14:14:56.414Z"
 last_activity: 2026-11-13
-last_activity_desc: "10.1-18 complete: app.event_gateway_grant answers a replay (already_in) before the ended/cancelled/deleted returns (24ca3ecc, c67e50d6, 15a902bd); pgTAP 233 354 ok; gate 38/41 under machine load 25 from another project, the 3 failed tasks passed on rerun; plan 19 next"
+last_activity_desc: "10.1-19 complete: DEPLOY notes name eleven migrations, ledger rows P20/P21 pending, gap exit gate recorded (3456919c, 81d645c4, 41cebb77, 1e914880); gap round 16..19 all executed; verification to re-run"
 state_head: eca8951d4022eddefeebf2750bf4a2347885c667
 progress:
   total_phases: 32
@@ -31,9 +31,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — EXECUTING
 Current Plan: 19
 Total Plans in Phase: 19
-Plan: 18 of 19 complete (gap round 10.1-16..19 executing; CR-01 blocking, WR-01 and WR-03 advisories folded in; WR-02, WR-04, IN-01 stay open advisories)
-Status: Executing Phase 10.1 (gaps only)
-Last activity: 2026-11-13 — 10.1-18 complete (WR-03 closed), wave 15 done, 10.1-19 next
+Plan: 19 of 19 complete (gap round 10.1-16..19 executed; CR-01 blocking, WR-01 and WR-03 advisories folded in; WR-02, WR-04, IN-01 stay open advisories)
+Status: Gap round executed, ready for re-verification
+Last activity: 2026-11-13 — 10.1-19 complete, gap round 16..19 executed, verification next
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 

@@ -1577,7 +1577,7 @@ Plans:
 **Goal:** An event can be linked to a Kiwify product (not a store product of the system); a member's presence is confirmed only after that product's purchase is approved, matched by the gateway product id and the buyer's e-mail; a refund or chargeback removes the presence and frees the seat; a payment that arrives at a full event still confirms; an event with no linked product keeps the automatic RSVP.
 **Requirements**: TICK-01..TICK-24
 **Depends on:** Phase 10 (and, for the base it extends, Phase 06 events and Phase 09.1 payment gateway)
-**Plans:** 18/19 plans executed (gap closure 10.1-16..10.1-19 planned 2026-11-13 from `10.1-VERIFICATION.md`: CR-01 blocking, WR-01 and WR-03 advisories; WR-02, WR-04 and IN-01 stay open advisories)
+**Plans:** 19/19 plans executed (gap closure 10.1-16..10.1-19 planned 2026-11-13 from `10.1-VERIFICATION.md`: CR-01 blocking, WR-01 and WR-03 advisories; WR-02, WR-04 and IN-01 stay open advisories)
 
 Plans:
 **Wave 1**
@@ -1645,7 +1645,7 @@ Plans:
 
 **Wave 16** *(gap closure — release notes and exit gate; blocked on Wave 15 completion)*
 
-- [ ] 10.1-19-PLAN.md — Release notes for the two new migrations (eleven files), owner ledger rows P20 and P21 for the proofs and the open advisories, and the gap-round exit gate
+- [x] 10.1-19-PLAN.md — Release notes for the two new migrations (eleven files), owner ledger rows P20 and P21 for the proofs and the open advisories, and the gap-round exit gate
 
 **Cross-cutting constraints:**
 
