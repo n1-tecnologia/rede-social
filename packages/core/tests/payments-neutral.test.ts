@@ -95,6 +95,89 @@ describe('the matcher', () => {
   });
 });
 
+/**
+ * Phase 10.1-15 (EP-34, EP-35, TICK-20): the files the paid-event work added, and the catalogs read as
+ * DATA. The first walk above matches the migrations named for payments and access only and reads the
+ * catalogs as raw text; a ticket migration, the ticket pgTAP file, the new e2e spec and the web ticket
+ * library are scanned here, and every catalog VALUE is matched after `JSON.parse`, so a value spelled
+ * with a unicode escape cannot hide the brand from a raw-text scan.
+ */
+const TICKET_MIGRATION = /(event_ticket|event_gateway|event_courtesy)/;
+
+/** Every string VALUE of a parsed catalog (keys are not copy), at any depth. */
+function catalogValues(node: unknown): string[] {
+  if (typeof node === 'string') return [node];
+  if (Array.isArray(node)) return node.flatMap(catalogValues);
+  if (node !== null && typeof node === 'object') {
+    return Object.values(node).flatMap(catalogValues);
+  }
+  return [];
+}
+
+/** Pure: the values of a catalog text that name the brand (empty and bare `{gateway}` never do). */
+function catalogHits(text: string): string[] {
+  return catalogValues(JSON.parse(text) as unknown).filter((value) => BRAND_PATTERN.test(value));
+}
+
+describe('the matcher over parsed catalog values (EP-35)', () => {
+  it('catches a value spelled with a unicode escape that a raw-text scan misses', () => {
+    // `ki` + the escape of `w` + `ify`: the raw text never contains the brand, the parsed value does.
+    const escaped = `{"a":{"b":"Venda pelo ${BRAND.slice(0, 2)}\\u0077${BRAND.slice(3)}."}}`;
+    expect(BRAND_PATTERN.test(escaped)).toBe(false);
+    expect(catalogHits(escaped)).toHaveLength(1);
+  });
+
+  it('catches the brand in any case, and in a nested array or object', () => {
+    const text = JSON.stringify({ a: [{ b: BRAND.toUpperCase() }], c: { d: `x ${BRAND} y` } });
+    expect(catalogHits(text)).toHaveLength(2);
+  });
+
+  it('is not a hit for an empty value, a bare {gateway} placeholder or neutral copy', () => {
+    const text = JSON.stringify({
+      empty: '',
+      slot: '{gateway}',
+      copy: 'Venda este evento pelo {gateway}: o ID fica no painel do {gateway}.',
+      count: { one: '# ingresso', other: '# ingressos' },
+    });
+    expect(catalogHits(text)).toEqual([]);
+  });
+});
+
+describe('the files of the paid-event work name no gateway (EP-34, TICK-20)', () => {
+  const ticketFiles = () => ({
+    migrations: listDir(
+      'supabase/migrations',
+      (n) => TICKET_MIGRATION.test(n) && n.endsWith('.sql'),
+    ),
+    pgtap: listDir('supabase/tests', (n) => n === '233-event-tickets.sql'),
+    e2e: listDir('apps/web/e2e', (n) => n === 'events-tickets.spec.ts'),
+    web: listDir('apps/web/lib', (n) => n === 'event-ticket.ts'),
+  });
+
+  it('walked the nine ticket migrations, the ticket pgTAP file, the spec and the web library', () => {
+    const groups = ticketFiles();
+    expect(groups.migrations.length).toBeGreaterThanOrEqual(9);
+    expect(groups.pgtap).toHaveLength(1);
+    expect(groups.e2e).toHaveLength(1);
+    expect(groups.web).toHaveLength(1);
+  });
+
+  for (const [name, files] of Object.entries(ticketFiles())) {
+    it(`${name}: no file names the brand`, () => {
+      expect(offenders(files, (file) => readFileSync(file, 'utf8'))).toEqual([]);
+    });
+  }
+
+  it('every value of every pt-BR catalog, parsed, names no brand', () => {
+    const catalogs = listDir('apps/web/messages/pt-BR', (n) => n.endsWith('.json'));
+    expect(catalogs.length).toBeGreaterThanOrEqual(30);
+    const hits = catalogs
+      .filter((file) => catalogHits(readFileSync(file, 'utf8')).length > 0)
+      .map(rel);
+    expect(hits).toEqual([]);
+  });
+});
+
 describe('the neutral layer names no gateway (PAY-02)', () => {
   const groups = neutralFiles();
 

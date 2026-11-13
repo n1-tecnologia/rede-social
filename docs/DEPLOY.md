@@ -4569,6 +4569,165 @@ moderation path, the legal wording that covers communities, the dashboard counts
 - Turn `social` off: every member write answers 403, the community, its posts and its highlights stay readable, and
   turning it on restores everything with no row changed.
 
+## Phase 10.1 release (paid events through the payment gateway)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them: nothing of
+Phase 10.1 has been pushed, deployed or applied to a hosted project, and no agent touches homolog or production.
+No command here prints a secret. Phase 10.1 ships ON TOP of the Phase 09.1 release (access by payment gateway),
+of the per-tenant project releases (09.2, 09.4) and of the Phase 10 and 12.x releases above. The proofs only the
+owner can run (the first real sale and its real refund, a real phone at 320 and 390 px, the homolog deploy, every
+production step, the sketch 021 approval record, the full `pnpm verify`, the planner assumptions to confirm) are in
+the ledger `.planning/phases/10.1-*/10.1-MANUAL-PROOFS.md`; it ships
+with every row `pending`, and a row becomes `passed` only with the evidence you paste and your own date.
+
+**This release does not, by itself, make any tenant sell a ticket.** A tenant sells tickets only when its
+`payments` module is on, a gateway is connected in Pagamentos, and an administrator links a gateway product to an
+event in the event form. Until that last step an event behaves exactly as before (see "Per-tenant effect" below).
+
+### What ships
+
+- **Nine migrations, all expand-only, applied in timestamp order** (TICK-22; the order `ls supabase/migrations`
+  prints, all after `20261112182228_member_content_write_gates.sql`). Each applies on an EMPTY tenant project and on
+  an existing one: defaults backfill and no row is required by any of them.
+  1. `20261113001315_event_tickets.sql` (generated): the third mapping kind `event` with its own `event_id` column on
+     `payment_products`, the origin and order columns of `event_attendances` (`origin` defaults to `rsvp`, so every
+     existing row and every write of the previous revision keeps its meaning), `refunded_at`, the reference price column
+     of `events`, the widened outcome list of `payment_events`, and the indexes.
+  2. `20261113001325_event_tickets_fk.sql` (hand-written): the composite foreign key
+     `payment_products (tenant_id, event_id) -> events (tenant_id, id)` on delete cascade, inside a catalogue guard.
+  3. `20261113003640_event_ticket_member_lane.sql` (generated): the two member attendance policies pinned to origin
+     `rsvp` with no order columns.
+  4. `20261113003644_event_ticket_guard.sql` (hand-written): `app.event_ticket_mapped` and the attendance guard
+     refusing a member's own `going` in an event that has a mapping (`payment_required`).
+  5. `20261113003918_event_ticket_guard_exceptions.sql` (hand-written): the final guard body, with the paid path's
+     exceptions (past the start, past the capacity, never past the end, never on a cancelled event).
+  6. `20261113004658_event_ticket_doors.sql` (hand-written): `app.events_enter` and `app.events_check_in` answer
+     `ticket_required` to a member with no presence in a paid event; holders and free events keep their outcomes.
+  7. `20261113005835_event_gateway_grant_revoke.sql` (hand-written): the gateway pair that confirms a presence on an
+     approved purchase and frees or flags it on a refund.
+  8. `20261113010200_event_courtesy_definers.sql` (hand-written): the administrator's courtesy grant and removal,
+     the sales lock, the reset and the holders read.
+  9. `20261113010607_event_ticket_reads.sql` (hand-written): four tenant-pinned reads (`event_is_paid`,
+     `event_checkout_url`, `event_ticket_admin`, `event_title_for`).
+- **The web.** The event form's Ingresso section, the Pago tag, the Comprar ingresso zone and the Presença
+  confirmada block with its live swap, the two closed doors, the bell row, Participantes with its origin marks and
+  Liberar presença, and the ticket rows of Pagamentos. The web reads every new key of the API as optional.
+- **The API and the worker.** Three mapping routes (`/v1/payments/event-products/{eventId}`), the courtesy routes,
+  the paid facts on the event payload, and the apply job that turns an approved purchase into a presence and a
+  refund into its removal. No new queue and no new job name.
+
+### Read-only check on EVERY hosted project (run before anything else)
+
+Run these on each hosted tenant project, **including the one that holds several tenants**, in the Supabase SQL
+editor or with `psql` and a read-only role. They only read. Paste the shapes and counts in the ledger; never a
+project reference or a tenant name.
+
+```sql
+-- A. Is any of this release already on the project? (expected before the release: no row)
+select column_name from information_schema.columns
+ where table_schema = 'public' and table_name = 'event_attendances'
+   and column_name in ('origin', 'order_ref', 'refunded_at');
+-- B. Which of this release's versions are already recorded? (expected before the release: no row)
+select version from supabase_migrations.schema_migrations
+ where version in ('20261113001315', '20261113001325', '20261113003640', '20261113003644', '20261113003918',
+                   '20261113004658', '20261113005835', '20261113010200', '20261113010607') order by version;
+-- C. Which tenants have the payments module on (the only ones that can link a product to an event)?
+select tenant_id, enabled from public.tenant_modules where module_key = 'payments';
+```
+
+Then, from the repository, the two local checks that need no project:
+
+- `pnpm db:migrate-all -- --dry-run` lists the pending versions per project and writes nothing; on a project that
+  already has the Phase 12.3 release the nine files above are the pending ones.
+- The expand-only grep over the nine files prints nothing:
+  `grep -inE 'drop (table|column)|rename|set not null|alter column .* type' supabase/migrations/*_event_ticket*.sql
+  supabase/migrations/*_event_gateway*.sql supabase/migrations/*_event_courtesy*.sql`.
+  **The documented exception** is not matched by that pattern and is not a drop of data: the generated file
+  `20261113001315_event_tickets.sql` drops and re-adds two CHECK constraints in the same file
+  (`payment_products_kind_chk` and `payment_events_outcome_chk`) to WIDEN a closed list (kind `event`; the ticket
+  outcomes). A widened list accepts everything the old one accepted.
+
+### Order
+
+1. Migrations on every tenant database first, through the ledgered fan-out (the Phase 09.2 Cloud Run Job `migrateAll`, D-544: databases before the services); the nine files apply in the order of their names, the runner is serialised per database and idempotent, so a re-run is safe. Locally, `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole tenant set to an empty second local database.
+2. Web second, once every project is current.
+3. API and worker last and together, from a REBUILT image (the image bakes the migrations manifest built by `scripts/build-migrations-manifest.mjs`; an image built before these files does not know them, and a production boot without the manifest stops with `migrations manifest empty`).
+
+**Why this order.** The web reads every new key as optional, so an old API is fine behind a new web (nothing in it
+asks for a paid fact the old API does not send), while the new API reads the migrated columns and calls the new
+definers, so it must never run before the migrations reach a project: the schema gate holds such a project out as
+`updating` instead of letting a member meet the error. The web is therefore never ahead of the migrations either:
+its form calls the mapping routes, which exist only in the new API, so an administrator cannot link a product until
+the API step is done.
+
+### What keeps the previous API revision working during the fan-out
+
+- **An event with no mapping behaves as before.** Every new branch of the attendance guard, of Entrar and of the
+  check-in is gated on the mapping existing (`app.event_ticket_mapped`); a free event, which is every event until an
+  administrator links a product, takes the old path byte for byte.
+- **Old code writes the default origin.** The previous API inserts attendances without the new columns, so they take
+  `origin = 'rsvp'` and no order columns, which is exactly what the pinned member policies accept.
+- **The old code never selects the new columns, tables or functions**, so it keeps working against the new database.
+- **The closed outcome list is widened, never narrowed.** An older reader of `payment_events` keeps reading every row
+  written before the first ticket sells (see the rollback limit below for the rows after it).
+
+### Per-tenant effect
+
+Nothing changes for a tenant until an administrator links a product to an event **and** the tenant has the
+`payments` module on **and** a gateway is connected. After that, and only for the linked event: the member sees the
+Pago tag and one Comprar ingresso link instead of Vou, an approved purchase for the member's e-mail confirms the
+presence by itself, and a refund removes it. Turning the `payments` module off later does NOT reopen the free Vou:
+the mapping stays, the event stays paid, and members see "Venda indisponível" until the module is back (D-746). A
+tenant without the module sees no ticket anywhere.
+
+### Rollback limit
+
+- **Migrations are never rolled back** (forward-only; there is no down migration). Roll forward with a fix.
+- **Before the first ticket sells,** redeploy the previous API and worker revision, then the previous web. Unlink any
+  event an administrator linked first (the mapping delete is refused once a ticket is sold, `ticket_locked`).
+- **After the first ticket sells, do not roll the API back.** A delivery row then carries one of the new outcomes
+  (`ticket_granted`, `ticket_granted_over_limit`, `ticket_revoked`, `ticket_kept`, `event_ended`, `event_cancelled`)
+  and an older API would fail its strict outcome list when it reads that row (Eventos recentes would error), and it
+  would not know that a paid event has no free Vou. Roll forward with a fix instead.
+- **The new API against an old schema is held out `updating`.** Do not release the API before the migrations reach
+  every project.
+
+### Smoke checks (on the homolog host once it serves this release)
+
+Read-only SQL on a tenant project, after the Job:
+
+```sql
+select column_name from information_schema.columns
+ where table_schema = 'public' and table_name = 'event_attendances' and column_name in ('origin', 'order_ref', 'refunded_at');
+-- three rows
+select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app' and proname in ('event_ticket_mapped', 'event_gateway_grant', 'event_gateway_revoke',
+   'event_courtesy_grant', 'event_courtesy_remove', 'event_is_paid', 'event_checkout_url', 'event_ticket_admin');
+-- eight rows
+select count(*) from public.event_attendances where origin <> 'rsvp';
+-- 0 on a project where no ticket was ever sold
+```
+
+And in the app, on a test event of a tenant with the payments module on and a gateway connected:
+
+- Link a product to a new test event in the event form (Cobrar ingresso: product id, https link, reference price).
+- Read the event as a member: the Pago tag, one Comprar ingresso link to the stored address, no Vou.
+- One delivery (a test purchase of the real gateway, or the fake adapter on a local stack only) for that member's
+  e-mail: the open page becomes Presença confirmada by itself, the bell shows the row, Participantes marks Pago.
+- Refund it in the gateway panel: the presence leaves the list.
+
+### Open items for the developer (recorded, not decided here)
+
+- **The real gateway's signature scheme is still two accepted candidates (adapter note A-P17, risk T-10.1-R3).** A
+  ticket is now worth money to a forger. Unchanged by this phase; for the security review.
+- **The first real sale and its real refund are unproven** (the product id format and the refund's order id have
+  only been seen in the gateway's test deliveries). Ledger row TICK-24.
+- **`putStoreMapping` has a latent compensation race** noticed during the phase; worth a quick task.
+
+### Manual proofs (hosted)
+
+See the ledger named at the top. A row becomes `passed` only with the evidence you paste and your own date.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
