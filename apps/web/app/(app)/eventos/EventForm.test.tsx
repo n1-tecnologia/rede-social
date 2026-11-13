@@ -4,6 +4,7 @@ import { EVENT_SCHEDULE_MAX_ITEMS } from '@rede-social/module-events/contracts';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { EventFormTicket } from '@/lib/event-ticket';
 
 /**
  * 06-04 — the event form (UI-D-212, sketch 006 surface 1), against the REAL `events.json` and
@@ -47,28 +48,42 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
 
-const { catalogs, toast, push, replace, refresh, create, update, cancel, reactivate, remove } =
-  await vi.hoisted(async () => {
-    const { readFileSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    const read = (name: string) =>
-      JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
-    return {
-      catalogs: {
-        events: read('events').events as Record<string, unknown>,
-        media: read('media').media as Record<string, unknown>,
-      } as Record<string, Record<string, unknown>>,
-      toast: { show: vi.fn(), dismiss: vi.fn() },
-      push: vi.fn(),
-      replace: vi.fn(),
-      refresh: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
-      cancel: vi.fn(),
-      reactivate: vi.fn(),
-      remove: vi.fn(),
-    };
-  });
+const {
+  catalogs,
+  toast,
+  push,
+  replace,
+  refresh,
+  create,
+  update,
+  cancel,
+  reactivate,
+  remove,
+  saveTicket,
+  removeTicket,
+} = await vi.hoisted(async () => {
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const read = (name: string) =>
+    JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
+  return {
+    catalogs: {
+      events: read('events').events as Record<string, unknown>,
+      media: read('media').media as Record<string, unknown>,
+    } as Record<string, Record<string, unknown>>,
+    toast: { show: vi.fn(), dismiss: vi.fn() },
+    push: vi.fn(),
+    replace: vi.fn(),
+    refresh: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    cancel: vi.fn(),
+    reactivate: vi.fn(),
+    remove: vi.fn(),
+    saveTicket: vi.fn(),
+    removeTicket: vi.fn(),
+  };
+});
 
 MotionGlobalConfig.skipAnimations = true;
 
@@ -94,6 +109,11 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push, replace, refresh }
 vi.mock('@rede-social/ui', async (orig) => ({
   ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
+}));
+
+vi.mock('./ticket-actions', () => ({
+  saveEventTicketAction: saveTicket,
+  removeEventTicketAction: removeTicket,
 }));
 
 vi.mock('./actions', () => ({
@@ -239,12 +259,16 @@ beforeEach(() => {
     cancel,
     reactivate,
     remove,
+    saveTicket,
+    removeTicket,
   ]) {
     mock.mockReset();
   }
   uploads.list.length = 0;
   create.mockResolvedValue({ ok: true, eventId: EVENT_ID });
   update.mockResolvedValue({ ok: true, eventId: EVENT_ID });
+  saveTicket.mockResolvedValue({ ok: true, recurring: false });
+  removeTicket.mockResolvedValue({ ok: true });
   fetchMock.mockReset().mockImplementation(async () => json(PAULISTA));
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -1658,5 +1682,533 @@ describe('EventForm — step 2, the "Informações úteis" (2026-10-06)', () => 
         })
         .getAttribute('aria-checked'),
     ).toBe('true');
+  });
+});
+
+/**
+ * Phase 10.1-11 (TICK-02 to TICK-05, D-744 to D-748, D-755, D-757, UI-D-741 to UI-D-743) — the event
+ * form's Ingresso section and the two-step save. The two ticket actions are stubbed; the section, the
+ * state machine (`ticketSectionState`) and the shared `eventInputSchema` are real, against the real
+ * `events.json`.
+ *
+ * Claims:
+ *  - tracer: switch on + id + https link + price "80,00" sends `ticketPriceCents: 8000` in the event
+ *    save and then calls the product action ONCE with the created event id; switch off sends `null`
+ *    and calls nothing; a host without the `ticket` prop sends no price key and draws no section;
+ *  - the state props: the gateway word (display name or the neutral fallback), the locked section
+ *    with a price that still saves, module off, a linked product with the gateway down (its stored
+ *    values go unchanged and call nothing), the D-748 note and the D-747 off line;
+ *  - the sequence: errors after the first submit only and nothing is saved while they stand, a price-only
+ *    edit calls no mapping endpoint, a create is NEVER repeated when the second write fails, the typed
+ *    values stay, the offending field speaks (`gateway_product_taken` with the gateway word), anything
+ *    else is the toast, a stale tab hitting the lock re-reads the section as locked, errors clear on the
+ *    next edit of their field, and the subscription hint keeps the form open.
+ */
+describe('EventForm — the Ingresso section (Phase 10.1-11)', () => {
+  const GATEWAY = 'Gateway Exemplo';
+  const PAIR = { externalProductId: 'PRD-48213', checkoutUrl: 'https://pay.example/ingresso' };
+  const TICKET: EventFormTicket = {
+    moduleOn: true,
+    gatewayConnected: true,
+    canManagePayments: true,
+    gatewayName: GATEWAY,
+    saved: null,
+    soldCount: 0,
+    hasConfirmed: false,
+  };
+  const SAVED: EventFormTicket = { ...TICKET, saved: PAIR };
+  const T = (key: string, values?: Record<string, unknown>) =>
+    lookup('events', `form.ticket.${key}`, values);
+
+  const stored = {
+    title: 'Encontro anual',
+    description: '',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    format: 'online' as const,
+    venueName: '',
+    address: '',
+    meetingUrl: 'https://meet.example.com/x',
+    start: { date: '2026-10-12', time: '19:00' },
+    end: { date: '2026-10-12', time: '21:00' },
+  };
+
+  const renderCreateWith = (ticket: EventFormTicket | undefined) =>
+    render(<EventForm mode="create" tenantName="Rede Demo" zoneLabel={ZONE} ticket={ticket} />);
+
+  const renderEditWith = (ticket: EventFormTicket | undefined, initial = {}) =>
+    render(
+      <EventForm
+        mode="edit"
+        eventId={EVENT_ID}
+        initial={{ ...stored, ...initial }}
+        tenantName="Rede Demo"
+        zoneLabel={ZONE}
+        ticket={ticket}
+      />,
+    );
+
+  /** The smallest valid create: Online, a name, a start and a meeting link. */
+  function fillOnline() {
+    fireEvent.click(screen.getByRole('button', { name: /Online/ }));
+    type('event-title', 'Encontro anual');
+    type('event-start-date', '2026-10-12');
+    type('event-start-time', '19:00');
+    type('event-url', 'https://meet.example.com/x');
+  }
+
+  const submitForm = async () => {
+    await act(async () => {
+      fireEvent.submit(document.querySelector('[data-event-form]') as HTMLFormElement);
+    });
+  };
+  const sw = () => document.querySelector('[data-ticket-switch]') as HTMLButtonElement;
+  const section = () => document.querySelector('[data-event-ticket]') as HTMLElement | null;
+  const state = () => section()?.getAttribute('data-ticket-state');
+  const toggleOn = () => fireEvent.click(sw());
+  const fillPair = (id = PAIR.externalProductId, link = PAIR.checkoutUrl) => {
+    type('event-gateway-id', id);
+    type('event-checkout-url', link);
+  };
+  const sent = (mock: typeof create, call = 0) =>
+    mock.mock.calls[call]?.[mock === update ? 1 : 0] as Record<string, unknown>;
+  const errorsText = () =>
+    [...(section()?.querySelectorAll('[role="alert"]') ?? [])].map((node) => node.textContent);
+
+  describe('the tracer: the admin creates a paid event', () => {
+    it('sends the price with the event and links the product once, with the created event id', async () => {
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair('  PRD-48213 ', ` ${PAIR.checkoutUrl} `);
+      type('event-ticket-price', '80,00');
+      await submitForm();
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(sent(create).ticketPriceCents).toBe(8000);
+      expect(saveTicket).toHaveBeenCalledTimes(1);
+      expect(saveTicket).toHaveBeenCalledWith(EVENT_ID, {
+        externalProductId: PAIR.externalProductId,
+        checkoutUrl: PAIR.checkoutUrl,
+      });
+      // The product is the SECOND write: after the event save, before the landing.
+      expect(create.mock.invocationCallOrder[0]).toBeLessThan(
+        saveTicket.mock.invocationCallOrder[0] as number,
+      );
+      expect(saveTicket.mock.invocationCallOrder[0]).toBeLessThan(
+        replace.mock.invocationCallOrder[0] as number,
+      );
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: E.toasts.created });
+    });
+
+    it('with the switch off the event is saved exactly as today: price null, no product call', async () => {
+      renderCreateWith(TICKET);
+      fillOnline();
+      expect(section()?.querySelector('[data-ticket-fields]')).toBeNull();
+      await submitForm();
+      expect(sent(create).ticketPriceCents).toBeNull();
+      expect(saveTicket).not.toHaveBeenCalled();
+      expect(removeTicket).not.toHaveBeenCalled();
+    });
+
+    it('a price left empty is valid and sends null with the product still linked', async () => {
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair();
+      await submitForm();
+      expect(sent(create).ticketPriceCents).toBeNull();
+      expect(saveTicket).toHaveBeenCalledTimes(1);
+    });
+
+    it('a host that predates the section draws none and sends no price key at all', async () => {
+      renderCreateWith(undefined);
+      fillOnline();
+      expect(section()).toBeNull();
+      await submitForm();
+      expect(create).toHaveBeenCalledTimes(1);
+      expect('ticketPriceCents' in sent(create)).toBe(false);
+      expect(saveTicket).not.toHaveBeenCalled();
+    });
+
+    it('the price echoes as 80,00 on blur and the fields are disabled while the submit runs', async () => {
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      type('event-ticket-price', '80');
+      fireEvent.blur(field('event-ticket-price'));
+      expect(field('event-ticket-price').value).toBe('80,00');
+
+      let release: (value: unknown) => void = () => {};
+      create.mockReturnValue(new Promise((resolve) => (release = resolve)));
+      fillPair();
+      await submitForm();
+      expect(field('event-gateway-id').disabled).toBe(true);
+      expect(field('event-checkout-url').disabled).toBe(true);
+      expect(field('event-ticket-price').disabled).toBe(true);
+      expect(sw().disabled).toBe(true);
+      await act(async () => release({ ok: true, eventId: EVENT_ID }));
+    });
+  });
+
+  describe('the section reads the server facts (UI-D-742)', () => {
+    it('names the gateway with the display name the server passed', () => {
+      renderCreateWith(TICKET);
+      expect(section()?.textContent).toContain(T('helper', { gateway: GATEWAY }));
+      toggleOn();
+      expect(document.querySelector('label[for="event-gateway-id"]')?.textContent).toBe(
+        T('idLabel', { gateway: GATEWAY }),
+      );
+    });
+
+    it('falls back to the neutral word when the server has no display name (A-11-GATEWAY)', () => {
+      renderCreateWith({ ...TICKET, gatewayName: null });
+      const fallback = T('gatewayFallback');
+      expect(section()?.textContent).toContain(T('helper', { gateway: fallback }));
+      expect(section()?.textContent).not.toMatch(/kiwify/i);
+    });
+
+    it('module off with nothing linked: the switch is disabled and the event saves with price null', async () => {
+      renderCreateWith({ ...TICKET, moduleOn: false, gatewayConnected: false });
+      expect(state()).toBe('moduleOff');
+      expect(sw().disabled).toBe(true);
+      fillOnline();
+      await submitForm();
+      expect(sent(create).ticketPriceCents).toBeNull();
+      expect(saveTicket).not.toHaveBeenCalled();
+    });
+
+    it('module on, gateway not connected: the note, with the link only for payments.manage', () => {
+      renderCreateWith({ ...TICKET, gatewayConnected: false });
+      expect(state()).toBe('notConnected');
+      expect(section()?.querySelector('a')?.getAttribute('href')).toBe('/configuracoes/pagamentos');
+      cleanup();
+      renderCreateWith({ ...TICKET, gatewayConnected: false, canManagePayments: false });
+      expect(section()?.querySelector('a')).toBeNull();
+    });
+
+    it('edit, product saved: opens on, filled, clean, with the stored price', () => {
+      renderEditWith({ ...SAVED }, { ticketPriceCents: 8000 });
+      expect(state()).toBe('free');
+      expect(sw().getAttribute('aria-checked')).toBe('true');
+      expect(field('event-gateway-id').value).toBe(PAIR.externalProductId);
+      expect(field('event-checkout-url').value).toBe(PAIR.checkoutUrl);
+      expect(field('event-ticket-price').value).toBe('80,00');
+      expect(submitButton()?.disabled).toBe(false);
+      // Untouched: the X leaves without asking.
+      fireEvent.click(screen.getByRole('button', { name: E.form.close }));
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    });
+
+    it('edit, locked by a sale: id and link disabled, the price still saves and calls no mapping endpoint', async () => {
+      renderEditWith({ ...SAVED, soldCount: 3 }, { ticketPriceCents: 8000 });
+      expect(state()).toBe('locked');
+      expect(field('event-gateway-id').disabled).toBe(true);
+      expect(field('event-checkout-url').disabled).toBe(true);
+      expect(field('event-ticket-price').disabled).toBe(false);
+      expect(sw().disabled).toBe(true);
+      type('event-ticket-price', '95,50');
+      await submitForm();
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(sent(update, 0).ticketPriceCents).toBe(9550);
+      expect(saveTicket).not.toHaveBeenCalled();
+      expect(removeTicket).not.toHaveBeenCalled();
+    });
+
+    it('edit, a price-only change sends the event save and no mapping request', async () => {
+      renderEditWith({ ...SAVED }, { ticketPriceCents: 8000 });
+      type('event-ticket-price', '90,00');
+      await submitForm();
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(sent(update, 0).ticketPriceCents).toBe(9000);
+      expect(saveTicket).not.toHaveBeenCalled();
+      expect(removeTicket).not.toHaveBeenCalled();
+    });
+
+    it('edit, linked but the gateway is down: stored values disabled, saved unchanged, no mapping call', async () => {
+      renderEditWith({ ...SAVED, gatewayConnected: false }, { ticketPriceCents: 8000 });
+      expect(state()).toBe('linkedUnavailable');
+      expect(sw().getAttribute('aria-checked')).toBe('true');
+      expect(sw().disabled).toBe(true);
+      expect(field('event-gateway-id').disabled).toBe(true);
+      type('event-title', 'Encontro anual 2');
+      await submitForm();
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(sent(update, 0).ticketPriceCents).toBe(8000);
+      expect(saveTicket).not.toHaveBeenCalled();
+      expect(removeTicket).not.toHaveBeenCalled();
+    });
+
+    it('edit with confirmed presences and the product not saved: the D-748 note, gone once saved', () => {
+      renderEditWith({ ...TICKET, hasConfirmed: true });
+      expect(section()?.querySelector('[data-ticket-existing-note]')).toBeNull();
+      toggleOn();
+      expect(section()?.querySelector('[data-ticket-existing-note]')?.textContent).toBe(
+        T('existingNote'),
+      );
+      cleanup();
+      renderEditWith({ ...SAVED, hasConfirmed: true });
+      expect(section()?.querySelector('[data-ticket-existing-note]')).toBeNull();
+    });
+
+    it('create never shows the existing-presences note', () => {
+      renderCreateWith({ ...TICKET, hasConfirmed: true });
+      toggleOn();
+      expect(section()?.querySelector('[data-ticket-existing-note]')).toBeNull();
+    });
+
+    it('switching a saved, unsold product off shows the effect line and removes it on save only', async () => {
+      renderEditWith({ ...SAVED }, { ticketPriceCents: 8000 });
+      toggleOn();
+      expect(section()?.querySelector('[data-ticket-off-note]')?.textContent).toBe(T('offEffect'));
+      await submitForm();
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(sent(update, 0).ticketPriceCents).toBeNull();
+      expect(removeTicket).toHaveBeenCalledTimes(1);
+      expect(removeTicket).toHaveBeenCalledWith(EVENT_ID);
+      expect(saveTicket).not.toHaveBeenCalled();
+    });
+
+    it('an event with no product and the switch left off never calls the remove action', async () => {
+      renderEditWith({ ...TICKET });
+      type('event-title', 'Encontro anual 2');
+      await submitForm();
+      expect(removeTicket).not.toHaveBeenCalled();
+      expect(saveTicket).not.toHaveBeenCalled();
+    });
+
+    it('edit with a changed pair relinks it through the save action', async () => {
+      renderEditWith({ ...SAVED });
+      type('event-checkout-url', 'https://pay.example/outro');
+      await submitForm();
+      expect(saveTicket).toHaveBeenCalledWith(EVENT_ID, {
+        externalProductId: PAIR.externalProductId,
+        checkoutUrl: 'https://pay.example/outro',
+      });
+    });
+  });
+
+  describe('errors, retries and refusals (UI-D-743)', () => {
+    it('keeps its errors quiet until the first submit, then speaks per field and saves nothing', async () => {
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      type('event-ticket-price', 'abc');
+      expect(errorsText()).toEqual([]);
+      expect(submitButton()?.disabled).toBe(false);
+
+      await submitForm();
+      expect(errorsText()).toEqual([
+        T('errors.idRequired'),
+        T('errors.linkRequired'),
+        T('errors.priceInvalid'),
+      ]);
+      expect(create).not.toHaveBeenCalled();
+      expect(saveTicket).not.toHaveBeenCalled();
+      expect(document.querySelector('[data-event-form-error]')?.textContent).toBe(
+        E.form.errors.save,
+      );
+    });
+
+    it('a link that is not https says so, and so does a bare word', async () => {
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair('PRD-1', 'http://pay.example/x');
+      await submitForm();
+      expect(errorsText()).toEqual([T('errors.linkInvalid')]);
+      type('event-checkout-url', 'pay.example/x');
+      expect(errorsText()).toEqual([T('errors.linkInvalid')]);
+      type('event-checkout-url', 'https://pay.example/x');
+      expect(errorsText()).toEqual([]);
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('an id without a link and a link without an id are two distinct outcomes', async () => {
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      type('event-gateway-id', 'PRD-1');
+      await submitForm();
+      expect(errorsText()).toEqual([T('errors.linkRequired')]);
+      type('event-gateway-id', '');
+      type('event-checkout-url', PAIR.checkoutUrl);
+      expect(errorsText()).toEqual([T('errors.idRequired')]);
+    });
+
+    it('a failed second write keeps the event saved and the typed values, and the offending field speaks', async () => {
+      saveTicket.mockResolvedValue({ ok: false, issue: 'id_taken' });
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair();
+      type('event-ticket-price', '80,00');
+      await submitForm();
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(errorsText()).toEqual([T('errors.taken', { gateway: GATEWAY })]);
+      expect(field('event-gateway-id').value).toBe(PAIR.externalProductId);
+      expect(field('event-checkout-url').value).toBe(PAIR.checkoutUrl);
+      expect(field('event-ticket-price').value).toBe('80,00');
+      // The form stays: no landing, no "created" toast.
+      expect(replace).not.toHaveBeenCalled();
+      expect(push).not.toHaveBeenCalled();
+      expect(toast.show).not.toHaveBeenCalled();
+    });
+
+    it('never repeats the create: the next save updates the event it created and retries the product', async () => {
+      saveTicket.mockResolvedValueOnce({ ok: false, issue: 'id_taken' });
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair();
+      await submitForm();
+      expect(create).toHaveBeenCalledTimes(1);
+
+      type('event-gateway-id', 'PRD-99999');
+      await submitForm();
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update.mock.calls[0]?.[0]).toBe(EVENT_ID);
+      expect(saveTicket).toHaveBeenCalledTimes(2);
+      expect(saveTicket).toHaveBeenLastCalledWith(EVENT_ID, {
+        externalProductId: 'PRD-99999',
+        checkoutUrl: PAIR.checkoutUrl,
+      });
+      expect(errorsText()).toEqual([]);
+      expect(replace).toHaveBeenCalledTimes(1);
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: E.toasts.created });
+    });
+
+    it('a pair the server already holds is not sent again on the retry', async () => {
+      saveTicket.mockResolvedValueOnce({ ok: true, recurring: true });
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair();
+      await submitForm();
+      expect(saveTicket).toHaveBeenCalledTimes(1);
+      await submitForm();
+      expect(saveTicket).toHaveBeenCalledTimes(1);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['id_required', 'id', 'errors.idRequired'],
+      ['link_required', 'link', 'errors.linkRequired'],
+      ['link_invalid', 'link', 'errors.linkInvalid'],
+    ] as const)('the server issue %s lands under the %s field', async (issue, _field, key) => {
+      saveTicket.mockResolvedValue({ ok: false, issue });
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair();
+      await submitForm();
+      expect(errorsText()).toEqual([T(key)]);
+    });
+
+    it('any other failure is the toast, with the event saved and the values in place', async () => {
+      saveTicket.mockResolvedValue({ ok: false, issue: 'generic' });
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair();
+      await submitForm();
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: T('errors.save') });
+      expect(errorsText()).toEqual([]);
+      expect(field('event-gateway-id').value).toBe(PAIR.externalProductId);
+      expect(replace).not.toHaveBeenCalled();
+    });
+
+    it('an action that throws is the same toast', async () => {
+      saveTicket.mockRejectedValue(new Error('boom'));
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair();
+      await submitForm();
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: T('errors.save') });
+      expect(JSON.stringify(logged.mock.calls)).not.toContain(PAIR.checkoutUrl);
+      logged.mockRestore();
+    });
+
+    it('an error clears on the next edit of its own field, and only that one', async () => {
+      saveTicket.mockResolvedValue({ ok: false, issue: 'id_taken' });
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair();
+      await submitForm();
+      expect(errorsText()).toHaveLength(1);
+      type('event-checkout-url', 'https://pay.example/otro');
+      expect(errorsText()).toHaveLength(1);
+      type('event-gateway-id', 'PRD-2');
+      expect(errorsText()).toEqual([]);
+    });
+
+    it('a stale tab hitting the lock shows the alert row and re-reads the section as locked', async () => {
+      saveTicket.mockResolvedValue({ ok: false, issue: 'locked', soldCount: 4 });
+      renderEditWith({ ...SAVED });
+      type('event-checkout-url', 'https://pay.example/otro');
+      await submitForm();
+
+      expect(section()?.querySelector('[data-ticket-section-error]')?.textContent).toBe(
+        T('errors.locked'),
+      );
+      expect(state()).toBe('locked');
+      expect(sw().getAttribute('aria-checked')).toBe('true');
+      expect(sw().disabled).toBe(true);
+      expect(field('event-gateway-id').disabled).toBe(true);
+      expect(field('event-ticket-price').disabled).toBe(false);
+      // What the server holds is shown again, not what was typed over it.
+      expect(field('event-checkout-url').value).toBe(PAIR.checkoutUrl);
+      expect(push).not.toHaveBeenCalled();
+    });
+
+    it('a locked answer with no readable count still reads as locked (at least one sale)', async () => {
+      saveTicket.mockResolvedValue({ ok: false, issue: 'locked' });
+      renderEditWith({ ...SAVED });
+      type('event-gateway-id', 'PRD-1');
+      await submitForm();
+      expect(state()).toBe('locked');
+    });
+
+    it('the lock also answers a removal: the switch comes back on', async () => {
+      removeTicket.mockResolvedValue({ ok: false, issue: 'locked', soldCount: 2 });
+      renderEditWith({ ...SAVED });
+      toggleOn();
+      expect(sw().getAttribute('aria-checked')).toBe('false');
+      await submitForm();
+      expect(state()).toBe('locked');
+      expect(sw().getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('the subscription hint of the save answer keeps the form open with the warning (A-UI-10)', async () => {
+      saveTicket.mockResolvedValue({ ok: true, recurring: true });
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair();
+      expect(section()?.querySelector('[data-ticket-recurring]')).toBeNull();
+      await submitForm();
+      expect(section()?.querySelector('[data-ticket-recurring]')?.textContent).toBe(T('recurring'));
+      expect(state()).toBe('recurring');
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: E.toasts.created });
+      expect(replace).not.toHaveBeenCalled();
+      // The warning blocks nothing: the fields stay editable.
+      expect(field('event-gateway-id').disabled).toBe(false);
+    });
+
+    it('with no hint the form lands on the new event', async () => {
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggleOn();
+      fillPair();
+      await submitForm();
+      expect(section()?.querySelector('[data-ticket-recurring]')).toBeNull();
+      expect(replace).toHaveBeenCalledTimes(1);
+    });
   });
 });

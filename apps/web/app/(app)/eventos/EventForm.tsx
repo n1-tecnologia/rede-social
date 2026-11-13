@@ -16,6 +16,7 @@ import {
   type WallClock,
 } from '@rede-social/module-events/contracts';
 import { EventCover } from '@rede-social/module-events/ui';
+import { isCheckoutLink } from '@rede-social/module-payments/contracts';
 import {
   Button,
   ConfirmDialog,
@@ -55,6 +56,14 @@ import {
   type ScheduleItem,
   splitEventDescription,
 } from '@/lib/event-extras';
+import {
+  type EventFormTicket,
+  parseTicketPrice,
+  ticketPriceText as storedPriceText,
+  type TicketFieldErrors,
+  ticketFieldErrors,
+  ticketSectionState,
+} from '@/lib/event-ticket';
 import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
 import { CancelEventControl } from './[eventId]/CancelEventControl';
 import { DeleteEventControl } from './[eventId]/DeleteEventControl';
@@ -62,6 +71,12 @@ import { ReactivateEventControl } from './[eventId]/ReactivateEventControl';
 import { createEventAction, type EventWriteResult, updateEventAction } from './actions';
 import { ADDRESS_FIELD_IDS, EventAddressFields } from './EventAddressFields';
 import { eventSpanDays, ScheduleEditor } from './ScheduleEditor';
+import { TicketSection } from './TicketSection';
+import {
+  type EventTicketOutcome,
+  removeEventTicketAction,
+  saveEventTicketAction,
+} from './ticket-actions';
 import { useCepLookup } from './useCepLookup';
 
 /**
@@ -155,6 +170,8 @@ export type EventFormInitial = {
    * or empty falls back to the LEGACY programme parsed out of `description`.
    */
   schedule?: readonly ScheduleItem[];
+  /** Phase 10.1-11 (D-755): the stored reference price in integer cents. Absent or null is "no price". */
+  ticketPriceCents?: number | null;
 };
 
 export type EventFormProps = {
@@ -173,6 +190,11 @@ export type EventFormProps = {
   canReactivate?: boolean;
   /** Edit mode only, server-computed: cancelled and `now >= starts_at` (no way back). */
   cancelledLocked?: boolean;
+  /**
+   * Phase 10.1-11 (UI-D-741): what the server knows about the event's ticket. Absent (a host that
+   * predates the section) draws no "Ingresso" section and sends no `ticketPriceCents` key.
+   */
+  ticket?: EventFormTicket;
 };
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
@@ -270,6 +292,7 @@ export function EventForm({
   canCancel = false,
   canReactivate = false,
   cancelledLocked = false,
+  ticket,
 }: EventFormProps) {
   const t = useTranslations('events');
   const tm = useTranslations('media');
@@ -319,6 +342,29 @@ export function EventForm({
   const [endAt, setEndAt] = useState<WallClock>(start.end);
   // An edit arrives with an end the admin chose, so the prefill never overwrites it.
   const [endTouched, setEndTouched] = useState(mode === 'edit');
+
+  // Phase 10.1-11 (UI-D-741 to UI-D-743): the "Ingresso" section. The switch, the typed pair and the
+  // price text live here; `savedPair` is what the server holds NOW (trimmed), so only a real change of
+  // the pair calls the second endpoint. The section's state is data from the server's facts
+  // (`ticketSectionState`), the recurring hint comes only from a save answer (A-UI-10) and the sold
+  // count only grows (a stale tab hitting the lock re-reads the section as locked).
+  const ticketSaved = ticket?.saved ?? null;
+  const initialTicketPrice = storedPriceText(start.ticketPriceCents);
+  const [ticketOn, setTicketOn] = useState(ticketSaved !== null);
+  const [ticketProductId, setTicketProductId] = useState(ticketSaved?.externalProductId ?? '');
+  const [ticketLink, setTicketLink] = useState(ticketSaved?.checkoutUrl ?? '');
+  const [ticketPrice, setTicketPrice] = useState(initialTicketPrice);
+  const [savedPair, setSavedPair] = useState<{ id: string; link: string } | null>(
+    ticketSaved
+      ? { id: ticketSaved.externalProductId.trim(), link: ticketSaved.checkoutUrl.trim() }
+      : null,
+  );
+  /** The second write's refusals (the server's), cleared on the next edit of their field or submit. */
+  const [ticketServerErrors, setTicketServerErrors] = useState<TicketFieldErrors>({});
+  const [ticketRecurring, setTicketRecurring] = useState(false);
+  const [soldNow, setSoldNow] = useState(ticket?.soldCount ?? 0);
+  /** A create that succeeded while its second write did not: the next save updates THIS event. */
+  const createdId = useRef<string | null>(null);
 
   const [submitted, setSubmitted] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -448,6 +494,22 @@ export function EventForm({
   // The programme as the API stores it; the key travels ONLY when there is something in it.
   const storedSchedule = normaliseSchedule(schedule);
   const scheduleField = storedSchedule.length > 0 ? { schedule: storedSchedule } : {};
+  // Phase 10.1-11 (D-755, A-06-PRICE): the reference price rides the event save. An explicit `null`
+  // clears it (an OMITTED key would keep the stored one), so a section that is off or has no price
+  // sends `null`; only a host that predates the section sends no key at all.
+  const sectionState = ticketSectionState({
+    linked: savedPair !== null,
+    moduleOn: ticket?.moduleOn ?? false,
+    gatewayConnected: ticket?.gatewayConnected ?? false,
+    canManagePayments: ticket?.canManagePayments ?? false,
+    soldCount: soldNow,
+    recurring: ticketRecurring,
+  });
+  const priceParse = parseTicketPrice(ticketPrice);
+  const ticketPriceField =
+    ticket === undefined
+      ? {}
+      : { ticketPriceCents: ticketOn && priceParse.ok ? priceParse.cents : null };
   const payload = inPerson
     ? {
         title,
@@ -457,6 +519,7 @@ export function EventForm({
         category,
         capacity,
         ...scheduleField,
+        ...ticketPriceField,
         format,
         venueName,
         address: effectiveAddress,
@@ -471,6 +534,7 @@ export function EventForm({
         category,
         capacity,
         ...scheduleField,
+        ...ticketPriceField,
         format,
         meetingUrl,
         start: startAt,
@@ -494,6 +558,7 @@ export function EventForm({
       meetingUrl,
       startAt,
       endAt,
+      [ticketOn, ticketProductId, ticketLink, ticketPrice],
     ]) !==
     JSON.stringify([
       start.title,
@@ -513,6 +578,12 @@ export function EventForm({
       start.meetingUrl,
       start.start,
       start.end,
+      [
+        ticketSaved !== null,
+        ticketSaved?.externalProductId ?? '',
+        ticketSaved?.checkoutUrl ?? '',
+        initialTicketPrice,
+      ],
     ]);
 
   /** UI-D-212: every required field of the visible side is filled. */
@@ -572,6 +643,30 @@ export function EventForm({
       errors.description = t('form.errors.descriptionTooLong', { max: EVENT_MAX_DESCRIPTION });
     }
   }
+
+  // Phase 10.1-11 (UI-D-741): the Ingresso section's own messages, after the first submit like every
+  // other field. Id and link are required together (a product with no link would let nobody buy), a
+  // link must be `https:`, the price may stay empty. The server's refusals (second write) sit beneath.
+  const ticketEditable = ticket !== undefined && ticketOn && !sectionState.fieldsDisabled;
+  const ticketErrors: TicketFieldErrors = { ...ticketServerErrors };
+  if (submitted && ticket !== undefined && ticketOn) {
+    if (ticketEditable) {
+      const link = ticketLink.trim();
+      if (ticketProductId.trim() === '') ticketErrors.id = 'idRequired';
+      if (link === '') ticketErrors.link = 'linkRequired';
+      else if (!isCheckoutLink(link)) ticketErrors.link = 'linkInvalid';
+    }
+    Object.assign(ticketErrors, ticketFieldErrors({ priceText: ticketPrice }));
+  }
+  const ticketInvalid =
+    ticket !== undefined &&
+    ticketOn &&
+    (!priceParse.ok ||
+      (ticketEditable &&
+        (ticketProductId.trim() === '' ||
+          ticketLink.trim() === '' ||
+          !isCheckoutLink(ticketLink.trim()))));
+  const gatewayWord = ticket?.gatewayName?.trim() || t('form.ticket.gatewayFallback');
 
   const back = mode === 'edit' && eventId ? `/eventos/${eventId}` : '/eventos';
 
@@ -652,10 +747,93 @@ export function EventForm({
     }
   };
 
+  /** An edit of one Ingresso field drops the server's refusal drawn under it (UI-D-743). */
+  const clearTicketError = (field: 'id' | 'link') =>
+    setTicketServerErrors(({ [field]: _cleared, ...rest }) => rest);
+
+  /**
+   * The SECOND write (UI-D-743, D-744): the product mapping, after the event is saved (the form is the
+   * single writer; the two modules cannot share a transaction, MOD-02). Only a REAL change of the
+   * pair calls the endpoint (a price-only edit calls none), and a DELETE only when a saved product
+   * was switched off. A failure leaves the event saved and every typed value in place: a field issue
+   * lands under its input, the sales lock re-reads the section as locked, anything else is the toast.
+   * `recurring` is a SUCCESS that keeps the form open, so the subscription warning is seen.
+   */
+  const saveTicket = async (
+    savedEventId: string,
+  ): Promise<'skipped' | 'saved' | 'recurring' | 'failed'> => {
+    if (ticket === undefined || sectionState.fieldsDisabled) return 'skipped';
+    const pairId = ticketProductId.trim();
+    const pairLink = ticketLink.trim();
+    if (ticketOn) {
+      if (savedPair?.id === pairId && savedPair.link === pairLink) return 'skipped';
+    } else if (savedPair === null) {
+      return 'skipped';
+    }
+
+    let outcome: EventTicketOutcome;
+    try {
+      outcome = ticketOn
+        ? await saveEventTicketAction(savedEventId, {
+            externalProductId: pairId,
+            checkoutUrl: pairLink,
+          })
+        : await removeEventTicketAction(savedEventId);
+    } catch (error) {
+      // The event IS saved; only the product failed. Shape only: never an id or a link.
+      console.error('events.ticket_save_failed', { error: String(error) });
+      toast.show({ tone: 'error', message: t('form.ticket.errors.save') });
+      return 'failed';
+    }
+
+    if (outcome.ok) {
+      if (ticketOn) {
+        setSavedPair({ id: pairId, link: pairLink });
+        if (outcome.recurring) {
+          setTicketRecurring(true);
+          return 'recurring';
+        }
+      } else {
+        setSavedPair(null);
+        setTicketRecurring(false);
+      }
+      return 'saved';
+    }
+    switch (outcome.issue) {
+      case 'id_required':
+        setTicketServerErrors({ id: 'idRequired' });
+        break;
+      case 'id_taken':
+        setTicketServerErrors({ id: 'idTaken' });
+        break;
+      case 'link_required':
+        setTicketServerErrors({ link: 'linkRequired' });
+        break;
+      case 'link_invalid':
+        setTicketServerErrors({ link: 'linkInvalid' });
+        break;
+      case 'locked':
+        // A sale landed meanwhile: the product can no longer change or go. Show what the server
+        // holds (the count when it could be read, at least one) and drop what was typed over it.
+        setSoldNow(Math.max(1, outcome.soldCount ?? 0));
+        if (savedPair !== null) {
+          setTicketOn(true);
+          setTicketProductId(savedPair.id);
+          setTicketLink(savedPair.link);
+        }
+        setTicketServerErrors({ section: 'locked' });
+        break;
+      default:
+        toast.show({ tone: 'error', message: t('form.ticket.errors.save') });
+    }
+    return 'failed';
+  };
+
   const submit = () => {
     setSubmitted(true);
     setFormError(null);
     setPosterError(null);
+    setTicketServerErrors({});
     const parsed = eventInputSchema.safeParse(payload);
     if (!parsed.success) {
       const tooLong = parsed.error.issues.some((issue) => issue.path[0] === 'description');
@@ -666,17 +844,28 @@ export function EventForm({
       );
       return;
     }
+    // The Ingresso fields speak under themselves (the errors above); the top card points at them.
+    if (ticketInvalid) {
+      setFormError(t('form.errors.save'));
+      return;
+    }
     startTransition(async () => {
-      const result =
-        mode === 'edit' && eventId
-          ? await updateEventAction(eventId, parsed.data)
-          : await createEventAction(parsed.data);
+      // A create that succeeded while its second write failed is never repeated: the next save updates it.
+      const targetId = mode === 'edit' && eventId ? eventId : createdId.current;
+      const result = targetId
+        ? await updateEventAction(targetId, parsed.data)
+        : await createEventAction(parsed.data);
       if (result.ok) {
+        if (mode !== 'edit') createdId.current = result.eventId;
+        const ticketResult = await saveTicket(result.eventId);
+        if (ticketResult === 'failed') return;
         const done = {
           tone: 'success',
           message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
         } as const;
         toast.show(done);
+        // The subscription warning is only worth drawing if the admin stays to read it.
+        if (ticketResult === 'recurring') return;
         // 2026-10-09: an edit returns to the event it changed and a create replaces the form with
         // the new event, so the form is never left behind that event's "Voltar".
         const landing = `/eventos/${result.eventId}`;
@@ -1377,6 +1566,38 @@ export function EventForm({
               {t('form.capacity.helper')}
             </p>
           </div>
+
+          {/* ── (6c) Ingresso (Phase 10.1-11, UI-D-741): the end of step 1, after "Vagas". ── */}
+          {ticket !== undefined ? (
+            <TicketSection
+              state={sectionState}
+              gateway={gatewayWord}
+              on={ticketOn}
+              onToggle={setTicketOn}
+              productId={ticketProductId}
+              onProductId={(value) => {
+                setTicketProductId(value);
+                clearTicketError('id');
+              }}
+              link={ticketLink}
+              onLink={(value) => {
+                setTicketLink(value);
+                clearTicketError('link');
+              }}
+              priceText={ticketPrice}
+              onPriceText={setTicketPrice}
+              errors={ticketErrors}
+              existingNote={
+                mode === 'edit' &&
+                ticket.hasConfirmed &&
+                ticketOn &&
+                savedPair === null &&
+                !sectionState.switchDisabled
+              }
+              offNote={!ticketOn && savedPair !== null && !sectionState.switchDisabled}
+              busy={busy}
+            />
+          ) : null}
 
           <Button
             type="button"
