@@ -212,3 +212,208 @@ revoke all on function app.event_gateway_grant(uuid, uuid, uuid, text, text, boo
   from public, anon, authenticated;--> statement-breakpoint
 grant execute on function app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)
   to service_role;
+--> statement-breakpoint
+
+-- ── 2. THE GUARD KNOWS THE COLUMN ──────────────────────────────────────────────────────────────────
+-- LATEST definition of `app.event_attendance_guard()`: a byte copy of the body in
+-- `20261113141716_event_ticket_bookkeeping_lock.sql` with two changes, both for `ticket_confirmed_at`:
+--   * step 1a: the member lane (`authenticated`) changing the column is refused with 42501, the named constraint
+--     `event_attendances_bookkeeping_locked` and the message `bookkeeping_locked`, BEFORE the bookkeeping exit and
+--     before the CHECK of plan 01 (T-10.2-03: a member can neither forge nor erase the instant that marks a
+--     payment early);
+--   * step 1b: the column is removed from both sides of the `to_jsonb(...)` comparison, so the grant's upgrade
+--     update (order columns plus the instant, run as the definer owner) stays a pure bookkeeping update that no
+--     member rule judges.
+-- The member lane never writes the instant: the grant stamps it as a definer. Every other step, name and message
+-- is unchanged and the trigger `event_attendances_guard` keeps pointing at the same function (never recreated).
+create or replace function app.event_attendance_guard() returns trigger
+  language plpgsql set search_path = '' as $$
+declare
+  v_status text;
+  v_starts_at timestamptz;
+  v_ends_at timestamptz;
+  v_capacity integer;
+  v_confirmed integer;
+  v_paid boolean;
+  v_paid_path boolean;
+begin
+  -- 1. A row never moves: its tenant, event and member are its identity.
+  if tg_op = 'UPDATE' and (new.tenant_id is distinct from old.tenant_id
+                           or new.event_id is distinct from old.event_id
+                           or new.user_id is distinct from old.user_id) then
+    raise exception using errcode = '23514', constraint = 'event_attendances_immutable',
+                          message = 'attendance_immutable';
+  end if;
+
+  -- 1a. The bookkeeping lock (10.1 gap, CR-01; 10.2, T-10.2-03): the member lane never writes the order columns
+  --     or the confirmation instant. Placed BEFORE the bookkeeping exit, which would otherwise return a member's
+  --     rewrite of them.
+  if tg_op = 'UPDATE' and current_user = 'authenticated'
+     and (new.origin is distinct from old.origin
+          or new.order_provider is distinct from old.order_provider
+          or new.order_ref is distinct from old.order_ref
+          or new.refunded_at is distinct from old.refunded_at
+          or new.ticket_confirmed_at is distinct from old.ticket_confirmed_at) then
+    raise exception using errcode = '42501', constraint = 'event_attendances_bookkeeping_locked',
+                          message = 'bookkeeping_locked';
+  end if;
+
+  -- 1b. Bookkeeping exit (10.1): only origin, order_provider, order_ref, refunded_at, ticket_confirmed_at or
+  --     updated_at changed. Not an answer and not a check-in, so no later step judges it.
+  if tg_op = 'UPDATE'
+     and to_jsonb(new) - 'origin' - 'order_provider' - 'order_ref' - 'refunded_at' - 'ticket_confirmed_at' - 'updated_at'
+         = to_jsonb(old) - 'origin' - 'order_provider' - 'order_ref' - 'refunded_at' - 'ticket_confirmed_at' - 'updated_at' then
+    return new;
+  end if;
+
+  -- 2. The event, read in THIS tenant and locked against a concurrent cancel or edit.
+  select e.status, e.starts_at, e.ends_at, e.capacity
+    into v_status, v_starts_at, v_ends_at, v_capacity
+    from public.events e
+   where e.id = new.event_id
+     and e.tenant_id = new.tenant_id
+     and e.deleted_at is null
+     for share;
+  if not found then
+    raise exception using errcode = '23503', constraint = 'event_attendances_event_visible',
+                          message = 'event_not_found';
+  end if;
+
+  -- 2b. Is this a paid event? (10.1, D-741) Whatever the payments module flag says (D-746). And is
+  --     this row on the paid path (a payment or the admin's courtesy), the only origins that skip
+  --     the start and capacity rules (D-750, D-751)?
+  v_paid := app.event_ticket_mapped(new.tenant_id, new.event_id);
+  v_paid_path := new.origin in ('ticket', 'courtesy');
+
+  -- 3. A checked-in row keeps its status for good (D-204: "once checked in, the answer is locked").
+  if tg_op = 'UPDATE' and old.checked_in_at is not null
+     and new.status is distinct from old.status then
+    raise exception using errcode = '23514', constraint = 'event_attendances_locked',
+                          message = 'attendance_locked';
+  end if;
+
+  -- 3b. A member's own move INTO going in a paid event is a payment, not an answer (D-741).
+  if v_paid and new.status = 'going' and new.origin = 'rsvp'
+     and (tg_op = 'INSERT' or old.status is distinct from 'going') then
+    raise exception using errcode = '23514', constraint = 'event_attendances_payment_required',
+                          message = 'payment_required';
+  end if;
+
+  -- 3c. A paid or courtesy presence is not given back by a Não vou (D-754).
+  if tg_op = 'UPDATE' and old.origin in ('ticket', 'courtesy')
+     and old.status = 'going' and new.status = 'not_going' then
+    raise exception using errcode = '23514', constraint = 'event_attendances_ticket_locked',
+                          message = 'ticket_locked';
+  end if;
+
+  -- 4. A cancelled event takes no answer and no check-in (D-201).
+  if v_status = 'cancelled' then
+    raise exception using errcode = '23514', constraint = 'event_attendances_event_active',
+                          message = 'cancelled';
+  end if;
+
+  -- 5. RSVP is open strictly before the start (D-204). The paid path is judged by the END instead
+  --    (D-750): a payment approved after the start still confirms, but never after the event is over.
+  if v_paid_path then
+    if new.status = 'going' and (tg_op = 'INSERT' or old.status is distinct from 'going')
+       and now() >= v_ends_at then
+      raise exception using errcode = '23514', constraint = 'event_attendances_event_ended',
+                            message = 'event_ended';
+    end if;
+  elsif new.status in ('going', 'not_going') and now() >= v_starts_at then
+    raise exception using errcode = '23514', constraint = 'event_attendances_rsvp_open',
+                          message = 'rsvp_closed';
+  end if;
+
+  -- 6. A check-in lands only inside the window (D-209). An UPDATE of a row that already checked in
+  --    (a later edit of an unrelated column) is not a new check-in and is not re-judged.
+  if new.status in ('checked_in', 'walk_in')
+     and (tg_op = 'INSERT' or old.checked_in_at is null) then
+    if now() < v_starts_at - interval '1 hour' then
+      raise exception using errcode = '23514', constraint = 'event_attendances_checkin_window',
+                            message = 'checkin_not_open';
+    end if;
+    if now() >= v_ends_at then
+      raise exception using errcode = '23514', constraint = 'event_attendances_checkin_window',
+                            message = 'checkin_closed';
+    end if;
+  end if;
+
+  -- 6b. Backstop: a walk-in has no ticket, so in a paid event it is refused (the check-in definers
+  --     answer `ticket_required` first; this is the last line).
+  if v_paid and new.status = 'walk_in'
+     and (tg_op = 'INSERT' or old.checked_in_at is null) then
+    raise exception using errcode = '23514', constraint = 'event_attendances_payment_required',
+                          message = 'payment_required';
+  end if;
+
+  -- 7. A full event takes no new Vou (2026-10-03). See `20261003233626_event_capacity_guard.sql`:
+  --    only a move INTO `going` on an event with a limit is judged, against the OTHER members'
+  --    confirmed count, under a transaction-scoped advisory lock on the event. A ticket or a
+  --    courtesy skips it (D-751): the seat was paid for or given.
+  if v_capacity is not null and new.status = 'going' and not v_paid_path
+     and (tg_op = 'INSERT' or old.status is distinct from 'going') then
+    perform pg_advisory_xact_lock(hashtextextended('event_capacity:' || new.event_id::text, 0));
+    select count(*)
+      into v_confirmed
+      from public.event_attendances a
+     where a.tenant_id = new.tenant_id
+       and a.event_id = new.event_id
+       and a.user_id <> new.user_id
+       and a.status in ('going', 'checked_in');
+    if v_confirmed >= v_capacity then
+      raise exception using errcode = '23514', constraint = 'event_attendances_capacity',
+                            message = 'event_full';
+    end if;
+  end if;
+
+  return new;
+end
+$$;
+--> statement-breakpoint
+
+-- ── 3. THE DELIVERY DEFINER ─────────────────────────────────────────────────────────────────────────
+-- `app.event_ticket_before_opening(tenant, event, provider, order_ref)`: true iff the attendance row of THIS tenant
+-- found by provider and trimmed order reference belongs to the given event and satisfies the derived rule
+-- `before_opening` above. A NULL or malformed argument, another tenant's reference, an unknown reference, a
+-- reference of another event and a row that is not a ticket are false. The tenant is an ARGUMENT pinned in every
+-- statement (the owner bypasses RLS); `service_role` only, like `app.event_title_for` (the Pagamentos list runs in
+-- the admin lane and asks per delivery).
+create or replace function app.event_ticket_before_opening(
+  p_tenant uuid,
+  p_event uuid,
+  p_provider text,
+  p_order_ref text
+)
+returns boolean
+language plpgsql stable security definer set search_path = '' as $$
+declare
+  v_ref text := pg_catalog.btrim(p_order_ref, E' \t\r\n');
+  v_result boolean;
+begin
+  if p_tenant is null or p_event is null or p_provider is null or p_order_ref is null
+     or p_provider !~ '^[a-z][a-z0-9_]{1,30}$'
+     or v_ref = '' or pg_catalog.char_length(v_ref) > 200 or v_ref ~ '[[:cntrl:]]' then
+    return false;
+  end if;
+
+  select (a.origin = 'ticket'
+          and a.ticket_confirmed_at is not null
+          and e.registration_opens_at is not null
+          and a.ticket_confirmed_at < e.registration_opens_at)
+    into v_result
+    from public.event_attendances a
+    join public.events e on e.id = a.event_id and e.tenant_id = a.tenant_id
+   where a.tenant_id = p_tenant
+     and a.event_id = p_event
+     and a.order_provider = p_provider
+     and a.order_ref = v_ref;
+
+  return coalesce(v_result, false);
+end
+$$;
+--> statement-breakpoint
+revoke all on function app.event_ticket_before_opening(uuid, uuid, text, text)
+  from public, anon, authenticated;--> statement-breakpoint
+grant execute on function app.event_ticket_before_opening(uuid, uuid, text, text)
+  to service_role;

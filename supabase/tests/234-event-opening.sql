@@ -42,7 +42,7 @@ begin;
 --    tenant with no events and a random id are told nothing; a session with no claims is told nothing.
 --
 -- Fixture ids use the `1e320000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(122);
+select plan(151);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-opn-a', 'Abertura A', '1e320000-0000-4000-8000-000000000001');
@@ -649,6 +649,175 @@ select is(
   (select count(*)::int || ':' || (min(ticket_confirmed_at) = now() - interval '5 minutes')::text
      from public.event_attendances where event_id = tests.op('601') and user_id = tests.op('601')),
   '1:true', 'EP-49/EP-59: one presence, and the confirmation instant was never rewritten');
+
+-- ── 7. the member lane (plan 05, T-10.2-03, D-791) ───────────────────────────────────────────────
+-- A member (role `authenticated`) can never write `ticket_confirmed_at`: `app.event_attendance_guard()` refuses it
+-- (42501, constraint `event_attendances_bookkeeping_locked`, message `bookkeeping_locked`) before the CHECK and
+-- before the bookkeeping exit. Users 60a to 60d, memberships 70a to 70d, 605 free (a plain rsvp row of 60a) |
+-- 606 opens in two days, no ticket (the courtesy and reset controls).
+select tests.auth_user('g' || h || '@opn-6.local', tests.op(h)) from unnest(array['60a','60b','60c','60d']) as h;
+insert into public.memberships (id, tenant_id, user_id, role, status, blocked_at, deleted_at)
+  select tests.op('7' || substr(h, 2)), tests.op('1'), tests.op(h), 'member', 'active', null, null
+    from unnest(array['60a','60b','60c','60d']) as h;
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, registration_opens_at) values
+  (tests.op('605'), tests.op('1'), tests.op('a1'), 'G5', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null),
+  (tests.op('606'), tests.op('1'), tests.op('a1'), 'G6', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '2 days');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.op('1'), tests.op('605'), tests.op('60a'), 'going', now(), 'rsvp');
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values
+  (tests.op('1'), 'fake', 'event', 'opn-234-g606', tests.op('606'));
+
+select tests.as_tenant(tests.op('1'), tests.op('601'));
+select throws_ok($$ update public.event_attendances set ticket_confirmed_at = now() + interval '30 days' where event_id = tests.op('601') and user_id = tests.op('601') $$,
+  '42501', 'bookkeeping_locked', 'T-10.2-03: a member moving the confirmation instant of their own ticket row is bookkeeping_locked');
+select throws_ok($$ update public.event_attendances set ticket_confirmed_at = null where event_id = tests.op('601') and user_id = tests.op('601') $$,
+  '42501', 'bookkeeping_locked', 'T-10.2-03: a member erasing the confirmation instant of their own ticket row is bookkeeping_locked');
+select throws_ok($$ update public.event_attendances set ticket_confirmed_at = now() - interval '9 days', responded_at = now() where event_id = tests.op('601') and user_id = tests.op('601') $$,
+  '42501', 'bookkeeping_locked', 'T-10.2-03: the instant is refused even when carried with an allowed column');
+do $$
+declare
+  v_state text;
+  v_constraint text;
+  v_message text;
+begin
+  begin
+    update public.event_attendances set ticket_confirmed_at = now() + interval '1 day' where event_id = tests.op('601') and user_id = tests.op('601');
+    perform set_config('s7.probe', 'no exception', true);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_constraint = constraint_name, v_message = message_text;
+    perform set_config('s7.probe', v_state || '|' || coalesce(v_constraint, '') || '|' || v_message, true);
+  end;
+end
+$$;
+select is(current_setting('s7.probe', true), '42501|event_attendances_bookkeeping_locked|bookkeeping_locked',
+  'T-10.2-03: the refusal is SQLSTATE 42501, constraint event_attendances_bookkeeping_locked, message bookkeeping_locked');
+reset role;
+select is(
+  (select ticket_confirmed_at = now() - interval '5 minutes' from public.event_attendances where event_id = tests.op('601') and user_id = tests.op('601')),
+  true, 'T-10.2-03: after the refused attempts the ticket row still reads its confirmation instant');
+
+-- The same attempt on a plain rsvp row: the guard answers before the CHECK would.
+select tests.as_tenant(tests.op('1'), tests.op('60a'));
+select throws_ok($$ update public.event_attendances set ticket_confirmed_at = now() where event_id = tests.op('605') and user_id = tests.op('60a') $$,
+  '42501', 'bookkeeping_locked', 'T-10.2-03: a member writing the instant on their own plain rsvp row is bookkeeping_locked (the guard answers before the CHECK)');
+-- A member insert of origin rsvp that carries the column is refused (the CHECK of plan 01).
+reset role;
+select tests.as_tenant(tests.op('1'), tests.op('60b'));
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, ticket_confirmed_at) values (tests.op('1'), tests.op('605'), tests.op('60b'), 'going', now(), now()) $$,
+  '23514', null, 'T-10.2-03: a member insert of origin rsvp carrying the instant is refused');
+reset role;
+select is((select ticket_confirmed_at is null from public.event_attendances where event_id = tests.op('605') and user_id = tests.op('60a')), true,
+  'T-10.2-03: the plain rsvp row still reads a null instant');
+
+-- Positive controls: every legitimate writer still passes under the redefined guard.
+select tests.as_service();
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('70c'), tests.op('604'), 'fake', 'OPN7-1') $$,
+  $$ values ('granted'::text) $$, 'control: the service role grant still writes the instant');
+reset role;
+select is((select ticket_confirmed_at = now() from public.event_attendances where event_id = tests.op('604') and user_id = tests.op('60c')), true,
+  'control: ...and the row reads it');
+select tests.as_tenant(tests.op('1'), tests.op('a1'), 'admin_tenant');
+select results_eq($$ select outcome from app.event_courtesy_grant(tests.op('606'), tests.op('70d')) $$, $$ values ('granted'::text) $$,
+  'control: the admin courtesy grant is accepted');
+select lives_ok($$ select app.event_ticket_reset(tests.op('606')) $$, 'control: the admin reset is accepted');
+reset role;
+select is((select origin from public.event_attendances where event_id = tests.op('606') and user_id = tests.op('60d')), 'rsvp',
+  'control: ...and the courtesy row is a plain rsvp again');
+select tests.as_tenant(tests.op('1'), tests.op('60a'));
+select lives_ok($$ update public.event_attendances set responded_at = now() where event_id = tests.op('605') and user_id = tests.op('60a') $$,
+  'control: a member update of an unrelated column of their own rsvp row is accepted');
+select lives_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values (tests.op('1'), tests.op('605'), tests.op('60a'), 'not_going', now(), 'rsvp') on conflict (tenant_id, event_id, user_id) do update set status = excluded.status, responded_at = now(), updated_at = now() where event_attendances.status in ('going','not_going') and event_attendances.status is distinct from excluded.status $$,
+  'control: the free-event Não vou upsert of a member is accepted');
+reset role;
+
+-- ── 8. the derived mark (plan 05, D-791, OPEN-13, OPEN-15, EP-28, EP-29, EP-30) ─────────────────
+-- The rule `before_opening`, defined ONCE here as a copy of the expression in `attendeeProjection`
+-- (packages/modules/events/server/service.ts, plan 07). Edit both together.
+create view tests.op_marks as
+  select a.id, a.event_id, a.user_id,
+         (a.origin = 'ticket' and a.ticket_confirmed_at is not null and ev.registration_opens_at is not null and a.ticket_confirmed_at < ev.registration_opens_at) as before_opening
+    from public.event_attendances a
+    join public.events ev on ev.id = a.event_id and ev.tenant_id = a.tenant_id;
+
+-- 607 opens in a day: the boundary pair and the null cases | 608 no opening | 60b/60c below: two ticket rows confirmed in
+-- the same instant, rows 609/60a: a Vou upgraded before and after the opening through the grant.
+select tests.auth_user('g' || h || '@opn-8.local', tests.op(h)) from unnest(array['610','611','612','613','614','615','616','617','618','619','620','621','622']) as h;
+insert into public.memberships (id, tenant_id, user_id, role, status, blocked_at, deleted_at)
+  select tests.op('7' || substr(h, 2)), tests.op('1'), tests.op(h), 'member', 'active', null, null
+    from unnest(array['617','618','619']) as h;
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, registration_opens_at) values
+  (tests.op('607'), tests.op('1'), tests.op('a1'), 'H1', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '1 day'),
+  (tests.op('608'), tests.op('1'), tests.op('a1'), 'H2', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null),
+  (tests.op('609'), tests.op('1'), tests.op('a1'), 'H3', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '1 hour'),
+  (tests.op('60e'), tests.op('1'), tests.op('a1'), 'H4', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() - interval '1 hour'),
+  (tests.op('60f'), tests.op('1'), tests.op('a1'), 'H5', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', now() + interval '1 day');
+-- Ticket rows written directly (the instants are chosen, not taken from the clock). 610 an hour before the opening |
+-- 611 exactly at it | 612 one microsecond before it | 613 one microsecond after it | 614 a null instant (a row from before
+-- this release) | 615 a courtesy | 616 a plain rsvp | 620 and 621 confirmed in the same instant on 60f.
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref, ticket_confirmed_at)
+  select tests.op('1'), tests.op('607'), tests.op(v.u), 'going', now(), 'ticket', 'fake', 'OPN8-' || v.u,
+         (select ev.registration_opens_at from public.events ev where ev.id = tests.op('607')) + v.delta
+    from (values ('610', interval '-1 hour'), ('611', interval '0'), ('612', interval '-1 microsecond'), ('613', interval '1 microsecond')) as v(u, delta);
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values
+  (tests.op('1'), tests.op('607'), tests.op('614'), 'going', now(), 'ticket', 'fake', 'OPN8-614');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.op('1'), tests.op('607'), tests.op('615'), 'going', now(), 'courtesy'),
+  (tests.op('1'), tests.op('607'), tests.op('616'), 'going', now(), 'rsvp');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref, ticket_confirmed_at) values
+  (tests.op('1'), tests.op('608'), tests.op('610'), 'going', now(), 'ticket', 'fake', 'OPN8-NOOPEN', now() - interval '2 days');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref, ticket_confirmed_at) values
+  (tests.op('1'), tests.op('60f'), tests.op('620'), 'going', now() - interval '3 minutes', 'ticket', 'fake', 'OPN8-620', now() - interval '1 hour'),
+  (tests.op('1'), tests.op('60f'), tests.op('621'), 'going', now() - interval '4 minutes', 'ticket', 'fake', 'OPN8-621', now() - interval '1 hour');
+-- A Vou given before the link, upgraded through the grant: 617 on 609 (before its opening) and 618 on 60e (after its opening).
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.op('1'), tests.op('609'), tests.op('617'), 'going', now() - interval '2 days', 'rsvp'),
+  (tests.op('1'), tests.op('60e'), tests.op('618'), 'going', now() - interval '2 days', 'rsvp');
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id)
+  select tests.op('1'), 'fake', 'event', 'opn-234-h' || h, tests.op(h) from unnest(array['609','60e']) as h;
+select set_config('request.jwt.claims', '', true);
+select tests.as_service();
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('717'), tests.op('609'), 'fake', 'OPN8-617') $$,
+  $$ values ('granted'::text) $$, 'fixture: the Vou of 617 is upgraded BEFORE the opening');
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('718'), tests.op('60e'), 'fake', 'OPN8-618') $$,
+  $$ values ('granted'::text) $$, 'fixture: the Vou of 618 is upgraded AFTER the opening');
+select results_eq($$ select outcome from app.event_gateway_grant(tests.op('1'), tests.op('719'), tests.op('609'), 'manual', 'OPN8-619', true) $$,
+  $$ values ('granted'::text) $$, 'fixture: the manual release of 619 before the opening');
+reset role;
+
+select is(
+  (select string_agg(m.user_id::text || ':' || m.before_opening::text, ',' order by m.user_id)
+     from tests.op_marks m where m.event_id = tests.op('607')),
+  (select string_agg(tests.op(u)::text || ':' || b, ',' order by tests.op(u))
+     from (values ('610', 'true'), ('611', 'false'), ('612', 'true'), ('613', 'false'), ('614', 'false'), ('615', 'false'), ('616', 'false')) as v(u, b)),
+  'EP-28/EP-29: an hour early and one microsecond early are marked; the exact instant, one microsecond after, a null instant, a courtesy and a plain rsvp are not');
+select is((select m.before_opening from tests.op_marks m where m.event_id = tests.op('608') and m.user_id = tests.op('610')), false,
+  'EP-29: a ticket row of an event with no opening is never marked');
+select is((select m.before_opening from tests.op_marks m where m.event_id = tests.op('609') and m.user_id = tests.op('617')), true,
+  'EP-28: a Vou upgraded BEFORE the opening is marked (its old responded_at plays no part)');
+select is((select m.before_opening from tests.op_marks m where m.event_id = tests.op('60e') and m.user_id = tests.op('618')), false,
+  'EP-28: the same Vou upgraded AFTER the opening is not marked');
+select is((select m.before_opening from tests.op_marks m where m.event_id = tests.op('609') and m.user_id = tests.op('619')), true,
+  'OPEN-13: the manual release before the opening is marked');
+select is((select bool_and(a.ticket_confirmed_at is not null) from public.event_attendances a where a.event_id in (tests.op('609'), tests.op('60e')) and a.origin = 'ticket'),
+  true, 'D-791: every ticket row the grant wrote carries the instant');
+
+-- Stable: with a marked row the opening cannot move (plan 04), and a refund that deletes the row removes the mark with it.
+select is(tests.try_opening(tests.op('609'), now() + interval '2 hours'), '23514|events_opening_locked|opening_locked',
+  'OPEN-13: the opening of an event with a marked ticket cannot change');
+select tests.as_service();
+select results_eq($$ select outcome from app.event_gateway_revoke(tests.op('1'), 'fake', 'OPN8-617') $$, $$ values ('removed'::text) $$,
+  'fixture: the refund deletes the going ticket of 617');
+reset role;
+select is((select count(*)::int from tests.op_marks m where m.event_id = tests.op('609') and m.user_id = tests.op('617')), 0,
+  'OPEN-13: ...and the mark went with the row');
+
+-- EP-30: the new column is in no index and in no ordering; equal instants keep the order by (responded_at, id).
+select is((select count(*)::int from pg_indexes where schemaname = 'public' and tablename = 'event_attendances' and indexdef ~ 'ticket_confirmed_at'), 0,
+  'EP-30: ticket_confirmed_at is in no index');
+select is(
+  (select string_agg(a.user_id::text, ',' order by a.responded_at, a.id) from public.event_attendances a where a.event_id = tests.op('60f')),
+  tests.op('621')::text || ',' || tests.op('620')::text,
+  'EP-30: two rows confirmed in the same instant keep their order by (responded_at, id)');
 
 select * from finish();
 rollback;
