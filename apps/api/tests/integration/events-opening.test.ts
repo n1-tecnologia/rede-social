@@ -725,6 +725,351 @@ describe('10.2 the member read (D-780, D-788, D-789; OPEN-02, OPEN-05, OPEN-06)'
       true,
     );
   });
+
+  /* ── Task 3: the key sets, the order, the matrix, the shape, the lanes and the removal ── */
+
+  /** The 10.1 key set of a FREE event's list item, written down from the shipped contract, NOT from the new code. */
+  const FREE_ITEM_KEYS = [
+    'address',
+    'capacity',
+    'category',
+    'confirmedCount',
+    'coverAssetId',
+    'coverVariantWidths',
+    'endsAt',
+    'format',
+    'id',
+    'paid',
+    'posterAssetId',
+    'posterVariantWidths',
+    'presentCount',
+    'startsAt',
+    'status',
+    'ticketPriceCents',
+    'title',
+    'venueName',
+    'viewerCheckedInAt',
+    'viewerOrigin',
+    'viewerRefunded',
+    'viewerStatus',
+  ];
+  const FREE_DETAIL_KEYS = [
+    ...FREE_ITEM_KEYS,
+    'checkoutUrl',
+    'description',
+    'schedule',
+    'viewerRespondedAt',
+  ].sort();
+  const FREE_EDIT_KEYS = [
+    'address',
+    'capacity',
+    'category',
+    'coverAssetId',
+    'coverVariantWidths',
+    'description',
+    'end',
+    'endsAt',
+    'format',
+    'id',
+    'meetingUrl',
+    'posterAssetId',
+    'posterVariantWidths',
+    'schedule',
+    'start',
+    'startsAt',
+    'status',
+    'ticket',
+    'ticketPriceCents',
+    'title',
+    'venueName',
+  ];
+  const sortedKeys = (value: unknown) => Object.keys(value as Json).sort();
+
+  it('a free event keeps the 10.1 key set on every read, even with a stale stored opening; a paid one with no opening adds only the seed (and saleReady on the detail) (EP-04, EP-05)', async () => {
+    const token = await memberToken();
+    const free = await ticketEvent(labTenantId, {
+      title: `${PREFIX}-keys-free`,
+      opensInMinutes: 30,
+    });
+    const paidNone = await mapped('keys-paid');
+
+    const freeDetail = await readAs(token, `/v1/events/${free}`);
+    expect(freeDetail.status, freeDetail.raw).toBe(200);
+    expect(sortedKeys(freeDetail.json)).toEqual(FREE_DETAIL_KEYS);
+
+    const list = await readAs(token, '/v1/events?period=upcoming&limit=50');
+    const items = list.json.items as Json[];
+    const freeItem = items.find((item) => item.id === free);
+    const paidItem = items.find((item) => item.id === paidNone);
+    expect(sortedKeys(freeItem)).toEqual(FREE_ITEM_KEYS);
+    expect(sortedKeys(paidItem)).toEqual([...FREE_ITEM_KEYS, 'serverNow'].sort());
+
+    const paidDetail = await readAs(token, `/v1/events/${paidNone}`);
+    expect(sortedKeys(paidDetail.json)).toEqual(
+      [...FREE_DETAIL_KEYS, 'saleReady', 'serverNow'].sort(),
+    );
+
+    // The next read answers a seeded FREE event of the lab tenant: the 10.1 key set again.
+    const next = await readAs(token, '/v1/events/next');
+    const nextEvent = next.json.event as Json | null;
+    if (nextEvent && nextEvent.paid === false) {
+      expect(sortedKeys(nextEvent)).toEqual(FREE_ITEM_KEYS);
+    }
+
+    const freeEdit = await request(`/v1/events/${free}/edit`, adminToken);
+    expect(sortedKeys(await freeEdit.json())).toEqual(FREE_EDIT_KEYS);
+    // A paid event with no opening differs on the edit read by the pair (null) and the seed only.
+    const paidEdit = await request(`/v1/events/${paidNone}/edit`, adminToken);
+    expect(sortedKeys(await paidEdit.json())).toEqual(
+      [...FREE_EDIT_KEYS, 'registrationOpens', 'serverNow'].sort(),
+    );
+  });
+
+  it('the list order of a free, a paid-with-opening and a paid-without event is the unchanged (starts_at, id) order (EP-06)', async () => {
+    const token = await memberToken();
+    const ids = [
+      await ticketEvent(labTenantId, {
+        title: `${PREFIX}-ord-free`,
+        startsInMinutes: 5000,
+        endsInMinutes: 5100,
+      }),
+      await ticketEvent(labTenantId, {
+        title: `${PREFIX}-ord-open`,
+        startsInMinutes: 5200,
+        endsInMinutes: 5300,
+        opensInMinutes: 30,
+      }),
+      await ticketEvent(labTenantId, {
+        title: `${PREFIX}-ord-none`,
+        startsInMinutes: 5200,
+        endsInMinutes: 5300,
+      }),
+    ];
+    await ticketMapping(labTenantId, ids[1] as string);
+    await ticketMapping(labTenantId, ids[2] as string);
+    const expected = await adminSql<{ id: string }[]>`
+      select id::text as id from public.events
+       where title like ${`${PREFIX}-ord-%`} order by starts_at asc, id asc`;
+    const list = await readAs(token, '/v1/events?period=upcoming&limit=50');
+    const mine = (list.json.items as Json[])
+      .map((item) => item.id as string)
+      .filter((id) => ids.includes(id));
+    expect(mine).toEqual(expected.map((row) => row.id));
+    expect(mine).toHaveLength(3);
+  });
+
+  it('the link, the readiness and the opening agree on every row of the matrix: module on, module off, gateway down; no link; opening null, past, future; soft-deleted (EP-14)', async () => {
+    const token = await memberToken();
+    const kinds = [
+      { name: 'null', opens: null },
+      { name: 'past', opens: -30 },
+      { name: 'future', opens: 30 },
+    ] as const;
+    const withLink: Record<string, string> = {};
+    const noLink: Record<string, string> = {};
+    for (const kind of kinds) {
+      withLink[kind.name] = await mapped(`mx-link-${kind.name}`, { opensInMinutes: kind.opens });
+      noLink[kind.name] = await mapped(`mx-nolink-${kind.name}`, {
+        opensInMinutes: kind.opens,
+        link: false,
+      });
+    }
+    const read = async (id: string) => (await readAs(token, `/v1/events/${id}`)).json;
+
+    /** checkoutUrl is non-null iff the sale is ready and the opening is not after the server instant. */
+    const invariant = (json: Json, label: string) => {
+      const opens = json.registrationOpensAt as string | undefined;
+      const now = json.serverNow as string;
+      expect(now, label).toMatch(ISO6);
+      const notAhead = opens === undefined || opens <= now;
+      expect(json.checkoutUrl !== null, label).toBe(json.saleReady === true && notAhead);
+    };
+
+    // State 1: module on, gateway connected.
+    for (const kind of kinds) {
+      const linked = await read(withLink[kind.name] as string);
+      const bare = await read(noLink[kind.name] as string);
+      invariant(linked, `on/link/${kind.name}`);
+      invariant(bare, `on/nolink/${kind.name}`);
+      expect(linked.saleReady, `on/link/${kind.name}`).toBe(true);
+      expect(linked.checkoutUrl, `on/link/${kind.name}`).toBe(kind.name === 'future' ? null : LINK);
+      expect(bare.saleReady, `on/nolink/${kind.name}`).toBe(false);
+      expect(bare.checkoutUrl, `on/nolink/${kind.name}`).toBeNull();
+    }
+
+    // State 2: the payments module off.
+    await setPaymentsRow(labTenantId, { enabled: false, settings: {} });
+    moduleFlags.invalidate(labTenantId);
+    try {
+      for (const kind of kinds) {
+        const linked = await read(withLink[kind.name] as string);
+        invariant(linked, `off/${kind.name}`);
+        expect(linked.checkoutUrl, `off/${kind.name}`).toBeNull();
+        expect(linked.saleReady, `off/${kind.name}`).toBe(false);
+      }
+    } finally {
+      await setPaymentsRow(labTenantId, { enabled: true, settings: {} });
+      moduleFlags.invalidate(labTenantId);
+    }
+
+    // State 3: the gateway disconnected.
+    await removePaymentIntegrations(labTenantId);
+    try {
+      for (const kind of kinds) {
+        const linked = await read(withLink[kind.name] as string);
+        invariant(linked, `down/${kind.name}`);
+        expect(linked.checkoutUrl, `down/${kind.name}`).toBeNull();
+        expect(linked.saleReady, `down/${kind.name}`).toBe(false);
+      }
+    } finally {
+      integration = await seedPaymentIntegration(labTenantId);
+    }
+
+    // State 4: soft-deleted: a bare 404 on the detail and absent from the list.
+    const doomed = withLink.null as string;
+    await adminSql`update public.events set deleted_at = now() where id = ${doomed}::uuid`;
+    const gone = await readAs(token, `/v1/events/${doomed}`);
+    expect(gone.status).toBe(404);
+    const list = await readAs(token, '/v1/events?period=upcoming&limit=50');
+    expect((list.json.items as Json[]).some((item) => item.id === doomed)).toBe(false);
+  });
+
+  it('through the API an opening seconds ahead holds the link back and one seconds behind hands it out, judged by the answer’s own instants (EP-14)', async () => {
+    const token = await memberToken();
+    const eventId = await mapped('edge');
+    for (const [interval, linked] of [
+      ['10 seconds', false],
+      ['-10 seconds', true],
+    ] as const) {
+      await openingAt(eventId, interval);
+      const res = await readAs(token, `/v1/events/${eventId}`);
+      expect(res.json.saleReady).toBe(true);
+      expect(res.json.checkoutUrl, interval).toBe(linked ? LINK : null);
+      const opens = res.json.registrationOpensAt as string;
+      const now = res.json.serverNow as string;
+      expect(opens <= now, interval).toBe(linked);
+    }
+  });
+
+  it('the instants are fixed-width six-digit UTC strings, an opening one microsecond before the start reads back exactly, and two instants one microsecond apart order as plain strings (EP-04, EP-15)', async () => {
+    const token = await memberToken();
+    const a = await mapped('shape-a');
+    const b = await mapped('shape-b');
+    await adminSql`
+      update public.events set registration_opens_at = date_trunc('second', starts_at) - interval '1 hour' + interval '1 microsecond'
+       where id = ${a}::uuid`;
+    await adminSql`
+      update public.events set registration_opens_at = date_trunc('second', starts_at) - interval '1 hour' + interval '2 microseconds'
+       where id = ${b}::uuid`;
+    const [expectedA] = await adminSql<{ at: string }[]>`
+      select to_char(registration_opens_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at
+        from public.events where id = ${a}::uuid`;
+    const readA = (await readAs(token, `/v1/events/${a}`)).json;
+    const readB = (await readAs(token, `/v1/events/${b}`)).json;
+    expect(readA.registrationOpensAt).toBe(expectedA?.at);
+    expect(readA.registrationOpensAt).toMatch(/\.000001Z$/);
+    expect(readB.registrationOpensAt).toMatch(/\.000002Z$/);
+    expect((readA.registrationOpensAt as string) < (readB.registrationOpensAt as string)).toBe(
+      true,
+    );
+    for (const json of [readA, readB]) {
+      expect(json.serverNow).toMatch(ISO6);
+      expect(json.registrationOpensAt).toMatch(ISO6);
+    }
+
+    // An opening one microsecond before the start is stored by the CHECK and read back at six digits.
+    const c = await mapped('shape-c');
+    await adminSql`
+      update public.events set registration_opens_at = starts_at - interval '1 microsecond'
+       where id = ${c}::uuid`;
+    const [expectedC] = await adminSql<{ at: string }[]>`
+      select to_char(registration_opens_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at
+        from public.events where id = ${c}::uuid`;
+    const readC = (await readAs(token, `/v1/events/${c}`)).json;
+    expect(readC.registrationOpensAt).toBe(expectedC?.at);
+    expect(readC.registrationOpensAt).toMatch(ISO6);
+  });
+
+  it('cross-tenant, both directions, each with a positive control: a member of the other tenant gets the bare 404 and never an opening (OPEN-23)', async () => {
+    const [demo] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.tenants where slug = 'rede-demo'`;
+    if (!demo) throw new Error('rede-demo is not seeded');
+    try {
+      const labMember = await memberToken();
+      const demoIdentity = await createSharedIdentity({
+        prefix: PREFIX,
+        memberships: [{ host: 'demo', role: 'member' }],
+      });
+      const demoMember = await signInAs(demoIdentity.email, demoIdentity.password);
+
+      const labEvent = await mapped('xt-lab', { opensInMinutes: 30 });
+      const demoEvent = await ticketEvent(demo.id, {
+        title: `${PREFIX}-xt-demo`,
+        opensInMinutes: 30,
+      });
+      await ticketMapping(demo.id, demoEvent);
+
+      // Positive controls: each member reads their own tenant's paid event with the opening.
+      const ownLab = await readAs(labMember, `/v1/events/${labEvent}`);
+      expect(ownLab.status, ownLab.raw).toBe(200);
+      expect(ownLab.json.registrationOpensAt).toMatch(ISO6);
+      const ownDemo = await readAs(demoMember, `/v1/events/${demoEvent}`, HOSTS.demo);
+      expect(ownDemo.status, ownDemo.raw).toBe(200);
+      expect(ownDemo.json.registrationOpensAt).toMatch(ISO6);
+
+      // The negatives, in both directions: the bare 404, no opening anywhere in the body.
+      for (const [token, host, id, openingOf] of [
+        [demoMember, HOSTS.demo, labEvent, ownLab.json.registrationOpensAt],
+        [labMember, HOSTS.lab, demoEvent, ownDemo.json.registrationOpensAt],
+      ] as const) {
+        const res = await readAs(token, `/v1/events/${id}`, host);
+        expect(res.status).toBe(404);
+        expect(res.raw).not.toContain(String(openingOf));
+        expect(res.json.error).toMatchObject({ code: 'NOT_FOUND' });
+        const list = await readAs(token, '/v1/events?period=upcoming&limit=50', host);
+        expect((list.json.items as Json[]).some((item) => item.id === id)).toBe(false);
+        expect(list.raw).not.toContain(String(openingOf));
+      }
+
+      // The attendance list: the other tenant's admin is refused with the bare 404; the own admin reads it.
+      const demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+      const foreign = await readAs(
+        demoAdmin,
+        `/v1/events/${labEvent}/attendance?list=confirmed&limit=50`,
+        HOSTS.demo,
+      );
+      expect(foreign.status).toBe(404);
+      const own = await readAs(
+        adminToken,
+        `/v1/events/${labEvent}/attendance?list=confirmed&limit=50`,
+      );
+      expect(own.status, own.raw).toBe(200);
+    } finally {
+      await removePaymentMappings(demo.id);
+    }
+  });
+
+  it('removing the product link turns the event into a free one on every read and clears the stored opening (EP-04)', async () => {
+    const token = await memberToken();
+    const eventId = await mapped('removal', { opensInMinutes: 30 });
+    const before = await readAs(token, `/v1/events/${eventId}`);
+    expect(before.json.registrationOpensAt).toMatch(ISO6);
+
+    const removed = await request(`/v1/payments/event-products/${eventId}`, adminToken, {
+      method: 'DELETE',
+    });
+    expect(removed.status, await removed.clone().text()).toBeLessThan(300);
+    expect(await openingIs(eventId, null)).toBe(true);
+
+    const detail = await readAs(token, `/v1/events/${eventId}`);
+    expect(sortedKeys(detail.json)).toEqual(FREE_DETAIL_KEYS);
+    expect(detail.json.paid).toBe(false);
+    const list = await readAs(token, '/v1/events?period=upcoming&limit=50');
+    const item = (list.json.items as Json[]).find((entry) => entry.id === eventId);
+    expect(sortedKeys(item)).toEqual(FREE_ITEM_KEYS);
+    const edit = await request(`/v1/events/${eventId}/edit`, adminToken);
+    expect(sortedKeys(await edit.json())).toEqual(FREE_EDIT_KEYS);
+  });
 });
 
 describe('10.2 the edit read gives the wall clock back, and Participantes marks the early payer (D-791, D-792; OPEN-03, OPEN-14)', () => {
