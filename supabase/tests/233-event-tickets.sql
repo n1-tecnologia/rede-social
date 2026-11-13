@@ -20,7 +20,7 @@ begin;
 --    off changes none of it (D-746). (Plan 02 task 2 extends this section with the paid-path exceptions.)
 --
 -- Fixture ids use the `1e310000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(42);
+select plan(66);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-tkt-a', 'Ingresso A', '1e310000-0000-4000-8000-000000000001');
@@ -177,6 +177,110 @@ select is(app.event_ticket_mapped('1e310000-0000-4000-8000-000000000001', '1e310
 select throws_ok(
   $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e3', '1e310000-0000-4000-8000-0000000000c5', 'going', now()) $$,
   '23514', 'payment_required', 'D-746: ...and the free Vou stays closed');
+reset role;
+
+
+-- ── 2b. the paid path, the ticket lock, the bookkeeping exit, the walk-in backstop ──────────────
+-- (plan 02, task 2: `*_event_ticket_guard_exceptions.sql`, the final guard body.)
+-- e5 mapped, started 1 hour ago, limit 1 | e6 mapped, ended | e7 mapped, cancelled | e8 mapped (the lock) |
+-- e9 mapped, check-in window, cancelled later | ea mapped / eb free, check-in window |
+-- ec free, full | ed free, started.
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, capacity) values
+  ('1e310000-0000-4000-8000-0000000000e5', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Pago iniciado', 'in_person', 'Sede', 'Rua A, 9', now() + interval '-1 hour', now() + interval '2 hours', 1),
+  ('1e310000-0000-4000-8000-0000000000e6', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Pago encerrado', 'in_person', 'Sede', 'Rua A, 9', now() + interval '-3 hours', now() + interval '-1 hour', null),
+  ('1e310000-0000-4000-8000-0000000000e7', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Pago cancelado', 'in_person', 'Sede', 'Rua A, 9', now() + interval '5 days', now() + interval '5 days 2 hours', null),
+  ('1e310000-0000-4000-8000-0000000000e8', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Pago trava', 'in_person', 'Sede', 'Rua A, 9', now() + interval '5 days', now() + interval '5 days 2 hours', null),
+  ('1e310000-0000-4000-8000-0000000000e9', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Pago contabilidade', 'in_person', 'Sede', 'Rua A, 9', now() + interval '30 minutes', now() + interval '150 minutes', null),
+  ('1e310000-0000-4000-8000-0000000000ea', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Pago porta', 'in_person', 'Sede', 'Rua A, 9', now() + interval '30 minutes', now() + interval '150 minutes', null),
+  ('1e310000-0000-4000-8000-0000000000eb', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Livre porta', 'in_person', 'Sede', 'Rua A, 9', now() + interval '30 minutes', now() + interval '150 minutes', null),
+  ('1e310000-0000-4000-8000-0000000000ec', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Livre lotado', 'in_person', 'Sede', 'Rua A, 9', now() + interval '5 days', now() + interval '5 days 2 hours', 1),
+  ('1e310000-0000-4000-8000-0000000000ed', '1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000a1', 'Livre iniciado', 'in_person', 'Sede', 'Rua A, 9', now() + interval '-1 hour', now() + interval '2 hours', null);
+select set_config('request.jwt.claims', '', true);
+select tests.as_service();
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e8', '1e310000-0000-4000-8000-0000000000c3', 'going', now(), 'rsvp');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e9', '1e310000-0000-4000-8000-0000000000c2', 'going', now(), 'rsvp');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, checked_in_at, checkin_via, origin, order_provider, order_ref) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e9', '1e310000-0000-4000-8000-0000000000c1', 'checked_in', now(), now(), 'code', 'ticket', 'fake', 'ORD-E9');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000ec', '1e310000-0000-4000-8000-0000000000c1', 'going', now(), 'rsvp');
+reset role;
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-e5', '1e310000-0000-4000-8000-0000000000e5'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-e6', '1e310000-0000-4000-8000-0000000000e6'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-e7', '1e310000-0000-4000-8000-0000000000e7'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-e8', '1e310000-0000-4000-8000-0000000000e8'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-e9', '1e310000-0000-4000-8000-0000000000e9'),
+  ('1e310000-0000-4000-8000-000000000001', 'fake', 'event', 'tkt-233-ea', '1e310000-0000-4000-8000-0000000000ea');
+update public.events set status = 'cancelled', cancelled_at = now() where id in ('1e310000-0000-4000-8000-0000000000e7', '1e310000-0000-4000-8000-0000000000e9');
+
+-- D-750 / D-751 / TICK-09 / TICK-10: the paid path passes the start and the capacity.
+select tests.as_service();
+select lives_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e5', '1e310000-0000-4000-8000-0000000000c1', 'going', now(), 'ticket', 'fake', 'ORD-E5-1') $$,
+  'D-750: a ticket row lands after starts_at (rsvp_closed does not apply to the paid path)');
+select lives_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e5', '1e310000-0000-4000-8000-0000000000c2', 'going', now(), 'ticket', 'fake', 'ORD-E5-2') $$,
+  'D-751: a second ticket row lands over a limit of 1 (capacity does not apply to the paid path)');
+select lives_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e5', '1e310000-0000-4000-8000-0000000000c3', 'going', now(), 'courtesy') $$,
+  'D-751: a courtesy row lands after starts_at and over capacity');
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e6', '1e310000-0000-4000-8000-0000000000c1', 'going', now(), 'ticket', 'fake', 'ORD-E6-1') $$,
+  '23514', 'event_ended', 'D-750: a ticket row is refused at ends_at (event_ended)');
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e6', '1e310000-0000-4000-8000-0000000000c2', 'going', now(), 'courtesy') $$,
+  '23514', 'event_ended', 'D-750: a courtesy row is refused at ends_at (event_ended)');
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e7', '1e310000-0000-4000-8000-0000000000c1', 'going', now(), 'ticket', 'fake', 'ORD-E7-1') $$,
+  '23514', 'cancelled', 'D-201: a ticket row is refused on a cancelled event (the cancelled step is unconditional)');
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e7', '1e310000-0000-4000-8000-0000000000c2', 'going', now(), 'courtesy') $$,
+  '23514', 'cancelled', 'D-201: a courtesy row is refused on a cancelled event');
+reset role;
+
+-- The member lane in the same mapped event, then the free-event controls.
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c5');
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e5', '1e310000-0000-4000-8000-0000000000c5', 'going', now(), 'rsvp') $$,
+  '23514', 'payment_required', 'D-741: in a mapped event a member''s own Vou, started and over capacity, is payment_required (paying is the way in)');
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000ec', '1e310000-0000-4000-8000-0000000000c5', 'going', now(), 'rsvp') $$,
+  '23514', 'event_full', 'control: in a FREE full event a member''s own Vou is still event_full');
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000ed', '1e310000-0000-4000-8000-0000000000c5', 'going', now(), 'rsvp') $$,
+  '23514', 'rsvp_closed', 'control: in a FREE started event a member''s own Vou is still rsvp_closed');
+reset role;
+
+-- D-754 / A-UI-4: the ticket lock.
+select tests.as_service();
+select lives_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e8', '1e310000-0000-4000-8000-0000000000c1', 'going', now(), 'ticket', 'fake', 'ORD-E8-1') $$,
+  'fixture: a ticket holder in e8');
+select lives_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e8', '1e310000-0000-4000-8000-0000000000c2', 'going', now(), 'courtesy') $$,
+  'fixture: a courtesy holder in e8');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c1');
+select throws_ok($$ update public.event_attendances set status = 'not_going', responded_at = now() where event_id = '1e310000-0000-4000-8000-0000000000e8' and user_id = '1e310000-0000-4000-8000-0000000000c1' $$,
+  '23514', 'ticket_locked', 'D-754: a ticket holder''s Não vou is ticket_locked (the named code beats the policy)');
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000e8', '1e310000-0000-4000-8000-0000000000c1', 'going', now(), 'rsvp') on conflict (tenant_id, event_id, user_id) do update set status = excluded.status, responded_at = now(), updated_at = now() where event_attendances.status in ('going','not_going') and event_attendances.status is distinct from excluded.status $$,
+  '23514', 'payment_required', 'D-741: a holder repeating Vou is judged on the proposed INSERT and refused payment_required (the service answers it as the unchanged 200)');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c2');
+select throws_ok($$ update public.event_attendances set status = 'not_going', responded_at = now() where event_id = '1e310000-0000-4000-8000-0000000000e8' and user_id = '1e310000-0000-4000-8000-0000000000c2' $$,
+  '23514', 'ticket_locked', 'D-754: a courtesy holder''s Não vou is ticket_locked');
+reset role;
+select tests.as_tenant('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000c3');
+select lives_ok($$ update public.event_attendances set status = 'not_going', responded_at = now() where event_id = '1e310000-0000-4000-8000-0000000000e8' and user_id = '1e310000-0000-4000-8000-0000000000c3' $$,
+  'A-UI-4: a presence made BEFORE the link (origin rsvp) may go to not_going');
+select throws_ok($$ update public.event_attendances set status = 'going', responded_at = now() where event_id = '1e310000-0000-4000-8000-0000000000e8' and user_id = '1e310000-0000-4000-8000-0000000000c3' $$,
+  '23514', 'payment_required', 'A-UI-4/D-741: ...and cannot return to going without paying');
+reset role;
+select is((select status from public.event_attendances where event_id = '1e310000-0000-4000-8000-0000000000e8' and user_id = '1e310000-0000-4000-8000-0000000000c1'), 'going', 'D-754: the ticket holder is still going after the refused Não vou and the refused repeat');
+
+-- Pitfalls 1 and 3: the bookkeeping exit (a definer''s refund flag and origin upgrade on a cancelled event).
+select tests.as_service();
+select lives_ok($$ update public.event_attendances set refunded_at = now() where event_id = '1e310000-0000-4000-8000-0000000000e9' and user_id = '1e310000-0000-4000-8000-0000000000c1' $$,
+  'bookkeeping exit: refunded_at on a CHECKED-IN ticket row of a CANCELLED event passes (no cancelled, no checked-in lock)');
+select lives_ok($$ update public.event_attendances set origin = 'ticket', order_provider = 'fake', order_ref = 'ORD-E9-UP', updated_at = now() where event_id = '1e310000-0000-4000-8000-0000000000e9' and user_id = '1e310000-0000-4000-8000-0000000000c2' $$,
+  'bookkeeping exit: an origin upgrade of a going presence on a cancelled event passes');
+select throws_ok($$ update public.event_attendances set status = 'checked_in', checked_in_at = now(), checkin_via = 'code' where event_id = '1e310000-0000-4000-8000-0000000000e9' and user_id = '1e310000-0000-4000-8000-0000000000c2' $$,
+  '23514', 'cancelled', 'control: an ordinary update (a check-in) on the same cancelled event is still refused (the exit is narrow)');
+select is((select origin from public.event_attendances where event_id = '1e310000-0000-4000-8000-0000000000e9' and user_id = '1e310000-0000-4000-8000-0000000000c2'), 'ticket', 'bookkeeping exit: the upgraded row reads origin ticket');
+reset role;
+
+-- Step 6b: the walk-in backstop.
+select tests.as_service();
+select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, checked_in_at, checkin_via) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000ea', '1e310000-0000-4000-8000-0000000000c7', 'walk_in', now(), 'code') $$,
+  '23514', 'payment_required', 'T-10.1-05: a new walk_in row in a mapped event is payment_required (backstop)');
+select lives_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, checked_in_at, checkin_via) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000eb', '1e310000-0000-4000-8000-0000000000c7', 'walk_in', now(), 'code') $$,
+  'control: the same walk_in in a free event is accepted (as pgTAP 141 proves)');
 reset role;
 
 select * from finish();

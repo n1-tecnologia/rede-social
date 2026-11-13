@@ -432,3 +432,84 @@ describe('events capacity: a full event takes no new Vou (guard step 7)', () => 
     }
   });
 });
+
+/**
+ * Phase 10.1 (plan 02, D-750, D-751): the paid path passes the limit and the start, which a member's
+ * own Vou never does. A mapping of kind `event` is linked with direct SQL (the `fake` provider) and the
+ * `ticket` rows are seeded by SQL, standing for what the apply job writes in plan 04. The free
+ * event is the positive control for every refusal: a full free event is still `event_full` (case 5)
+ * and a started free event is still `rsvp_closed` (case 2 of events-rsvp).
+ */
+async function otherTicketHolders(eventId: string, count: number): Promise<string[]> {
+  const people = await adminSql<{ id: string }[]>`
+    select u.id from public.users u
+      join public.memberships m on m.user_id = u.id
+     where m.tenant_id = ${tenantIds.demo}::uuid
+       and u.id not in (${userIds.demoMember}::uuid, ${userIds.demoAdmin}::uuid,
+                        ${userIds.demoSupport}::uuid)
+     order by u.email
+     limit ${count}`;
+  expect(people).toHaveLength(count);
+  for (const [index, person] of people.entries()) {
+    await adminSql`
+      insert into public.event_attendances
+             (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref)
+      values (${tenantIds.demo}::uuid, ${eventId}::uuid, ${person.id}::uuid, 'going', now(),
+              'ticket', 'fake', ${`ORD-CAP-${eventId.slice(0, 8)}-${index}`})`;
+  }
+  return people.map((person) => person.id);
+}
+
+async function mapEvent(eventId: string): Promise<void> {
+  await adminSql`
+    insert into public.payment_products
+           (tenant_id, provider, kind, external_product_id, checkout_url, event_id)
+    values (${tenantIds.demo}::uuid, 'fake', 'event', ${`tkt-cap-${crypto.randomUUID()}`},
+            'https://pay.example.test/checkout', ${eventId}::uuid)`;
+}
+
+describe('events capacity: the paid path (D-750, D-751)', () => {
+  it('9. ticket rows land over the limit and after the start; a member Vou in the same events is payment_required, in a free event event_full / rsvp_closed', async () => {
+    const paid = await create(body('paga lotada', { capacity: 1 }));
+    await mapEvent(paid.id);
+    await otherTicketHolders(paid.id, 2);
+    // Two confirmed seats on a limit of 1: the paid path did not count against the limit.
+    expect((await detail(paid.id)).confirmedCount).toBe(2);
+    const refused = await rsvp(paid.id, 'going');
+    expect(refused.status).toBe(409);
+    expect((await envelope(refused)).details).toEqual({ event: 'payment_required' });
+    expect((await answers(paid.id)).map((row) => row.user_id)).not.toContain(userIds.demoMember);
+
+    // After the start: a ticket row still lands (the apply job's late payment), the member's Vou stays closed.
+    await adminSql`
+      update public.events
+         set starts_at = now() - interval '1 hour', ends_at = now() + interval '2 hours'
+       where id = ${paid.id}::uuid`;
+    const late = await adminSql<{ id: string }[]>`
+      select u.id from public.users u
+        join public.memberships m on m.user_id = u.id
+       where m.tenant_id = ${tenantIds.demo}::uuid
+         and u.id not in (${userIds.demoMember}::uuid, ${userIds.demoAdmin}::uuid,
+                          ${userIds.demoSupport}::uuid)
+         and u.id not in (select user_id from public.event_attendances
+                           where event_id = ${paid.id}::uuid)
+       order by u.email
+       limit 1`;
+    expect(late).toHaveLength(1);
+    await adminSql`
+      insert into public.event_attendances
+             (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref)
+      values (${tenantIds.demo}::uuid, ${paid.id}::uuid, ${late[0]?.id ?? ''}::uuid, 'going', now(),
+              'ticket', 'fake', ${`ORD-CAP-LATE-${paid.id.slice(0, 8)}`})`;
+    const started = await rsvp(paid.id, 'going');
+    expect(started.status).toBe(409);
+    expect((await envelope(started)).details).toEqual({ event: 'payment_required' });
+
+    // Positive control: the same member in a FREE full event is still event_full.
+    const free = await create(body('livre lotada', { capacity: 1 }));
+    await othersGoing(free.id, 1);
+    const full = await rsvp(free.id, 'going');
+    expect(full.status).toBe(409);
+    expect((await envelope(full)).details).toEqual({ event: 'event_full' });
+  });
+});

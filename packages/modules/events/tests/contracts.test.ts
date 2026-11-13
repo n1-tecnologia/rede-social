@@ -154,6 +154,37 @@ describe('eventInputSchema — the refusal vocabulary', () => {
     expect(EVENT_ISSUES).toContain('too_many_attempts');
     expect(new Set(EVENT_ISSUES).size).toBe(EVENT_ISSUES.length);
   });
+
+  it('8b. 10.1 (TICK-23): the ticket refusals are in the closed list, each once, and the list is exactly pinned', () => {
+    expect(EVENT_ISSUES).toContain('payment_required');
+    expect(EVENT_ISSUES).toContain('ticket_locked');
+    expect(EVENT_ISSUES).toContain('event_ended');
+    expect(EVENT_ISSUE_SET.has('payment_required')).toBe(true);
+    expect(EVENT_ISSUE_SET.has('ticket_locked')).toBe(true);
+    // External contract once released: the strings are never renamed, so the whole list is pinned.
+    expect([...EVENT_ISSUES]).toEqual([
+      'name_required',
+      'end_before_start',
+      'location_required',
+      'url_required',
+      'url_invalid',
+      'cover_invalid',
+      'poster_invalid',
+      'rsvp_closed',
+      'cancelled',
+      'attendance_locked',
+      'checkin_not_open',
+      'checkin_closed',
+      'wrong_code',
+      'too_many_attempts',
+      'reactivate_started',
+      'event_ended',
+      'event_full',
+      'photo_invalid',
+      'payment_required',
+      'ticket_locked',
+    ]);
+  });
 });
 
 describe('eventQuerySchema — period is closed, limit clamps', () => {
