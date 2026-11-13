@@ -53,8 +53,16 @@ begin;
 --    clears the next row; the summary's over-limit flag; and the correlated count rides
 --    `event_attendances_tenant_event_status_idx` BY NAME.
 --
+-- 8. BOOKKEEPING LOCK (gap plan 16, CR-01, D-741, D-752, D-754, T-10.1-37, T-10.1-38, T-10.1-39): a member
+--    (role `authenticated`) changing `origin`, `order_provider`, `order_ref` or `refunded_at` of their own ticket
+--    or courtesy row is refused by the guard (42501, constraint `event_attendances_bookkeeping_locked`, message
+--    `bookkeeping_locked`) before the bookkeeping exit can return it, each column on both row kinds, the
+--    constraint name probed, both rows read untouched, and the positive control of every legitimate writer (the
+--    service role, the apply lane, the admin reset, the free-event Não vou upsert, a member update of an
+--    unrelated column); a refund still finds the row afterwards.
+--
 -- Fixture ids use the `1e310000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(323);
+select plan(342);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-tkt-a', 'Ingresso A', '1e310000-0000-4000-8000-000000000001');
@@ -1496,10 +1504,112 @@ insert into public.event_attendances (tenant_id, event_id, user_id, status, resp
 insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
   (tests.tk('1'), tests.tk('801'), tests.tk('102'), 'going', now(), 'courtesy');
 reset role;
+-- 802 is free, 803 gets its mapping AFTER two member rows exist (a presence made before the link), then a courtesy.
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, capacity) values
+  (tests.tk('802'), tests.tk('1'), tests.tk('10c'), 'Evento 802', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null),
+  (tests.tk('803'), tests.tk('1'), tests.tk('10c'), 'Evento 803', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null);
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.tk('1'), tests.tk('802'), tests.tk('103'), 'going', now(), 'rsvp'),
+  (tests.tk('1'), tests.tk('803'), tests.tk('105'), 'going', now(), 'rsvp'),
+  (tests.tk('1'), tests.tk('803'), tests.tk('106'), 'going', now(), 'rsvp');
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values
+  (tests.tk('1'), 'fake', 'event', 'tkt-233-s8-803', tests.tk('803'));
+select tests.as_service();
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.tk('1'), tests.tk('803'), tests.tk('104'), 'going', now(), 'courtesy');
+reset role;
+
 -- The verifier's reproduction: a member rewrites ONLY the order columns of their own ticket row.
 select tests.as_tenant(tests.tk('1'), tests.tk('101'));
 select throws_ok($$ update public.event_attendances set origin = 'rsvp', order_provider = null, order_ref = null where event_id = tests.tk('801') and user_id = tests.tk('101') $$,
   '42501', 'bookkeeping_locked', 'CR-01/D-752: a member stripping origin and the order columns of their own ticket row is bookkeeping_locked');
+
+-- Every column, one at a time, on the ticket row of user 101.
+select throws_ok($$ update public.event_attendances set origin = 'rsvp' where event_id = tests.tk('801') and user_id = tests.tk('101') $$,
+  '42501', 'bookkeeping_locked', 'T-10.1-37: a member changing origin of their own ticket row is bookkeeping_locked');
+select throws_ok($$ update public.event_attendances set order_provider = null where event_id = tests.tk('801') and user_id = tests.tk('101') $$,
+  '42501', 'bookkeeping_locked', 'T-10.1-37: a member changing order_provider of their own ticket row is bookkeeping_locked');
+select throws_ok($$ update public.event_attendances set order_ref = null where event_id = tests.tk('801') and user_id = tests.tk('101') $$,
+  '42501', 'bookkeeping_locked', 'T-10.1-37: a member changing order_ref of their own ticket row is bookkeeping_locked');
+select throws_ok($$ update public.event_attendances set refunded_at = now() where event_id = tests.tk('801') and user_id = tests.tk('101') $$,
+  '42501', 'bookkeeping_locked', 'T-10.1-37: a member changing refunded_at of their own ticket row is bookkeeping_locked');
+
+-- The constraint name and the SQLSTATE the guard raises (the missing_ok read makes a missing refusal a clean failure).
+do $$
+declare
+  v_state text;
+  v_constraint text;
+  v_message text;
+begin
+  begin
+    update public.event_attendances set origin = 'rsvp' where event_id = tests.tk('801') and user_id = tests.tk('101');
+    perform set_config('s8.probe', 'no exception', true);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_constraint = constraint_name, v_message = message_text;
+    perform set_config('s8.probe', v_state || '|' || coalesce(v_constraint, '') || '|' || v_message, true);
+  end;
+end
+$$;
+select is(current_setting('s8.probe', true), '42501|event_attendances_bookkeeping_locked|bookkeeping_locked',
+  'T-10.1-37: the refusal is SQLSTATE 42501, constraint event_attendances_bookkeeping_locked, message bookkeeping_locked');
+reset role;
+
+-- Every column, one at a time, on the courtesy row of user 102 (the guard answers before the CHECKs do).
+select tests.as_tenant(tests.tk('1'), tests.tk('102'));
+select throws_ok($$ update public.event_attendances set origin = 'rsvp' where event_id = tests.tk('801') and user_id = tests.tk('102') $$,
+  '42501', 'bookkeeping_locked', 'T-10.1-37: a member changing origin of their own courtesy row is bookkeeping_locked');
+select throws_ok($$ update public.event_attendances set order_provider = 'fake' where event_id = tests.tk('801') and user_id = tests.tk('102') $$,
+  '42501', 'bookkeeping_locked', 'T-10.1-37: a member writing order_provider on their own courtesy row is bookkeeping_locked');
+select throws_ok($$ update public.event_attendances set order_ref = 'S8-X' where event_id = tests.tk('801') and user_id = tests.tk('102') $$,
+  '42501', 'bookkeeping_locked', 'T-10.1-37: a member writing order_ref on their own courtesy row is bookkeeping_locked');
+select throws_ok($$ update public.event_attendances set refunded_at = now() where event_id = tests.tk('801') and user_id = tests.tk('102') $$,
+  '42501', 'bookkeeping_locked', 'T-10.1-37: a member writing refunded_at on their own courtesy row is bookkeeping_locked');
+reset role;
+
+-- EP-G1: a refused UPDATE rolls back with its statement; both rows read exactly as before.
+select is(
+  (select origin || '/' || order_provider || '/' || order_ref || '/' || (refunded_at is null)::text
+     from public.event_attendances where event_id = tests.tk('801') and user_id = tests.tk('101')),
+  'ticket/fake/S8-T1/true',
+  'EP-G1: after the refused attempts the ticket row still reads origin ticket, its provider and reference, no refund stamp');
+select is(
+  (select origin || '/' || (order_provider is null and order_ref is null and refunded_at is null)::text
+     from public.event_attendances where event_id = tests.tk('801') and user_id = tests.tk('102')),
+  'courtesy/true',
+  'EP-G1: after the refused attempts the courtesy row still reads origin courtesy with all three order columns null');
+
+-- The positive controls: every legitimate writer still passes.
+select tests.as_service();
+select lives_ok($$ update public.event_attendances set origin = 'ticket', order_provider = 'fake', order_ref = 'S8-UP', updated_at = now() where event_id = tests.tk('801') and user_id = tests.tk('102') $$,
+  'D-752 control: the service role upgrades a courtesy row to a ticket');
+select lives_ok($$ update public.event_attendances set refunded_at = now() where event_id = tests.tk('801') and user_id = tests.tk('102') $$,
+  'D-752 control: the service role stamps refunded_at on that upgraded row');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('206'), tests.tk('803'), 'fake', 'S8-G1') $$,
+  $$ values ('granted'::text) $$,
+  'D-752 control: the apply lane (app.event_gateway_grant) upgrades a presence made before the link');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('10c'), 'admin_tenant');
+select lives_ok($$ select app.event_ticket_reset(tests.tk('803')) $$,
+  'D-747 control: the admin lane resets the event (a definer rewrites origin from an authenticated session and is not judged)');
+reset role;
+select is((select origin from public.event_attendances where event_id = tests.tk('803') and user_id = tests.tk('104')), 'rsvp',
+  'D-747 control: ...and the courtesy row of user 104 now reads origin rsvp');
+select tests.as_tenant(tests.tk('1'), tests.tk('103'));
+select lives_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values (tests.tk('1'), tests.tk('802'), tests.tk('103'), 'not_going', now(), 'rsvp') on conflict (tenant_id, event_id, user_id) do update set status = excluded.status, responded_at = now(), updated_at = now() where event_attendances.status in ('going','not_going') and event_attendances.status is distinct from excluded.status $$,
+  'D-754 control: a member''s Não vou upsert in a free event is accepted (the upsert path is untouched)');
+reset role;
+select tests.as_tenant(tests.tk('1'), tests.tk('105'));
+select lives_ok($$ update public.event_attendances set responded_at = now() where event_id = tests.tk('803') and user_id = tests.tk('105') $$,
+  'control: a member update that touches none of the four columns is not judged');
+reset role;
+
+-- TICK-11 closed: the refund still finds the row by its order reference after every refused attempt.
+select tests.as_service();
+select results_eq(
+  $$ select outcome from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S8-T1') $$,
+  $$ values ('removed'::text) $$,
+  'TICK-11/D-760: the refund of S8-T1 still finds the row and answers removed after the refused strip attempts');
 reset role;
 
 -- The rank count rides the status index BY NAME on a volume fixture (a handful of rows is always scanned):
