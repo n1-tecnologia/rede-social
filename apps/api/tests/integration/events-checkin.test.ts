@@ -764,4 +764,67 @@ describe('paid event doors (D-742, T-10.1-05, T-10.1-06, T-10.1-22)', () => {
     ]);
     expect(received.slice(before).filter((payload) => payload.eventId === paid.id)).toHaveLength(1);
   });
+
+  it('3. online: ticket and courtesy holders inside the window get the URL, ONE event.checked_in each, the row keeps its origin, and a repeat is idempotent', async () => {
+    const paid = await createEvent('porta online portadores', 'online');
+    await openWindow(paid.id);
+    await linkTicket(paid.id);
+    await giveTicket(paid.id, userIds.joao ?? '', 'ticket');
+    await giveTicket(paid.id, userIds.iris ?? '', 'courtesy');
+    const before = received.length;
+
+    for (const token of [tokens.joao, tokens.iris]) {
+      const res = await enter(paid.id, token);
+      expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+      expect((await res.json()) as EnterResult).toEqual({
+        outcome: 'recorded',
+        meetingUrl: MEETING_URL,
+      });
+    }
+    expect(await rows(paid.id, userIds.joao ?? '')).toEqual([
+      { status: 'checked_in', origin: 'ticket', order_ref: expect.stringMatching(/^ORD-DOOR-/) },
+    ]);
+    expect(await rows(paid.id, userIds.iris ?? '')).toEqual([
+      { status: 'checked_in', origin: 'courtesy', order_ref: null },
+    ]);
+    expect(received.slice(before).filter((payload) => payload.eventId === paid.id)).toHaveLength(2);
+
+    // A repeat: already, with the URL, nothing emitted, nothing rewritten.
+    const again = await enter(paid.id, tokens.joao);
+    expect((await again.json()) as EnterResult).toEqual({
+      outcome: 'already',
+      meetingUrl: MEETING_URL,
+    });
+    expect(received.slice(before).filter((payload) => payload.eventId === paid.id)).toHaveLength(2);
+
+    // The non-holder in the same event is still refused beside them.
+    const refused = await enter(paid.id, tokens.sofia);
+    expect((await refused.json()) as EnterResult).toEqual({
+      outcome: 'ticket_required',
+      meetingUrl: null,
+    });
+  });
+
+  it('4. a FREE event is untouched: the walk-in still lands, in person and online', async () => {
+    const inPerson = await createEvent('porta livre presencial');
+    await openWindow(inPerson.id);
+    const code = await codeOf(inPerson.id);
+    const res = await checkIn(inPerson.id, code, tokens.rafael);
+    expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+    expect(((await res.json()) as CheckinResult).outcome).toBe('walk_in');
+    expect(await rows(inPerson.id, userIds.rafael ?? '')).toEqual([
+      { status: 'walk_in', origin: 'rsvp', order_ref: null },
+    ]);
+
+    const online = await createEvent('porta livre online', 'online');
+    await openWindow(online.id);
+    const live = await enter(online.id, tokens.rafael);
+    expect((await live.json()) as EnterResult).toEqual({
+      outcome: 'recorded',
+      meetingUrl: MEETING_URL,
+    });
+    expect(await rows(online.id, userIds.rafael ?? '')).toEqual([
+      { status: 'walk_in', origin: 'rsvp', order_ref: null },
+    ]);
+  });
 });
