@@ -1577,7 +1577,7 @@ Plans:
 **Goal:** An event can be linked to a Kiwify product (not a store product of the system); a member's presence is confirmed only after that product's purchase is approved, matched by the gateway product id and the buyer's e-mail; a refund or chargeback removes the presence and frees the seat; a payment that arrives at a full event still confirms; an event with no linked product keeps the automatic RSVP.
 **Requirements**: TICK-01..TICK-24
 **Depends on:** Phase 10 (and, for the base it extends, Phase 06 events and Phase 09.1 payment gateway)
-**Plans:** 4/15 plans executed
+**Plans:** 5/15 plans executed
 
 Plans:
 **Wave 1**
@@ -1596,7 +1596,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 10.1-04-PLAN.md — The SQL definers: gateway grant and revoke, courtesy, lock and reset, holders, tenant-pinned reads, hardening and cross-tenant pgTAP
+- [x] 10.1-04-PLAN.md — The SQL definers: gateway grant and revoke, courtesy, lock and reset, holders, tenant-pinned reads, hardening and cross-tenant pgTAP
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
