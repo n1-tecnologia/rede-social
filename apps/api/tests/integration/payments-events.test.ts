@@ -1296,5 +1296,124 @@ describe('10.1 events: paid-event deliveries', () => {
       // the marker is one boolean: no instant, no opening date and no reason rides along
       expect(raw).not.toMatch(/registrationOpensAt|ticketConfirmedAt|confirmedAt/);
     }, 90_000);
+
+    it('OPEN-23 cross-tenant: the marker is each tenant own, a shared order reference marks neither list of the other, and the definer gives no marker for a foreign tenant argument', async () => {
+      const labEarly = await opensLater('xt-lab');
+      await removePaymentIntegrations(demoTenantId);
+      await removePaymentMappings(demoTenantId);
+      const demoIntegration = await seedPaymentIntegration(demoTenantId);
+      const [previousDemo] = await adminSql<
+        { enabled: boolean; settings: Record<string, unknown> }[]
+      >`
+        select enabled, settings from public.tenant_modules
+         where tenant_id = ${demoTenantId}::uuid and module_key = 'payments'`;
+      await setPaymentsRow(demoTenantId, { enabled: true, settings: {} });
+      moduleFlags.invalidate(demoTenantId);
+      try {
+        const demoEventId = await ticketEvent(demoTenantId, {
+          title: `${TITLE}-xt-demo`,
+          startsInMinutes: 1_440,
+          endsInMinutes: 1_560,
+          opensInMinutes: 60,
+        });
+        const demoMapping = await ticketMapping(demoTenantId, demoEventId);
+        const demoAdminIdentity = await createSharedIdentity({
+          prefix: PREFIX,
+          memberships: [{ host: 'demo', role: 'admin_tenant' }],
+        });
+        const demoAdmin: Person = {
+          userId: demoAdminIdentity.userId,
+          membershipId: '',
+          email: demoAdminIdentity.email,
+          token: await signInAs(demoAdminIdentity.email, demoAdminIdentity.password),
+        };
+        const labBuyer = await personWithEmail(freshEmail(PREFIX, 'xtlab'), 'lab');
+        const demoBuyer = await personWithEmail(freshEmail(PREFIX, 'xtdemo'), 'demo');
+
+        // the SAME order reference is used by both tenants: only the tenant argument tells them apart
+        const shared = ref();
+        const labDelivery = await deliverAndApply(
+          integration,
+          approved(labEarly.productId, labBuyer.email, shared),
+        );
+        const demoDelivery = await deliverAndApply(
+          demoIntegration,
+          approved(demoMapping.externalProductId, demoBuyer.email, shared),
+        );
+        expect(labDelivery).toMatchObject({ state: 'applied', outcome: 'ticket_granted' });
+        expect(demoDelivery).toMatchObject({ state: 'applied', outcome: 'ticket_granted' });
+
+        const listAs = async (who: Person, host: string) => {
+          const res = await api.request('/v1/payments/events', {
+            headers: { [TENANT_HOST_HEADER]: host, authorization: `Bearer ${who.token}` },
+          });
+          expect(res.status, await res.clone().text()).toBe(200);
+          return ((await res.json()) as { items: EventItem[] }).items;
+        };
+
+        // positive controls: each admin sees its own early delivery with the marker
+        const labItems = await listAs(admin, HOSTS.lab);
+        const demoItems = await listAs(demoAdmin, HOSTS.demo);
+        expect(labItems.find((item) => item.id === labDelivery.id)).toMatchObject({
+          beforeOpening: true,
+        });
+        expect(demoItems.find((item) => item.id === demoDelivery.id)).toMatchObject({
+          beforeOpening: true,
+        });
+        // negatives, both directions: neither list holds a row of the other tenant
+        expect(labItems.map((item) => item.id)).not.toContain(demoDelivery.id);
+        expect(demoItems.map((item) => item.id)).not.toContain(labDelivery.id);
+
+        // the definer asked with the wrong tenant argument never answers true, in either direction
+        const asked = async (tenant: string, event: string) => {
+          const [row] = await adminSql<{ marked: boolean }[]>`
+            select app.event_ticket_before_opening(${tenant}::uuid, ${event}::uuid, 'fake', ${shared})
+                   as marked`;
+          return row?.marked;
+        };
+        expect(await asked(labTenantId, labEarly.eventId), 'control: lab, its own event').toBe(
+          true,
+        );
+        expect(await asked(demoTenantId, demoEventId), 'control: demo, its own event').toBe(true);
+        expect(await asked(demoTenantId, labEarly.eventId), 'demo asking for the lab event').toBe(
+          false,
+        );
+        expect(await asked(labTenantId, demoEventId), 'lab asking for the demo event').toBe(false);
+
+        // a reference that exists ONLY in the lab tenant, asked with the demo tenant argument
+        const onlyLab = ref();
+        const solo = await personWithEmail(freshEmail(PREFIX, 'xtsolo'), 'lab');
+        const soloDelivery = await deliverAndApply(
+          integration,
+          approved(labEarly.productId, solo.email, onlyLab),
+        );
+        expect(soloDelivery).toMatchObject({ outcome: 'ticket_granted' });
+        const [wrong] = await adminSql<{ marked: boolean }[]>`
+          select app.event_ticket_before_opening(${demoTenantId}::uuid, ${demoEventId}::uuid, 'fake', ${onlyLab})
+                 as marked`;
+        const [right] = await adminSql<{ marked: boolean }[]>`
+          select app.event_ticket_before_opening(${labTenantId}::uuid, ${labEarly.eventId}::uuid, 'fake', ${onlyLab})
+                 as marked`;
+        expect(wrong?.marked).toBe(false);
+        expect(right?.marked).toBe(true);
+        expect((await listAs(demoAdmin, HOSTS.demo)).map((item) => item.id)).not.toContain(
+          soloDelivery.id,
+        );
+      } finally {
+        await removePaymentIntegrations(demoTenantId);
+        await removePaymentMappings(demoTenantId);
+        if (previousDemo) {
+          await setPaymentsRow(demoTenantId, {
+            enabled: previousDemo.enabled,
+            settings: previousDemo.settings,
+          });
+        } else {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${demoTenantId}::uuid and module_key = 'payments'`;
+        }
+        moduleFlags.invalidate(demoTenantId);
+      }
+    }, 120_000);
   });
 });

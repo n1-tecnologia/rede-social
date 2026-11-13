@@ -5,6 +5,7 @@ import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   attendancesOf,
+  confirmedAtOf,
   deliver,
   deliverAndApply,
   eventRow,
@@ -676,4 +677,76 @@ describe('10.1 the kind dispatch guard', () => {
   it('a kind that is neither access, store_product nor event ends in the guard, never in a store write', () => {
     expect(() => unsupportedMappingKind('seat' as never)).toThrow(/not handled/);
   });
+});
+
+/* ── 10.2-08: two deliveries of ONE order applied at the same moment, the sale not yet open (EP-60, D-782) ── */
+
+describe('10.2 parallel deliveries of one order before the opening', () => {
+  it('EP-60: two approved bodies with the same order reference and different bytes serialise on the event lock: one presence, one unchanged instant, one applied and one no_effect, one notice, no deadlock', async () => {
+    for (let round = 0; round < 5; round += 1) {
+      const ev = await paidEvent({
+        startsInMinutes: 1_440,
+        endsInMinutes: 1_560,
+        opensInMinutes: 60,
+      });
+      const buyer = await newBuyer(`par${round}`);
+      const ref = orderRef();
+      // the inbox dedupes only identical bytes: two different bodies are two recorded deliveries
+      const first = await deliver(
+        integration,
+        ticketDelivery('purchase_approved', {
+          ref,
+          productId: ev.productId,
+          email: buyer.email,
+          copy: 'a',
+        }),
+      );
+      const second = await deliver(
+        integration,
+        ticketDelivery('purchase_approved', {
+          ref,
+          productId: ev.productId,
+          email: buyer.email,
+          copy: 'b',
+        }),
+      );
+      expect(second).not.toBe(first);
+
+      const settled = await Promise.allSettled([runApply(first), runApply(second)]);
+      expect(
+        settled.map((outcome) => outcome.status),
+        `round ${round}: neither job may fail or deadlock`,
+      ).toEqual(['fulfilled', 'fulfilled']);
+
+      const rows = await Promise.all([eventRow(first), eventRow(second)]);
+      expect(
+        rows.map((row) => row.state),
+        `round ${round}`,
+      ).toEqual(['applied', 'applied']);
+      expect(rows.map((row) => row.outcome).sort(), `round ${round}`).toEqual([
+        'no_effect',
+        'ticket_granted',
+      ]);
+
+      // one presence, confirmed once, and the instant is the same after a second round of applies
+      const presences = await attendancesOf(ev.eventId);
+      expect(presences, `round ${round}`).toHaveLength(1);
+      expect(presences[0]).toMatchObject({
+        user_id: buyer.userId,
+        origin: 'ticket',
+        order_ref: ref,
+      });
+      const instant = await confirmedAtOf(ev.eventId);
+      expect(instant).toHaveLength(1);
+      expect(instant[0]?.confirmed_at, `round ${round}`).not.toBeNull();
+      await Promise.all([runApply(first), runApply(second)]);
+      expect(await confirmedAtOf(ev.eventId), `round ${round}: the instant never moves`).toEqual(
+        instant,
+      );
+      expect(await attendancesOf(ev.eventId)).toHaveLength(1);
+
+      await runNotificationJobs(labTenantId);
+      expect(await noticesOf(buyer.userId), `round ${round}: one notice`).toHaveLength(1);
+    }
+  }, 120_000);
 });
