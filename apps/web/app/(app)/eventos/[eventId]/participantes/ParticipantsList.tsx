@@ -18,10 +18,13 @@ import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useRef, useState } from 'react';
 import type { AttendeeView } from '@/lib/events-view';
 import {
+  type GrantCourtesyResult,
+  grantCourtesyAction,
   loadMoreAttendanceAction,
   refreshAttendanceAction,
   removeCourtesyAction,
 } from '../../actions';
+import { ReleaseConfirmDialog, useReleaseToast } from './ReleasePresenceSheet';
 
 export interface ParticipantsListProps {
   eventId: string;
@@ -101,6 +104,8 @@ export function ParticipantsList({
   const toast = useToast();
   const regionRef = useRef<HTMLElement>(null);
   const [removeTarget, setRemoveTarget] = useState<AttendeeView | null>(null);
+  const [releaseTarget, setReleaseTarget] = useState<AttendeeView | null>(null);
+  const toastRelease = useReleaseToast();
 
   const [items, setItems] = useState(initialItems);
   const [cursor, setCursor] = useState(initialCursor);
@@ -197,6 +202,31 @@ export function ParticipantsList({
     }
   };
 
+  /**
+   * The confirmed release of a "Não vão" row (UI-D-755 door 2, by `attendanceId`). The row leaves this chip
+   * ONLY when the server says the person now holds a presence; every refusal keeps it. A row the server no
+   * longer knows (the bare 404) is re-read rather than guessed at.
+   */
+  const releasePresence = async () => {
+    const target = releaseTarget;
+    if (!target) return;
+    let result: GrantCourtesyResult = { status: 'generic' };
+    try {
+      result = await grantCourtesyAction(eventId, { attendanceId: target.id });
+    } catch (error) {
+      console.error('events.courtesy_grant_failed', { error: String(error) });
+    }
+    toastRelease(result.status, target.name);
+    if (result.status === 'granted' || result.status === 'already_in') {
+      setItems((previous) => previous.filter((row) => row.id !== target.id));
+      regionRef.current?.focus();
+      router.refresh();
+    } else if (result.status === 'not_found') {
+      void refresh();
+      router.refresh();
+    }
+  };
+
   let body: ReactNode;
   if (firstLoadFailed && items.length === 0) {
     body = (
@@ -264,6 +294,17 @@ export function ParticipantsList({
                   >
                     {t('participants.courtesy.action')}
                   </Button>
+                ) : canManage && row.action === 'release' ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    hitArea
+                    data-release-presence={row.id}
+                    aria-label={t('participants.release.rowAria', { name: row.name })}
+                    onClick={() => setReleaseTarget(row)}
+                  >
+                    {t('participants.release.door')}
+                  </Button>
                 ) : undefined
               }
             />
@@ -307,6 +348,11 @@ export function ParticipantsList({
         </section>
       </PullToRefresh>
       {/* Outside the pull container: its transform would become the dialog's containing block. */}
+      <ReleaseConfirmDialog
+        name={releaseTarget?.name ?? null}
+        onConfirm={releasePresence}
+        onClose={() => setReleaseTarget(null)}
+      />
       <ConfirmDialog
         open={removeTarget !== null}
         tone="danger"

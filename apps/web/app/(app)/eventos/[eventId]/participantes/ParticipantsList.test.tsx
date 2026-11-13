@@ -76,11 +76,19 @@ vi.mock('../../actions', () => ({
   refreshAttendanceAction: vi.fn(),
   regenerateCheckinCodeAction: vi.fn(),
   removeCourtesyAction: vi.fn(),
+  grantCourtesyAction: vi.fn(),
+  searchCourtesyMembersAction: vi.fn(),
+  courtesyHoldersAction: vi.fn(),
 }));
 
 const { default: ParticipantsPage } = await import('./page');
 const { ParticipantsList } = await import('./ParticipantsList');
-const { refreshAttendanceAction, removeCourtesyAction } = await import('../../actions');
+const {
+  courtesyHoldersAction,
+  grantCourtesyAction,
+  refreshAttendanceAction,
+  removeCourtesyAction,
+} = await import('../../actions');
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const ADMIN = ['events.event.manage', 'events.attendance.read', 'events.attendance.respond'];
@@ -125,6 +133,8 @@ async function renderPage(lista?: string) {
 
 beforeEach(() => {
   vi.mocked(removeCourtesyAction).mockReset();
+  vi.mocked(grantCourtesyAction).mockReset();
+  vi.mocked(courtesyHoldersAction).mockReset();
   vi.mocked(refreshAttendanceAction).mockReset();
   router.refresh.mockReset();
   state.permissions = ADMIN;
@@ -206,6 +216,25 @@ describe('the Participantes page (RSC)', () => {
     await renderPage();
     expect(screen.getByTestId('checkin-code')).toBeTruthy();
     expect(screen.getByText('Algo deu errado')).toBeTruthy();
+  });
+
+  it('6b. the toolbar door: a paid event and the manage permission draw it above the chips, nobody else', async () => {
+    state.summary = { status: 'ok', summary: summary({ paid: true }) };
+    const { unmount } = await renderPage();
+    const door = screen.getByRole('button', { name: 'Liberar presença' });
+    const nav = screen.getByRole('navigation', { name: 'Filtrar participantes' });
+    expect(door.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    unmount();
+    // Attendance read WITHOUT manage: the list, but no door.
+    state.permissions = ['events.attendance.read'];
+    const second = await renderPage();
+    expect(screen.queryByRole('button', { name: 'Liberar presença' })).toBeNull();
+    second.unmount();
+    // A free event has neither door, even for the admin.
+    state.permissions = ADMIN;
+    state.summary = { status: 'ok', summary: summary() };
+    await renderPage();
+    expect(screen.queryByRole('button', { name: 'Liberar presença' })).toBeNull();
   });
 
   it('7. rows are formatted on the server and are not links; Presentes tags the walk-in only', async () => {
@@ -524,5 +553,149 @@ describe('ParticipantsList: the marks and the courtesy removal of a paid event',
     expect(screen.getByRole('region', { name: 'Participantes do evento' })).toBe(
       document.activeElement,
     );
+  });
+});
+
+/**
+ * Phase 10.1-14 (UI-D-755 door 2, A-UI-5) — the "Não vão" rows of a paid event carry "Liberar presença";
+ * the toolbar door is drawn by the page. The row leaves the chip only from the server's answer.
+ */
+describe('ParticipantsList: Liberar presença on the Não vão chip', () => {
+  const notGoing = (id: string, overrides: Partial<AttendeeView> = {}): AttendeeView => ({
+    id,
+    name: `Pessoa ${id.slice(-1)}`,
+    removed: false,
+    avatarUrl: null,
+    meta: 'Respondeu em sex., 2 de out.',
+    walkIn: false,
+    marks: [],
+    action: 'release',
+    ...overrides,
+  });
+  const open = async (name: string) => {
+    fireEvent.click(screen.getByRole('button', { name: `Liberar presença de ${name}` }));
+    return screen.findByRole('dialog');
+  };
+
+  it('12a. every row of a paid event carries the outline action; the confirm names the person and sends nothing yet', async () => {
+    renderList({
+      list: 'not_going',
+      canManage: true,
+      initialItems: [notGoing(A1), notGoing(A2)],
+    });
+    const buttons = screen.getAllByRole('button', { name: /^Liberar presença de/ });
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]?.textContent).toBe('Liberar presença');
+    expect(buttons[0]?.className).toContain('border');
+    // No marks on a Não vão row: it holds no presence to describe.
+    expect(document.querySelector('[data-attendee-marks]')).toBeNull();
+    const dialog = await open('Pessoa 1');
+    expect(within(dialog).getByText('Liberar presença de Pessoa 1?')).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        'A presença é confirmada agora, sem cobrança. Ela aparece como Cortesia.',
+      ),
+    ).toBeTruthy();
+    expect(grantCourtesyAction).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Não liberar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(grantCourtesyAction).not.toHaveBeenCalled();
+    expect(screen.getByText('Pessoa 1')).toBeTruthy();
+  });
+
+  it('12b. granted: the request carries the attendanceId, the row leaves ONLY after the answer, counts refresh', async () => {
+    let resolve: (value: { status: 'granted' }) => void = () => {};
+    vi.mocked(grantCourtesyAction).mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    renderList({
+      list: 'not_going',
+      canManage: true,
+      initialItems: [notGoing(A1), notGoing(A2)],
+    });
+    const dialog = await open('Pessoa 1');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Liberar presença' }));
+    });
+    expect(grantCourtesyAction).toHaveBeenCalledTimes(1);
+    expect(grantCourtesyAction).toHaveBeenCalledWith(EVENT_ID, { attendanceId: A1 });
+    // Pending: the row is still on screen, untouched.
+    expect(screen.getByText('Pessoa 1')).toBeTruthy();
+    expect(router.refresh).not.toHaveBeenCalled();
+    await act(async () => {
+      resolve({ status: 'granted' });
+    });
+    await waitFor(() => expect(screen.queryByText('Pessoa 1')).toBeNull());
+    expect(screen.getByText('Pessoa 2')).toBeTruthy();
+    expect(screen.getByText('Presença de Pessoa 1 liberada.')).toBeTruthy();
+    expect(router.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['event_ended', 'Este evento já terminou.'],
+    ['event_cancelled', 'Este evento foi cancelado.'],
+    ['event_not_paid', 'Algo deu errado. Tente novamente.'],
+    ['generic', 'Algo deu errado. Tente novamente.'],
+  ] as const)(
+    '12c. a refusal (%s) toasts its sentence and the row stays',
+    async (status, message) => {
+      vi.mocked(grantCourtesyAction).mockResolvedValue({ status });
+      renderList({ list: 'not_going', canManage: true, initialItems: [notGoing(A1)] });
+      const dialog = await open('Pessoa 1');
+      await act(async () => {
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Liberar presença' }));
+      });
+      expect(await screen.findByText(message)).toBeTruthy();
+      expect(screen.getByText('Pessoa 1')).toBeTruthy();
+      expect(router.refresh).not.toHaveBeenCalled();
+      expect(refreshAttendanceAction).not.toHaveBeenCalled();
+    },
+  );
+
+  it('12d. already_in: the info sentence names the person and the row leaves this chip', async () => {
+    vi.mocked(grantCourtesyAction).mockResolvedValue({ status: 'already_in' });
+    renderList({ list: 'not_going', canManage: true, initialItems: [notGoing(A1)] });
+    const dialog = await open('Pessoa 1');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Liberar presença' }));
+    });
+    expect(await screen.findByText('Pessoa 1 já está inscrito neste evento.')).toBeTruthy();
+    await waitFor(() => expect(screen.queryAllByTestId('attendee-row')).toHaveLength(0));
+  });
+
+  it('12e. not_found re-reads the chip instead of guessing', async () => {
+    vi.mocked(grantCourtesyAction).mockResolvedValue({ status: 'not_found' });
+    vi.mocked(refreshAttendanceAction).mockResolvedValue({
+      ok: true,
+      items: [],
+      nextCursor: null,
+    });
+    renderList({ list: 'not_going', canManage: true, initialItems: [notGoing(A1)] });
+    const dialog = await open('Pessoa 1');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Liberar presença' }));
+    });
+    await waitFor(() =>
+      expect(refreshAttendanceAction).toHaveBeenCalledWith(EVENT_ID, 'not_going'),
+    );
+    await waitFor(() => expect(screen.queryByText('Pessoa 1')).toBeNull());
+  });
+
+  it('12f. a viewer without the manage permission, and a free event, see no door', () => {
+    const { unmount } = renderList({
+      list: 'not_going',
+      canManage: false,
+      initialItems: [notGoing(A1)],
+    });
+    expect(screen.queryByRole('button', { name: /Liberar presença/ })).toBeNull();
+    unmount();
+    // A free event's row has no `action` key at all, whoever looks.
+    const free: AttendeeView = { ...notGoing(A1) };
+    delete free.action;
+    delete free.marks;
+    renderList({ list: 'not_going', canManage: true, initialItems: [free] });
+    expect(screen.queryByRole('button', { name: /Liberar presença/ })).toBeNull();
   });
 });

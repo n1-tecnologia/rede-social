@@ -15,6 +15,7 @@ import {
 import { ActiveChipInView } from './ActiveChipInView';
 import { ParticipantsList } from './ParticipantsList';
 import { RegenerateCodeControl } from './RegenerateCodeControl';
+import { ReleasePresenceToolbar } from './ReleasePresenceSheet';
 
 /** The chip nav's DOM id, shared with `ActiveChipInView`. */
 const CHIPS_ID = 'participants-chips';
@@ -33,6 +34,8 @@ const CHIPS_ID = 'participants-chips';
  *  2. the CODE CARD first (D-208: the organiser opens this at the door to read it aloud): the code,
  *     spelled for screen readers, from the admin-only summary read; online, the online note instead.
  *     "Gerar novo código" sits in its action slot only with `events.event.manage` (D-217);
+ *  2b. a paid event and `events.event.manage` add the "Liberar presença" toolbar door above the chips
+ *     (10.1-14, UI-D-755); a free event has none;
  *  3. the chip nav: three `Chip` links carrying the counts (`pendingConfirmedCount`, `presentCount`,
  *     `notGoingCount`: Pitfall 11, the Confirmados chip is `going` ONLY), `whitespace-nowrap` and
  *     `tabular-nums`, scrolling horizontally when four-digit counts exceed a 320px row (UI E11
@@ -136,6 +139,9 @@ export default async function ParticipantsPage({
         onlineNote={t('participants.online')}
         action={canManage ? <RegenerateCodeControl eventId={eventId} /> : undefined}
       />
+
+      {/* Phase 10.1-14 (UI-D-755): the toolbar door, a paid event and the manage permission only. */}
+      {summary.paid === true && canManage ? <ReleasePresenceToolbar eventId={eventId} /> : null}
 
       <nav
         id={CHIPS_ID}

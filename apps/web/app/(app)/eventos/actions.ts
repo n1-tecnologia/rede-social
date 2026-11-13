@@ -1,11 +1,15 @@
 'use server';
 
+import { adminMemberListQuerySchema } from '@rede-social/contracts/moderation';
 import {
   ATTENDANCE_LISTS,
   type AttendanceList,
   attendanceQuerySchema,
   type CheckinOutcome,
+  type CourtesyBody,
   checkinSchema,
+  courtesyBodySchema,
+  EVENT_COURTESY_MAX_HOLDER_IDS,
   EVENT_ISSUE_SET,
   type EventIssue,
   type EventPhoto,
@@ -18,6 +22,7 @@ import {
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { getAdminMembers } from '@/lib/admin-members';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import {
   addEventPhoto,
@@ -28,6 +33,8 @@ import {
   getAttendance,
   getEventPhotos,
   getEventSections,
+  grantCourtesy,
+  loadCourtesyHolders,
   loadEvent,
   putRsvp,
   regenerateCode,
@@ -610,6 +617,153 @@ export async function removeCourtesyAction(
     revalidatePath(`/eventos/${eventId}`);
   }
   return result;
+}
+
+/**
+ * What releasing a presence can answer (D-743, UI-D-755), each a CODE the screen maps to a toast:
+ * `granted` (a new courtesy), `already_in` (the member already held a presence of any origin: never
+ * rewritten), `event_ended`, `event_cancelled`, `event_not_paid` (the sale was switched off meanwhile),
+ * `not_found` (the member left, the row is gone, or the id is another tenant's: one bare 404) and `generic`.
+ */
+export type GrantCourtesyResult = {
+  status:
+    | 'granted'
+    | 'already_in'
+    | 'event_ended'
+    | 'event_cancelled'
+    | 'event_not_paid'
+    | 'not_found'
+    | 'generic';
+};
+
+/**
+ * `POST /v1/events/{id}/courtesy` for the confirmed "Liberar presença": by `membershipId` (the release
+ * sheet's member search) or by the `attendanceId` of a "Não vão" row. The API's own body schema runs FIRST
+ * (exactly one id, `.strict()`), so a forged key or a body naming both never leaves the server. The events
+ * manage guard and the definer's claim check are the authority, not this action, and it works with the
+ * `payments` module off (D-746). A bootstrap refusal navigates OUTSIDE the try/catch. Logs carry the shape
+ * only, never a name, e-mail or id.
+ */
+export async function grantCourtesyAction(
+  eventId: string,
+  target: CourtesyBody,
+): Promise<GrantCourtesyResult> {
+  const body = courtesyBodySchema.safeParse(target);
+  if (!isEventId(eventId) || !body.success) return { status: 'generic' };
+
+  let refusal: string | null = null;
+  let result: GrantCourtesyResult = { status: 'generic' };
+  try {
+    const written = await grantCourtesy(eventId, body.data);
+    result = { status: written.outcome };
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      refusal = bootstrapRedirectPath(error);
+      const issue = (error.details as { event?: unknown } | undefined)?.event;
+      if (!refusal && issue === 'event_ended') result = { status: 'event_ended' };
+      else if (!refusal && issue === 'cancelled') result = { status: 'event_cancelled' };
+      else if (!refusal && issue === 'event_not_paid') result = { status: 'event_not_paid' };
+      else if (!refusal && error.status === 404) result = { status: 'not_found' };
+    }
+    if (!refusal && result.status === 'generic') {
+      console.error('events.courtesy_grant_failed', { error: String(error) });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  if (result.status === 'granted' || result.status === 'already_in') {
+    revalidatePath(`/eventos/${eventId}/participantes`);
+    revalidatePath(`/eventos/${eventId}`);
+  }
+  return result;
+}
+
+/** One member the release sheet's search found: what the row shows and what the release sends. */
+export interface CourtesyCandidate {
+  membershipId: string;
+  /** The profile name, or the e-mail when there is none (the Membros row rule). */
+  name: string;
+  email: string;
+  avatarAssetId: string | null;
+}
+
+export type CourtesyMemberSearchResult =
+  | { ok: true; items: CourtesyCandidate[]; nextCursor: string | null }
+  | { ok: false; code: 'generic' };
+
+/**
+ * The sheet's member search (A-UI-6, UI-D-755): `getAdminMembers({ q, status: 'active' })`, the SAME read
+ * and permission as the Membros admin search, validated with its own query schema (trimmed, capped at 80,
+ * and NEVER an empty query: the sheet has no unbounded list, T-10.1-16) before any request. Only ACTIVE
+ * memberships are offered; `cursor` is OPAQUE. The search term is the admin's own words and never reaches
+ * a log line.
+ */
+export async function searchCourtesyMembersAction(
+  q: string,
+  cursor: string | null = null,
+): Promise<CourtesyMemberSearchResult> {
+  const query = adminMemberListQuerySchema.safeParse({
+    q,
+    status: 'active',
+    ...(cursor === null ? {} : { cursor }),
+  });
+  if (!query.success || !query.data.q) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: CourtesyMemberSearchResult = { ok: false, code: 'generic' };
+  try {
+    const page = await getAdminMembers({
+      q: query.data.q,
+      status: 'active',
+      cursor: query.data.cursor,
+    });
+    result = {
+      ok: true,
+      items: page.items.map((member) => ({
+        membershipId: member.membershipId,
+        name: member.displayName ?? member.email,
+        email: member.email,
+        avatarAssetId: member.avatarAssetId,
+      })),
+      nextCursor: page.nextCursor,
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) {
+      console.error('events.courtesy_search_failed', {
+        ...(error instanceof ApiClientError
+          ? { status: error.status, code: error.code }
+          : { error: String(error) }),
+      });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+export type CourtesyHoldersResult = { ok: true; holders: string[] } | { ok: false };
+
+/**
+ * Which of the members a sheet page shows already hold a presence (A-UI-6), so "Já inscrito" can replace
+ * the button BEFORE the click. At most `EVENT_COURTESY_MAX_HOLDER_IDS` uuids, checked here first. An
+ * unreadable answer is `{ ok: false }`: the sheet then offers every row and the write refuses
+ * `already_in` itself, so this read is a courtesy to the admin, never a gate.
+ */
+export async function courtesyHoldersAction(
+  eventId: string,
+  membershipIds: string[],
+): Promise<CourtesyHoldersResult> {
+  if (
+    !isEventId(eventId) ||
+    !Array.isArray(membershipIds) ||
+    membershipIds.length > EVENT_COURTESY_MAX_HOLDER_IDS ||
+    !membershipIds.every(isEventId)
+  ) {
+    return { ok: false };
+  }
+  const holders = await loadCourtesyHolders(eventId, membershipIds);
+  return holders === null ? { ok: false } : { ok: true, holders };
 }
 
 /* ── 2026-10-03: the event's "Fotos" ────────────────────────────────────────────────────────────── */

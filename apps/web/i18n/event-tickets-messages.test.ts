@@ -423,6 +423,71 @@ describe('events.json: the origin marks and the courtesy removal (UI-D-754, UI-D
 });
 
 /**
+ * Phase 10.1-14 (UI-D-755, A-UI-5, A-UI-6): "Liberar presença", the admin's two doors and their one confirm.
+ * The cancelled refusal is the SHIPPED `errors.cancelled`, not a new key.
+ */
+const RELEASE: Record<string, { text: string; names: string[] }> = {
+  'participants.release.door': { text: 'Liberar presença', names: [] },
+  'participants.release.title': { text: 'Liberar presença', names: [] },
+  'participants.release.search': { text: 'Buscar membro', names: [] },
+  'participants.release.clear': { text: 'Limpar busca', names: [] },
+  'participants.release.prompt': { text: 'Digite o nome ou o e-mail do membro.', names: [] },
+  'participants.release.alreadyIn': { text: 'Já inscrito', names: [] },
+  'participants.release.row': { text: 'Liberar', names: [] },
+  'participants.release.rowAria': { text: 'Liberar presença de {name}', names: ['name'] },
+  'participants.release.empty.title': { text: 'Nenhum membro encontrado', names: [] },
+  'participants.release.empty.body': { text: 'Tente outro nome ou e-mail.', names: [] },
+  'participants.release.error': { text: 'Não foi possível buscar membros.', names: [] },
+  'participants.release.confirm.title': { text: 'Liberar presença de {name}?', names: ['name'] },
+  'participants.release.confirm.body': {
+    text: 'A presença é confirmada agora, sem cobrança. Ela aparece como Cortesia.',
+    names: [],
+  },
+  'participants.release.confirm.confirm': { text: 'Liberar presença', names: [] },
+  'participants.release.confirm.cancel': { text: 'Não liberar', names: [] },
+  'participants.release.toasts.granted': { text: 'Presença de {name} liberada.', names: ['name'] },
+  'participants.release.toasts.ended': { text: 'Este evento já terminou.', names: [] },
+  'participants.release.toasts.alreadyIn': {
+    text: '{name} já está inscrito neste evento.',
+    names: ['name'],
+  },
+  'participants.release.toasts.generic': { text: 'Algo deu errado. Tente novamente.', names: [] },
+};
+
+describe('events.json: Liberar presença (UI-D-755, A-UI-5, A-UI-6)', () => {
+  it('carries every key with the approved sentence and its placeholders', () => {
+    for (const [key, { text, names }] of Object.entries(RELEASE)) {
+      expect(all[key], `missing key events.${key}`).toBe(text);
+      expect(placeholders(all[key] as string), `placeholders of events.${key}`).toEqual(names);
+    }
+  });
+
+  it('holds no key under participants.release that the contract does not list', () => {
+    const present = Object.keys(all).filter((key) => key.startsWith('participants.release.'));
+    expect(present.sort()).toEqual(Object.keys(RELEASE).sort());
+  });
+
+  it('fills {name} as a plain value, markup and all, never interpreting it', () => {
+    expect(translate('participants.release.confirm.title', { name: '<b>Ana</b>' })).toBe(
+      'Liberar presença de <b>Ana</b>?',
+    );
+    expect(translate('participants.release.toasts.alreadyIn', { name: 'Ana' })).toBe(
+      'Ana já está inscrito neste evento.',
+    );
+  });
+
+  it('answers a cancelled event with the shipped sentence', () => {
+    expect(all['errors.cancelled']).toBe('Este evento foi cancelado.');
+  });
+
+  it('names the provider nowhere (TICK-20)', () => {
+    for (const key of Object.keys(RELEASE)) {
+      expect(all[key], `events.${key}`).not.toMatch(/kiwify|gateway|webhook|R\$|pedido/i);
+    }
+  });
+});
+
+/**
  * Phase 10.1-13 (UI-D-760): the bell row of the paid event, in the `notifications` namespace. Rich text:
  * the lead is a `<b>` tag the renderer fills, the title a plain value.
  */

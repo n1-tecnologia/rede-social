@@ -1,9 +1,12 @@
 import { revalidatePath } from 'next/cache';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getAdminMembers } from '@/lib/admin-members';
 import { ApiClientError } from '@/lib/bootstrap';
 import {
   checkIn,
   createEvent,
+  grantCourtesy,
+  loadCourtesyHolders,
   loadEvent,
   putRsvp,
   removeCourtesy,
@@ -11,9 +14,12 @@ import {
 } from '@/lib/events';
 import {
   checkInEventAction,
+  courtesyHoldersAction,
   createEventAction,
+  grantCourtesyAction,
   removeCourtesyAction,
   rsvpEventAction,
+  searchCourtesyMembersAction,
   updateEventAction,
 } from './actions';
 
@@ -48,12 +54,16 @@ vi.mock('@/lib/events', () => ({
   getAttendance: vi.fn(),
   getEventPhotos: vi.fn(),
   getEventSections: vi.fn(),
+  grantCourtesy: vi.fn(),
+  loadCourtesyHolders: vi.fn(),
   putRsvp: vi.fn(),
   regenerateCode: vi.fn(),
   removeCourtesy: vi.fn(),
   removeEventPhoto: vi.fn(),
   setEventStatus: vi.fn(),
 }));
+
+vi.mock('@/lib/admin-members', () => ({ getAdminMembers: vi.fn() }));
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -307,5 +317,165 @@ describe('removeCourtesyAction (D-743, D-752, UI-D-756)', () => {
     expect(await removeCourtesyAction('nope', ROW)).toEqual({ ok: false, code: 'generic' });
     expect(await removeCourtesyAction(EVENT, '../../x')).toEqual({ ok: false, code: 'generic' });
     expect(removeCourtesy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Phase 10.1-14 (D-743, A-UI-5, A-UI-6, UI-D-755, T-10.1-12/13/16) — releasing a presence, the member search
+ * and the holders read. Only the events client and the admin members read are stubbed, so these also prove
+ * the release needs nothing from the payments module (D-746): it works with the module off.
+ */
+describe('grantCourtesyAction (D-743, UI-D-755)', () => {
+  const MEMBER = '66666666-6666-4666-8666-666666666666';
+  const ROW = '55555555-5555-4555-8555-555555555555';
+  const refused = (status: number, event?: string) =>
+    new ApiClientError(
+      status,
+      status === 404 ? 'NOT_FOUND' : 'CONFLICT',
+      event ? { event } : undefined,
+      'req-1',
+    );
+
+  beforeEach(() => {
+    vi.mocked(grantCourtesy).mockReset();
+    vi.mocked(revalidatePath).mockClear();
+  });
+
+  it('granted and already_in pass through, send the body untouched and refresh the screens', async () => {
+    vi.mocked(grantCourtesy).mockResolvedValueOnce({ outcome: 'granted' });
+    expect(await grantCourtesyAction(EVENT, { membershipId: MEMBER })).toEqual({
+      status: 'granted',
+    });
+    expect(grantCourtesy).toHaveBeenCalledWith(EVENT, { membershipId: MEMBER });
+    expect(revalidatePath).toHaveBeenCalledWith(`/eventos/${EVENT}/participantes`);
+    expect(revalidatePath).toHaveBeenCalledWith(`/eventos/${EVENT}`);
+    vi.mocked(grantCourtesy).mockResolvedValueOnce({ outcome: 'already_in' });
+    expect(await grantCourtesyAction(EVENT, { attendanceId: ROW })).toEqual({
+      status: 'already_in',
+    });
+    expect(grantCourtesy).toHaveBeenLastCalledWith(EVENT, { attendanceId: ROW });
+  });
+
+  it.each([
+    [409, 'event_ended', 'event_ended'],
+    [409, 'cancelled', 'event_cancelled'],
+    [409, 'event_not_paid', 'event_not_paid'],
+    [404, undefined, 'not_found'],
+    [409, 'something_new', 'generic'],
+    [500, undefined, 'generic'],
+  ] as const)(
+    'the %s %s refusal is the closed code %s and revalidates nothing',
+    async (status, event, code) => {
+      vi.mocked(grantCourtesy).mockRejectedValue(refused(status, event));
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      expect(await grantCourtesyAction(EVENT, { membershipId: MEMBER })).toEqual({ status: code });
+      expect(revalidatePath).not.toHaveBeenCalled();
+      spy.mockRestore();
+    },
+  );
+
+  it('a body naming both ids, a forged key or a malformed id never reaches the API (T-10.1-12)', async () => {
+    const forged = [
+      { membershipId: MEMBER, attendanceId: ROW },
+      { membershipId: MEMBER, userId: ROW },
+      { membershipId: MEMBER, origin: 'ticket' },
+      { membershipId: 'nope' },
+      {},
+    ];
+    for (const body of forged) {
+      expect(await grantCourtesyAction(EVENT, body as never)).toEqual({ status: 'generic' });
+    }
+    expect(await grantCourtesyAction('nope', { membershipId: MEMBER })).toEqual({
+      status: 'generic',
+    });
+    expect(grantCourtesy).not.toHaveBeenCalled();
+  });
+});
+
+describe('searchCourtesyMembersAction (A-UI-6, T-10.1-16)', () => {
+  const MEMBER = '66666666-6666-4666-8666-666666666666';
+  beforeEach(() => {
+    vi.mocked(getAdminMembers).mockReset();
+  });
+
+  it('asks the ACTIVE members of the admin read and answers only what the row draws', async () => {
+    vi.mocked(getAdminMembers).mockResolvedValue({
+      items: [
+        {
+          membershipId: MEMBER,
+          displayName: null,
+          email: 'ana@email.com',
+          avatarAssetId: null,
+          role: 'member',
+        },
+      ],
+      nextCursor: 'c2',
+    } as never);
+    expect(await searchCourtesyMembersAction('  ana ', null)).toEqual({
+      ok: true,
+      items: [
+        {
+          membershipId: MEMBER,
+          name: 'ana@email.com',
+          email: 'ana@email.com',
+          avatarAssetId: null,
+        },
+      ],
+      nextCursor: 'c2',
+    });
+    expect(getAdminMembers).toHaveBeenCalledWith({ q: 'ana', status: 'active', cursor: undefined });
+  });
+
+  it('an empty or blank query never reaches the API: the list is never unbounded', async () => {
+    expect(await searchCourtesyMembersAction('', null)).toEqual({ ok: false, code: 'generic' });
+    expect(await searchCourtesyMembersAction('   ', null)).toEqual({ ok: false, code: 'generic' });
+    expect(await searchCourtesyMembersAction('x'.repeat(81), null)).toEqual({
+      ok: false,
+      code: 'generic',
+    });
+    expect(getAdminMembers).not.toHaveBeenCalled();
+  });
+
+  it('forwards the cursor untouched and answers generic on a refusal', async () => {
+    vi.mocked(getAdminMembers).mockResolvedValue({ items: [], nextCursor: null } as never);
+    await searchCourtesyMembersAction('ana', 'opaque');
+    expect(getAdminMembers).toHaveBeenCalledWith({ q: 'ana', status: 'active', cursor: 'opaque' });
+    vi.mocked(getAdminMembers).mockRejectedValue(
+      new ApiClientError(500, 'INTERNAL', undefined, 'r'),
+    );
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await searchCourtesyMembersAction('ana', null)).toEqual({ ok: false, code: 'generic' });
+    spy.mockRestore();
+  });
+});
+
+describe('courtesyHoldersAction (A-UI-6, T-10.1-16)', () => {
+  const ids = (count: number) =>
+    Array.from(
+      { length: count },
+      (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    );
+  beforeEach(() => {
+    vi.mocked(loadCourtesyHolders).mockReset();
+  });
+
+  it('answers the holders the API reports', async () => {
+    vi.mocked(loadCourtesyHolders).mockResolvedValue(ids(1));
+    expect(await courtesyHoldersAction(EVENT, ids(3))).toEqual({ ok: true, holders: ids(1) });
+    expect(loadCourtesyHolders).toHaveBeenCalledWith(EVENT, ids(3));
+  });
+
+  it('an unreadable answer is { ok: false }, never an empty "nobody holds one"', async () => {
+    vi.mocked(loadCourtesyHolders).mockResolvedValue(null);
+    expect(await courtesyHoldersAction(EVENT, ids(2))).toEqual({ ok: false });
+  });
+
+  it('more than 50 ids, a non-uuid or a bad event id never leave the server', async () => {
+    expect(await courtesyHoldersAction(EVENT, ids(51))).toEqual({ ok: false });
+    expect(await courtesyHoldersAction(EVENT, ['nope'])).toEqual({ ok: false });
+    expect(await courtesyHoldersAction('nope', ids(1))).toEqual({ ok: false });
+    expect(loadCourtesyHolders).not.toHaveBeenCalled();
+    vi.mocked(loadCourtesyHolders).mockResolvedValue([]);
+    expect(await courtesyHoldersAction(EVENT, ids(50))).toEqual({ ok: true, holders: [] });
   });
 });

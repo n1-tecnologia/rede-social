@@ -579,6 +579,33 @@
         "refunded": "Reembolsado",
         "overLimit": "Acima do limite"
       },
+      "release": {
+        "door": "Liberar presença",
+        "title": "Liberar presença",
+        "search": "Buscar membro",
+        "clear": "Limpar busca",
+        "prompt": "Digite o nome ou o e-mail do membro.",
+        "alreadyIn": "Já inscrito",
+        "row": "Liberar",
+        "rowAria": "Liberar presença de {name}",
+        "empty": {
+          "title": "Nenhum membro encontrado",
+          "body": "Tente outro nome ou e-mail."
+        },
+        "error": "Não foi possível buscar membros.",
+        "confirm": {
+          "title": "Liberar presença de {name}?",
+          "body": "A presença é confirmada agora, sem cobrança. Ela aparece como Cortesia.",
+          "confirm": "Liberar presença",
+          "cancel": "Não liberar"
+        },
+        "toasts": {
+          "granted": "Presença de {name} liberada.",
+          "ended": "Este evento já terminou.",
+          "alreadyIn": "{name} já está inscrito neste evento.",
+          "generic": "Algo deu errado. Tente novamente."
+        }
+      },
       "courtesy": {
         "action": "Remover cortesia",
         "actionAria": "Remover cortesia de {name}",
