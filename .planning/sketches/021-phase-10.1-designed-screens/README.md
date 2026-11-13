@@ -75,11 +75,11 @@ screens:
   - sino-presenca-confirmada
   - sino-presenca-removida-conteudo
   - push-presenca-confirmada
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: Igor (recorded by Claude on Igor's instruction, "pode mudar voce mesmo", 2026-11-13)
+approved_at: 2026-11-13
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-10.1, design-review, D-33, D-365, D-417, UI-04, event-tickets, kiwify, paid-events]
