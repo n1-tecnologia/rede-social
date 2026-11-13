@@ -54,7 +54,7 @@ begin;
 --    `event_attendances_tenant_event_status_idx` BY NAME.
 --
 -- Fixture ids use the `1e310000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(322);
+select plan(323);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-tkt-a', 'Ingresso A', '1e310000-0000-4000-8000-000000000001');
@@ -1478,6 +1478,29 @@ select results_eq($$
    order by a.id $$,
   $$ values (tests.tk('7b1'), false), (tests.tk('7b2'), false) $$,
   'A-UI-13: after the first ticket is refunded away the third becomes rank 2 and its flag clears');
+
+-- ── 8. the bookkeeping lock (gap plan 16, CR-01, D-741, D-752, T-10.1-37) ──────────────────────────
+-- A member (role `authenticated`) can never change origin, order_provider, order_ref or refunded_at of a row:
+-- `app.event_attendance_guard()` refuses it (42501, `event_attendances_bookkeeping_locked`, `bookkeeping_locked`)
+-- BEFORE the bookkeeping exit can return it. The definers, the apply lane and the service role are not judged.
+-- 801 mapped, no limit: a ticket row (user 101) and a courtesy row (user 102) |
+-- 802 free: an rsvp row (user 103) | 803 no limit: rsvp rows of users 105 and 106 made BEFORE the link, a courtesy row (user 104).
+reset role;
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, capacity) values
+  (tests.tk('801'), tests.tk('1'), tests.tk('10c'), 'Evento 801', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null);
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values
+  (tests.tk('1'), 'fake', 'event', 'tkt-233-s8-801', tests.tk('801'));
+select tests.as_service();
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values
+  (tests.tk('1'), tests.tk('801'), tests.tk('101'), 'going', now(), 'ticket', 'fake', 'S8-T1');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.tk('1'), tests.tk('801'), tests.tk('102'), 'going', now(), 'courtesy');
+reset role;
+-- The verifier's reproduction: a member rewrites ONLY the order columns of their own ticket row.
+select tests.as_tenant(tests.tk('1'), tests.tk('101'));
+select throws_ok($$ update public.event_attendances set origin = 'rsvp', order_provider = null, order_ref = null where event_id = tests.tk('801') and user_id = tests.tk('101') $$,
+  '42501', 'bookkeeping_locked', 'CR-01/D-752: a member stripping origin and the order columns of their own ticket row is bookkeeping_locked');
+reset role;
 
 -- The rank count rides the status index BY NAME on a volume fixture (a handful of rows is always scanned):
 -- 100 events x 20 members = 2,000 rows of tenant A, then `analyze`.
