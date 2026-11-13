@@ -572,6 +572,32 @@
         "notGoing": "Respondeu em {date}"
       },
       "removed": "Membro removido",
+      "origin": {
+        "paid": "Pago",
+        "courtesy": "Cortesia",
+        "beforeTicket": "Anterior ao ingresso",
+        "refunded": "Reembolsado",
+        "overLimit": "Acima do limite"
+      },
+      "courtesy": {
+        "action": "Remover cortesia",
+        "actionAria": "Remover cortesia de {name}",
+        "confirm": {
+          "title": "Remover a cortesia de {name}?",
+          "body": "A pessoa deixa de estar inscrita neste evento. Ninguém é avisado.",
+          "confirm": "Remover cortesia",
+          "cancel": "Manter cortesia"
+        },
+        "toasts": {
+          "removed": "Cortesia de {name} removida."
+        },
+        "errors": {
+          "locked": "Esta pessoa já fez check-in e a inscrição não pode ser removida.",
+          "notCourtesy": "Esta presença não é uma cortesia. A lista foi atualizada.",
+          "gone": "Esta cortesia já tinha sido removida. A lista foi atualizada.",
+          "generic": "Algo deu errado. Tente novamente."
+        }
+      },
       "empty": {
         "confirmed": {
           "title": "Ninguém confirmou ainda",

@@ -164,6 +164,7 @@ export default async function ParticipantsPage({
         initialItems={rows}
         initialCursor={page?.nextCursor ?? null}
         initialError={page === null}
+        canManage={canManage}
       />
     </div>
   );

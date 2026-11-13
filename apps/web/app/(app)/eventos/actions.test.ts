@@ -1,10 +1,18 @@
 import { revalidatePath } from 'next/cache';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClientError } from '@/lib/bootstrap';
-import { checkIn, createEvent, loadEvent, putRsvp, updateEvent } from '@/lib/events';
+import {
+  checkIn,
+  createEvent,
+  loadEvent,
+  putRsvp,
+  removeCourtesy,
+  updateEvent,
+} from '@/lib/events';
 import {
   checkInEventAction,
   createEventAction,
+  removeCourtesyAction,
   rsvpEventAction,
   updateEventAction,
 } from './actions';
@@ -42,6 +50,7 @@ vi.mock('@/lib/events', () => ({
   getEventSections: vi.fn(),
   putRsvp: vi.fn(),
   regenerateCode: vi.fn(),
+  removeCourtesy: vi.fn(),
   removeEventPhoto: vi.fn(),
   setEventStatus: vi.fn(),
 }));
@@ -242,5 +251,61 @@ describe('the check-in refusals of a paid event (D-742, UI-D-752)', () => {
     }
     vi.mocked(checkIn).mockRejectedValue(refused('ticket_required'));
     expect(await checkInEventAction(EVENT, 'K7QM')).toEqual({ ok: false, error: 'failed' });
+  });
+});
+
+/**
+ * Phase 10.1-14 (D-743, D-752, UI-D-756, T-10.1-12/13) — taking a courtesy back. Every answer is a CLOSED
+ * code the list maps to catalog copy; the ids are checked before any request is built; a success refreshes
+ * the screens that print the counts.
+ */
+describe('removeCourtesyAction (D-743, D-752, UI-D-756)', () => {
+  const ROW = '55555555-5555-4555-8555-555555555555';
+  const refused = (status: number, event?: string) =>
+    new ApiClientError(
+      status,
+      status === 404 ? 'NOT_FOUND' : 'CONFLICT',
+      event ? { event } : undefined,
+      'req-1',
+    );
+
+  beforeEach(() => {
+    vi.mocked(removeCourtesy).mockReset();
+    vi.mocked(revalidatePath).mockClear();
+  });
+
+  it('a success sends the two ids once and refreshes the participants and the detail', async () => {
+    vi.mocked(removeCourtesy).mockResolvedValue(undefined);
+    expect(await removeCourtesyAction(EVENT, ROW)).toEqual({ ok: true });
+    expect(removeCourtesy).toHaveBeenCalledTimes(1);
+    expect(removeCourtesy).toHaveBeenCalledWith(EVENT, ROW);
+    expect(revalidatePath).toHaveBeenCalledWith(`/eventos/${EVENT}/participantes`);
+    expect(revalidatePath).toHaveBeenCalledWith(`/eventos/${EVENT}`);
+  });
+
+  it.each([
+    ['attendance_locked', 'locked'],
+    ['not_courtesy', 'not_courtesy'],
+  ] as const)('the 409 %s is the closed code %s and revalidates nothing', async (event, code) => {
+    vi.mocked(removeCourtesy).mockRejectedValue(refused(409, event));
+    expect(await removeCourtesyAction(EVENT, ROW)).toEqual({ ok: false, code });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('the bare 404 is not_found; any other failure, and an unknown 409 code, are generic', async () => {
+    vi.mocked(removeCourtesy).mockRejectedValue(refused(404));
+    expect(await removeCourtesyAction(EVENT, ROW)).toEqual({ ok: false, code: 'not_found' });
+    vi.mocked(removeCourtesy).mockRejectedValue(refused(409, 'something_new'));
+    expect(await removeCourtesyAction(EVENT, ROW)).toEqual({ ok: false, code: 'generic' });
+    vi.mocked(removeCourtesy).mockRejectedValue(new Error('boom'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await removeCourtesyAction(EVENT, ROW)).toEqual({ ok: false, code: 'generic' });
+    spy.mockRestore();
+  });
+
+  it('a malformed id never reaches the API', async () => {
+    expect(await removeCourtesyAction('nope', ROW)).toEqual({ ok: false, code: 'generic' });
+    expect(await removeCourtesyAction(EVENT, '../../x')).toEqual({ ok: false, code: 'generic' });
+    expect(removeCourtesy).not.toHaveBeenCalled();
   });
 });

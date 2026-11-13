@@ -120,4 +120,101 @@ describe('AttendeeRow (UI-D-213)', () => {
     expect(row.lastElementChild).toBe(tag);
     expect(row.querySelector('.min-w-0.flex-1')).not.toBeNull();
   });
+
+  /**
+   * Phase 10.1-14 (UI-D-754 to UI-D-756): the `marks` and `action` slots. The module still ships no
+   * words: both are nodes the host fills.
+   */
+  it('7. a row with neither slot is byte-identical to the shipped one (a free event, UI-D-754)', () => {
+    render(
+      <AttendeeRow name="name-sentinel" removed={false} avatarUrl={null} meta="meta-sentinel" />,
+    );
+    const row = screen.getByTestId('attendee-row');
+    expect(row.className).toBe('flex min-h-14 items-center gap-3 border-b border-divider py-2');
+    expect(row.querySelector('[data-attendee-marks]')).toBeNull();
+    expect(row.querySelector('[data-attendee-action]')).toBeNull();
+    // Avatar, then the text column with exactly the name and the meta: nothing else.
+    expect(row.children).toHaveLength(2);
+    expect(row.children[1]?.children).toHaveLength(2);
+    // An empty marks list draws no line either.
+    cleanup();
+    render(
+      <AttendeeRow
+        name="name-sentinel"
+        removed={false}
+        avatarUrl={null}
+        meta="meta-sentinel"
+        marks={[]}
+      />,
+    );
+    expect(screen.getByTestId('attendee-row').querySelector('[data-attendee-marks]')).toBeNull();
+  });
+
+  it('8. the marks are a wrapping pills line UNDER the meta, inside the name column', () => {
+    render(
+      <AttendeeRow
+        name="name-sentinel"
+        removed={false}
+        avatarUrl={null}
+        meta="meta-sentinel"
+        marks={[<span key="a">mark-a</span>, <span key="b">mark-b</span>]}
+      />,
+    );
+    const line = screen.getByTestId('attendee-row').querySelector('[data-attendee-marks]');
+    expect(line).not.toBeNull();
+    for (const token of ['mt-1', 'flex', 'flex-wrap', 'gap-1']) {
+      expect(line?.className).toContain(token);
+    }
+    const meta = screen.getByText('meta-sentinel');
+    expect(meta.className).toContain('truncate');
+    expect(meta.className).toContain('tabular-nums');
+    // Same column as the name and the meta, after the meta.
+    expect(line?.parentElement).toBe(meta.parentElement);
+    expect(
+      meta.compareDocumentPosition(line as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getByText('mark-a')).toBeInTheDocument();
+    expect(screen.getByText('mark-b')).toBeInTheDocument();
+  });
+
+  it('9. the action is a shrink-0 sibling of the column that wraps under it below 360px', () => {
+    render(
+      <AttendeeRow
+        name={'n'.repeat(80)}
+        removed={false}
+        avatarUrl={null}
+        meta="meta-sentinel"
+        action={<button type="button">action-sentinel</button>}
+        tag={<span>tag-sentinel</span>}
+      />,
+    );
+    const row = screen.getByTestId('attendee-row');
+    expect(row.className).toContain('flex-wrap');
+    const action = screen.getByRole('button', { name: 'action-sentinel' }).parentElement;
+    expect(action).toHaveAttribute('data-attendee-action');
+    for (const token of ['shrink-0', 'max-[359px]:basis-full']) {
+      expect(action?.className).toContain(token);
+    }
+    // A sibling of the column, never inside it, and the name still truncates first.
+    expect(action?.parentElement).toBe(row);
+    expect(row.querySelector('.min-w-0.flex-1')?.contains(action)).toBe(false);
+    expect(screen.getByText('n'.repeat(80)).className).toContain('truncate');
+    // The walk-in tag keeps its own trailing slot before the action.
+    expect(screen.getByText('tag-sentinel').parentElement?.className).toContain('shrink-0');
+  });
+
+  it('10. the module ships no word of its own for either slot', () => {
+    render(
+      <AttendeeRow
+        name="name-sentinel"
+        removed={false}
+        avatarUrl={null}
+        meta="meta-sentinel"
+        marks={[<span key="a">mark-a</span>]}
+        action={<button type="button">action-sentinel</button>}
+      />,
+    );
+    const row = screen.getByTestId('attendee-row');
+    expect(row.textContent).toBe('name-sentinelmeta-sentinelmark-aaction-sentinel');
+  });
 });

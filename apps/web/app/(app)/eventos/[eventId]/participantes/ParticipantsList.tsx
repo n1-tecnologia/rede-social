@@ -4,17 +4,24 @@ import type { AttendanceList } from '@rede-social/module-events/contracts';
 import { AttendeeRow } from '@rede-social/module-events/ui';
 import {
   Button,
+  ConfirmDialog,
   EmptyState,
   InfiniteScroll,
   PullToRefresh,
   Skeleton,
   StatusPill,
+  useToast,
 } from '@rede-social/ui';
-import { TriangleAlert, Users } from 'lucide-react';
+import { TriangleAlert, UserMinus, Users } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { type ReactNode, useCallback, useState } from 'react';
+import { type ReactNode, useCallback, useRef, useState } from 'react';
 import type { AttendeeView } from '@/lib/events-view';
-import { loadMoreAttendanceAction, refreshAttendanceAction } from '../../actions';
+import {
+  loadMoreAttendanceAction,
+  refreshAttendanceAction,
+  removeCourtesyAction,
+} from '../../actions';
 
 export interface ParticipantsListProps {
   eventId: string;
@@ -25,6 +32,11 @@ export interface ParticipantsListProps {
   initialCursor: string | null;
   /** `true` when the server could not read the first page at all (UI-D-216). */
   initialError?: boolean;
+  /**
+   * Phase 10.1-14: the viewer holds `events.event.manage`, so a courtesy row may carry "Remover cortesia"
+   * (UI-D-756). The page decides it from the bootstrap; the API's literal guard is the authority.
+   */
+  canManage?: boolean;
 }
 
 /** Each chip's own empty state (UI-SPEC Copywriting "Participantes" empties). */
@@ -66,6 +78,12 @@ export function ParticipantsSkeleton() {
  * here (UI-D-203). Rows are `AttendeeRow`s and are NOT links (D-47). In Presentes a walk-in carries
  * the neutral `StatusPill` "Sem confirmação" as its trailing tag; in the other chips there is none.
  *
+ * **Phase 10.1-14 (UI-D-754, UI-D-756).** The rows of a PAID event arrive with `marks` (the origin pill,
+ * then "Reembolsado", then "Acima do limite") and an `action`; a free event's rows carry neither key and
+ * render exactly as before. "Remover cortesia" opens a danger `ConfirmDialog`, and the row leaves the list
+ * ONLY from the server's answer (nothing is optimistic); a refusal leaves the row, toasts and re-reads
+ * the chip.
+ *
  * Four states: an unreadable first page (the generic error card with a retry), the chip's own empty
  * state, the rows, and the load-more failure. The code card above always renders, so the screen is
  * never blank (UI E11/empty).
@@ -76,8 +94,13 @@ export function ParticipantsList({
   initialItems,
   initialCursor,
   initialError,
+  canManage = false,
 }: ParticipantsListProps) {
   const t = useTranslations('events');
+  const router = useRouter();
+  const toast = useToast();
+  const regionRef = useRef<HTMLElement>(null);
+  const [removeTarget, setRemoveTarget] = useState<AttendeeView | null>(null);
 
   const [items, setItems] = useState(initialItems);
   const [cursor, setCursor] = useState(initialCursor);
@@ -140,6 +163,40 @@ export function ParticipantsList({
     void refresh();
   }, [refresh]);
 
+  /**
+   * The confirmed removal. The row leaves the list only when the server says it is gone; every refusal
+   * keeps it, says why, and re-reads the chip so the row shows what is true now (D-752).
+   */
+  const removeCourtesy = async () => {
+    const target = removeTarget;
+    if (!target) return;
+    const result = await removeCourtesyAction(eventId, target.id);
+    if (result.ok) {
+      setItems((previous) => previous.filter((row) => row.id !== target.id));
+      toast.show({
+        tone: 'success',
+        message: t('participants.courtesy.toasts.removed', { name: target.name }),
+      });
+      // The trigger is about to leave the DOM: park focus on the list, not on the page.
+      regionRef.current?.focus();
+      router.refresh();
+      return;
+    }
+    const key =
+      result.code === 'locked'
+        ? 'locked'
+        : result.code === 'not_courtesy'
+          ? 'notCourtesy'
+          : result.code === 'not_found'
+            ? 'gone'
+            : 'generic';
+    toast.show({ tone: 'error', message: t(`participants.courtesy.errors.${key}`) });
+    if (result.code !== 'generic') {
+      void refresh();
+      router.refresh();
+    }
+  };
+
   let body: ReactNode;
   if (firstLoadFailed && items.length === 0) {
     body = (
@@ -189,6 +246,26 @@ export function ParticipantsList({
                   </StatusPill>
                 ) : undefined
               }
+              marks={row.marks?.map((mark) => (
+                <StatusPill key={mark.kind} tone={mark.tone} data-mark={mark.kind}>
+                  {mark.label}
+                </StatusPill>
+              ))}
+              action={
+                canManage && row.action === 'removeCourtesy' ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    hitArea
+                    className="text-danger"
+                    data-remove-courtesy={row.id}
+                    aria-label={t('participants.courtesy.actionAria', { name: row.name })}
+                    onClick={() => setRemoveTarget(row)}
+                  >
+                    {t('participants.courtesy.action')}
+                  </Button>
+                ) : undefined
+              }
             />
           ))}
         </div>
@@ -218,10 +295,35 @@ export function ParticipantsList({
   }
 
   return (
-    <PullToRefresh onRefresh={refresh}>
-      <section aria-label={t('participants.region')} className="flex flex-col pb-6">
-        {body}
-      </section>
-    </PullToRefresh>
+    <>
+      <PullToRefresh onRefresh={refresh}>
+        <section
+          ref={regionRef}
+          tabIndex={-1}
+          aria-label={t('participants.region')}
+          className="flex flex-col pb-6 outline-none"
+        >
+          {body}
+        </section>
+      </PullToRefresh>
+      {/* Outside the pull container: its transform would become the dialog's containing block. */}
+      <ConfirmDialog
+        open={removeTarget !== null}
+        tone="danger"
+        icon={UserMinus}
+        title={
+          removeTarget ? t('participants.courtesy.confirm.title', { name: removeTarget.name }) : ''
+        }
+        body={t('participants.courtesy.confirm.body')}
+        confirmLabel={t('participants.courtesy.confirm.confirm')}
+        cancelLabel={t('participants.courtesy.confirm.cancel')}
+        onConfirm={removeCourtesy}
+        onClose={() => setRemoveTarget(null)}
+        onError={(error) => {
+          console.error('events.courtesy_remove_failed', { error: String(error) });
+          toast.show({ tone: 'error', message: t('participants.courtesy.errors.generic') });
+        }}
+      />
+    </>
   );
 }

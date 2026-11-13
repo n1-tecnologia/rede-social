@@ -358,6 +358,71 @@ describe('events.json: the closed doors of a paid event (UI-D-751, UI-D-752)', (
 });
 
 /**
+ * Phase 10.1-14 (UI-D-754, UI-D-756): the origin marks and the courtesy removal of Participantes, the
+ * admin's screen. The provider never appears here either: a presence is "Pago", not "Pago pelo ...".
+ */
+const PARTICIPANTS_MARKS: Record<string, { text: string; names: string[] }> = {
+  'participants.origin.paid': { text: 'Pago', names: [] },
+  'participants.origin.courtesy': { text: 'Cortesia', names: [] },
+  'participants.origin.beforeTicket': { text: 'Anterior ao ingresso', names: [] },
+  'participants.origin.refunded': { text: 'Reembolsado', names: [] },
+  'participants.origin.overLimit': { text: 'Acima do limite', names: [] },
+  'participants.courtesy.action': { text: 'Remover cortesia', names: [] },
+  'participants.courtesy.actionAria': { text: 'Remover cortesia de {name}', names: ['name'] },
+  'participants.courtesy.confirm.title': {
+    text: 'Remover a cortesia de {name}?',
+    names: ['name'],
+  },
+  'participants.courtesy.confirm.body': {
+    text: 'A pessoa deixa de estar inscrita neste evento. Ninguém é avisado.',
+    names: [],
+  },
+  'participants.courtesy.confirm.confirm': { text: 'Remover cortesia', names: [] },
+  'participants.courtesy.confirm.cancel': { text: 'Manter cortesia', names: [] },
+  'participants.courtesy.toasts.removed': {
+    text: 'Cortesia de {name} removida.',
+    names: ['name'],
+  },
+  'participants.courtesy.errors.locked': {
+    text: 'Esta pessoa já fez check-in e a inscrição não pode ser removida.',
+    names: [],
+  },
+  'participants.courtesy.errors.notCourtesy': {
+    text: 'Esta presença não é uma cortesia. A lista foi atualizada.',
+    names: [],
+  },
+  'participants.courtesy.errors.gone': {
+    text: 'Esta cortesia já tinha sido removida. A lista foi atualizada.',
+    names: [],
+  },
+  'participants.courtesy.errors.generic': { text: 'Algo deu errado. Tente novamente.', names: [] },
+};
+
+describe('events.json: the origin marks and the courtesy removal (UI-D-754, UI-D-756)', () => {
+  it('carries every key with the approved sentence and its placeholders', () => {
+    for (const [key, { text, names }] of Object.entries(PARTICIPANTS_MARKS)) {
+      expect(all[key], `missing key events.${key}`).toBe(text);
+      expect(placeholders(all[key] as string), `placeholders of events.${key}`).toEqual(names);
+    }
+  });
+
+  it('fills {name} as a plain value, markup and all, never interpreting it', () => {
+    expect(translate('participants.courtesy.confirm.title', { name: '<b>Ana</b>' })).toBe(
+      'Remover a cortesia de <b>Ana</b>?',
+    );
+    expect(translate('participants.courtesy.toasts.removed', { name: 'Ana' })).toBe(
+      'Cortesia de Ana removida.',
+    );
+  });
+
+  it('names the provider nowhere (TICK-20)', () => {
+    for (const key of Object.keys(PARTICIPANTS_MARKS)) {
+      expect(all[key], `events.${key}`).not.toMatch(/kiwify|gateway|webhook/i);
+    }
+  });
+});
+
+/**
  * Phase 10.1-13 (UI-D-760): the bell row of the paid event, in the `notifications` namespace. Rich text:
  * the lead is a `<b>` tag the renderer fills, the title a plain value.
  */

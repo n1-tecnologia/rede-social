@@ -31,6 +31,7 @@ import {
   loadEvent,
   putRsvp,
   regenerateCode,
+  removeCourtesy,
   removeEventPhoto,
   setEventStatus,
   updateEvent,
@@ -557,6 +558,57 @@ export async function regenerateCheckinCodeAction(eventId: string): Promise<Rege
 
   if (refusal) redirect(refusal);
   if (result.ok) revalidatePath(`/eventos/${eventId}/participantes`);
+  return result;
+}
+
+/* ── Phase 10.1-14: the courtesy of a paid event (D-743, D-752) ───────────────────────────────── */
+
+/**
+ * What taking a courtesy back can answer, each a CODE the list maps to catalog copy: `locked` (the person
+ * already checked in, D-752), `not_courtesy` (the row is a paid presence or a plain Vou now: it is never
+ * removed by hand), `not_found` (already gone, or never this event's) and `generic`.
+ */
+export type RemoveCourtesyResult =
+  | { ok: true }
+  | { ok: false; code: 'locked' | 'not_courtesy' | 'not_found' | 'generic' };
+
+/**
+ * `DELETE /v1/events/{id}/courtesy/{attendanceId}` for the confirmed "Remover cortesia". The ids are
+ * validated before any request (a server action is a public endpoint); the API's literal manage guard and
+ * the definer's own claim check are the authority, and the decision to refuse a paid or checked-in row is
+ * the database's (T-10.1-12), so nothing here is a gate. A bootstrap refusal navigates OUTSIDE the
+ * try/catch. Nothing optimistic: the list updates from this answer, and a refusal leaves the row as it was.
+ * Logs carry the shape only, never a name or an id.
+ */
+export async function removeCourtesyAction(
+  eventId: string,
+  attendanceId: string,
+): Promise<RemoveCourtesyResult> {
+  if (!isEventId(eventId) || !isEventId(attendanceId)) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: RemoveCourtesyResult = { ok: false, code: 'generic' };
+  try {
+    await removeCourtesy(eventId, attendanceId);
+    result = { ok: true };
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      refusal = bootstrapRedirectPath(error);
+      const issue = (error.details as { event?: unknown } | undefined)?.event;
+      if (!refusal && issue === 'attendance_locked') result = { ok: false, code: 'locked' };
+      else if (!refusal && issue === 'not_courtesy') result = { ok: false, code: 'not_courtesy' };
+      else if (!refusal && error.status === 404) result = { ok: false, code: 'not_found' };
+    }
+    if (!refusal && !result.ok && result.code === 'generic') {
+      console.error('events.courtesy_remove_failed', { error: String(error) });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  if (result.ok) {
+    revalidatePath(`/eventos/${eventId}/participantes`);
+    revalidatePath(`/eventos/${eventId}`);
+  }
   return result;
 }
 

@@ -6,10 +6,13 @@ import {
   attendanceSummarySchema,
   type CheckinCode,
   type CheckinResult,
+  type CourtesyBody,
   type CourtesyHolders,
+  type CourtesyResult,
   checkinCodeSchema,
   checkinResultSchema,
   courtesyHoldersSchema,
+  courtesyResultSchema,
   type EnterResult,
   EVENT_COURTESY_MAX_HOLDER_IDS,
   EVENT_MAX_PAGE_SIZE,
@@ -573,4 +576,34 @@ export async function loadCourtesyHolders(
 
   if (path) redirect(path);
   return holders;
+}
+
+/**
+ * `POST /v1/events/{eventId}/courtesy` (Phase 10.1-14, D-743): releases a free presence of a PAID event to
+ * ONE member, named by `membershipId` (the release sheet) or by the `attendanceId` of a "Não vão" row. Manage
+ * only on the API. Answers `granted` or `already_in`; a refusal is thrown as an `ApiClientError` carrying
+ * `details.event` (`cancelled`, `event_ended`, `event_not_paid` on a 409; nothing on the bare 404), which
+ * `grantCourtesyAction` maps to a closed code.
+ */
+export async function grantCourtesy(eventId: string, body: CourtesyBody): Promise<CourtesyResult> {
+  const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}/courtesy`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await apiError(res);
+  return courtesyResultSchema.parse(await res.json());
+}
+
+/**
+ * `DELETE /v1/events/{eventId}/courtesy/{attendanceId}` (Phase 10.1-14, D-743, D-752): takes a courtesy back.
+ * A 204 on success; a refusal is thrown as an `ApiClientError` (`details.event` `attendance_locked` or
+ * `not_courtesy` on a 409, the bare 404 when the row is gone), which `removeCourtesyAction` maps.
+ */
+export async function removeCourtesy(eventId: string, attendanceId: string): Promise<void> {
+  const res = await apiFetch(
+    `/v1/events/${encodeURIComponent(eventId)}/courtesy/${encodeURIComponent(attendanceId)}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) throw await apiError(res);
 }

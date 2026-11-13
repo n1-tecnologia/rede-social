@@ -2,9 +2,9 @@
 
 import type { AttendanceSummary, Attendee } from '@rede-social/module-events/contracts';
 import { ToastProvider } from '@rede-social/ui';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
-import type { ReactElement } from 'react';
+import type { ComponentProps, ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttendeeView } from '@/lib/events-view';
 
@@ -62,21 +62,25 @@ vi.mock('@/lib/events', () => ({
   loadAttendance: vi.fn(async () => state.page),
 }));
 
+const router = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
+
 vi.mock('next/navigation', () => ({
   notFound: () => {
     throw new Error('NEXT_NOT_FOUND');
   },
-  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  useRouter: () => router,
 }));
 
 vi.mock('../../actions', () => ({
   loadMoreAttendanceAction: vi.fn(),
   refreshAttendanceAction: vi.fn(),
   regenerateCheckinCodeAction: vi.fn(),
+  removeCourtesyAction: vi.fn(),
 }));
 
 const { default: ParticipantsPage } = await import('./page');
 const { ParticipantsList } = await import('./ParticipantsList');
+const { refreshAttendanceAction, removeCourtesyAction } = await import('../../actions');
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const ADMIN = ['events.event.manage', 'events.attendance.read', 'events.attendance.respond'];
@@ -120,6 +124,9 @@ async function renderPage(lista?: string) {
 }
 
 beforeEach(() => {
+  vi.mocked(removeCourtesyAction).mockReset();
+  vi.mocked(refreshAttendanceAction).mockReset();
+  router.refresh.mockReset();
   state.permissions = ADMIN;
   state.summary = { status: 'ok', summary: summary() };
   state.page = { items: [attendee(A1)], nextCursor: null };
@@ -228,6 +235,21 @@ describe('the Participantes page (RSC)', () => {
   });
 });
 
+/** The list needs the app's toast host (the root layout mounts it in the real app). */
+function renderList(props: Partial<ComponentProps<typeof ParticipantsList>> = {}) {
+  return render(
+    <ToastProvider>
+      <ParticipantsList
+        eventId={EVENT_ID}
+        list="confirmed"
+        initialItems={[]}
+        initialCursor={null}
+        {...props}
+      />
+    </ToastProvider>,
+  );
+}
+
 describe('ParticipantsList (client)', () => {
   const view = (id: string, overrides: Partial<AttendeeView> = {}): AttendeeView => ({
     id,
@@ -241,24 +263,10 @@ describe('ParticipantsList (client)', () => {
 
   it('8. the walk-in tag appears ONLY in Presentes', () => {
     const items = [view(A1, { walkIn: true })];
-    const { unmount } = render(
-      <ParticipantsList
-        eventId={EVENT_ID}
-        list="present"
-        initialItems={items}
-        initialCursor={null}
-      />,
-    );
+    const { unmount } = renderList({ list: 'present', initialItems: items });
     expect(screen.getByTestId('walk-in-tag').textContent).toBe('Sem confirmação');
     unmount();
-    render(
-      <ParticipantsList
-        eventId={EVENT_ID}
-        list="confirmed"
-        initialItems={items}
-        initialCursor={null}
-      />,
-    );
+    renderList({ list: 'confirmed', initialItems: items });
     expect(screen.queryByTestId('walk-in-tag')).toBeNull();
   });
 
@@ -271,9 +279,7 @@ describe('ParticipantsList (client)', () => {
     ],
     ['not_going', 'Ninguém recusou', 'Quem responder Não vou aparece aqui.'],
   ] as const)('9. %s has its own empty state', (list, title, body) => {
-    render(
-      <ParticipantsList eventId={EVENT_ID} list={list} initialItems={[]} initialCursor={null} />,
-    );
+    renderList({ list });
     const empty = screen.getByTestId('participants-empty');
     expect(empty.getAttribute('data-list')).toBe(list);
     expect(within(empty).getByText(title)).toBeTruthy();
@@ -281,14 +287,10 @@ describe('ParticipantsList (client)', () => {
   });
 
   it('10. a removed member reads "Membro removido" in the tertiary 14/400 style, and the row still renders', () => {
-    render(
-      <ParticipantsList
-        eventId={EVENT_ID}
-        list="present"
-        initialItems={[view(A1, { removed: true, name: t('participants.removed') })]}
-        initialCursor={null}
-      />,
-    );
+    renderList({
+      list: 'present',
+      initialItems: [view(A1, { removed: true, name: t('participants.removed') })],
+    });
     const row = screen.getByTestId('attendee-row');
     expect(row.getAttribute('data-removed')).toBe('true');
     const label = within(row).getByText('Membro removido');
@@ -297,17 +299,230 @@ describe('ParticipantsList (client)', () => {
   });
 
   it('11. the region is labelled, and a first-load failure is the generic error card with a retry', () => {
-    render(
-      <ParticipantsList
-        eventId={EVENT_ID}
-        list="confirmed"
-        initialItems={[]}
-        initialCursor={null}
-        initialError
-      />,
-    );
+    renderList({ initialError: true });
     expect(screen.getByRole('region', { name: 'Participantes do evento' })).toBeTruthy();
     expect(screen.getByText('Algo deu errado')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeTruthy();
+  });
+});
+
+/**
+ * Phase 10.1-14 (UI-D-754, UI-D-756) — the origin marks and the courtesy removal. The rows are the
+ * finished `AttendeeView`s the server builds (plan 08's view-model); the real catalog speaks.
+ */
+describe('ParticipantsList: the marks and the courtesy removal of a paid event', () => {
+  const mark = (kind: string, tone: 'success' | 'neutral' | 'warning', label: string) => ({
+    kind: kind as 'paid',
+    tone,
+    label,
+  });
+  const PAID = mark('paid', 'success', 'Pago');
+  const COURTESY = mark('courtesy', 'neutral', 'Cortesia');
+  const BEFORE = mark('beforeTicket', 'neutral', 'Anterior ao ingresso');
+  const REFUNDED = mark('refunded', 'warning', 'Reembolsado');
+  const OVER = mark('overLimit', 'warning', 'Acima do limite');
+
+  const row = (id: string, overrides: Partial<AttendeeView> = {}): AttendeeView => ({
+    id,
+    name: `Pessoa ${id.slice(-1)}`,
+    removed: false,
+    avatarUrl: null,
+    meta: 'Confirmou em sex., 2 de out.',
+    walkIn: false,
+    ...overrides,
+  });
+
+  const A3 = 'aaaaaaaa-0000-4000-8000-000000000003';
+  const A4 = 'aaaaaaaa-0000-4000-8000-000000000004';
+
+  const rowOf = (name: string) =>
+    screen.getAllByTestId('attendee-row').find((el) => within(el).queryByText(name)) as HTMLElement;
+  const pills = (el: HTMLElement) =>
+    Array.from(el.querySelectorAll('[data-mark]')).map((pill) => pill.textContent);
+
+  it('11a. tracer: each presence shows its origin, a courtesy offers the removal and a paid one does not', async () => {
+    renderList({
+      canManage: true,
+      initialItems: [
+        row(A1, { marks: [PAID], action: null }),
+        row(A2, { marks: [COURTESY], action: 'removeCourtesy' }),
+        row(A3, { marks: [PAID, REFUNDED], action: null, meta: 'Check-in às 18:40' }),
+        row(A4, { marks: [BEFORE], action: null }),
+      ],
+    });
+    expect(pills(rowOf('Pessoa 1'))).toEqual(['Pago']);
+    expect(pills(rowOf('Pessoa 2'))).toEqual(['Cortesia']);
+    expect(pills(rowOf('Pessoa 3'))).toEqual(['Pago', 'Reembolsado']);
+    expect(pills(rowOf('Pessoa 4'))).toEqual(['Anterior ao ingresso']);
+    // Only the courtesy row has an action; a paid presence leaves by refund at the gateway (D-743).
+    expect(screen.getAllByRole('button', { name: /Remover cortesia/ })).toHaveLength(1);
+    expect(
+      within(rowOf('Pessoa 2')).getByRole('button', { name: 'Remover cortesia de Pessoa 2' }),
+    ).toBeTruthy();
+
+    vi.mocked(removeCourtesyAction).mockResolvedValue({ ok: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Remover cortesia de Pessoa 2' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Remover a cortesia de Pessoa 2?')).toBeTruthy();
+    expect(
+      within(dialog).getByText('A pessoa deixa de estar inscrita neste evento. Ninguém é avisado.'),
+    ).toBeTruthy();
+    // Nothing is sent, and the row stays, until the admin confirms.
+    expect(removeCourtesyAction).not.toHaveBeenCalled();
+    expect(screen.getByText('Pessoa 2')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remover cortesia' }));
+    });
+    expect(removeCourtesyAction).toHaveBeenCalledTimes(1);
+    expect(removeCourtesyAction).toHaveBeenCalledWith(EVENT_ID, A2);
+    await waitFor(() => expect(screen.queryByText('Pessoa 2')).toBeNull());
+    expect(screen.getByText('Pessoa 1')).toBeTruthy();
+    expect(screen.getByText('Cortesia de Pessoa 2 removida.')).toBeTruthy();
+    expect(router.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('11b. every mark order: origin, then Reembolsado, then Acima do limite, in the host order', () => {
+    renderList({
+      list: 'present',
+      initialItems: [
+        row(A1, { marks: [COURTESY, REFUNDED, OVER], action: null }),
+        row(A2, { marks: [PAID, OVER], action: null }),
+      ],
+    });
+    expect(pills(rowOf('Pessoa 1'))).toEqual(['Cortesia', 'Reembolsado', 'Acima do limite']);
+    expect(pills(rowOf('Pessoa 2'))).toEqual(['Pago', 'Acima do limite']);
+    const tones = Array.from(rowOf('Pessoa 1').querySelectorAll('[data-mark]')).map(
+      (el) => el.className,
+    );
+    expect(tones[0]).toContain('bg-bg-tertiary');
+    expect(tones[1]).toContain('bg-warning/10');
+    expect(tones[2]).toContain('bg-warning/10');
+    // Colour is never the only signal: every pill is a word.
+    expect(rowOf('Pessoa 1').querySelectorAll('[data-mark]')).toHaveLength(3);
+  });
+
+  it('11c. a free event: rows carry no marks, no action and the exact shipped markup', () => {
+    renderList({ canManage: true, initialItems: [row(A1)] });
+    const el = screen.getByTestId('attendee-row');
+    expect(el.querySelector('[data-attendee-marks]')).toBeNull();
+    expect(el.querySelector('[data-attendee-action]')).toBeNull();
+    expect(el.className).toBe('flex min-h-14 items-center gap-3 border-b border-divider py-2');
+    expect(screen.queryByRole('button', { name: /cortesia/i })).toBeNull();
+  });
+
+  it('11d. without the manage permission a courtesy row still shows its mark and no action', () => {
+    renderList({
+      canManage: false,
+      initialItems: [row(A1, { marks: [COURTESY], action: 'removeCourtesy' })],
+    });
+    expect(pills(rowOf('Pessoa 1'))).toEqual(['Cortesia']);
+    expect(screen.queryByRole('button', { name: /Remover cortesia/ })).toBeNull();
+  });
+
+  it('11e. "Manter cortesia" closes the dialog and sends nothing', async () => {
+    renderList({
+      canManage: true,
+      initialItems: [row(A1, { marks: [COURTESY], action: 'removeCourtesy' })],
+    });
+    const trigger = screen.getByRole('button', { name: 'Remover cortesia de Pessoa 1' });
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Manter cortesia' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(removeCourtesyAction).not.toHaveBeenCalled();
+    expect(screen.getByText('Pessoa 1')).toBeTruthy();
+    expect(router.refresh).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['locked', 'Esta pessoa já fez check-in e a inscrição não pode ser removida.', true],
+    ['not_courtesy', 'Esta presença não é uma cortesia. A lista foi atualizada.', true],
+    ['not_found', 'Esta cortesia já tinha sido removida. A lista foi atualizada.', true],
+    ['generic', 'Algo deu errado. Tente novamente.', false],
+  ] as const)(
+    '11f. a refusal (%s) keeps the row, says why and %s',
+    async (code, message, rereads) => {
+      vi.mocked(removeCourtesyAction).mockResolvedValue({ ok: false, code });
+      vi.mocked(refreshAttendanceAction).mockResolvedValue({
+        ok: true,
+        items: [row(A1, { marks: [PAID], action: null })],
+        nextCursor: null,
+      });
+      renderList({
+        canManage: true,
+        initialItems: [row(A1, { marks: [COURTESY], action: 'removeCourtesy' })],
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Remover cortesia de Pessoa 1' }));
+      const dialog = await screen.findByRole('dialog');
+      await act(async () => {
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Remover cortesia' }));
+      });
+      expect(await screen.findByText(message)).toBeTruthy();
+      // The row is still there; it changes only if the re-read says so (no optimistic move).
+      expect(screen.getByText('Pessoa 1')).toBeTruthy();
+      if (rereads) {
+        await waitFor(() =>
+          expect(refreshAttendanceAction).toHaveBeenCalledWith(EVENT_ID, 'confirmed'),
+        );
+        await waitFor(() => expect(pills(rowOf('Pessoa 1'))).toEqual(['Pago']));
+        expect(router.refresh).toHaveBeenCalledTimes(1);
+      } else {
+        expect(refreshAttendanceAction).not.toHaveBeenCalled();
+        expect(pills(rowOf('Pessoa 1'))).toEqual(['Cortesia']);
+        expect(router.refresh).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it('11g. a rejected action toasts the generic line and keeps the row', async () => {
+    vi.mocked(removeCourtesyAction).mockRejectedValue(new Error('network'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderList({
+      canManage: true,
+      initialItems: [row(A1, { marks: [COURTESY], action: 'removeCourtesy' })],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Remover cortesia de Pessoa 1' }));
+    const dialog = await screen.findByRole('dialog');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remover cortesia' }));
+    });
+    expect(await screen.findByText('Algo deu errado. Tente novamente.')).toBeTruthy();
+    expect(screen.getByText('Pessoa 1')).toBeTruthy();
+    spy.mockRestore();
+  });
+
+  it('11h. focus stays inside the screen: a refusal returns to the row button, a success lands on the list', async () => {
+    vi.mocked(removeCourtesyAction).mockResolvedValueOnce({ ok: false, code: 'generic' });
+    renderList({
+      canManage: true,
+      initialItems: [
+        row(A1, { marks: [COURTESY], action: 'removeCourtesy' }),
+        row(A2, { marks: [COURTESY], action: 'removeCourtesy' }),
+      ],
+    });
+    const first = screen.getByRole('button', { name: 'Remover cortesia de Pessoa 1' });
+    first.focus();
+    fireEvent.click(first);
+    let dialog = await screen.findByRole('dialog');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remover cortesia' }));
+    });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(first);
+
+    vi.mocked(removeCourtesyAction).mockResolvedValueOnce({ ok: true });
+    const second = screen.getByRole('button', { name: 'Remover cortesia de Pessoa 2' });
+    second.focus();
+    fireEvent.click(second);
+    dialog = await screen.findByRole('dialog');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remover cortesia' }));
+    });
+    await waitFor(() => expect(screen.queryByText('Pessoa 2')).toBeNull());
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(screen.getByRole('region', { name: 'Participantes do evento' })).toBe(
+      document.activeElement,
+    );
   });
 });
