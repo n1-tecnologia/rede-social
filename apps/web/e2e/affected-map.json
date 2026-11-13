@@ -807,6 +807,28 @@
         "apps/web/lib/phone-menu*"
       ],
       "specs": ["shell.spec.ts", "courses-member-area.spec.ts"]
+    },
+    {
+      "id": "event-tickets-web",
+      "why": "Paid events through the payment gateway (Phase 10.1): the event form's Ingresso section, the member's Pago tag, buy zone and Presença confirmada block with its live swap, the two closed doors, the Presença confirmada bell row, Participantes with its origin marks, the Liberar presença sheet and the Acima do limite notice; events-tickets.spec walks the whole path (link a product, buy by a signed delivery, enter, release a cortesia, refund, the ticket rows of Pagamentos) with the 320px backstops, and the existing events, payments and notifications specs read the same screens.",
+      "globs": [
+        "apps/web/app/(app)/eventos/{TicketSection,EventForm,ticket-actions}*",
+        "apps/web/app/(app)/eventos/[eventId]/{PaidEventZone,EventBanner,EventActions,TicketDoorActions,zone}*",
+        "apps/web/app/(app)/eventos/[eventId]/entrar/**",
+        "apps/web/app/(app)/eventos/[eventId]/check-in/**",
+        "apps/web/app/(app)/eventos/[eventId]/participantes/**",
+        "apps/web/components/useLiveRefresh*",
+        "apps/web/lib/event-ticket*",
+        "apps/web/lib/notification-renderers*",
+        "apps/web/e2e/events-tickets.spec.ts"
+      ],
+      "specs": [
+        "events-tickets.spec.ts",
+        "events.spec.ts",
+        "payments-admin.spec.ts",
+        "payments-store.spec.ts",
+        "notifications.spec.ts"
+      ]
     }
   ]
 }

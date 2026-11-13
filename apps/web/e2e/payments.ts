@@ -196,6 +196,20 @@ export async function resetPayments(tenantSlug: string, prefix: string): Promise
      where ag.email like ${like}
         or (ag.external_ref like ${like}
             and ag.tenant_id = (select id from public.tenants where slug = ${tenantSlug}))`;
+  // Phase 10.1-15: the ticket rows of the namespace. An event mapping is found by its gateway id or by
+  // the title of the event it belongs to; the attendance rows (they reference the account, which is
+  // deleted below, with no cascade) by the run's e-mails or by the title of their event.
+  await sql()`
+    delete from public.payment_products p
+     using public.tenants t
+     where t.id = p.tenant_id and t.slug = ${tenantSlug} and p.kind = 'event'
+       and (p.external_product_id like ${like}
+            or p.event_id in (select e.id from public.events e
+                               where e.tenant_id = t.id and e.title like ${like}))`;
+  await sql()`
+    delete from public.event_attendances a
+     where a.user_id in (select u.id from public.users u where u.email like ${like})
+        or a.event_id in (select e.id from public.events e where e.title like ${like})`;
   await sql()`
     delete from public.payment_products p
      using public.tenants t
@@ -240,6 +254,101 @@ export async function insertStoreMapping(input: {
     select t.id, 'fake', 'store_product', ${input.externalProductId}, ${input.storeProductId}::uuid,
            ${input.checkoutUrl ?? null}
       from public.tenants t where t.slug = ${input.tenantSlug}`;
+}
+
+/**
+ * Maps an EVENT to a gateway product id and a checkout link (what the event form's Ingresso section
+ * writes through the second write), for the cases that need a paid event without driving the form.
+ * Provider `fake`, kind `event`, the `event_id` column (the `payment_products_event_chk` pairing).
+ */
+export async function insertEventMapping(input: {
+  tenantSlug: string;
+  eventId: string;
+  externalProductId: string;
+  checkoutUrl: string;
+}): Promise<void> {
+  await sql()`
+    insert into public.payment_products
+      (tenant_id, provider, kind, external_product_id, event_id, checkout_url)
+    select t.id, 'fake', 'event', ${input.externalProductId}, ${input.eventId}::uuid,
+           ${input.checkoutUrl}
+      from public.tenants t where t.slug = ${input.tenantSlug}`;
+}
+
+/** The mapping the form wrote for an event (null when it has none): what the browser cannot read. */
+export async function eventMappingFor(
+  eventId: string,
+): Promise<{ externalProductId: string; checkoutUrl: string | null } | null> {
+  const rows = await sql()<{ external_product_id: string; checkout_url: string | null }[]>`
+    select external_product_id, checkout_url
+      from public.payment_products
+     where kind = 'event' and event_id = ${eventId}::uuid`;
+  const row = rows[0];
+  return row ? { externalProductId: row.external_product_id, checkoutUrl: row.checkout_url } : null;
+}
+
+/**
+ * What the database holds for one payer at one event, as a single line for a failure message: the
+ * attendance row (status and origin), the notification rows of the account and the newest delivery.
+ * The browser cannot see these, and a swap that did not happen is one of "the row is not there", "the
+ * notice is not there" or "the page did not ask again".
+ */
+export async function ticketDiagnostics(eventId: string, email: string): Promise<string> {
+  const attendance = await sql()<{ status: string; origin: string }[]>`
+    select a.status, a.origin from public.event_attendances a
+      join public.users u on u.id = a.user_id
+     where a.event_id = ${eventId}::uuid and u.email = ${email}`;
+  const notices = await sql()<{ kind: string }[]>`
+    select n.kind from public.notifications n
+      join public.users u on u.id = n.user_id
+     where u.email = ${email} order by n.created_at desc limit 5`;
+  const delivery = await sql()<{ state: string; outcome: string | null }[]>`
+    select state, outcome from public.payment_events
+     where email = ${email} order by received_at desc limit 1`;
+  return JSON.stringify({
+    attendance: attendance[0] ?? null,
+    notifications: notices.map((row) => row.kind),
+    delivery: delivery[0] ?? null,
+  });
+}
+
+/** The id of the live event titled `title` in `tenantSlug`. */
+export async function eventIdByTitle(tenantSlug: string, title: string): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    select e.id from public.events e
+      join public.tenants t on t.id = e.tenant_id
+     where t.slug = ${tenantSlug} and e.title = ${title} and e.deleted_at is null
+     limit 1`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`no event titled ${title} in ${tenantSlug}`);
+  return id;
+}
+
+/** The id of a tenant by slug, through this file's fixture connection. */
+export async function labTenantId(tenantSlug: string = LAB): Promise<string> {
+  const rows = await sql()<
+    { id: string }[]
+  >`select id from public.tenants where slug = ${tenantSlug}`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`no tenant ${tenantSlug}`);
+  return id;
+}
+
+/** Gives a throwaway member a display name the Participantes rows and the release sheet can find. */
+export async function nameMember(
+  tenantSlug: string,
+  email: string,
+  displayName: string,
+): Promise<void> {
+  const updated = await sql()`
+    update public.member_profiles mp
+       set display_name = ${displayName}, updated_at = now()
+      from public.memberships m
+      join public.users u on u.id = m.user_id
+      join public.tenants t on t.id = m.tenant_id
+     where mp.membership_id = m.id and t.slug = ${tenantSlug} and u.email = ${email}
+    returning mp.membership_id`;
+  if (updated.length === 0) throw new Error(`no profile to name for ${email} in ${tenantSlug}`);
 }
 
 /** Inserts a long-named access product (a row of the Produtos de acesso list) straight in the table. */
