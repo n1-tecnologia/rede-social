@@ -516,3 +516,132 @@ describe('PaidEventZone — the soon branch, the tracer (OPEN-08, D-786, D-789)'
     expect(ended.container.innerHTML).toBe('');
   });
 });
+
+/* ── Phase 10.2-13 Task 2: the polite wrapper speaks only the unit thresholds and the opening ───── */
+
+describe('PaidEventZone — what the polite wrapper speaks while soon (UI-D-787, A-UI-16)', () => {
+  const MS = (days: number, hours: number, minutes: number, seconds = 0) =>
+    days * DAY + hours * HOUR + minutes * MIN + seconds * 1000;
+  const MILESTONE = (
+    catalog.ticket as { soon: { milestone: Record<string, string>; opened: string } }
+  ).soon;
+  const wrapperText = () => (screen.getByTestId('event-actions-live').textContent ?? '').trim();
+  const tick = (ms: number) =>
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SEED_MS);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('T1. the wrapper holds ONLY the hidden status sentence, never a cell, never the timer', () => {
+    soonZone(2 * DAY);
+    const wrapper = screen.getByTestId('event-actions-live');
+    expect(wrapper.querySelectorAll('[data-testid="live-countdown-cell"]')).toHaveLength(0);
+    expect(wrapper.querySelectorAll('[role="timer"]')).toHaveLength(0);
+    // Nothing earlier than 24 h: the wrapper is silent.
+    expect(wrapperText()).toBe('');
+    expect(wrapper.querySelector('[data-testid="event-soon-status"]')?.className).toContain(
+      'sr-only',
+    );
+  });
+
+  it.each([
+    ['25 hours', MS(1, 1, 0), ''],
+    ['exactly 24 hours', DAY, ''],
+    ['one minute under 24 hours', DAY - MIN, MILESTONE.milestone.day],
+    ['one hour and one minute', HOUR + MIN, MILESTONE.milestone.day],
+    ['exactly one hour', HOUR, MILESTONE.milestone.day],
+    ['59 minutes', 59 * MIN, MILESTONE.milestone.hour],
+    ['one minute', MIN, MILESTONE.milestone.hour],
+    ['59 999 ms', 59_999, MILESTONE.milestone.minute],
+    ['30 seconds', 30_000, MILESTONE.milestone.minute],
+    ['zero', 0, ''],
+  ])('T2. at %s the sentence is %j', (_label, remaining, sentence) => {
+    soonZone(remaining as number);
+    expect(wrapperText()).toBe(sentence);
+  });
+
+  it('T3. the whole wait speaks at most three status sentences, one per threshold, whatever the minutes', () => {
+    soonZone(DAY + 2 * MIN);
+    const spoken: string[] = [];
+    let changes = 0;
+    let last = wrapperText();
+    for (let minute = 0; minute < DAY / MIN + 4; minute += 1) {
+      tick(MIN);
+      const now = wrapperText();
+      if (now !== last) {
+        changes += 1;
+        if (now !== '') spoken.push(now);
+        last = now;
+      }
+    }
+    expect(spoken).toEqual([
+      MILESTONE.milestone.day,
+      MILESTONE.milestone.hour,
+      MILESTONE.milestone.minute,
+    ]);
+    // Three sentences in, and the last one clears at zero without speaking.
+    expect(changes).toBe(4);
+  });
+
+  it('T4. across a 10-minute advance the polite wrapper changes at most 3 times', () => {
+    soonZone(HOUR + 5 * MIN);
+    let changes = 0;
+    let last = wrapperText();
+    for (let minute = 0; minute < 10; minute += 1) {
+      tick(MIN);
+      const now = wrapperText();
+      if (now !== last) changes += 1;
+      last = now;
+    }
+    expect(changes).toBeLessThanOrEqual(3);
+    // The day sentence is already there at 65 minutes; the hour sentence replaces it once.
+    expect(changes).toBe(1);
+  });
+
+  it('T5. the one-time lead: a soon to buy swap announces As inscrições abriram. once, inside the same wrapper', () => {
+    const view = soonZone(30_000);
+    const wrapper = screen.getByTestId('event-actions-live');
+    expect(screen.queryByTestId('event-actions-opened')).toBeNull();
+    view.rerender(<PaidEventZone {...buyProps()} />);
+    expect(screen.getByTestId('event-actions-live')).toBe(wrapper);
+    const lead = screen.getByTestId('event-actions-opened');
+    expect(lead.textContent).toBe(MILESTONE.opened);
+    expect(lead.className).toContain('sr-only');
+    expect(wrapper.contains(lead)).toBe(true);
+    expect(buy()?.getAttribute('href')).toBe(HREF);
+    expect(screen.getAllByText(MILESTONE.opened)).toHaveLength(1);
+  });
+
+  it('T6. a first load of an already-open event draws no lead, and a swap to sold out or unavailable none either', () => {
+    zone();
+    expect(screen.queryByTestId('event-actions-opened')).toBeNull();
+    cleanup();
+    for (const next of ['soldOut', 'unavailable'] as const) {
+      const view = soonZone(30_000);
+      view.rerender(<PaidEventZone {...buyProps({ zone: next, checkoutHref: null })} />);
+      expect(screen.queryByTestId('event-actions-opened')).toBeNull();
+      expect(screen.queryAllByTestId('live-countdown-cell')).toHaveLength(0);
+      cleanup();
+    }
+  });
+});
+
+function buyProps(overrides: Partial<Props> = {}): Props {
+  return {
+    zone: 'buy',
+    phase: 'P0',
+    format: 'in_person',
+    cancelled: false,
+    checkoutHref: HREF,
+    priceLabel: null,
+    ...overrides,
+  };
+}

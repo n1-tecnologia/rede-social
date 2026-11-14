@@ -27,13 +27,22 @@ import type { EventActionState } from '@/lib/events-view';
  *     (D-207), at most one gold fill.
  */
 
-const { catalog, toast, refresh, rsvp } = await vi.hoisted(async () => {
+const { catalog, icu, toast, refresh, rsvp } = await vi.hoisted(async () => {
   const { readFileSync } = await import('node:fs');
   const { join } = await import('node:path');
+  const { createTranslator } = await import('next-intl');
+  const { loadMessages } = await import('@/i18n/messages');
   const read = (name: string) =>
     JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
+  // The real ICU translator, for the plural and select keys of the count (Phase 10.2).
+  const real = createTranslator({
+    locale: 'pt-BR',
+    messages: loadMessages(join(process.cwd(), 'messages', 'pt-BR')),
+    namespace: 'events' as never,
+  }) as unknown as (key: string, values?: Record<string, unknown>) => string;
   return {
     catalog: read('events').events as Record<string, unknown>,
+    icu: real,
     toast: { show: vi.fn(), dismiss: vi.fn() },
     refresh: vi.fn(),
     rsvp: vi.fn(),
@@ -46,6 +55,7 @@ const lookup = (key: string, values?: Record<string, unknown>) => {
   const raw = key
     .split('.')
     .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], catalog);
+  if (typeof raw === 'string' && /\{\w+, (plural|select)/.test(raw)) return icu(key, values);
   return String(raw ?? key).replace(/\{(\w+)\}/g, (_, name: string) =>
     String(values?.[name] ?? ''),
   );
@@ -55,7 +65,9 @@ vi.mock('next-intl', () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) => lookup(key, values),
 }));
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh }) }));
+// A STABLE router, as Next's is: a new object per render would rebuild the countdown's server clock.
+const router = { push: vi.fn(), refresh };
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
 vi.mock('@rede-social/ui', async (orig) => ({
   ...(await orig<typeof import('@rede-social/ui')>()),
@@ -964,5 +976,281 @@ describe('EventActions — the live swap of a paid event (10.1-12, UI-D-747, UI-
     await waitFor(() => expect(fake.client.channel).toHaveBeenCalledTimes(1));
     fake.emit('notifications.changed');
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* ── Phase 10.2-13: the opening as a boundary, the swap, the retry and the early payer ──────────── */
+
+describe('EventActions — the opening, the swap and the early payer (10.2-13, D-788, D-789, UI-D-789)', () => {
+  const HREF = 'https://pay.example/checkout/abc';
+  const SEED = '2026-11-13T12:00:00.000Z';
+  const SEED_MS = Date.parse(SEED);
+  const SECOND = 1000;
+  const MINUTE = 60 * SECOND;
+  const TENANT = '0d000000-0000-4000-8000-00000000aaaa';
+  const USER = '0d000000-0000-4000-8000-00000000bbbb';
+  const TOPIC = `tenant:${TENANT}:user:${USER}`;
+  const OPENED = (catalog.ticket as { soon: { opened: string } }).soon.opened;
+
+  /** A paid event whose opening is `remainingMs` after the seed; every other boundary is far away. */
+  function soon(remainingMs: number, overrides: Partial<EventActionState> = {}): EventActionState {
+    return state({
+      paid: true,
+      zone: 'soon',
+      checkoutHref: null,
+      priceLabel: null,
+      viewerOrigin: null,
+      checkinOpensAt: new Date(SEED_MS + 30 * 24 * HOUR).toISOString(),
+      startsAt: new Date(SEED_MS + 31 * 24 * HOUR).toISOString(),
+      endsAt: new Date(SEED_MS + 32 * 24 * HOUR).toISOString(),
+      soon: {
+        opensAt: new Date(SEED_MS + remainingMs).toISOString(),
+        serverNow: SEED,
+        dateLabel: '20 nov',
+        timeLabel: '10:00',
+        zoneLabel: 'Horário de Brasília',
+        price: 'R$ 80,00',
+      },
+      ...overrides,
+    });
+  }
+  /** What the server answers once the sale is open: the buy zone, no `soon` block. */
+  const opened = (overrides: Partial<EventActionState> = {}) =>
+    state({
+      paid: true,
+      zone: 'buy',
+      checkoutHref: HREF,
+      priceLabel: 'R$ 80,00',
+      viewerOrigin: null,
+      checkinOpensAt: new Date(SEED_MS + 30 * 24 * HOUR).toISOString(),
+      startsAt: new Date(SEED_MS + 31 * 24 * HOUR).toISOString(),
+      endsAt: new Date(SEED_MS + 32 * 24 * HOUR).toISOString(),
+      ...overrides,
+    });
+
+  const cellTexts = () =>
+    screen.queryAllByTestId('live-countdown-cell').map((cell) => cell.textContent);
+  const wrapper = () => screen.getByTestId('event-actions-live');
+  const advance = (ms: number) =>
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SEED_MS);
+  });
+
+  it('13a. an opening 30 s after the seed schedules exactly one refresh just after it, none before', () => {
+    render(<EventActions {...soon(30 * SECOND)} />);
+    advance(30 * SECOND - 1);
+    expect(refresh).not.toHaveBeenCalled();
+    advance(500);
+    expect(refresh).not.toHaveBeenCalled();
+    // The shipped margin (1 s) lands the refresh past the server's instant.
+    advance(600);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(toast.show).not.toHaveBeenCalled();
+  });
+
+  it('13b. the schedule follows the SERVER seed, not a device clock a day slow', () => {
+    vi.setSystemTime(SEED_MS - 24 * HOUR);
+    render(<EventActions {...soon(30 * SECOND)} />);
+    advance(30 * SECOND + 1_100);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('13c. a page opened days early refreshes once at the opening and not before', () => {
+    render(<EventActions {...soon(3 * 24 * HOUR)} />);
+    advance(3 * 24 * HOUR - 1);
+    expect(refresh).not.toHaveBeenCalled();
+    advance(1_100);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('13d. while the server still answers soon the zone keeps Abrindo agora, with no toast and no error text, and the retry chain is bounded', () => {
+    const props = soon(30 * SECOND);
+    const view = render(<EventActions {...props} />);
+    advance(31 * SECOND);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(cellTexts()).toEqual(['Abrindo agora']);
+    // The server answered the SAME zone (clocks a few seconds apart): the chain keeps trying.
+    view.rerender(<EventActions {...props} />);
+    advance(2 * SECOND);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    view.rerender(<EventActions {...props} />);
+    advance(5 * SECOND);
+    expect(refresh).toHaveBeenCalledTimes(3);
+    view.rerender(<EventActions {...props} />);
+    advance(15 * SECOND);
+    expect(refresh).toHaveBeenCalledTimes(4);
+    view.rerender(<EventActions {...props} />);
+    advance(30 * SECOND);
+    expect(refresh).toHaveBeenCalledTimes(5);
+    // The chain is over: no storm.
+    advance(10 * MINUTE);
+    expect(refresh).toHaveBeenCalledTimes(5);
+    // And through all of it: still the word, no link, no toast, no error copy.
+    expect(cellTexts()).toEqual(['Abrindo agora']);
+    expect(toast.show).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/erro|falha|tente/i)).toBeNull();
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('13e. the swap: the buy anchor and its hint replace the count, and the lead is announced ONCE inside the wrapper', () => {
+    const view = render(<EventActions {...soon(30 * SECOND)} />);
+    const before = wrapper();
+    expect(screen.queryByTestId('event-actions-opened')).toBeNull();
+    advance(31 * SECOND);
+    view.rerender(<EventActions {...opened()} />);
+    // The SAME polite wrapper holds the lead and the buy zone.
+    expect(wrapper()).toBe(before);
+    expect(screen.getByTestId('event-actions-buy').getAttribute('href')).toBe(HREF);
+    expect(
+      screen.getByText((catalog.ticket as { hint: { afterPay: string } }).hint.afterPay),
+    ).toBeTruthy();
+    expect(screen.queryAllByTestId('live-countdown-cell')).toHaveLength(0);
+    expect(screen.queryByTestId('event-soon-opens-at')).toBeNull();
+    expect(screen.queryAllByRole('timer')).toHaveLength(0);
+    const lead = screen.getAllByText(OPENED);
+    expect(lead).toHaveLength(1);
+    expect(wrapper().contains(lead[0] as HTMLElement)).toBe(true);
+    expect(lead[0]?.className).toContain('sr-only');
+    // A later refresh with the same zone says nothing more.
+    view.rerender(<EventActions {...opened()} />);
+    expect(screen.getAllByText(OPENED)).toHaveLength(1);
+  });
+
+  it('13f. a first load of an already-open event never draws the lead', () => {
+    render(<EventActions {...opened()} />);
+    expect(screen.getByTestId('event-actions-buy')).toBeTruthy();
+    expect(screen.queryByText(OPENED)).toBeNull();
+    expect(screen.queryByTestId('event-actions-opened')).toBeNull();
+  });
+
+  it('13g. the swap re-arms the boundaries: the retry chain of soon is cancelled and the opening is no boundary any more', () => {
+    const view = render(<EventActions {...soon(30 * SECOND)} />);
+    advance(31 * SECOND);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    view.rerender(<EventActions {...opened()} />);
+    advance(10 * MINUTE);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('13h. a swap to sold out, unavailable or sales closed shows that state and never a stale count', () => {
+    for (const [zoneKind, button] of [
+      ['soldOut', 'Esgotado'],
+      ['unavailable', 'Venda indisponível'],
+    ] as const) {
+      const view = render(<EventActions {...soon(30 * SECOND)} />);
+      advance(31 * SECOND);
+      view.rerender(<EventActions {...opened({ zone: zoneKind, checkoutHref: null })} />);
+      expect(screen.getByRole('button', { name: button })).toBeTruthy();
+      expect(screen.queryAllByTestId('live-countdown-cell')).toHaveLength(0);
+      expect(screen.queryByTestId('event-soon-opens-at')).toBeNull();
+      expect(screen.queryByText(OPENED)).toBeNull();
+      expect(screen.queryByTestId('event-actions-buy')).toBeNull();
+      cleanup();
+      refresh.mockReset();
+    }
+  });
+
+  it('13i. a new seed from a refresh shows the new count at once, with no stale flash', () => {
+    const view = render(<EventActions {...soon(2 * HOUR)} />);
+    expect(cellTexts()).toEqual(['02horas']);
+    const later = soon(2 * HOUR);
+    view.rerender(
+      <EventActions
+        {...later}
+        soon={{
+          ...(later.soon as NonNullable<EventActionState['soon']>),
+          serverNow: new Date(SEED_MS + 70 * MINUTE).toISOString(),
+        }}
+      />,
+    );
+    // 2 h minus the 70 minutes the new seed is later: the new value, never the old `02horas`.
+    expect(cellTexts()).toEqual(['50min']);
+  });
+
+  it('13j. the zone changes, the boundary key changes: the opening is a boundary only while soon', () => {
+    // A paid event whose zone is unavailable carries no soon block: no opening boundary, no refresh.
+    render(<EventActions {...opened({ zone: 'unavailable', checkoutHref: null })} />);
+    advance(60 * MINUTE);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  function fakeRealtime() {
+    const channels: { topic: string; onBroadcast?: (m: BroadcastMessage) => void }[] = [];
+    const client = {
+      setAuth: vi.fn(async () => {}),
+      channel: vi.fn((topic: string) => {
+        const channel: { topic: string; onBroadcast?: (m: BroadcastMessage) => void } = { topic };
+        channels.push(channel);
+        const handle = {
+          on: (_t: 'broadcast', _f: { event: string }, cb: (m: BroadcastMessage) => void) => {
+            channel.onBroadcast = cb;
+            return handle;
+          },
+          subscribe: () => handle,
+        };
+        return handle;
+      }),
+      removeChannel: vi.fn(async () => 'ok'),
+      disconnect: vi.fn(async () => 'ok'),
+    };
+    return {
+      client,
+      factory: vi.fn(() => client as never),
+      emit: (event: string) =>
+        act(() =>
+          [...channels]
+            .reverse()
+            .find((c) => c.topic === TOPIC)
+            ?.onBroadcast?.({ event, payload: { kind: 'payments.ticket' } }),
+        ),
+    };
+  }
+  const inProvider = (fake: ReturnType<typeof fakeRealtime>, props: EventActionState) => (
+    <RealtimeProvider
+      supabaseUrl="http://supabase.test"
+      publishableKey="pk"
+      tokenUrl="/api/realtime/token"
+      clientFactory={fake.factory}
+    >
+      <EventActions {...props} tenantId={TENANT} userId={USER} />
+    </RealtimeProvider>
+  );
+
+  it('13k. an early payer: the listener is mounted during soon, and a presence swaps to the confirmed zone inside the SAME wrapper, count and all', async () => {
+    const fake = fakeRealtime();
+    const view = render(inProvider(fake, soon(5 * HOUR)));
+    await vi.waitFor(() => expect(fake.client.channel).toHaveBeenCalledTimes(1));
+    const live = wrapper();
+    expect(screen.queryAllByTestId('live-countdown-cell').length).toBeGreaterThan(0);
+    // The payment lands: the signal asks the server, which answers a presence.
+    fake.emit('notifications.changed');
+    expect(refresh).toHaveBeenCalledTimes(1);
+    view.rerender(
+      inProvider(
+        fake,
+        opened({
+          zone: null,
+          checkoutHref: null,
+          priceLabel: null,
+          answer: 'going',
+          viewerOrigin: 'ticket',
+        }),
+      ),
+    );
+    expect(wrapper()).toBe(live);
+    expect(live.getAttribute('aria-live')).toBe('polite');
+    expect(live.contains(screen.getByTestId('event-actions-checkin'))).toBe(true);
+    expect(screen.queryAllByTestId('live-countdown-cell')).toHaveLength(0);
+    expect(screen.queryByTestId('event-soon-opens-at')).toBeNull();
+    expect(screen.queryByTestId('event-actions-buy')).toBeNull();
+    expect(screen.queryByText(OPENED)).toBeNull();
+    expect(toast.show).not.toHaveBeenCalled();
   });
 });

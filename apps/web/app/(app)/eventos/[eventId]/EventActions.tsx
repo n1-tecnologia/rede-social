@@ -46,9 +46,15 @@ import { GOLD, GOLD_BASE, OUTLINE_CTA, Zone } from './zone';
  * agrees. `payment_required` and `ticket_locked` (a stale tab) toast and refresh into the state the
  * server now draws.
  *
+ * **The `Em breve` zone (Phase 10.2, D-786, D-789, UI-D-781).** A paid event whose registration opening
+ * is still ahead of the server's instant draws `SoonZone` instead of the buy control (the precedence is
+ * in `PaidEventZone`): the count, the exact opening and no control of any kind. The opening joins the
+ * boundaries below, so the page asks the server just after it and swaps to `Comprar ingresso` by itself.
+ *
  * **Boundary refresh** (UI-D-203): `useBoundaryRefresh` targets the next of `checkinOpensAt` /
- * `startsAt` / `endsAt` within 24 h, so the zone changes at the venue without a pull. It lives in the
- * outer component, so the paid zone has it too.
+ * `startsAt` / `endsAt` (and, while `soon`, the opening) so the zone changes at the venue without a
+ * pull. It lives in the outer component, so the paid zone has it too; its key is `{phase}:{zone}`, so a
+ * change of zone re-arms it and the retry chain only runs while the server answers the SAME zone.
  */
 export function EventActions({
   tenantId = null,
@@ -63,8 +69,17 @@ export function EventActions({
 }) {
   const { phase, cancelled, answer, checkedIn, checkinOpensAt, startsAt, endsAt } = state;
   // One boundary refresh for every branch, the paid zone's included: the buy control leaves at
-  // `starts_at` by the SERVER's instant, never the device clock (UI-D-747).
-  useBoundaryRefresh([checkinOpensAt, startsAt, endsAt], phase);
+  // `starts_at` by the SERVER's instant, never the device clock (UI-D-747). While the zone is `soon`
+  // (Phase 10.2, D-788, D-789) the registration opening is one more boundary and the server's seed is the
+  // clock it is measured on, so one refresh lands just after the opening and the shipped retry chain
+  // keeps asking while the server still answers `soon`. The key carries the zone, so the swap to the buy
+  // zone (or to sold out, or to unavailable) re-arms the boundaries instead of being read as "same phase".
+  const opening = state.soon?.opensAt;
+  useBoundaryRefresh(
+    opening ? [checkinOpensAt, startsAt, endsAt, opening] : [checkinOpensAt, startsAt, endsAt],
+    `${phase}:${state.zone ?? ''}`,
+    state.soon?.serverNow ?? null,
+  );
 
   // Phase 10.1-12 (D-741, D-756, UI-D-746, UI-D-748). A paid event and a member WITHOUT a presence is the
   // paid zone's, on the SERVER's answer (never the optimistic one). Once a member has been in that
@@ -89,6 +104,7 @@ export function EventActions({
       refundedNote={state.refundedNote ?? null}
       tenantId={tenantId}
       userId={userId}
+      soon={state.soon ?? null}
     >
       {waiting ? null : <ActionsBody {...state} />}
     </PaidEventZone>
