@@ -99,6 +99,73 @@ describe('EventHero tag (10.1-12, UI-D-745)', () => {
   });
 });
 
+/**
+ * Phase 10.2-14 (D-784, D-790, OPEN-07, OPEN-20) - the hero's `Em breve` tag (the same element with a Clock)
+ * and its finished-node overline, which carries the holder's live count. The module ships no words and
+ * reads no clock: both arrive from the host.
+ */
+describe('EventHero Em breve tag and node overline (10.2-14)', () => {
+  const base = {
+    title: 'title-sentinel',
+    overline: 'overline-sentinel' as React.ReactNode,
+    place: 'place-sentinel',
+    placeKind: 'venue' as const,
+    coverVariantWidths: [640, 1080],
+    coverAlt: 'cover-alt',
+    coverAssetId: ASSET,
+  };
+
+  it('14. tagIcon="clock" draws the Clock glyph on the same tag, not the Ticket', () => {
+    render(<EventHero {...base} category="category-sentinel" tag="tag-sentinel" tagIcon="clock" />);
+    const tag = screen.getByTestId('event-hero-tag');
+    expect(tag.querySelector('svg.lucide-clock')).not.toBeNull();
+    expect(tag.querySelector('svg.lucide-ticket')).toBeNull();
+    expect(tag.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(tag.className).toContain('bg-black/60');
+    expect(tag.className).toContain('whitespace-nowrap');
+  });
+
+  it('15. without tagIcon (or with "ticket") the tag is the shipped Ticket markup, byte for byte', () => {
+    const plain = render(<EventHero {...base} category="category-sentinel" tag="tag-sentinel" />)
+      .container.innerHTML;
+    cleanup();
+    const ticket = render(
+      <EventHero {...base} category="category-sentinel" tag="tag-sentinel" tagIcon="ticket" />,
+    ).container.innerHTML;
+    expect(ticket).toBe(plain);
+    expect(plain).toContain('lucide-ticket');
+    expect(plain).not.toContain('lucide-clock');
+  });
+
+  it('16. a tagIcon with no tag draws nothing and leaves the hero byte-identical', () => {
+    const plain = render(<EventHero {...base} category="category-sentinel" />).container.innerHTML;
+    cleanup();
+    const withIcon = render(<EventHero {...base} category="category-sentinel" tagIcon="clock" />)
+      .container.innerHTML;
+    expect(withIcon).toBe(plain);
+  });
+
+  it('17. a React node as the overline renders inside the overlay on BOTH branches; a string is unchanged', () => {
+    const node = <span data-testid="node-overline">node-sentinel</span>;
+    // Photo branch.
+    const photo = render(<EventHero {...base} overline={node} category="category-sentinel" />);
+    expect(screen.getByTestId('event-hero-overline')).toContainElement(
+      screen.getByTestId('node-overline'),
+    );
+    expect(screen.getByTestId('event-hero-overline')).toHaveTextContent('node-sentinel');
+    photo.unmount();
+    // Gradient branch.
+    render(<EventHero {...base} overline={node} coverAssetId={null} coverVariantWidths={[]} />);
+    expect(screen.getByTestId('event-cover-fallback')).toBeInTheDocument();
+    expect(screen.getByTestId('event-hero-overline')).toContainElement(
+      screen.getByTestId('node-overline'),
+    );
+    cleanup();
+    render(<EventHero {...base} overline="string-sentinel" />);
+    expect(screen.getByTestId('event-hero-overline').innerHTML).toBe('string-sentinel');
+  });
+});
+
 describe('EventInfoGrid (UI-D-204)', () => {
   const cells = [
     { icon: 'date' as const, label: 'l-date', value: 'v-date' },

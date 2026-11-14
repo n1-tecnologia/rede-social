@@ -1834,6 +1834,14 @@ describe('10.2-10 the hero tag follows the opening (OPEN-07, D-784)', () => {
     expect(view.sale?.kind).toBe('unavailable');
     expect(view).not.toHaveProperty('soon');
   });
+
+  it('the hero glyph is the clock exactly when the tag is Em breve, the ticket for Pago (10.2-14)', () => {
+    const icon = (overrides: Partial<EventDetail>) =>
+      eventDetailView(soonEvent(overrides), real()).tagIcon;
+    expect(icon({})).toBe('clock');
+    expect(icon({ saleReady: false })).toBe('clock');
+    expect(icon({ serverNow: OPENS })).toBe('ticket');
+  });
 });
 
 describe('10.2-10 a free event keeps today’s exact key sets', () => {

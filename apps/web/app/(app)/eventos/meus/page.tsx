@@ -4,6 +4,7 @@ import { Card, EmptyState } from '@rede-social/ui';
 import { CalendarDays, Camera, CircleAlert, Clock, MapPin, QrCode, Ticket } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
+import { EventLiveNote } from '@/components/events/EventLiveNote';
 import { ExampleTag } from '@/components/events/ExampleTag';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { splitEventDescription } from '@/lib/event-extras';
@@ -11,6 +12,7 @@ import { loadEvent, loadEventSections } from '@/lib/events';
 import {
   eventCountdown,
   eventDateLabel,
+  eventHolderCountdown,
   eventHours,
   eventPhase,
   eventPlaceLine,
@@ -26,6 +28,10 @@ const PARTICIPATED_DETAILS = 10;
  * `/eventos/meus` (2026-10-06, the REINE prototype's "Meus eventos" of the events menu): the three
  * numbers (events taken part in, hours of content, certificates), "Inscrito" (the events to come the
  * member is going to, each with its check-in) and "Participados" (the events they checked in to).
+ *
+ * Phase 10.2 (D-790, OPEN-20): the count on a card of a PAID event is live (`EventLiveNote`, surface
+ * `reine`) and runs through the check-in window until the start (A-UI-15; the one branch is
+ * `holderRemaining` in `lib/events-view.ts`); a free event keeps its `Faltam N dias`.
  *
  * Real: the events, the answers, the check-ins, the hours (`eventHours`) and whether an event has a
  * certificate (the organiser's "Informações úteis", read from each event's description). EXAMPLES,
@@ -163,7 +169,11 @@ export default async function MyEventsPage() {
                       </span>
                     ) : null}
                     <span className="absolute top-3 right-3 rounded-full bg-white/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-black">
-                      {eventCountdown(event, tz, nowMs, t)}
+                      <EventLiveNote
+                        note={eventCountdown(event, tz, nowMs, t)}
+                        countdown={eventHolderCountdown(event, tz, nowMs, t)?.countdown}
+                        surface="reine"
+                      />
                     </span>
                   </EventCover>
                 </a>

@@ -1,6 +1,7 @@
 import { EventPoster } from '@rede-social/module-events/ui';
 import { CalendarDays, CircleAlert } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { EventLiveNote } from '@/components/events/EventLiveNote';
 import {
   ProfileEmptyCard,
   ProfileRail,
@@ -16,6 +17,10 @@ import { PROFILE_RAIL_SIZE } from '@/lib/profile-activity-view';
  * order), at most `PROFILE_RAIL_SIZE` posters in the same sideways rail; the section's "Ver todos"
  * opens `/eventos/meus`. It shares the events read with "Atividades" (`profileEventSections`, one
  * request per render), and a failed read is this section's own error card.
+ *
+ * Phase 10.2: the poster's note is the live count of the shared card view (`EventLiveNote`), exactly as
+ * in the gallery: the holder's count to a paid event runs through the check-in window until the start
+ * (A-UI-15, one branch in `lib/events-view.ts`), and a free event draws its shipped note.
  */
 export async function ProfileEventsRail({ tz, nowMs }: { tz: string; nowMs: number }) {
   const [t, te, sections] = await Promise.all([
@@ -60,7 +65,11 @@ export async function ProfileEventsRail({ tz, nowMs }: { tz: string; nowMs: numb
             place={card.place}
             placeKind={card.placeKind}
             badge={card.badge}
-            note={card.note}
+            note={
+              card.note !== undefined || card.countdown ? (
+                <EventLiveNote note={card.note ?? ''} countdown={card.countdown} surface="poster" />
+              ) : undefined
+            }
             coverAssetId={card.coverAssetId}
             coverVariantWidths={card.coverVariantWidths}
             coverAlt={card.coverAlt}

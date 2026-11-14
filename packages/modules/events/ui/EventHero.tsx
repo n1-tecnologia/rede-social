@@ -1,7 +1,8 @@
 'use client';
 
 import { cn } from '@rede-social/ui';
-import { MapPin, Ticket, Video } from 'lucide-react';
+import { Clock, MapPin, Ticket, Video } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { EventCover } from './EventCover';
 
 /**
@@ -21,6 +22,12 @@ import { EventCover } from './EventCover';
  * over-media ground, top right of the same row, the category pill keeping the top left. Absent or
  * empty, the hero is byte-identical to a free event's.
  *
+ * **The opening** (Phase 10.2-14, D-784, OPEN-07): while the sale is closed for a viewer who is not in, the
+ * host passes the finished word "Em breve" with `tagIcon="clock"` (the `Clock` glyph on the same ground,
+ * one tag, never two); the default `tagIcon` is `ticket`, so every shipped caller is byte-identical.
+ * **The overline is a finished node** (A-UI-9, D-790): the host passes a string, or its live holder count
+ * as a node; the module only places it, reads no clock and ships no word.
+ *
  * Presentational and props-only: it formats no date and **ships no words** (PWA-03). The host passes
  * the finished overline (countdown, "É hoje!", "Acontecendo agora", "Aconteceu em …"), the place
  * string and the cover alt. The same overlay is drawn twice from ONE definition: white over the
@@ -31,8 +38,8 @@ import { EventCover } from './EventCover';
  */
 export interface EventHeroProps {
   title: string;
-  /** The hero line, already formatted in the tenant's timezone by the host. */
-  overline: string;
+  /** The hero line, already formatted in the tenant's timezone by the host: a string or a finished node. */
+  overline: ReactNode;
   /** The event's own category ("Workshop"), the top-left pill; absent or empty draws none. */
   category?: string | null;
   /** The venue name, or the host's "Online". */
@@ -44,6 +51,8 @@ export interface EventHeroProps {
   coverAlt: string;
   /** The finished "Pago" word of a paid event, top right; absent or empty draws none (UI-D-745). */
   tag?: string;
+  /** The glyph of the tag: `ticket` (the default, "Pago") or `clock` ("Em breve", 10.2-14, D-784). */
+  tagIcon?: 'ticket' | 'clock';
 }
 
 export function EventHero({
@@ -56,8 +65,10 @@ export function EventHero({
   coverVariantWidths,
   coverAlt,
   tag,
+  tagIcon = 'ticket',
 }: EventHeroProps) {
   const PlaceIcon = placeKind === 'online' ? Video : MapPin;
+  const TagIcon = tagIcon === 'clock' ? Clock : Ticket;
 
   const bottom = (onPhoto: boolean) => (
     <div className="absolute right-4 bottom-3 left-4">
@@ -126,7 +137,7 @@ export function EventHero({
               data-testid="event-hero-tag"
               className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white backdrop-blur-sm"
             >
-              <Ticket size={10} strokeWidth={3} aria-hidden />
+              <TagIcon size={10} strokeWidth={3} aria-hidden />
               {tag}
             </span>
           ) : null}

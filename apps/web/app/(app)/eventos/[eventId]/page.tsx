@@ -19,6 +19,7 @@ import {
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { EventLiveNote } from '@/components/events/EventLiveNote';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { hasGoodToKnow } from '@/lib/event-extras';
 import { loadEvent, loadEventPhotos } from '@/lib/events';
@@ -46,7 +47,10 @@ import { ReactivateEventControl } from './ReactivateEventControl';
  *     "Inscrição confirmada" card, with its example ticket, payment and invoice, left the page on
  *     2026-10-09);
  *  2. ONE hero `Card`: the 16/10 cover (the category in the button colour, "Faltam N dias · {date}",
- *     the title in the tenant's title font, `{venue} · {cidade}, {UF}`), then the body: the banner
+ *     the title in the tenant's title font, `{venue} · {cidade}, {UF}`; Phase 10.2: the `Em breve` tag
+ *     with the Clock while the sale is closed, and for a PAID holder the overline is the live count
+ *     `Faltam 12 d 4 h 13 min · {when}`, running through the check-in window until the start (A-UI-15, the
+ *     one branch is `holderRemaining` in `lib/events-view.ts`, so changing it is a one-line decision)), then the body: the banner
  *     (cancelled or checked in), "Você participou deste evento" once a check-in is over, the
  *     description, the info grid (Traje as its fourth cell when the organiser gave one) and the gold
  *     action zone (`EventActions`);
@@ -142,7 +146,17 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
             <Card>
               <EventHero
                 title={view.title}
-                overline={view.hero.overline}
+                overline={
+                  view.hero.overlineCountdown ? (
+                    <EventLiveNote
+                      note={view.hero.overline}
+                      countdown={view.hero.overlineCountdown}
+                      surface="hero"
+                    />
+                  ) : (
+                    view.hero.overline
+                  )
+                }
                 category={view.hero.category}
                 place={view.hero.place}
                 placeKind={view.hero.placeKind}
@@ -150,6 +164,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
                 coverVariantWidths={view.hero.coverVariantWidths}
                 coverAlt={view.hero.coverAlt}
                 tag={view.tag ?? undefined}
+                tagIcon={view.tagIcon}
               />
               <div className="flex flex-col gap-4 p-4">
                 {view.banner ? (

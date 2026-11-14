@@ -1087,6 +1087,11 @@ export type EventDetailView = {
    */
   paid?: true;
   tag?: string | null;
+  /**
+   * Phase 10.2-14 (D-784): the hero tag's glyph, `clock` exactly when `tag` is the `Em breve` word and
+   * `ticket` for `Pago`; decided from the same facts as the word, never from the string.
+   */
+  tagIcon?: 'ticket' | 'clock';
   sale?: EventSaleState | null;
   refundedNote?: string | null;
   /**
@@ -1330,6 +1335,7 @@ export function eventDetailView(
           !viewerIn && !cancelled && phase !== 'P3'
             ? t(soonTag ? 'ticket.soon.badge' : 'ticket.badge')
             : (null as string | null),
+        tagIcon: soonTag ? ('clock' as const) : ('ticket' as const),
         sale,
         ...(soon === null ? {} : { soon }),
         refundedNote:
