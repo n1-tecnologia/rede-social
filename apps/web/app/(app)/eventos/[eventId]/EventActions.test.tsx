@@ -350,7 +350,7 @@ describe('EventActions — the boundary refresh (UI-D-203)', () => {
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
-  it('5c. schedules nothing when the next boundary is more than 24 h away, or all are past', () => {
+  it('5c. waits in steps of at most 24 h for a farther boundary (Phase 10.2), and schedules nothing when all are past', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     vi.setSystemTime(NOW);
     const { unmount } = render(
@@ -362,8 +362,14 @@ describe('EventActions — the boundary refresh (UI-D-203)', () => {
         })}
       />,
     );
-    expect(vi.getTimerCount()).toBe(0);
+    // One 24 h step, no refresh at it; the 25 h boundary then refreshes exactly once.
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(24 * HOUR);
+    expect(refresh).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(HOUR + 1_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
     unmount();
+    refresh.mockReset();
 
     render(
       <EventActions
