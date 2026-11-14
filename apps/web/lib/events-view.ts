@@ -12,6 +12,13 @@ import {
 import type { getTranslations } from 'next-intl/server';
 import { addressMapsQuery, parseEventAddress } from './event-address';
 import {
+  type CountdownT,
+  type CountdownTarget,
+  countdownLead,
+  countdownParts,
+  countdownShort,
+} from './event-countdown';
+import {
   type EventExtras,
   effectiveSchedule,
   type ScheduleItem,
@@ -315,6 +322,79 @@ function openingIsFuture(event: Pick<EventSummary, 'registrationOpensAt' | 'serv
 }
 
 /**
+ * The plain descriptor a client countdown island is built from (Phase 10.2, D-785, D-788): which sentence it
+ * frames (`opening` or `event`), the target and the server seed as ISO strings. Plain data, never a node:
+ * the card view also crosses a server action.
+ */
+export type CountdownDescriptor = { kind: CountdownTarget; targetIso: string; seedIso: string };
+
+/** The card's descriptor: the count plus the reference price that precedes it on the poster note. */
+export type EventCardCountdown = CountdownDescriptor & { price: string | null };
+
+/** The hero's descriptor: the count plus the finished static `when` part of the overline. */
+export type EventHeroCountdown = CountdownDescriptor & { when: string };
+
+/** The formatter's translator slice, from the view's translator (the catalog keys are the same). */
+const countdownT = (t: Translator): CountdownT => t as unknown as CountdownT;
+
+/**
+ * Remaining milliseconds from the seed, computed exactly as the client island does (`Date.parse` of the two
+ * strings), so the server string and the first client render are the same. It never reads a clock.
+ */
+function remainingFromSeed(targetIso: string, seedIso: string): number {
+  return Date.parse(targetIso) - Date.parse(seedIso);
+}
+
+/** The fields the holder's countdown needs: the start, the status and the server seed. */
+type HolderEvent = Pick<EventSummary, 'startsAt' | 'status'> &
+  Partial<Pick<EventSummary, 'paid' | 'serverNow'>>;
+
+/**
+ * The holder's count to the event (D-790, A-UI-15): only a PAID event that is not cancelled, before its
+ * start (P0 or the check-in window P1), with a server seed. `null` for anything else, so a free event, a
+ * missing seed (older API) and the phases that have their own word keep the shipped lines. The caller
+ * checks that the viewer is in.
+ */
+function holderRemaining(
+  event: HolderEvent,
+  phase: EventPhase,
+): { remaining: number; seedIso: string } | null {
+  if (event.paid !== true || event.status === 'cancelled') return null;
+  if (phase !== 'P0' && phase !== 'P1') return null;
+  if (typeof event.serverNow !== 'string') return null;
+  const remaining = remainingFromSeed(event.startsAt, event.serverNow);
+  return Number.isFinite(remaining) ? { remaining, seedIso: event.serverNow } : null;
+}
+
+/**
+ * The finished "Faltam 12 d 4 h 13 min" of an event count, in the `card` or `reine.mine` catalog scope: the
+ * singular lead by ICU `select` (A-UI-10), the last minute on its own key.
+ */
+function untilText(t: Translator, remaining: number, scope: 'card' | 'reine.mine'): string {
+  if (countdownParts(remaining).state === 'lessThanMinute')
+    return t(`${scope}.untilLessThanMinute`);
+  return t(`${scope}.until`, {
+    lead: countdownLead(remaining),
+    time: countdownShort(countdownT(t), remaining),
+  });
+}
+
+/**
+ * The card's note while `Em breve` (without the price, which the caller puts first): the short count to the
+ * opening, `Abre em menos de 1 min` in the last minute and `Abrindo agora` at zero.
+ */
+function soonNote(
+  event: Required<Pick<EventSummary, 'registrationOpensAt' | 'serverNow'>>,
+  t: Translator,
+): string {
+  const remaining = remainingFromSeed(event.registrationOpensAt, event.serverNow);
+  const state = countdownParts(remaining).state;
+  if (state === 'now') return t('ticket.soon.opening');
+  if (state === 'lessThanMinute') return t('card.soonNoteLessThanMinute');
+  return t('card.soonNote', { time: countdownShort(countdownT(t), remaining) });
+}
+
+/**
  * The zone, first match wins (UI-D-781): cancelled, ended (P3), under way (P2), `saleReady === false`
  * (unavailable, so a module that is off or a gateway that is down never shows a countdown), then `soon`,
  * then full, then no safe link (unavailable), then buy. A viewer who holds a presence never reaches this
@@ -459,7 +539,9 @@ export function eventCardBadge(
 }
 
 /** What the line under the place reads: the card's own state plus the limit and its count. */
-type CardNoteEvent = CardEvent & Pick<EventSummary, 'capacity' | 'confirmedCount'>;
+type CardNoteEvent = CardEvent &
+  Pick<EventSummary, 'capacity' | 'confirmedCount'> &
+  Partial<Pick<EventSummary, 'paid' | 'serverNow' | 'registrationOpensAt'>>;
 
 /**
  * The line under the place, never on a cancelled event:
@@ -469,6 +551,11 @@ type CardNoteEvent = CardEvent & Pick<EventSummary, 'capacity' | 'confirmedCount
  *   (before the start, D-204) and it has a limit: `Últimas N vagas` (`Última vaga` for one) when
  *   1 to `EVENT_LOW_SPOTS` spots are left, `Vagas esgotadas` when none is. The viewer's own events
  *   keep their countdown: their spot is already theirs.
+ * Phase 10.2 (D-785, D-790, A-UI-2, A-UI-15): on a PAID event whose opening is ahead of the server seed and
+ * the viewer is not in, the note is the short count to the opening (`Abre em 2 d 4 h 13 min`) and the spots
+ * line is not drawn (nobody can buy yet); on a PAID event the viewer is in, with a seed, it is the count to
+ * the event (`Faltam 12 d 4 h 13 min`), running through the check-in window until `starts_at`, never
+ * `É hoje!`. A free event, and a paid one with no seed, keep the lines above byte for byte.
  * Undefined otherwise: the card then ends at the place.
  */
 export function eventCardNote(
@@ -481,12 +568,21 @@ export function eventCardNote(
   const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
   if (!isViewerIn(event)) {
     if (!rsvpOpen(event, nowMs)) return undefined;
+    if (event.paid === true && openingIsFuture(event)) {
+      return soonNote(
+        event as Required<Pick<EventSummary, 'registrationOpensAt' | 'serverNow'>>,
+        t,
+      );
+    }
     const left = spotsLeft(event);
     if (left === null || left > EVENT_LOW_SPOTS) return undefined;
     return left === 0 ? t('card.soldOut') : t('card.spotsLeft', { count: left });
   }
   if (phase === 'P3') return undefined;
   if (phase === 'P2') return t('card.live');
+  const holder = holderRemaining(event, phase);
+  if (holder)
+    return holder.remaining <= 0 ? t('card.live') : untilText(t, holder.remaining, 'card');
   const days = tenantDaysUntil(event.startsAt, timeZone, nowMs);
   return days <= 0 ? t('card.today') : t('card.countdown', { count: days });
 }
@@ -503,7 +599,11 @@ function cardPlace(event: Pick<EventSummary, 'format' | 'venueName' | 'address'>
   return event.venueName ?? '';
 }
 
-/** Everything `EventPoster` renders, as finished strings: no instant crosses to the client. */
+/**
+ * Everything `EventPoster` renders, as finished strings. No instant is formatted on the client: the only
+ * instants that cross are the two ISO strings of the `countdown` descriptor (Phase 10.2), which the island
+ * counts between from the server seed, never from a device clock.
+ */
 export type EventCardView = {
   id: string;
   href: string;
@@ -525,6 +625,12 @@ export type EventCardView = {
    * that is neither cancelled nor over. A free event's view has no such key at all.
    */
   tag?: string;
+  /**
+   * Phase 10.2 (D-785, D-788, UI-D-786): the plain descriptor of the count the note carries, so the client
+   * island can tick it: `opening` while `Em breve`, `event` for a paid event the viewer is in. Absent for a
+   * free event, with no seed and in every state with no count; `note` is its finished initial string.
+   */
+  countdown?: EventCardCountdown;
   coverAssetId: string | null;
   coverVariantWidths: number[];
   /**
@@ -551,21 +657,23 @@ export function eventCardView(
   const badge = eventCardBadge(event, tz, nowMs, t);
   const spotsNote = eventCardNote(event, tz, nowMs, t);
   const whenLine = eventWhenLine(event, tz, nowMs, t);
-  const when = [
-    whenLine.text,
-    ...(badge.kind === 'date' || badge.kind === 'live' ? [] : [badge.label]),
-    ...(spotsNote === undefined || whenLine.live ? [] : [spotsNote]),
-  ].join(', ');
-  const label = t('poster.label', { title: event.title, when });
+  const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
 
   // Phase 10.1-08 (D-753, D-755, UI-D-744): the paid offer is shown to a viewer who is NOT in, on an
   // event that is neither cancelled nor over. Everything below is skipped for a free event, so its view
   // keeps today's exact key set.
   const offered =
-    event.paid === true &&
-    !isViewerIn(event) &&
-    event.status !== 'cancelled' &&
-    eventPhase(event.startsAt, event.endsAt, nowMs) !== 'P3';
+    event.paid === true && !isViewerIn(event) && event.status !== 'cancelled' && phase !== 'P3';
+  // Phase 10.2 (D-784, A-UI-3): `Em breve` follows the opening alone, by the server seed.
+  const soon = offered && (phase === 'P0' || phase === 'P1') && openingIsFuture(event);
+  const holder = event.paid === true && isViewerIn(event) ? holderRemaining(event, phase) : null;
+  // The name is static: a ticking count (the opening's or a holder's) never goes into it (UI-D-787).
+  const when = [
+    whenLine.text,
+    ...(badge.kind === 'date' || badge.kind === 'live' ? [] : [badge.label]),
+    ...(spotsNote === undefined || whenLine.live || soon || holder ? [] : [spotsNote]),
+  ].join(', ');
+  const label = t('poster.label', { title: event.title, when });
   const price = offered ? formatTicketPrice(event.ticketPriceCents) : null;
   // The price goes FIRST on the poster note ("R$ 80,00 · Últimas 3 vagas"), never truncated.
   const note =
@@ -574,9 +682,34 @@ export function eventCardView(
       : spotsNote === undefined
         ? price
         : t('card.priceNote', { price, note: spotsNote });
-  const ariaLabel = offered
-    ? `${label}${price === null ? t('card.paid') : t('card.paidPrice', { price })}`
-    : label;
+  const opening =
+    soon && typeof event.registrationOpensAt === 'string'
+      ? formatEventOpening(event.registrationOpensAt, tz, nowMs)
+      : null;
+  const ariaLabel = opening
+    ? `${label}${
+        price === null
+          ? t('card.soon', { date: opening.dateLabel, time: opening.timeLabel })
+          : t('card.soonPrice', { date: opening.dateLabel, time: opening.timeLabel, price })
+      }`
+    : offered
+      ? `${label}${price === null ? t('card.paid') : t('card.paidPrice', { price })}`
+      : label;
+  let countdown: EventCardCountdown | null = null;
+  if (
+    soon &&
+    typeof event.registrationOpensAt === 'string' &&
+    typeof event.serverNow === 'string'
+  ) {
+    countdown = {
+      kind: 'opening',
+      targetIso: event.registrationOpensAt,
+      seedIso: event.serverNow,
+      price,
+    };
+  } else if (holder && holder.remaining > 0) {
+    countdown = { kind: 'event', targetIso: event.startsAt, seedIso: holder.seedIso, price: null };
+  }
   return {
     id: event.id,
     href: `/eventos/${event.id}`,
@@ -587,7 +720,8 @@ export function eventCardView(
     badge,
     ...(note === undefined ? {} : { note }),
     ariaLabel,
-    ...(offered ? { tag: t('ticket.badge') } : {}),
+    ...(offered ? { tag: t(soon ? 'ticket.soon.badge' : 'ticket.badge') } : {}),
+    ...(countdown ? { countdown } : {}),
     coverAssetId: event.coverAssetId,
     coverVariantWidths: event.coverVariantWidths,
     posterAssetId: event.posterAssetId ?? null,
@@ -735,15 +869,54 @@ function heroPlace(venue: string, address: string): string {
   return parts ? `${venue} · ${parts.city}, ${parts.state}` : venue;
 }
 
-/** The REINE cards' countdown: "É hoje!", or "Falta 1 dia" / "Faltam N dias" (tenant days). */
+/** What the holder's count needs beyond the start: the end (for the phase), status, paid and seed. */
+type CountdownEvent = Pick<EventSummary, 'startsAt'> &
+  Partial<Pick<EventSummary, 'endsAt' | 'status' | 'paid' | 'serverNow'>>;
+
+/** The holder's count of a `CountdownEvent`, or `null` when the shipped lines stand. */
+function holderOf(event: CountdownEvent, nowMs: number) {
+  if (event.endsAt === undefined) return null;
+  const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
+  return holderRemaining({ ...event, status: event.status ?? 'active' }, phase);
+}
+
+/**
+ * The REINE cards' countdown: "É hoje!", or "Falta 1 dia" / "Faltam N dias" (tenant days). Phase 10.2
+ * (D-790, A-UI-15): for a PAID event with a server seed, before its start, the count to the event instead
+ * (`Faltam 12 d 4 h 13 min`, `Falta 1 h`, `Falta menos de 1 min`), running through the check-in window and
+ * never `É hoje!`; a free event, and a paid one with no seed, keep the shipped lines.
+ */
 export function eventCountdown(
-  event: Pick<EventSummary, 'startsAt'>,
+  event: CountdownEvent,
   tz: string,
   nowMs: number,
   t: Translator,
 ): string {
+  const holder = holderOf(event, nowMs);
+  if (holder) {
+    return holder.remaining <= 0 ? t('card.live') : untilText(t, holder.remaining, 'reine.mine');
+  }
   const days = tenantDaysUntil(event.startsAt, tz, nowMs);
   return days <= 0 ? t('reine.mine.today') : t('reine.mine.countdown', { count: days });
+}
+
+/**
+ * The same count as `eventCountdown`, with its plain descriptor, for the server page that draws the note
+ * live (UI-D-788): `{ text, countdown }`, or `null` for a free event, no seed, a phase with no count or a
+ * count already at zero.
+ */
+export function eventHolderCountdown(
+  event: CountdownEvent,
+  _tz: string,
+  nowMs: number,
+  t: Translator,
+): { text: string; countdown: CountdownDescriptor } | null {
+  const holder = holderOf(event, nowMs);
+  if (!holder || holder.remaining <= 0) return null;
+  return {
+    text: untilText(t, holder.remaining, 'reine.mine'),
+    countdown: { kind: 'event', targetIso: event.startsAt, seedIso: holder.seedIso },
+  };
 }
 
 /** The cards' date: `seg., 12 de out.`, or the range of an event that spans days. */
@@ -898,6 +1071,12 @@ export type EventDetailView = {
     coverAssetId: string | null;
     coverVariantWidths: number[];
     coverAlt: string;
+    /**
+     * Phase 10.2 (D-788, UI-D-788): the plain descriptor of the holder's count in `overline`, present ONLY
+     * for a paid event the viewer is in, before its start, with a seed. `overline` is its finished initial
+     * string and `when` the static right part.
+     */
+    overlineCountdown?: EventHeroCountdown;
   };
   banner: EventBannerView | null;
   /**
@@ -971,17 +1150,38 @@ export type EventDetailView = {
  * running `Acontecendo agora`; today `É hoje! · {time}`; tomorrow `Amanhã · {time}`; from 2 days
  * `Faltam N dias · {date}`. Tenant-local calendar days.
  */
-function heroOverline(event: EventDetail, tz: string, nowMs: number, t: Translator): string {
+function heroOverline(
+  event: EventDetail,
+  tz: string,
+  nowMs: number,
+  t: Translator,
+): { overline: string; countdown?: EventHeroCountdown } {
   const date = formatEventDate(event.startsAt, tz, nowMs);
   const time = formatEventTime(event.startsAt, tz);
-  if (event.status === 'cancelled') return t('when.at', { date, time });
+  if (event.status === 'cancelled') return { overline: t('when.at', { date, time }) };
   const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
-  if (phase === 'P3') return t('hero.happened', { date });
-  if (phase === 'P2') return t('hero.live');
+  if (phase === 'P3') return { overline: t('hero.happened', { date }) };
+  if (phase === 'P2') return { overline: t('hero.live') };
   const days = tenantDaysUntil(event.startsAt, tz, nowMs);
-  if (days <= 0) return t('hero.today', { time });
-  if (days === 1) return t('hero.tomorrow', { time });
-  return t('hero.countdown', { count: days, date });
+  // Phase 10.2 (D-790, A-UI-15): a paid holder's count to the event, through the check-in window; the right
+  // part is `amanhã, 19:00` / `hoje, 19:00` within the next two tenant-local days, else the date.
+  const holder = isViewerIn(event) ? holderRemaining(event, phase) : null;
+  if (holder) {
+    if (holder.remaining <= 0) return { overline: t('hero.live') };
+    const when =
+      days <= 0
+        ? t('hero.whenToday', { time })
+        : days === 1
+          ? t('hero.whenTomorrow', { time })
+          : date;
+    return {
+      overline: t('hero.until', { until: untilText(t, holder.remaining, 'card'), when }),
+      countdown: { kind: 'event', targetIso: event.startsAt, seedIso: holder.seedIso, when },
+    };
+  }
+  if (days <= 0) return { overline: t('hero.today', { time }) };
+  if (days === 1) return { overline: t('hero.tomorrow', { time }) };
+  return { overline: t('hero.countdown', { count: days, date }) };
 }
 
 /**
@@ -1199,12 +1399,14 @@ export function eventDetailView(
           ariaLabel: t('location.openMapsLabel', { venue }),
         };
 
+  const heroLine = heroOverline(event, tz, nowMs, t);
   return {
     id: event.id,
     title: event.title,
     headerPill,
     hero: {
-      overline: heroOverline(event, tz, nowMs, t),
+      overline: heroLine.overline,
+      ...(heroLine.countdown ? { overlineCountdown: heroLine.countdown } : {}),
       category: event.category,
       place: online ? t('place.online') : heroPlace(venue, address),
       placeKind: online ? 'online' : 'venue',

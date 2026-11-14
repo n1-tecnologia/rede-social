@@ -17,8 +17,10 @@ import {
   eventCardBadge,
   eventCardNote,
   eventCardView,
+  eventCountdown,
   eventDateBadge,
   eventDetailView,
+  eventHolderCountdown,
   eventHours,
   eventMapView,
   eventPhase,
@@ -1900,5 +1902,286 @@ describe('10.2-10 a free event keeps today’s exact key sets', () => {
     const view = eventDetailView(paidEvent(), real());
     expect(view).not.toHaveProperty('soon');
     expect(eventActionState(paidEvent(), view)).not.toHaveProperty('soon');
+  });
+});
+
+describe('10.2-10 eventCardView: Em breve replaces Pago, with the short count and no spots line (D-784, D-785, UI-D-782)', () => {
+  /** The seed 2 d 4 h 13 min before the opening. */
+  const SEED_2D = '2026-10-05T08:47:00.000000Z';
+  const card = (overrides: Partial<EventSummary> = {}, nowMs = BEFORE) =>
+    eventCardView(
+      {
+        ...event(),
+        paid: true,
+        ticketPriceCents: 8000,
+        capacity: 50,
+        registrationOpensAt: OPENS,
+        serverNow: SEED_2D,
+        ...overrides,
+      },
+      real(nowMs),
+    );
+
+  it('the tag is Em breve (never Pago) and the note is price first with the short count', () => {
+    const view = card();
+    expect(view.tag).toBe('Em breve');
+    expect(view.note).toBe(`${PRICE} · Abre em 2 d 4 h 13 min`);
+    expect(view.countdown).toEqual({
+      kind: 'opening',
+      targetIso: OPENS,
+      seedIso: SEED_2D,
+      price: PRICE,
+    });
+  });
+
+  it('without a price the note is the count alone and the descriptor has no price', () => {
+    const view = card({ ticketPriceCents: null });
+    expect(view.note).toBe('Abre em 2 d 4 h 13 min');
+    expect(view.countdown).toMatchObject({ kind: 'opening', price: null });
+  });
+
+  it('the last minute reads "Abre em menos de 1 min" and zero reads "Abrindo agora", the tag staying', () => {
+    expect(card({ ticketPriceCents: null, serverNow: '2026-10-07T12:59:30.000000Z' }).note).toBe(
+      'Abre em menos de 1 min',
+    );
+    const zero = card({
+      ticketPriceCents: null,
+      registrationOpensAt: '2026-10-07T13:00:00.000001Z',
+      serverNow: '2026-10-07T13:00:00.000000Z',
+    });
+    expect(zero.note).toBe('Abrindo agora');
+    expect(zero.tag).toBe('Em breve');
+  });
+
+  it('the shipped spots line is not drawn while Em breve, even with a limit and few spots', () => {
+    const view = card({ ticketPriceCents: null, confirmedCount: 48 });
+    expect(view.note).toBe('Abre em 2 d 4 h 13 min');
+    expect(view.note).not.toContain('vaga');
+    expect(card({ confirmedCount: 50, ticketPriceCents: null }).note).not.toContain('esgotadas');
+  });
+
+  it('the accessible name ends in the absolute opening and the price and carries no count', () => {
+    const base = eventCardView(event(), real()).ariaLabel;
+    expect(card().ariaLabel).toBe(`${base}, evento pago, em breve, abre 7 out, 10:00, ${PRICE}`);
+    expect(card({ ticketPriceCents: null }).ariaLabel).toBe(
+      `${base}, evento pago, em breve, abre 7 out, 10:00`,
+    );
+    expect(card().ariaLabel).not.toMatch(/\d+ (d|h|min)(\s|,|$)/);
+    expect(card().ariaLabel).not.toContain('Abre em');
+    // The spots line of a nearly full event stays out of the name too.
+    expect(card({ confirmedCount: 48 }).ariaLabel).not.toContain('vagas');
+  });
+
+  it('the card goes back to the shipped Pago card the moment the opening is not ahead (D-784)', () => {
+    const back = card({ serverNow: OPENS });
+    const shipped = eventCardView(
+      { ...event(), paid: true, ticketPriceCents: 8000, capacity: 50 },
+      real(),
+    );
+    expect(back.tag).toBe('Pago');
+    expect(back.note).toBe(shipped.note);
+    expect(back.ariaLabel).toBe(shipped.ariaLabel);
+    expect(back).not.toHaveProperty('countdown');
+  });
+
+  it('never for a viewer who is in, a cancelled event or an ended one, nor with no seed (a missing seed draws no count)', () => {
+    expect(card({ viewerStatus: 'going' }).tag).toBeUndefined();
+    expect(card({ status: 'cancelled' }).tag).toBeUndefined();
+    expect(card({}, at('2026-10-13T01:00:00Z')).tag).toBeUndefined();
+    const noSeed = card({ serverNow: undefined });
+    expect(noSeed.tag).toBe('Pago');
+    expect(noSeed).not.toHaveProperty('countdown');
+  });
+
+  it('the view is plain serialisable data: no node, no function', () => {
+    const view = card();
+    expect(JSON.parse(JSON.stringify(view))).toEqual(view);
+  });
+});
+
+describe('10.2-10 the holder’s countdown to the event (D-790, OPEN-20, EP-41, A-UI-15)', () => {
+  const START_ISO = '2026-10-12T22:00:00.000000Z';
+  /** The seed `ms` before the start of the event. */
+  const seedBefore = (ms: number) => new Date(START - ms).toISOString().replace('Z', '000Z');
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const DAY = 24 * HOUR;
+  const holder = (overrides: Partial<EventSummary> = {}, nowMs = BEFORE) =>
+    eventCardView(
+      {
+        ...event(),
+        paid: true,
+        ticketPriceCents: 8000,
+        viewerStatus: 'going',
+        serverNow: seedBefore(12 * DAY + 4 * HOUR + 13 * MIN),
+        ...overrides,
+      },
+      real(nowMs),
+    );
+
+  it('days, hours and minutes, with no tag and no price on the card', () => {
+    const view = holder();
+    expect(view.tag).toBeUndefined();
+    expect(view.note).toBe('Faltam 12 d 4 h 13 min');
+    expect(view.countdown).toEqual({
+      kind: 'event',
+      targetIso: START_ISO,
+      seedIso: seedBefore(12 * DAY + 4 * HOUR + 13 * MIN),
+      price: null,
+    });
+    expect(holder({ serverNow: seedBefore(23 * HOUR + 40 * MIN) }).note).toBe('Faltam 23 h 40 min');
+    expect(holder({ serverNow: seedBefore(40 * MIN) }).note).toBe('Faltam 40 min');
+  });
+
+  it('the singular Falta only for one unit equal to 1, and the last minute line', () => {
+    expect(holder({ serverNow: seedBefore(HOUR) }).note).toBe('Falta 1 h');
+    expect(holder({ serverNow: seedBefore(MIN) }).note).toBe('Falta 1 min');
+    expect(holder({ serverNow: seedBefore(DAY + 5 * MIN) }).note).toBe('Faltam 1 d 5 min');
+    expect(holder({ serverNow: seedBefore(30_000) }).note).toBe('Falta menos de 1 min');
+  });
+
+  it('keeps running through the check-in window and never says É hoje!', () => {
+    const p1 = at('2026-10-12T21:30:00Z');
+    const view = holder({ serverNow: seedBefore(30 * MIN) }, p1);
+    expect(view.note).toBe('Faltam 30 min');
+    expect(view.note).not.toContain('hoje');
+  });
+
+  it('hands over to Acontecendo agora at the start and to nothing after the end', () => {
+    expect(holder({}, START).note).toBe('Acontecendo agora');
+    expect(holder({}, END).note).toBeUndefined();
+    expect(holder({}, START)).not.toHaveProperty('countdown');
+  });
+
+  it('a cancelled event carries none of it', () => {
+    const view = holder({ status: 'cancelled' });
+    expect(view.note).toBeUndefined();
+    expect(view).not.toHaveProperty('countdown');
+  });
+
+  it('a free event keeps Faltam N dias and É hoje! byte for byte, whatever seed it carries', () => {
+    const free = (overrides: Partial<EventSummary>, nowMs = BEFORE) =>
+      eventCardView({ ...event(), viewerStatus: 'going', ...overrides }, real(nowMs));
+    expect(free({ serverNow: seedBefore(3 * DAY) }).note).toBe('Faltam 7 dias');
+    expect(free({ paid: false, serverNow: seedBefore(3 * DAY) }).note).toBe('Faltam 7 dias');
+    expect(free({}, at('2026-10-12T12:00:00Z')).note).toBe('É hoje!');
+    expect(JSON.stringify(free({ paid: false, serverNow: seedBefore(3 * DAY) }))).toBe(
+      JSON.stringify(free({})),
+    );
+  });
+
+  it('a paid holder with no seed keeps the shipped note', () => {
+    const view = holder({ serverNow: undefined });
+    expect(view.note).toBe('Faltam 7 dias');
+    expect(view).not.toHaveProperty('countdown');
+  });
+
+  it('eventCountdown (Meus eventos) follows the same rule, and keeps Falta 1 dia for a free event', () => {
+    const paid = {
+      ...event(),
+      paid: true,
+      viewerStatus: 'going' as const,
+      serverNow: seedBefore(12 * DAY + 4 * HOUR + 13 * MIN),
+    };
+    expect(eventCountdown(paid, SP, BEFORE, t)).toBe('Faltam 12 d 4 h 13 min');
+    expect(eventCountdown({ ...paid, serverNow: seedBefore(HOUR) }, SP, BEFORE, t)).toBe(
+      'Falta 1 h',
+    );
+    expect(eventCountdown({ ...paid, serverNow: seedBefore(30_000) }, SP, BEFORE, t)).toBe(
+      'Falta menos de 1 min',
+    );
+    expect(eventCountdown({ ...paid, serverNow: undefined }, SP, BEFORE, t)).toBe('Faltam 7 dias');
+    const free = { ...event(), viewerStatus: 'going' as const };
+    expect(eventCountdown(free, SP, at('2026-10-11T12:00:00Z'), t)).toBe('Falta 1 dia');
+    expect(eventCountdown(free, SP, at('2026-10-12T12:00:00Z'), t)).toBe('É hoje!');
+  });
+
+  it('eventHolderCountdown gives the same finished string plus the plain descriptor, or null', () => {
+    const paid = {
+      ...event(),
+      paid: true,
+      viewerStatus: 'going' as const,
+      serverNow: seedBefore(12 * DAY + 4 * HOUR + 13 * MIN),
+    };
+    expect(eventHolderCountdown(paid, SP, BEFORE, t)).toEqual({
+      text: 'Faltam 12 d 4 h 13 min',
+      countdown: {
+        kind: 'event',
+        targetIso: START_ISO,
+        seedIso: seedBefore(12 * DAY + 4 * HOUR + 13 * MIN),
+      },
+    });
+    expect(eventHolderCountdown({ ...paid, paid: false }, SP, BEFORE, t)).toBeNull();
+    expect(eventHolderCountdown({ ...paid, serverNow: undefined }, SP, BEFORE, t)).toBeNull();
+    expect(eventHolderCountdown(paid, SP, START, t)).toBeNull();
+    expect(eventHolderCountdown(paid, SP, END, t)).toBeNull();
+    expect(eventHolderCountdown({ ...paid, status: 'cancelled' }, SP, BEFORE, t)).toBeNull();
+  });
+});
+
+describe('10.2-10 the hero overline of a paid holder (UI-D-783, UI-D-788)', () => {
+  const START_ISO = '2026-10-12T22:00:00.000000Z';
+  const seedBefore = (ms: number) => new Date(START - ms).toISOString().replace('Z', '000Z');
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const DAY = 24 * HOUR;
+  const hero = (overrides: Partial<EventDetail>, nowMs = BEFORE) =>
+    eventDetailView(
+      paidEvent({ viewerStatus: 'going', viewerOrigin: 'ticket', checkoutUrl: null, ...overrides }),
+      real(nowMs),
+    ).hero;
+
+  it('Faltam {count} · {date}, with the descriptor for the island', () => {
+    const seed = seedBefore(12 * DAY + 4 * HOUR + 13 * MIN);
+    const view = hero({ serverNow: seed });
+    expect(view.overline).toBe('Faltam 12 d 4 h 13 min · seg., 12 de out.');
+    expect(view.overlineCountdown).toEqual({
+      kind: 'event',
+      targetIso: START_ISO,
+      seedIso: seed,
+      when: 'seg., 12 de out.',
+    });
+  });
+
+  it('within the next two tenant-local days the right part is amanhã, {time} or hoje, {time}', () => {
+    expect(
+      hero({ serverNow: seedBefore(DAY + 10 * HOUR) }, at('2026-10-11T12:00:00Z')).overline,
+    ).toBe('Faltam 1 d 10 h · amanhã, 19:00');
+    expect(hero({ serverNow: seedBefore(10 * HOUR) }, at('2026-10-12T12:00:00Z')).overline).toBe(
+      'Falta 10 h · hoje, 19:00'.replace('Falta', 'Faltam'),
+    );
+    expect(hero({ serverNow: seedBefore(30_000) }, at('2026-10-12T21:59:30Z')).overline).toBe(
+      'Falta menos de 1 min · hoje, 19:00',
+    );
+  });
+
+  it('runs through the check-in window and never uses É hoje!', () => {
+    const view = hero({ serverNow: seedBefore(30 * MIN) }, at('2026-10-12T21:30:00Z'));
+    expect(view.overline).toBe('Faltam 30 min · hoje, 19:00');
+  });
+
+  it('hands over to the shipped Acontecendo agora and Aconteceu em {date}', () => {
+    expect(hero({ serverNow: seedBefore(0) }, START).overline).toBe('Acontecendo agora');
+    expect(hero({ serverNow: seedBefore(0) }, END).overline).toBe('Aconteceu em seg., 12 de out.');
+    expect(hero({ serverNow: seedBefore(0) }, START)).not.toHaveProperty('overlineCountdown');
+  });
+
+  it('a non-holder’s overline is unchanged, and so is a free event’s or a paid holder’s with no seed', () => {
+    const notIn = hero({ viewerStatus: null, viewerOrigin: null, serverNow: seedBefore(3 * DAY) });
+    expect(notIn.overline).toBe('Faltam 7 dias · seg., 12 de out.');
+    expect(notIn).not.toHaveProperty('overlineCountdown');
+    expect(hero({ serverNow: undefined }).overline).toBe('Faltam 7 dias · seg., 12 de out.');
+    const free = eventDetailView(
+      detail({ viewerStatus: 'going', serverNow: seedBefore(3 * DAY) }),
+      real(),
+    ).hero;
+    expect(free.overline).toBe('Faltam 7 dias · seg., 12 de out.');
+    expect(free).not.toHaveProperty('overlineCountdown');
+  });
+
+  it('a cancelled event keeps its cancelled overline', () => {
+    const view = hero({ status: 'cancelled', serverNow: seedBefore(3 * DAY) });
+    expect(view.overline).toBe('seg., 12 de out. · 19:00');
+    expect(view).not.toHaveProperty('overlineCountdown');
   });
 });
