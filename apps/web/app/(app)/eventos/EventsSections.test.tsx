@@ -1,9 +1,12 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { formatBrl } from '@rede-social/contracts/money';
+import type { EventSummary } from '@rede-social/module-events/contracts';
+import { EventPoster } from '@rede-social/module-events/ui';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { EventCardView } from '@/lib/events-view';
+import { type EventCardView, eventCardView } from '@/lib/events-view';
 
 /**
  * 2026-10-03 — the `/eventos` galleries (the REINE prototype's "Meus eventos" and "Outros eventos").
@@ -16,12 +19,20 @@ import type { EventCardView } from '@/lib/events-view';
  *  4. an unreadable first load renders the generic error card, whose retry refreshes the galleries.
  */
 
-const { catalog } = await vi.hoisted(async () => {
+const { catalog, icu } = await vi.hoisted(async () => {
   const { readFileSync } = await import('node:fs');
   const { join } = await import('node:path');
+  const { createTranslator } = await import('next-intl');
+  const { loadMessages } = await import('@/i18n/messages');
   const read = (name: string) =>
     JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
-  return { catalog: read('events').events as Record<string, unknown> };
+  // The real ICU translator, for the plural and select keys of the live count (Phase 10.2-14).
+  const real = createTranslator({
+    locale: 'pt-BR',
+    messages: loadMessages(join(process.cwd(), 'messages', 'pt-BR')),
+    namespace: 'events' as never,
+  }) as unknown as (key: string, values?: Record<string, unknown>) => string;
+  return { catalog: read('events').events as Record<string, unknown>, icu: real };
 });
 
 MotionGlobalConfig.skipAnimations = true;
@@ -30,6 +41,7 @@ const lookup = (key: string, values?: Record<string, unknown>) => {
   const raw = key
     .split('.')
     .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], catalog);
+  if (typeof raw === 'string' && /\{\w+, (plural|select)/.test(raw)) return icu(key, values);
   return String(raw ?? key).replace(/\{(\w+)\}/g, (_, name: string) =>
     String(values?.[name] ?? ''),
   );
@@ -41,12 +53,17 @@ vi.mock('next-intl', () => ({
 
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock('./actions', () => ({ refreshEventSectionsAction: refresh }));
+// A STABLE router, as Next's is (the countdown hooks depend on it).
+const nav = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => nav }));
 
 const { EventsSections } = await import('./EventsSections');
 
 afterEach(() => {
   cleanup();
   refresh.mockReset();
+  nav.refresh.mockReset();
+  vi.useRealTimers();
 });
 
 const TENANT = 'Tenant Demo';
@@ -288,5 +305,163 @@ describe('EventsSections — the paid card (10.1-12, UI-D-744)', () => {
     expect(within(paid).getByRole('link').getAttribute('aria-label')).toContain('evento pago');
     expect(within(free).queryByTestId('event-poster-tag')).toBeNull();
     expect(within(free).getAllByRole('link')).toHaveLength(1);
+  });
+});
+
+/**
+ * Phase 10.2-14 (D-784, D-785, D-786, OPEN-07) - the card of a paid event whose opening is ahead: the
+ * `Em breve` tag with the Clock, the price-first note with the live short count, the static accessible
+ * name (the absolute opening date, never the ticking value), one anchor, and a free card unchanged. The
+ * view is the REAL `eventCardView` over a summary, so the descriptor, the note and the name are the
+ * server's own words.
+ */
+describe('EventsSections — the Em breve card (10.2-14, D-784, D-785)', () => {
+  const PRICE = formatBrl(8000);
+  const SEED = '2026-10-05T08:47:00.000000Z';
+  const OPENS = '2026-10-07T13:00:00.000000Z';
+  const summary = (overrides: Partial<EventSummary> = {}): EventSummary => ({
+    id: 'soon',
+    title: 'Encontro anual',
+    format: 'in_person',
+    category: null,
+    capacity: null,
+    venueName: 'Auditório da sede',
+    address: null,
+    coverAssetId: null,
+    coverVariantWidths: [],
+    startsAt: '2026-10-12T22:00:00.000000Z',
+    endsAt: '2026-10-13T00:00:00.000000Z',
+    status: 'active',
+    viewerStatus: null,
+    viewerCheckedInAt: null,
+    confirmedCount: 0,
+    presentCount: 0,
+    paid: true,
+    ticketPriceCents: 8000,
+    registrationOpensAt: OPENS,
+    serverNow: SEED,
+    ...overrides,
+  });
+  const view = (overrides: Partial<EventSummary> = {}) =>
+    eventCardView(summary(overrides), {
+      tz: 'America/Sao_Paulo',
+      nowMs: Date.parse(SEED),
+      t: icu as unknown as Parameters<typeof eventCardView>[1]['t'],
+    });
+
+  it('the tracer: the Em breve tag with the Clock and the live price-first note inside ONE link', () => {
+    render(<EventsSections tenantName={TENANT} initial={{ mine: [], others: [view()] }} />);
+    const [item] = within(gallery(sections.others.title ?? '')).getAllByRole('listitem');
+    const tag = within(item as HTMLElement).getByTestId('event-poster-tag');
+    expect(tag.textContent).toBe('Em breve');
+    expect(tag.querySelector('svg.lucide-clock')).not.toBeNull();
+    expect(tag.querySelector('svg.lucide-ticket')).toBeNull();
+    expect(within(item as HTMLElement).getByTestId('event-poster-note').textContent).toBe(
+      `${PRICE} · Abre em 2 d 4 h 13 min`,
+    );
+    expect(within(item as HTMLElement).getAllByRole('link')).toHaveLength(1);
+    // The card's count is plain text: a link never holds a timer.
+    expect(within(item as HTMLElement).queryAllByRole('timer')).toHaveLength(0);
+  });
+
+  it('the accessible name is static: the absolute opening date and time, no count unit', () => {
+    render(<EventsSections tenantName={TENANT} initial={{ mine: [], others: [view()] }} />);
+    const label = screen.getByRole('link').getAttribute('aria-label') ?? '';
+    expect(label).toBe(view().ariaLabel);
+    expect(label).toContain('10:00');
+    expect(label).toMatch(/abre 7 out, 10:00/);
+    expect(label).not.toMatch(/\d\s?(d|h|min)\b/);
+    expect(label).not.toContain('Abre em');
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+  });
+
+  it('the count follows the minute change from the server seed, and the name never changes', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse(SEED));
+    render(
+      <EventsSections
+        tenantName={TENANT}
+        initial={{
+          mine: [],
+          others: [view({ registrationOpensAt: '2026-10-05T10:47:00.000000Z' })],
+        }}
+      />,
+    );
+    const label = screen.getByRole('link').getAttribute('aria-label');
+    expect(screen.getByTestId('event-poster-note').textContent).toBe(`${PRICE} · Abre em 2 h`);
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(screen.getByTestId('event-poster-note').textContent).toBe(
+      `${PRICE} · Abre em 1 h 59 min`,
+    );
+    expect(screen.getByRole('link').getAttribute('aria-label')).toBe(label);
+  });
+
+  it('with no seed the card keeps its static note (an older API) and draws no count', () => {
+    const older = eventCardView(summary({ serverNow: undefined }), {
+      tz: 'America/Sao_Paulo',
+      nowMs: Date.parse(SEED),
+      t: icu as unknown as Parameters<typeof eventCardView>[1]['t'],
+    });
+    render(<EventsSections tenantName={TENANT} initial={{ mine: [], others: [older] }} />);
+    expect(screen.queryByTestId('live-countdown-text')).toBeNull();
+    expect(screen.getByTestId('event-poster-tag').querySelector('svg.lucide-clock')).toBeNull();
+  });
+
+  it('a card with no descriptor draws its static note, and a paid card keeps the Ticket', () => {
+    render(
+      <EventsSections
+        tenantName={TENANT}
+        initial={{
+          mine: [],
+          others: [
+            card('paid', { tag: 'Pago', note: 'R$ 80,00 · Últimas 3 vagas' }),
+            card('free', { note: 'Faltam 4 dias' }),
+          ],
+        }}
+      />,
+    );
+    const [paid, free] = within(gallery(sections.others.title ?? '')).getAllByRole('listitem') as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(
+      within(paid).getByTestId('event-poster-tag').querySelector('svg.lucide-ticket'),
+    ).not.toBeNull();
+    expect(within(paid).getByTestId('event-poster-note').innerHTML).toBe(
+      'R$ 80,00 · Últimas 3 vagas',
+    );
+    expect(within(free).getByTestId('event-poster-note').innerHTML).toBe('Faltam 4 dias');
+    expect(within(free).queryByTestId('event-poster-tag')).toBeNull();
+  });
+
+  it('a free event card is byte-identical to the shipped poster markup', () => {
+    // The oracle is the poster rendered straight from the same props the page used before this plan.
+    const free = card('free', { note: 'Faltam 4 dias' });
+    const { container } = render(
+      <EventsSections tenantName={TENANT} initial={{ mine: [], others: [free] }} />,
+    );
+    const html = within(container).getByTestId('event-poster').outerHTML;
+    cleanup();
+    const direct = render(
+      <EventPoster
+        href={free.href}
+        ariaLabel={free.ariaLabel}
+        title={free.title}
+        category={free.category}
+        place={free.place}
+        placeKind={free.placeKind}
+        badge={free.badge}
+        note={free.note}
+        tag={free.tag}
+        coverAssetId={null}
+        coverVariantWidths={[]}
+        coverAlt={free.coverAlt}
+        grayscale={free.grayscale}
+        eager
+      />,
+    );
+    expect(within(direct.container).getByTestId('event-poster').outerHTML).toBe(html);
   });
 });

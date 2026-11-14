@@ -152,6 +152,67 @@ describe('EventPoster tag (10.1-12, UI-D-744)', () => {
   });
 });
 
+/**
+ * Phase 10.2-14 (D-784, D-785, OPEN-07) - the `Em breve` tag is the same element with a `Clock`
+ * glyph instead of the `Ticket`; the default is the shipped markup byte for byte; the note is a finished
+ * node so the host can put its live count there.
+ */
+describe('EventPoster Em breve tag and node note (10.2-14)', () => {
+  it('14. tagIcon="clock" draws the Clock glyph on the same tag, not the Ticket', () => {
+    poster({ tag: 'tag-sentinel', tagIcon: 'clock' });
+    const tag = screen.getByTestId('event-poster-tag');
+    expect(tag).toHaveTextContent('tag-sentinel');
+    expect(tag.querySelector('svg.lucide-clock')).not.toBeNull();
+    expect(tag.querySelector('svg.lucide-ticket')).toBeNull();
+    expect(tag.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(tag.className).toContain('bg-black/60');
+    expect(tag.className).toContain('whitespace-nowrap');
+    expect(tag.parentElement?.className).toContain('top-3');
+    expect(tag.parentElement?.className).toContain('right-3');
+  });
+
+  it('15. without tagIcon (or with "ticket") the tag markup is the shipped Ticket markup, byte for byte', () => {
+    const plain = poster({ tag: 'tag-sentinel' }).container.innerHTML;
+    cleanup();
+    const ticket = poster({ tag: 'tag-sentinel', tagIcon: 'ticket' }).container.innerHTML;
+    cleanup();
+    const undef = poster({ tag: 'tag-sentinel', tagIcon: undefined }).container.innerHTML;
+    expect(ticket).toBe(plain);
+    expect(undef).toBe(plain);
+    expect(plain).toContain('lucide-ticket');
+    expect(plain).not.toContain('lucide-clock');
+  });
+
+  it('16. a tagIcon without a tag draws nothing, and a free poster stays byte-identical', () => {
+    const plain = poster().container.innerHTML;
+    cleanup();
+    expect(poster({ tagIcon: 'clock' }).container.innerHTML).toBe(plain);
+  });
+
+  it('17. a React node as the note renders inside the note paragraph; a string renders as before', () => {
+    poster({ tag: 'tag-sentinel', note: <span data-testid="node-note">node-sentinel</span> });
+    const note = screen.getByTestId('event-poster-note');
+    expect(note.tagName).toBe('P');
+    expect(note).toContainElement(screen.getByTestId('node-note'));
+    expect(note).toHaveTextContent('node-sentinel');
+    cleanup();
+
+    poster({ note: 'string-sentinel' });
+    expect(screen.getByTestId('event-poster-note').innerHTML).toBe('string-sentinel');
+    cleanup();
+
+    // An empty string and an absent note draw no paragraph.
+    poster({ note: '' });
+    expect(screen.queryByTestId('event-poster-note')).toBeNull();
+  });
+
+  it('18. the card stays ONE anchor with the given name when the tag and the note are nodes', () => {
+    poster({ tag: 'tag-sentinel', tagIcon: 'clock', note: <span>node-sentinel</span> });
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+    expect(screen.getByRole('link', { name: 'aria-label-sentinel' })).toBeInTheDocument();
+  });
+});
+
 describe('EventCover', () => {
   it('6. thumb renders no overlay on either branch', () => {
     render(

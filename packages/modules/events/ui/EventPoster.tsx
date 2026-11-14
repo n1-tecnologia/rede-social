@@ -1,7 +1,8 @@
 'use client';
 
 import { cn } from '@rede-social/ui';
-import { CalendarX2, Check, MapPin, Ticket, Video } from 'lucide-react';
+import { CalendarX2, Check, Clock, MapPin, Ticket, Video } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { EventCover } from './EventCover';
 
 /**
@@ -16,6 +17,12 @@ import { EventCover } from './EventCover';
  * line. The HOST decides when it exists (a paid event the viewer is not in, neither cancelled nor over)
  * and passes it with the price-first `note` and the accessible name; without the prop the markup is
  * byte-identical to a free event's.
+ *
+ * **The opening** (Phase 10.2-14, D-784, OPEN-07): while the sale is closed for a viewer who is not in, the
+ * host passes the finished word "Em breve" with `tagIcon="clock"` (the `Clock` glyph on the same ground,
+ * one tag, never two). The default `tagIcon` is `ticket`, so every shipped caller is byte-identical.
+ * The `note` is a finished node (`ReactNode`, A-UI-9): the host passes its live short count there, the
+ * module only places it, reads no clock and ships no word.
  *
  * Presentational and props-only: it fetches nothing, formats no date, resolves no URL and **ships no
  * words** (PWA-03). The host passes `href`, every label and the already-formatted strings; relative
@@ -57,8 +64,11 @@ export interface EventPosterProps {
   place: string;
   placeKind: 'venue' | 'online';
   badge: EventPosterBadge;
-  /** The countdown ("Faltam 4 dias") or the spots line ("Últimas 3 vagas"); undefined for none. */
-  note?: string;
+  /**
+   * The countdown ("Faltam 4 dias") or the spots line ("Últimas 3 vagas"); undefined for none. A finished
+   * string, or a finished node the host built for a live count (10.2-14); the poster only places it.
+   */
+  note?: ReactNode;
   coverAssetId: string | null;
   coverVariantWidths: readonly number[];
   coverAlt: string;
@@ -68,6 +78,8 @@ export interface EventPosterProps {
   eager?: boolean;
   /** The finished "Pago" word of a paid event, top right; absent or empty draws none (UI-D-744). */
   tag?: string;
+  /** The glyph of the tag: `ticket` (the default, "Pago") or `clock` ("Em breve", 10.2-14, D-784). */
+  tagIcon?: 'ticket' | 'clock';
 }
 
 const BADGE = 'inline-flex items-center whitespace-nowrap rounded-full uppercase';
@@ -95,8 +107,10 @@ export function EventPoster({
   grayscale = false,
   eager = false,
   tag,
+  tagIcon = 'ticket',
 }: EventPosterProps) {
   const PlaceIcon = placeKind === 'online' ? Video : MapPin;
+  const TagIcon = tagIcon === 'clock' ? Clock : Ticket;
 
   /**
    * The bottom block, drawn twice from ONE definition so the photo and gradient branches can never
@@ -179,7 +193,7 @@ export function EventPoster({
         {tag ? (
           <span className="absolute top-3 right-3">
             <span data-testid="event-poster-tag" className={cn(BADGE, BADGE_GROUND)}>
-              <Ticket size={10} strokeWidth={3} aria-hidden />
+              <TagIcon size={10} strokeWidth={3} aria-hidden />
               {tag}
             </span>
           </span>

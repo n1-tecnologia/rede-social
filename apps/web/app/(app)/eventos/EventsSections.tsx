@@ -5,6 +5,7 @@ import { Button, Card, cn, EmptyState, PullToRefresh, Skeleton } from '@rede-soc
 import { CalendarDays, Plus, TriangleAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useId, useState } from 'react';
+import { EventLiveNote } from '@/components/events/EventLiveNote';
 import { eventListPoster } from '@/lib/cover-fallback';
 import type { EventCardView, EventSectionsView } from '@/lib/events-view';
 import { refreshEventSectionsAction } from './actions';
@@ -137,8 +138,18 @@ function Gallery({
                     place={card.place}
                     placeKind={card.placeKind}
                     badge={card.badge}
-                    note={card.note}
+                    note={
+                      card.note !== undefined || card.countdown ? (
+                        <EventLiveNote
+                          note={card.note ?? ''}
+                          countdown={card.countdown}
+                          surface="poster"
+                        />
+                      ) : undefined
+                    }
                     tag={card.tag}
+                    // `Em breve` is exactly the card whose descriptor counts to the opening (D-784).
+                    tagIcon={card.countdown?.kind === 'opening' ? 'clock' : 'ticket'}
                     coverAssetId={image.assetId}
                     coverVariantWidths={image.widths}
                     coverAlt={card.coverAlt}
