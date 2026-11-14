@@ -1,9 +1,10 @@
 'use client';
 
 import { PAYMENTS_MAX_LINK, PAYMENTS_MAX_PRODUCT_ID } from '@rede-social/module-payments/contracts';
-import { Input, SectionTitle, Switch } from '@rede-social/ui';
-import { CircleAlert, Lock } from 'lucide-react';
+import { Button, Input, SectionTitle, Switch } from '@rede-social/ui';
+import { CircleAlert, Info, Lock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import type { OpeningErrorKey, OpeningFieldState, OpeningPair } from '@/lib/event-opening-form';
 import {
   parseTicketPrice,
   type TicketErrorKey,
@@ -29,6 +30,30 @@ import {
  * section. A static notice (locked, module off) is text present at load, never a live region.
  */
 
+/**
+ * Phase 10.2-12 (D-792, D-793, D-794, UI-D-790, UI-D-791): the "Abertura das inscrições" field. Absent
+ * (a caller that predates it) draws nothing. Every fact arrives as a prop; the section keeps no state.
+ */
+export type TicketOpeningProps = {
+  /** The wall-clock pair as typed (or the stored one, read-only when locked). */
+  pair: OpeningPair;
+  onChange: (next: OpeningPair) => void;
+  /** Empties both inputs; the form returns focus to the date input. */
+  onClear: () => void;
+  /** (a) locked, (b) empty, (c) filled, (d) past: from `openingFieldState`. */
+  fieldState: OpeningFieldState;
+  /** The sold count the locked line reads (the form reads it once per render). */
+  soldCount: number;
+  /** The tenant zone's generic name, the form's own `form.when.zone` string. */
+  zoneLabel: string;
+  /** Shown under the pair after the first submit or a server refusal. */
+  error?: OpeningErrorKey;
+  /** A stale tab hit the sales lock: the alert row at the top of the section. */
+  lockedAlert: boolean;
+  /** The switch is off and a date is typed or stored: the warning row under the off-effect note. */
+  offWarning: boolean;
+};
+
 export type TicketSectionProps = {
   state: TicketSectionState;
   /** The `{gateway}` word, already resolved (display name or the neutral fallback). */
@@ -49,12 +74,17 @@ export type TicketSectionProps = {
   offNote: boolean;
   /** The form's pending state: every control is disabled while the submit runs. */
   busy: boolean;
+  /** Phase 10.2-12: the registration opening field; absent draws none. */
+  opening?: TicketOpeningProps;
 };
 
 const ID = {
   product: 'event-gateway-id',
   link: 'event-checkout-url',
   price: 'event-ticket-price',
+  opensDate: 'event-opens-date',
+  opensTime: 'event-opens-time',
+  opensError: 'event-opens-error',
 } as const;
 
 const HELPER = 'text-xs font-normal text-text-tertiary';
@@ -75,6 +105,7 @@ export function TicketSection({
   existingNote,
   offNote,
   busy,
+  opening,
 }: TicketSectionProps) {
   const t = useTranslations('events');
 
@@ -110,6 +141,16 @@ export function TicketSection({
           className="rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm font-normal text-danger"
         >
           {error(errors.section)}
+        </p>
+      ) : null}
+
+      {opening?.lockedAlert ? (
+        <p
+          role="alert"
+          data-opening-section-error
+          className="rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm font-normal text-danger"
+        >
+          {t('form.ticket.opensAt.errors.locked')}
         </p>
       ) : null}
 
@@ -168,6 +209,13 @@ export function TicketSection({
         <p data-ticket-off-note className={HELPER}>
           {t('form.ticket.offEffect')}
         </p>
+      ) : null}
+
+      {opening?.offWarning ? (
+        <div data-opening-off-warning className={WARNING_ROW}>
+          <CircleAlert aria-hidden size={16} className="mt-0.5 shrink-0 text-warning" />
+          <p className="text-xs font-normal text-text">{t('form.ticket.opensAt.offWarning')}</p>
+        </div>
       ) : null}
 
       {showFields ? (
@@ -256,8 +304,117 @@ export function TicketSection({
               </p>
             ) : null}
           </div>
+
+          {opening ? <OpeningField opening={opening} busy={busy} /> : null}
         </div>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * The "Abertura das inscrições" fieldset (UI-D-790, sketch 022 `form-abertura-*`): legend, the same
+ * date/time pair geometry as the event's own start (one column below 360px), the zone line, then the
+ * state's line. Locked (a): both inputs disabled with the stored value and the Lock line, no clear button.
+ * The error takes the form's inline `role="alert"` slot under the pair.
+ */
+function OpeningField({ opening, busy }: { opening: TicketOpeningProps; busy: boolean }) {
+  const t = useTranslations('events');
+  const { pair, fieldState, error } = opening;
+  const locked = fieldState === 'locked';
+  const disabled = locked || busy;
+  const hasValue = pair.date !== '' || pair.time !== '';
+  const errorText = error ? t(`form.ticket.opensAt.errors.${error}`) : undefined;
+  const describedBy = errorText ? ID.opensError : undefined;
+  const invalidClass = errorText ? 'border-danger' : undefined;
+
+  return (
+    <fieldset
+      data-ticket-opening
+      data-opening-state={fieldState}
+      className="flex min-w-0 flex-col gap-2"
+    >
+      <legend className="p-0 text-sm font-bold text-text">{t('form.ticket.opensAt.legend')}</legend>
+
+      <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-[minmax(0,1fr)_8rem]">
+        <Input
+          id={ID.opensDate}
+          type="date"
+          label={t('form.ticket.opensAt.date')}
+          value={pair.date}
+          disabled={disabled}
+          aria-invalid={errorText ? true : undefined}
+          aria-describedby={describedBy}
+          className={invalidClass}
+          onChange={(event) => opening.onChange({ ...pair, date: event.target.value })}
+        />
+        <Input
+          id={ID.opensTime}
+          type="time"
+          step={300}
+          label={t('form.ticket.opensAt.time')}
+          value={pair.time}
+          disabled={disabled}
+          aria-invalid={errorText ? true : undefined}
+          aria-describedby={describedBy}
+          className={invalidClass}
+          onChange={(event) => opening.onChange({ ...pair, time: event.target.value })}
+        />
+      </div>
+
+      {errorText ? (
+        <p
+          id={ID.opensError}
+          role="alert"
+          data-opening-error
+          className="break-words text-sm text-danger"
+        >
+          {errorText}
+        </p>
+      ) : null}
+
+      <p data-opening-zone className={`break-words ${HELPER}`}>
+        {t('form.when.zone', { zone: opening.zoneLabel })}
+      </p>
+
+      {locked ? (
+        <p
+          data-opening-locked
+          className="flex items-start gap-2 break-words text-xs font-normal text-text-secondary"
+        >
+          <Lock aria-hidden size={14} className="mt-0.5 shrink-0 text-text-tertiary" />
+          <span>{t('form.ticket.opensAt.locked', { count: opening.soldCount })}</span>
+        </p>
+      ) : (
+        <p data-opening-helper className={`break-words ${HELPER}`}>
+          {t(fieldState === 'empty' ? 'form.ticket.opensAt.helper' : 'form.ticket.opensAt.filled')}
+        </p>
+      )}
+
+      {fieldState === 'past' ? (
+        <p
+          data-opening-past
+          className="flex items-start gap-2 break-words text-xs font-normal text-text-tertiary"
+        >
+          <Info aria-hidden size={14} className="mt-0.5 shrink-0" />
+          <span>{t('form.ticket.opensAt.past')}</span>
+        </p>
+      ) : null}
+
+      {hasValue && !locked ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          hitArea
+          data-opening-clear
+          disabled={busy}
+          className="self-start"
+          onClick={opening.onClear}
+        >
+          {t('form.ticket.opensAt.clear')}
+        </Button>
+      ) : null}
+    </fieldset>
   );
 }

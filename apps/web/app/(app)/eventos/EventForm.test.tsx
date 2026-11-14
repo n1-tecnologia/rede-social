@@ -2212,3 +2212,141 @@ describe('EventForm — the Ingresso section (Phase 10.1-11)', () => {
     });
   });
 });
+
+/**
+ * Phase 10.2-12 (D-792, D-793, OPEN-03, OPEN-18, OPEN-19, UI-D-790, UI-D-791) — the "Abertura das
+ * inscrições" field of the Ingresso section. The tracer: the admin types an opening and the save carries
+ * it. The payload KEY rule is unit tested in `lib/event-opening-form.test.ts`; here it is proved through
+ * the form: sent only when it changed, never for a host that predates the section.
+ */
+describe('EventForm — the registration opening (Phase 10.2-12)', () => {
+  const GATEWAY = 'Gateway Exemplo';
+  const PAIR = { externalProductId: 'PRD-48213', checkoutUrl: 'https://pay.example/ingresso' };
+  const TICKET: EventFormTicket = {
+    moduleOn: true,
+    gatewayConnected: true,
+    canManagePayments: true,
+    gatewayName: GATEWAY,
+    saved: null,
+    soldCount: 0,
+    hasConfirmed: false,
+  };
+  const SAVED: EventFormTicket = { ...TICKET, saved: PAIR };
+  const OPENS = { date: '2026-10-01', time: '09:00' };
+  const NOW = { date: '2026-09-20', time: '12:00' };
+
+  const stored = {
+    title: 'Encontro anual',
+    description: '',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    format: 'online' as const,
+    venueName: '',
+    address: '',
+    meetingUrl: 'https://meet.example.com/x',
+    start: { date: '2026-10-12', time: '19:00' },
+    end: { date: '2026-10-12', time: '21:00' },
+  };
+
+  const renderCreateWith = (ticket: EventFormTicket | undefined) =>
+    render(
+      <EventForm
+        mode="create"
+        tenantName="Rede Demo"
+        zoneLabel={ZONE}
+        ticket={ticket}
+        nowWallClock={NOW}
+      />,
+    );
+
+  const renderEditWith = (
+    ticket: EventFormTicket | undefined,
+    initial: Record<string, unknown> = {},
+  ) =>
+    render(
+      <EventForm
+        mode="edit"
+        eventId={EVENT_ID}
+        initial={{ ...stored, ...initial }}
+        tenantName="Rede Demo"
+        zoneLabel={ZONE}
+        ticket={ticket}
+        nowWallClock={NOW}
+      />,
+    );
+
+  function fillOnline() {
+    fireEvent.click(screen.getByRole('button', { name: /Online/ }));
+    type('event-title', 'Encontro anual');
+    type('event-start-date', '2026-10-12');
+    type('event-start-time', '19:00');
+    type('event-url', 'https://meet.example.com/x');
+  }
+
+  const submitForm = async () => {
+    await act(async () => {
+      fireEvent.submit(document.querySelector('[data-event-form]') as HTMLFormElement);
+    });
+  };
+  const sw = () => document.querySelector('[data-ticket-switch]') as HTMLButtonElement;
+  const toggle = () => fireEvent.click(sw());
+  const sent = (mock: typeof create, call = 0) =>
+    mock.mock.calls[call]?.[mock === update ? 1 : 0] as Record<string, unknown>;
+  const typeOpening = (value: { date: string; time: string }) => {
+    type('event-opens-date', value.date);
+    type('event-opens-time', value.time);
+  };
+
+  describe('the tracer: the admin types an opening and the saved event carries it', () => {
+    it('create: a typed pair reaches the create action as registrationOpens', async () => {
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggle();
+      type('event-gateway-id', PAIR.externalProductId);
+      type('event-checkout-url', PAIR.checkoutUrl);
+      typeOpening(OPENS);
+      await submitForm();
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(sent(create).registrationOpens).toEqual(OPENS);
+    });
+
+    it('edit: submitting without touching the field sends no registrationOpens key', async () => {
+      renderEditWith(SAVED, { registrationOpens: OPENS });
+      expect(field('event-opens-date').value).toBe(OPENS.date);
+      expect(field('event-opens-time').value).toBe(OPENS.time);
+      type('event-title', 'Encontro anual 2');
+      await submitForm();
+
+      expect(update).toHaveBeenCalledTimes(1);
+      expect('registrationOpens' in sent(update)).toBe(false);
+    });
+
+    it('edit: changing the time sends the new pair', async () => {
+      renderEditWith(SAVED, { registrationOpens: OPENS });
+      type('event-opens-time', '09:30');
+      await submitForm();
+
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(sent(update).registrationOpens).toEqual({ ...OPENS, time: '09:30' });
+    });
+
+    it('a host that predates the section draws no field and sends no key', async () => {
+      renderCreateWith(undefined);
+      fillOnline();
+      await submitForm();
+
+      expect(document.getElementById('event-opens-date')).toBeNull();
+      expect(create).toHaveBeenCalledTimes(1);
+      expect('registrationOpens' in sent(create)).toBe(false);
+    });
+
+    it('the field is not rendered while the switch is off', () => {
+      renderCreateWith(TICKET);
+      expect(document.getElementById('event-opens-date')).toBeNull();
+      toggle();
+      expect(document.getElementById('event-opens-date')).not.toBeNull();
+      expect(document.getElementById('event-opens-time')).not.toBeNull();
+    });
+  });
+});

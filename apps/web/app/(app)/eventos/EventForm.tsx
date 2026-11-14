@@ -57,6 +57,17 @@ import {
   splitEventDescription,
 } from '@/lib/event-extras';
 import {
+  EMPTY_OPENING,
+  type OpeningErrorKey,
+  type OpeningPair,
+  openingErrors,
+  openingFieldState,
+  openingIsEmpty,
+  openingKey,
+  openingPairOrEmpty,
+  storedOpeningPair,
+} from '@/lib/event-opening-form';
+import {
   type EventFormTicket,
   parseTicketPrice,
   ticketPriceText as storedPriceText,
@@ -172,6 +183,12 @@ export type EventFormInitial = {
   schedule?: readonly ScheduleItem[];
   /** Phase 10.1-11 (D-755): the stored reference price in integer cents. Absent or null is "no price". */
   ticketPriceCents?: number | null;
+  /**
+   * Phase 10.2-12 (D-792): the stored registration opening as the edit read gave it, the tenant's wall
+   * clock (the database converted it; the form never does). Absent, `null` (a paid event with none) or a
+   * host that predates it are all "no opening".
+   */
+  registrationOpens?: WallClock | null;
 };
 
 export type EventFormProps = {
@@ -195,6 +212,12 @@ export type EventFormProps = {
    * predates the section) draws no "Ingresso" section and sends no `ticketPriceCents` key.
    */
   ticket?: EventFormTicket;
+  /**
+   * Phase 10.2-12 (D-781): the tenant's wall-clock "now" as the SERVER computed it from the request
+   * instant (`tenantWallClockNow`), so a pair already in the past can be told without the form reading a
+   * clock. Absent draws no "past" row.
+   */
+  nowWallClock?: WallClock;
 };
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
@@ -293,6 +316,7 @@ export function EventForm({
   canReactivate = false,
   cancelledLocked = false,
   ticket,
+  nowWallClock,
 }: EventFormProps) {
   const t = useTranslations('events');
   const tm = useTranslations('media');
@@ -363,6 +387,17 @@ export function EventForm({
   const [ticketServerErrors, setTicketServerErrors] = useState<TicketFieldErrors>({});
   const [ticketRecurring, setTicketRecurring] = useState(false);
   const [soldNow, setSoldNow] = useState(ticket?.soldCount ?? 0);
+  // Phase 10.2-12 (D-792, D-793, D-794): the registration opening. `openingTyped` is the pair as typed
+  // (kept in memory while the switch is toggled, discarded only at save), `openingStored` what the
+  // server holds NOW (so the key is sent only on a change), the two refusals are the server's.
+  const [openingTyped, setOpeningTyped] = useState<OpeningPair>(
+    openingPairOrEmpty(start.registrationOpens),
+  );
+  const [openingStored, setOpeningStored] = useState<OpeningPair | null>(
+    storedOpeningPair(start.registrationOpens),
+  );
+  const [openingServerError, setOpeningServerError] = useState<OpeningErrorKey | null>(null);
+  const [openingLockedAlert, setOpeningLockedAlert] = useState(false);
   /** A create that succeeded while its second write did not: the next save updates THIS event. */
   const createdId = useRef<string | null>(null);
 
@@ -510,6 +545,15 @@ export function EventForm({
     ticket === undefined
       ? {}
       : { ticketPriceCents: ticketOn && priceParse.ok ? priceParse.cents : null };
+  // Phase 10.2-12 (D-793, OPEN-19): the opening's key, sent ONLY when its value changed.
+  const openingField = openingKey({
+    host: ticket !== undefined,
+    locked: soldNow > 0,
+    switchOn: ticketOn,
+    hasMapping: savedPair !== null,
+    stored: openingStored,
+    typed: openingTyped,
+  });
   const payload = inPerson
     ? {
         title,
@@ -520,6 +564,7 @@ export function EventForm({
         capacity,
         ...scheduleField,
         ...ticketPriceField,
+        ...openingField,
         format,
         venueName,
         address: effectiveAddress,
@@ -535,6 +580,7 @@ export function EventForm({
         capacity,
         ...scheduleField,
         ...ticketPriceField,
+        ...openingField,
         format,
         meetingUrl,
         start: startAt,
@@ -559,6 +605,7 @@ export function EventForm({
       startAt,
       endAt,
       [ticketOn, ticketProductId, ticketLink, ticketPrice],
+      openingTyped,
     ]) !==
     JSON.stringify([
       start.title,
@@ -584,6 +631,7 @@ export function EventForm({
         ticketSaved?.checkoutUrl ?? '',
         initialTicketPrice,
       ],
+      openingPairOrEmpty(start.registrationOpens),
     ]);
 
   /** UI-D-212: every required field of the visible side is filled. */
@@ -668,6 +716,15 @@ export function EventForm({
           !isCheckoutLink(ticketLink.trim()))));
   const gatewayWord = ticket?.gatewayName?.trim() || t('form.ticket.gatewayFallback');
 
+  // Phase 10.2-12 (UI-D-790 e): the opening's own messages, judged against the TYPED start so moving the
+  // start re-judges the date (EP-38), after the first submit like every field. A stale or date-fold
+  // refusal from the server sits in the same slot until the next edit of either input.
+  const openingActive = ticket !== undefined && ticketOn;
+  const openingClientError = openingActive
+    ? openingErrors({ typed: openingTyped, start: startAt })
+    : null;
+  const openingError = (submitted ? openingClientError : null) ?? openingServerError ?? undefined;
+
   const back = mode === 'edit' && eventId ? `/eventos/${eventId}` : '/eventos';
 
   const close = () => {
@@ -745,6 +802,19 @@ export function EventForm({
       default:
         return t('form.errors.save');
     }
+  };
+
+  /** An edit of either opening input drops the server's refusal drawn under the pair. */
+  const changeOpening = (next: OpeningPair) => {
+    setOpeningTyped(next);
+    setOpeningServerError(null);
+  };
+
+  /** UI-D-790: empties both inputs and hands focus back to the date input (A-UI-17). */
+  const clearOpening = () => {
+    setOpeningTyped({ ...EMPTY_OPENING });
+    setOpeningServerError(null);
+    setFocusTarget('event-opens-date');
   };
 
   /** An edit of one Ingresso field drops the server's refusal drawn under it (UI-D-743). */
@@ -834,6 +904,8 @@ export function EventForm({
     setFormError(null);
     setPosterError(null);
     setTicketServerErrors({});
+    setOpeningServerError(null);
+    setOpeningLockedAlert(false);
     const parsed = eventInputSchema.safeParse(payload);
     if (!parsed.success) {
       const tooLong = parsed.error.issues.some((issue) => issue.path[0] === 'description');
@@ -845,7 +917,7 @@ export function EventForm({
       return;
     }
     // The Ingresso fields speak under themselves (the errors above); the top card points at them.
-    if (ticketInvalid) {
+    if (ticketInvalid || openingClientError !== null) {
       setFormError(t('form.errors.save'));
       return;
     }
@@ -857,8 +929,18 @@ export function EventForm({
         : await createEventAction(parsed.data);
       if (result.ok) {
         if (mode !== 'edit') createdId.current = result.eventId;
+        // The event write carried the opening (or kept it): what the server holds now.
+        if ('registrationOpens' in openingField) {
+          setOpeningStored(storedOpeningPair(openingField.registrationOpens));
+        }
         const ticketResult = await saveTicket(result.eventId);
         if (ticketResult === 'failed') return;
+        // A saved event with the ticket off holds no opening (cleared by the mapping removal or by the
+        // explicit null): the typed value is discarded now, and turning the switch on starts empty.
+        if (ticket !== undefined && !ticketOn) {
+          setOpeningTyped({ ...EMPTY_OPENING });
+          setOpeningStored(null);
+        }
         const done = {
           tone: 'success',
           message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
@@ -875,7 +957,20 @@ export function EventForm({
       }
       // The poster's refusal sits under its own block, never in the top card (UI-D-693).
       if (result.code === 'poster_invalid') setPosterError(messageFor(result.code));
-      else setFormError(messageFor(result.code));
+      else if (result.code === 'opening_after_start') {
+        // Under the pair, never the generic save line: a start moved earlier than a kept date, or a
+        // date-fold input the schema cannot see (EP-39).
+        setOpeningServerError('afterStart');
+        setStep(1);
+        setFocusTarget('event-opens-date');
+      } else if (result.code === 'opening_locked') {
+        // A paid presence landed meanwhile (D-783): re-read the section as locked, show what the server
+        // holds again, and say so at the top of the section.
+        setSoldNow((current) => Math.max(1, current));
+        setOpeningTyped(openingPairOrEmpty(openingStored));
+        setOpeningLockedAlert(true);
+        setStep(1);
+      } else setFormError(messageFor(result.code));
     });
   };
 
@@ -1596,6 +1691,21 @@ export function EventForm({
               }
               offNote={!ticketOn && savedPair !== null && !sectionState.switchDisabled}
               busy={busy}
+              opening={{
+                pair: openingTyped,
+                onChange: changeOpening,
+                onClear: clearOpening,
+                fieldState: openingFieldState({
+                  typed: openingTyped,
+                  nowWallClock,
+                  soldCount: soldNow,
+                }),
+                soldCount: soldNow,
+                zoneLabel,
+                error: openingError,
+                lockedAlert: openingLockedAlert,
+                offWarning: !ticketOn && (openingStored !== null || !openingIsEmpty(openingTyped)),
+              }}
             />
           ) : null}
 

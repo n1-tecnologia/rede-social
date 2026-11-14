@@ -371,3 +371,84 @@ describe('UI-D-741 and UI-D-743: notes and errors', () => {
     expect((el('event-checkout-url') as HTMLInputElement).value).toBe(longLink);
   });
 });
+
+/**
+ * Phase 10.2-12 (D-792, OPEN-18, UI-D-790, sketch 022 `form-abertura-*`): the "Abertura das inscrições"
+ * fieldset. Presentational, like the rest of the section: the state arrives as `opening`.
+ */
+describe('the registration opening field (Phase 10.2-12)', () => {
+  const ZONE = 'Horário Padrão de Brasília';
+  const OPENS = { date: '2026-11-20', time: '10:00' };
+
+  type Opening = NonNullable<Overrides['opening']>;
+  const opening = (over: Partial<Opening> = {}): Opening => ({
+    pair: { date: '', time: '' },
+    onChange: vi.fn(),
+    onClear: vi.fn(),
+    fieldState: 'empty',
+    soldCount: 0,
+    zoneLabel: ZONE,
+    lockedAlert: false,
+    offWarning: false,
+    ...over,
+  });
+  const fieldset = () => document.querySelector('[data-ticket-opening]') as HTMLElement | null;
+
+  it('draws the legend, the date and time inputs, the zone line and the helper after the price field', () => {
+    section({}, { ...SAVED, opening: opening() });
+    const set = fieldset() as HTMLElement;
+    expect(set.querySelector('legend')?.textContent).toBe('Abertura das inscrições');
+    expect(document.querySelector('label[for="event-opens-date"]')?.textContent).toBe('Data');
+    expect(document.querySelector('label[for="event-opens-time"]')?.textContent).toBe('Hora');
+    expect(el('event-opens-date')?.type).toBe('date');
+    expect(el('event-opens-time')?.type).toBe('time');
+    expect(set.querySelector('[data-opening-zone]')?.textContent).toBe(
+      `Fuso horário do evento: ${ZONE}`,
+    );
+    expect(set.querySelector('[data-opening-helper]')?.textContent).toBe(
+      'Opcional. Em branco, a venda abre na hora.',
+    );
+    // It follows the reference price inside the fields block.
+    const fields = q('[data-ticket-fields]') as HTMLElement;
+    const price = el('event-ticket-price') as HTMLElement;
+    expect(fields.contains(set)).toBe(true);
+    expect(price.compareDocumentPosition(set) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('keeps the pair geometry of the start: one column below 360px, date track plus 8rem time', () => {
+    section({}, { ...SAVED, opening: opening() });
+    const grid = (el('event-opens-date') as HTMLElement).closest('.grid') as HTMLElement;
+    expect(grid.className).toContain('grid-cols-1');
+    expect(grid.className).toContain('min-[360px]:grid-cols-[minmax(0,1fr)_8rem]');
+  });
+
+  it('is NOT rendered (not hidden) while the switch is off', () => {
+    section({}, { on: false, opening: opening() });
+    expect(fieldset()).toBeNull();
+    expect(el('event-opens-date')).toBeNull();
+  });
+
+  it('draws nothing for a caller that predates it (no opening prop)', () => {
+    section({}, SAVED);
+    expect(fieldset()).toBeNull();
+  });
+
+  it('typing a half reports the whole pair, with the other half untouched', () => {
+    const o = opening({ pair: OPENS, fieldState: 'filled' });
+    section({}, { ...SAVED, opening: o });
+    fireEvent.change(el('event-opens-time') as HTMLInputElement, { target: { value: '11:30' } });
+    expect(o.onChange).toHaveBeenCalledWith({ date: OPENS.date, time: '11:30' });
+    fireEvent.change(el('event-opens-date') as HTMLInputElement, {
+      target: { value: '2026-11-21' },
+    });
+    expect(o.onChange).toHaveBeenLastCalledWith({ date: '2026-11-21', time: OPENS.time });
+  });
+
+  it('a filled pair swaps the helper for the "Em breve" sentence', () => {
+    section({}, { ...SAVED, opening: opening({ pair: OPENS, fieldState: 'filled' }) });
+    expect(q('[data-opening-helper]')?.textContent).toBe(
+      'Os membros veem “Em breve” e a contagem até esta data.',
+    );
+    expect(q('[data-opening-past]')).toBeNull();
+  });
+});
