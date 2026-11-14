@@ -785,7 +785,7 @@ describe('10.2 the member read (D-780, D-788, D-789; OPEN-02, OPEN-05, OPEN-06)'
   ];
   const sortedKeys = (value: unknown) => Object.keys(value as Json).sort();
 
-  it('a free event keeps the 10.1 key set on every read, even with a stale stored opening; a paid one with no opening adds only the seed (and saleReady on the detail) (EP-04, EP-05)', async () => {
+  it('a free event keeps the 10.1 key set on every member read, even with a stale stored opening; a paid one with no opening adds only the seed (and saleReady on the detail) (EP-04, EP-05)', async () => {
     const token = await memberToken();
     const free = await ticketEvent(labTenantId, {
       title: `${PREFIX}-keys-free`,
@@ -817,7 +817,11 @@ describe('10.2 the member read (D-780, D-788, D-789; OPEN-02, OPEN-05, OPEN-06)'
     }
 
     const freeEdit = await request(`/v1/events/${free}/edit`, adminToken);
-    expect(sortedKeys(await freeEdit.json())).toEqual(FREE_EDIT_KEYS);
+    // WR-01: the ADMIN's edit read shows a stale stored opening of an unmapped event (members never read
+    // this route), so the form can clear it: the three opening keys appear on it and on no member read.
+    expect(sortedKeys(await freeEdit.json())).toEqual(
+      [...FREE_EDIT_KEYS, 'registrationOpens', 'registrationOpensAt', 'serverNow'].sort(),
+    );
     // A paid event with no opening differs on the edit read by the pair (null) and the seed only.
     const paidEdit = await request(`/v1/events/${paidNone}/edit`, adminToken);
     expect(sortedKeys(await paidEdit.json())).toEqual(
@@ -1113,7 +1117,7 @@ describe('10.2 the edit read gives the wall clock back, and Participantes marks 
     expect(json.serverNow).toMatch(ISO6);
   });
 
-  it('an event with NO mapping returns none of the three keys even when a date is stored (A-10.2-STALE-DATE)', async () => {
+  it('an unmapped event with a stored date gives the ADMIN the pair, the instant and the seed (WR-01); a free one gives none', async () => {
     const eventId = await created(
       body('edit-stale', 10, { registrationOpens: { date: tenantDate(3), time: '09:00' } }),
     );
@@ -1121,8 +1125,18 @@ describe('10.2 the edit read gives the wall clock back, and Participantes marks 
     const res = await request(`/v1/events/${eventId}/edit`, adminToken);
     const json = (await res.json()) as Json;
     expect(res.status).toBe(200);
+    expect(json.ticket ?? null).toBeNull();
+    expect(json.registrationOpens).toEqual({ date: tenantDate(3), time: '09:00' });
+    expect(json.registrationOpensAt).toMatch(ISO6);
+    expect(json.serverNow).toMatch(ISO6);
+
+    // The form's rule works on what the admin sees: an explicit null clears it, with no mapping.
+    const cleared = await put(eventId, body('edit-stale', 10, { registrationOpens: null }));
+    expect(cleared.status).toBe(200);
+    const after = await request(`/v1/events/${eventId}/edit`, adminToken);
+    const afterJson = (await after.json()) as Json;
     for (const key of ['registrationOpens', 'registrationOpensAt', 'serverNow']) {
-      expect(json, key).not.toHaveProperty(key);
+      expect(afterJson, key).not.toHaveProperty(key);
     }
   });
 

@@ -1419,7 +1419,6 @@ describe('2026-11-13 (10.2-07) — the read models carry the opening for a paid 
       registrationOpensAt: OPENS,
       serverNow: NOW,
     });
-    expect(statements[0]).toContain('ta.external_product_id is not null');
     expect(statements[0]).toContain('t.timezone');
 
     // Paid with no opening: the pair is null, the instant is absent.
@@ -1428,15 +1427,37 @@ describe('2026-11-13 (10.2-07) — the read models carry the opening for a paid 
     expect(none.registrationOpens).toBeNull();
     expect(Object.keys(none)).not.toContain('registrationOpensAt');
 
-    // No mapping (ticket null) and a stale stored date that SQL nulled: none of the three keys.
+    // No mapping and no stored date (the free case): none of the three keys.
     script = [[{ ...edit, ticket_product_id: null }]];
     const unmapped = await getEventForEdit(context(), EVENT_ID);
     for (const key of ['registrationOpens', 'registrationOpensAt', 'serverNow']) {
       expect(Object.keys(unmapped), key).not.toContain(key);
     }
 
-    // A manage-holding non-admin: no ticket object, so no opening block either.
-    script = [[{ ...paid }]];
+    // WR-01: no mapping but a stored date (a mapping save that failed after the event save): the admin
+    // gets the pair, the instant and the seed, so the form can show and clear it.
+    script = [
+      [
+        {
+          ...edit,
+          ticket_product_id: null,
+          opens_date: '2026-10-10',
+          opens_time: '09:30',
+          registration_opens_at: OPENS,
+          server_now: NOW,
+        },
+      ],
+    ];
+    const stale = await getEventForEdit(context(), EVENT_ID);
+    expect(stale.ticket).toBeNull();
+    expect(stale).toMatchObject({
+      registrationOpens: { date: '2026-10-10', time: '09:30' },
+      registrationOpensAt: OPENS,
+      serverNow: NOW,
+    });
+
+    // A manage-holding non-admin: no ticket object, so no opening block either (stale date included).
+    script = [[{ ...paid, ticket_product_id: null }]];
     const support = await getEventForEdit({ ...context(), role: 'support_tenant' }, EVENT_ID);
     for (const key of ['ticket', 'registrationOpens', 'registrationOpensAt', 'serverNow']) {
       expect(Object.keys(support), key).not.toContain(key);

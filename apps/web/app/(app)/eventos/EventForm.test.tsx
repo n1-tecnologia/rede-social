@@ -2581,6 +2581,37 @@ describe('EventForm — the registration opening (Phase 10.2-12)', () => {
       expect(update).toHaveBeenCalledTimes(1);
       expect(sent(update, 0).registrationOpens).toBeNull();
     });
+
+    // WR-01 (the review's scenario): the event was saved with a date, the mapping save failed, and the edit
+    // read now hands the stored pair back although no mapping exists.
+    it('an unmapped event with a stored date shows it when the switch goes on, so nothing goes live unseen', () => {
+      renderEditWith(TICKET, { registrationOpens: OPENS });
+      toggle();
+      expect(field('event-opens-date').value).toBe(OPENS.date);
+      expect(field('event-opens-time').value).toBe(OPENS.time);
+      expect(clearButton()).not.toBeNull();
+    });
+
+    it('an unmapped event with a stored date warns when the switch stays off, and the save clears it', async () => {
+      renderEditWith(TICKET, { registrationOpens: OPENS });
+      expect(document.querySelector('[data-opening-off-warning]')?.textContent).toBe(
+        O('offWarning'),
+      );
+      await submitForm();
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(sent(update).registrationOpens).toBeNull();
+    });
+
+    it('an unmapped event with a stored date: the admin clears it with the switch on and the save sends null', async () => {
+      saveTicket.mockResolvedValue({ ok: false, issue: 'link_invalid' });
+      renderEditWith(TICKET, { registrationOpens: OPENS });
+      toggle();
+      type('event-gateway-id', PAIR.externalProductId);
+      type('event-checkout-url', PAIR.checkoutUrl);
+      fireEvent.click(clearButton() as HTMLElement);
+      await submitForm();
+      expect(sent(update).registrationOpens).toBeNull();
+    });
   });
 
   describe('the server refusals (EP-39, D-783)', () => {

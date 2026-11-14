@@ -965,9 +965,9 @@ type EventEditRow = {
   ticket_gateway_open?: boolean | null;
   ticket_sold?: number | null;
   /**
-   * Phase 10.2-07 (D-792). All four are null unless the event is paid AND the caller got the definer's row
-   * (`ta.external_product_id is not null`, admin only), so a stale stored opening of an unmapped event never
-   * reaches the form.
+   * Phase 10.2-07 (D-792, WR-01). The stored opening as the tenant's wall clock and as an instant, whether or
+   * not a mapping exists (null when none is stored); `server_now` is null for an unmapped event with no stored
+   * opening. The mapper drops all of them for any caller who did not get `ticket` (admin only).
    */
   opens_date?: string | null;
   opens_time?: string | null;
@@ -1021,13 +1021,10 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
              ta.checkout_url as ticket_checkout_url,
              ta.gateway_open as ticket_gateway_open,
              ta.sold as ticket_sold,
-             case when ta.external_product_id is not null
-                  then to_char(e.registration_opens_at at time zone t.timezone, 'YYYY-MM-DD') end as opens_date,
-             case when ta.external_product_id is not null
-                  then to_char(e.registration_opens_at at time zone t.timezone, 'HH24:MI') end as opens_time,
-             case when ta.external_product_id is not null
-                  then to_char(e.registration_opens_at at time zone 'utc', ${ISO_MICROSECONDS}) end as registration_opens_at,
-             case when ta.external_product_id is not null
+             to_char(e.registration_opens_at at time zone t.timezone, 'YYYY-MM-DD') as opens_date,
+             to_char(e.registration_opens_at at time zone t.timezone, 'HH24:MI') as opens_time,
+             to_char(e.registration_opens_at at time zone 'utc', ${ISO_MICROSECONDS}) as registration_opens_at,
+             case when ta.external_product_id is not null or e.registration_opens_at is not null
                   then to_char(now() at time zone 'utc', ${ISO_MICROSECONDS}) end as server_now
         from events e
         join tenants t on t.id = e.tenant_id
@@ -1066,10 +1063,14 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
     schedule: toSchedule(row.schedule),
     // Absent for any caller but the tenant admin (D-753); `null` for an admin and an unmapped event.
     ...(ticket === undefined ? {} : { ticket }),
-    // Phase 10.2-07 (D-792, OPEN-03): only for a paid event read by the caller who got `ticket`. The wall
+    // Phase 10.2-07 (D-792, OPEN-03): only for the caller who got `ticket` (the tenant admin). The wall
     // clock pair is the exact inverse of the write (converted by Postgres in the tenant's zone); `null` says
-    // "paid, no opening". A free event, and a stale stored date of an unmapped one, carry none of the keys.
-    ...(ticket === undefined || ticket === null
+    // "paid, no opening". WR-01: the admin sees the STORED date whether or not a mapping exists, so a date
+    // left behind by a failed mapping save is visible to the form and can be cleared (omit keeps, null
+    // clears) instead of going live unseen when a mapping reappears. An unmapped event with no stored date
+    // (the free case) carries none of the keys. Members never read this route: their reads stay wrapped in
+    // the paid case (A-10.2-STALE-DATE).
+    ...(ticket === undefined || (ticket === null && typeof row.opens_date !== 'string')
       ? {}
       : {
           registrationOpens:

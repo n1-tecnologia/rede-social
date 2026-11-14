@@ -728,7 +728,9 @@ export const eventEditSchema = z
     /**
      * Phase 10.2 (D-792, OPEN-03): the stored opening read BACK as the tenant's wall clock by Postgres (the
      * exact inverse of the write), so the web never converts a time zone; null for a paid event with none.
-     * Present only for a paid event and only to the caller who gets `ticket`; absent otherwise.
+     * Present for a paid event and, when a date is stored, for an unmapped one too (WR-01: a date left by a
+     * failed mapping save must be visible to the admin so the form can clear it). Only to the caller who gets
+     * `ticket`; absent otherwise.
      */
     registrationOpens: z
       .object({ date: z.string(), time: z.string() })
