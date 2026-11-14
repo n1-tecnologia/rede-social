@@ -1613,3 +1613,292 @@ describe('10.1-08 attendeeView: origin marks and the one action (D-743, D-751, D
     ]);
   });
 });
+
+/* ── Phase 10.2-10: the opening as finished facts (OPEN-07, OPEN-11, D-784, D-786, D-788) ─────────────── */
+
+/**
+ * Six-digit UTC strings, as the API publishes them. The opening below is 2026-10-07 10:00 in São Paulo,
+ * two days and an hour after BEFORE; the seed is the server's instant of the answer.
+ */
+const OPENS = '2026-10-07T13:00:00.000000Z';
+const SEED = '2026-10-05T12:00:00.000000Z';
+const OPENING = { registrationOpensAt: OPENS, serverNow: SEED };
+/** The real translator and the same request instant, for the cases that assert catalog words. */
+const real = (nowMs = BEFORE) => ({ tz: SP, nowMs, t });
+
+/** An event the server withheld the link of: the module is on, the gateway is up, the clock is early. */
+const soonEvent = (overrides: Partial<EventDetail> = {}): EventDetail =>
+  paidEvent({ ...OPENING, saleReady: true, checkoutUrl: null, ...overrides });
+
+describe('10.2-10 tracer: a paid event with a future opening is a finished soon zone', () => {
+  it('travels from the strict contract type to the sale state, the detail view and the action state', () => {
+    const e = soonEvent();
+    expect(eventSaleState(e, eventPhase(e.startsAt, e.endsAt, BEFORE))).toEqual({
+      kind: 'soon',
+      opensAt: OPENS,
+      serverNow: SEED,
+      price: PRICE,
+    });
+
+    const view = eventDetailView(e, real());
+    expect(view.paid).toBe(true);
+    expect(view.sale?.kind).toBe('soon');
+    expect(view.tag).toBe('Em breve');
+    expect(view.soon).toEqual({
+      opensAt: OPENS,
+      serverNow: SEED,
+      dateLabel: '7 out',
+      timeLabel: '10:00',
+      zoneLabel: tenantZoneLabel(SP),
+      price: PRICE,
+    });
+
+    expect(eventActionState(e, view)).toMatchObject({
+      paid: true,
+      zone: 'soon',
+      checkoutHref: null,
+      priceLabel: null,
+      soon: {
+        opensAt: OPENS,
+        serverNow: SEED,
+        dateLabel: '7 out',
+        timeLabel: '10:00',
+        zoneLabel: 'Horário Padrão de Brasília',
+        price: PRICE,
+      },
+    });
+  });
+});
+
+describe('10.2-10 eventSaleState: the seven rows of UI-D-781, first match wins (OPEN-11, EP-26)', () => {
+  const NOW_P2 = at('2026-10-12T22:30:00Z');
+  const NOW_P3 = at('2026-10-13T01:00:00Z');
+  const sale = (overrides: Partial<EventDetail>, nowMs = BEFORE) => {
+    const e = soonEvent(overrides);
+    return eventSaleState(e, eventPhase(e.startsAt, e.endsAt, nowMs)).kind;
+  };
+
+  it('1. cancelled, with the opening still ahead, is none', () => {
+    expect(sale({ status: 'cancelled' })).toBe('none');
+  });
+
+  it('2. ended is none, even with the opening ahead and the sale unavailable', () => {
+    expect(sale({}, NOW_P3)).toBe('none');
+    expect(sale({ saleReady: false }, NOW_P3)).toBe('none');
+  });
+
+  it('3. under way is salesClosed', () => {
+    expect(sale({}, NOW_P2)).toBe('salesClosed');
+  });
+
+  it('4. an event whose module is off or whose gateway is down, before the opening, is unavailable, never soon', () => {
+    expect(sale({ saleReady: false })).toBe('unavailable');
+    expect(sale({ saleReady: false, confirmedCount: 50 })).toBe('unavailable');
+  });
+
+  it('5. the opening ahead of the seed is soon, and soon beats sold out (Esgotado never shows before the opening)', () => {
+    expect(sale({})).toBe('soon');
+    expect(sale({ confirmedCount: 50 })).toBe('soon');
+    expect(sale({ capacity: 50, confirmedCount: 80 })).toBe('soon');
+  });
+
+  it('6. once the opening is not ahead of the seed, a full event is sold out', () => {
+    const open = { registrationOpensAt: OPENS, serverNow: '2026-10-07T13:00:00.000000Z' };
+    expect(sale({ ...open, checkoutUrl: LINK, confirmedCount: 50 })).toBe('soldOut');
+    expect(sale({ ...open, checkoutUrl: LINK, confirmedCount: 49 })).toBe('buy');
+  });
+
+  it('7. otherwise buy, with the link and the price', () => {
+    const e = soonEvent({ serverNow: '2026-10-07T13:00:01.000000Z', checkoutUrl: LINK });
+    expect(eventSaleState(e, 'P0')).toEqual({ kind: 'buy', href: LINK, price: PRICE });
+  });
+
+  it('an older API answer (no saleReady, no opening) keeps today’s rule: a null link is unavailable, also when full', () => {
+    const older = (overrides: Partial<EventDetail>) =>
+      eventSaleState(paidEvent(overrides), 'P0').kind;
+    expect(older({ checkoutUrl: null })).toBe('unavailable');
+    expect(older({ checkoutUrl: null, confirmedCount: 50 })).toBe('unavailable');
+    expect(older({ confirmedCount: 50 })).toBe('soldOut');
+    expect(older({})).toBe('buy');
+  });
+
+  it('a stray unsafe link is never a buy href, even with the opening behind', () => {
+    const e = paidEvent({ ...OPENING, serverNow: '2026-10-08T00:00:00.000000Z', saleReady: true });
+    expect(eventSaleState({ ...e, checkoutUrl: 'http://pay.example/x' }, 'P0').kind).toBe(
+      'unavailable',
+    );
+  });
+
+  it('no seed (an older API with an opening): soon only while the server withheld the link, never a count', () => {
+    const noSeed = { registrationOpensAt: OPENS };
+    expect(eventSaleState(paidEvent({ ...noSeed, checkoutUrl: null }), 'P0')).toEqual({
+      kind: 'soon',
+      opensAt: OPENS,
+      serverNow: null,
+      price: PRICE,
+    });
+    expect(eventSaleState(paidEvent({ ...noSeed, checkoutUrl: LINK }), 'P0').kind).toBe('buy');
+    expect(
+      eventSaleState(paidEvent({ ...noSeed, checkoutUrl: null, saleReady: false }), 'P0').kind,
+    ).toBe('unavailable');
+  });
+
+  it('the comparison is exact to the microsecond, as plain strings (EP-15)', () => {
+    const e = (opens: string, seed: string) =>
+      eventSaleState(
+        paidEvent({
+          registrationOpensAt: opens,
+          serverNow: seed,
+          saleReady: true,
+          checkoutUrl: LINK,
+        }),
+        'P0',
+      ).kind;
+    // One microsecond after the seed: still ahead. Date.parse would truncate both to the same millisecond.
+    expect(e('2026-10-07T13:00:00.000001Z', '2026-10-07T13:00:00.000000Z')).toBe('soon');
+    expect(e('2026-10-07T13:00:00.000000Z', '2026-10-07T13:00:00.000000Z')).toBe('buy');
+    expect(e('2026-10-07T13:00:00.000000Z', '2026-10-07T13:00:00.000001Z')).toBe('buy');
+  });
+
+  it('a viewer who is in is never in the zone: the view carries no sale and no soon block', () => {
+    const view = eventDetailView(
+      soonEvent({ viewerStatus: 'going', viewerOrigin: 'ticket' }),
+      real(),
+    );
+    expect(view.sale).toBeNull();
+    expect(view.tag).toBeNull();
+    expect(view).not.toHaveProperty('soon');
+  });
+
+  it('the decision reads no clock: the device time and the request instant change nothing', () => {
+    const e = soonEvent();
+    const a = eventSaleState(e, 'P0');
+    expect(eventSaleState(e, 'P1')).toEqual(a);
+    // The request instant is past the opening by the clock, still before the start: the seed decides.
+    expect(eventDetailView(e, real(at('2026-10-10T00:00:00Z'))).sale?.kind).toBe('soon');
+    expect(eventDetailView(e, real(BEFORE)).sale?.kind).toBe('soon');
+  });
+});
+
+describe('10.2-10 the exact opening labels (D-786, UI-D-785)', () => {
+  const labels = (opens: string, nowMs = BEFORE) => {
+    const e = soonEvent({
+      registrationOpensAt: opens,
+      startsAt: '2027-03-01T22:00:00.000000Z',
+      endsAt: '2027-03-02T00:00:00.000000Z',
+    });
+    const view = eventDetailView(e, real(nowMs));
+    return [view.soon?.dateLabel, view.soon?.timeLabel];
+  };
+
+  it('is `day month` and 24 h time in the TENANT zone, no weekday', () => {
+    expect(labels('2026-11-20T13:00:00.000000Z')).toEqual(['20 nov', '10:00']);
+    expect(labels('2026-10-07T13:00:00.000000Z')).toEqual(['7 out', '10:00']);
+  });
+
+  it('a 23:30 local opening reads 23:30 on the typed day, though it is the next day in UTC', () => {
+    expect(labels('2026-10-08T02:30:00.000000Z')).toEqual(['7 out', '23:30']);
+  });
+
+  it('adds the year only when the opening is in another tenant-local year than the request instant', () => {
+    expect(labels('2027-01-10T13:00:00.000000Z')).toEqual(['10 jan 2027', '10:00']);
+    // 2027-01-01 01:00Z is still 31 Dec 2026 in São Paulo: the tenant's year decides.
+    expect(labels('2027-01-01T01:00:00.000000Z', at('2026-12-01T12:00:00Z'))).toEqual([
+      '31 dez',
+      '22:00',
+    ]);
+  });
+});
+
+describe('10.2-10 the hero tag follows the opening (OPEN-07, D-784)', () => {
+  const tag = (overrides: Partial<EventDetail>, nowMs = BEFORE) =>
+    eventDetailView(soonEvent(overrides), real(nowMs)).tag;
+
+  it('Em breve while the opening is ahead of the seed, Pago the moment it is not', () => {
+    expect(tag({})).toBe('Em breve');
+    expect(tag({ serverNow: OPENS })).toBe('Pago');
+    expect(tag({ serverNow: '2026-10-07T13:00:00.000001Z' })).toBe('Pago');
+  });
+
+  it('never on a viewer who is in, a cancelled event or an ended one', () => {
+    expect(tag({ viewerStatus: 'going' })).toBeNull();
+    expect(tag({ status: 'cancelled' })).toBeNull();
+    expect(tag({}, at('2026-10-13T01:00:00Z'))).toBeNull();
+  });
+
+  it('the tag follows the opening alone, so a module-off event reads Em breve while its zone says unavailable (A-UI-3)', () => {
+    const view = eventDetailView(soonEvent({ saleReady: false }), real());
+    expect(view.tag).toBe('Em breve');
+    expect(view.sale?.kind).toBe('unavailable');
+    expect(view).not.toHaveProperty('soon');
+  });
+});
+
+describe('10.2-10 a free event keeps today’s exact key sets', () => {
+  it('eventDetailView and eventActionState of a free event, whatever stray opening it carries', () => {
+    const free = eventDetailView(detail({ ...OPENING, paid: false }), real());
+    const plain = eventDetailView(detail(), real());
+    expect(Object.keys(free).sort()).toEqual(Object.keys(plain).sort());
+    expect(Object.keys(free).sort()).toEqual(
+      [
+        'banner',
+        'calendar',
+        'cancelled',
+        'checkinOpensAt',
+        'countIndex',
+        'description',
+        'endsAt',
+        'engaged',
+        'extras',
+        'format',
+        'full',
+        'headerPill',
+        'hero',
+        'hours',
+        'id',
+        'info',
+        'location',
+        'map',
+        'participation',
+        'past',
+        'phase',
+        'schedule',
+        'startTime',
+        'startsAt',
+        'title',
+      ].sort(),
+    );
+    expect(Object.keys(free.hero).sort()).toEqual(
+      [
+        'category',
+        'coverAlt',
+        'coverAssetId',
+        'coverVariantWidths',
+        'overline',
+        'place',
+        'placeKind',
+      ].sort(),
+    );
+    expect(Object.keys(eventActionState(detail({ ...OPENING, paid: false }), free)).sort()).toEqual(
+      [
+        'answer',
+        'cancelled',
+        'checkedIn',
+        'checkinOpensAt',
+        'endsAt',
+        'eventId',
+        'format',
+        'full',
+        'phase',
+        'startTime',
+        'startsAt',
+      ].sort(),
+    );
+  });
+
+  it('a paid event with no opening gains no soon key', () => {
+    const view = eventDetailView(paidEvent(), real());
+    expect(view).not.toHaveProperty('soon');
+    expect(eventActionState(paidEvent(), view)).not.toHaveProperty('soon');
+  });
+});

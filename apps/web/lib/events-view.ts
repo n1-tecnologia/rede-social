@@ -20,6 +20,12 @@ import {
 import { formatTicketPrice, safeCheckoutHref } from './event-ticket';
 
 /**
+ * Phase 10.2 (D-787): the pure countdown formatter lives in `event-countdown.ts`, which imports nothing
+ * server-side so the client island can use it; the names resolve from here too, as the UI-SPEC writes them.
+ */
+export * from './event-countdown';
+
+/**
  * THE formatter module for events (UI-D-203): every date, time and relative label an events surface
  * prints is built here, with `Intl.DateTimeFormat('pt-BR', { timeZone })` pinned to
  * `bootstrap.tenant.timezone`. There is no date library (UI-SPEC Registry Safety) and no other place
@@ -128,6 +134,28 @@ function formatDayMonth(iso: string, timeZone: string, nowMs: number): string {
     month: 'short',
     ...(otherYear ? { year: 'numeric' } : {}),
   }).format(new Date(iso));
+}
+
+/**
+ * The exact opening as the tenant's wall clock (Phase 10.2, D-786, UI-D-785): `{ dateLabel: '20 nov',
+ * timeLabel: '10:00' }`, the day, the abbreviated month without its dot, 24 h time, no weekday, and
+ * ` 2027` after the month only when the opening falls in another tenant-local year than `nowMs`.
+ */
+export function formatEventOpening(
+  iso: string,
+  timeZone: string,
+  nowMs: number,
+): { dateLabel: string; timeLabel: string } {
+  const day = formatter('pt-BR', timeZone, { day: 'numeric' }).format(new Date(iso));
+  const month = formatter('pt-BR', timeZone, { month: 'short' })
+    .format(new Date(iso))
+    .replace('.', '');
+  const year = tenantYear(iso, timeZone);
+  const otherYear = year !== tenantYear(nowMs, timeZone);
+  return {
+    dateLabel: `${day} ${month}${otherYear ? ` ${year}` : ''}`,
+    timeLabel: formatEventTime(iso, timeZone),
+  };
 }
 
 /** `true` when the event ends on another tenant-local calendar day than it starts. */
@@ -256,12 +284,13 @@ function rsvpOpen(event: Pick<EventSummary, 'startsAt' | 'endsAt' | 'status'>, n
 }
 
 /**
- * The member's sale zone of a PAID event (Phase 10.1-08, D-746, D-750, D-751, D-753, UI-D-746), a
- * finished fact the screen draws:
+ * The member's sale zone of a PAID event (Phase 10.1-08, D-746, D-750, D-751, D-753, UI-D-746; Phase 10.2,
+ * D-786, D-788, UI-D-781), a finished fact the screen draws:
  *  - `none`: nothing to sell or say (the event is cancelled or over, or it is not a paid event);
  *  - `salesClosed`: the event is under way, the sale ended when it started (D-750);
- *  - `unavailable`: no valid `https:` purchase link, so the module is off, the gateway is
- *    disconnected or the link is missing or unsafe (D-746);
+ *  - `unavailable`: the module is off, the gateway is disconnected or the link is missing or unsafe (D-746);
+ *  - `soon`: the registration opening is still ahead of the SERVER's instant (D-786): the zone counts down
+ *    to `opensAt` from `serverNow` (null when an older API sent no seed: no count is drawn then);
  *  - `soldOut`: `confirmedCount >= capacity` (D-751);
  *  - `buy`: the sale is open, with the validated href and the optional price label.
  */
@@ -269,24 +298,50 @@ export type EventSaleState =
   | { kind: 'none' }
   | { kind: 'salesClosed' }
   | { kind: 'unavailable' }
+  | { kind: 'soon'; opensAt: string; serverNow: string | null; price: string | null }
   | { kind: 'soldOut' }
   | { kind: 'buy'; href: string; price: string | null };
 
 /**
- * The zone, first match wins (UI-D-746): cancelled, then ended (P3), then under way (P2), then no
- * link, then full, then buy. A paid event that is both full and unavailable shows `unavailable`,
- * because "Esgotado" would promise a ticket the page cannot sell anyway.
+ * Whether a paid event's opening is still ahead of the server's instant, from payload facts alone
+ * (D-788, EP-15). Both strings are fixed-width UTC strings with six fractional digits, so the plain string
+ * comparison is chronological and exact to the microsecond, where `Date.parse` would truncate below the
+ * millisecond. No clock is read: a missing opening or a missing seed is `false`.
+ */
+function openingIsFuture(event: Pick<EventSummary, 'registrationOpensAt' | 'serverNow'>): boolean {
+  const opens = event.registrationOpensAt;
+  const seed = event.serverNow;
+  return typeof opens === 'string' && typeof seed === 'string' && opens > seed;
+}
+
+/**
+ * The zone, first match wins (UI-D-781): cancelled, ended (P3), under way (P2), `saleReady === false`
+ * (unavailable, so a module that is off or a gateway that is down never shows a countdown), then `soon`,
+ * then full, then no safe link (unavailable), then buy. A viewer who holds a presence never reaches this
+ * function (the callers guard `paid && !viewerIn`), so a holder is never in `Em breve`; `Esgotado` can
+ * never show before the opening because `soon` is decided first.
  *
- * Pure and clock-free: `phase` is `eventPhase(startsAt, endsAt, nowMs)` from the ONE request instant,
- * so the boundaries are the phase's (one millisecond before `starts_at` is `buy` through P0/P1, the
- * start itself is P2, `ends_at` itself is P3). A null `capacity` is never sold out. The link is
- * re-validated here (`safeCheckoutHref`), whatever the caller already did (T-10.1-24), and the price
- * is only formatted, never compared or computed (EP-23).
+ * `soon` is true when the opening and the seed are both present and the opening is greater than the seed
+ * (`openingIsFuture`), or, with the opening but NO seed (an older API), only while the server withheld the
+ * link (`checkoutUrl` null and `saleReady` not false): the zone then draws the static opening line and never
+ * a count. An answer with no `saleReady` keeps today's rule: a null link is `unavailable`, before the full
+ * check. Pure and clock-free: `phase` is `eventPhase(startsAt, endsAt, nowMs)` from the ONE request
+ * instant; the opening is compared with the seed, never with `nowMs` or a device clock (T-10.2-01). The link
+ * is re-validated here (`safeCheckoutHref`) and crosses only in `buy` (T-10.1-24); the price is only
+ * formatted, never compared or computed (EP-23).
  */
 export function eventSaleState(
   event: Pick<
     EventDetail,
-    'status' | 'capacity' | 'confirmedCount' | 'paid' | 'ticketPriceCents' | 'checkoutUrl'
+    | 'status'
+    | 'capacity'
+    | 'confirmedCount'
+    | 'paid'
+    | 'ticketPriceCents'
+    | 'checkoutUrl'
+    | 'registrationOpensAt'
+    | 'serverNow'
+    | 'saleReady'
   >,
   phase: EventPhase,
 ): EventSaleState {
@@ -294,12 +349,22 @@ export function eventSaleState(
   if (event.status === 'cancelled') return { kind: 'none' };
   if (phase === 'P3') return { kind: 'none' };
   if (phase === 'P2') return { kind: 'salesClosed' };
+  if (event.saleReady === false) return { kind: 'unavailable' };
+  const price = formatTicketPrice(event.ticketPriceCents);
+  const opens = event.registrationOpensAt;
+  if (typeof opens === 'string') {
+    const seed = typeof event.serverNow === 'string' ? event.serverNow : null;
+    const ahead = seed === null ? event.checkoutUrl == null : openingIsFuture(event);
+    if (ahead) return { kind: 'soon', opensAt: opens, serverNow: seed, price };
+  }
   const href = safeCheckoutHref(event.checkoutUrl);
-  if (href === null) return { kind: 'unavailable' };
+  // An older answer (no `saleReady`) keeps the 10.1 order: no link is unavailable even when full.
+  if (href === null && event.saleReady === undefined) return { kind: 'unavailable' };
   if (event.capacity !== null && event.confirmedCount >= event.capacity) {
     return { kind: 'soldOut' };
   }
-  return { kind: 'buy', href, price: formatTicketPrice(event.ticketPriceCents) };
+  if (href === null) return { kind: 'unavailable' };
+  return { kind: 'buy', href, price };
 }
 
 /**
@@ -803,6 +868,21 @@ export type EventBannerView =
       body: string;
     };
 
+/**
+ * Phase 10.2 (D-786, D-788): what the `Em breve` zone draws, as finished strings and the two ISO instants
+ * its client island counts between. `serverNow` is null for an older API (no seed: the static opening line
+ * and no count). `dateLabel` and `timeLabel` are the exact opening in the tenant's zone, `zoneLabel` its long
+ * pt-BR name, `price` the optional reference price.
+ */
+export type EventSoonView = {
+  opensAt: string;
+  serverNow: string | null;
+  dateLabel: string;
+  timeLabel: string;
+  zoneLabel: string;
+  price: string | null;
+};
+
 /** Everything `/eventos/[eventId]` renders, as finished strings and ISO instants. */
 export type EventDetailView = {
   id: string;
@@ -830,6 +910,10 @@ export type EventDetailView = {
   tag?: string | null;
   sale?: EventSaleState | null;
   refundedNote?: string | null;
+  /**
+   * Phase 10.2 (D-786): the `Em breve` zone's finished strings, present ONLY while `sale.kind` is `soon`.
+   */
+  soon?: EventSoonView;
   /** Plain text; `''` means "no description" and the paragraph is absent. */
   description: string;
   info: EventInfoCellView[];
@@ -1021,12 +1105,33 @@ export function eventDetailView(
   // Phase 10.1-08 (UI-D-745, UI-D-746): the paid facts, computed once from the request instant.
   const viewerIn = isViewerIn(event);
   const sale = paid && !viewerIn ? eventSaleState(event, phase) : null;
+  // Phase 10.2 (D-784, A-UI-3): `Em breve` replaces `Pago` while the opening is ahead of the seed, on the
+  // opening alone (the page's own zone may still say unavailable); an older answer with no seed follows
+  // the zone (the server withheld the link).
+  const soonTag =
+    !viewerIn &&
+    !cancelled &&
+    (phase === 'P0' || phase === 'P1') &&
+    (openingIsFuture(event) || sale?.kind === 'soon');
+  const soon: EventSoonView | null =
+    sale?.kind === 'soon'
+      ? {
+          opensAt: sale.opensAt,
+          serverNow: sale.serverNow,
+          ...formatEventOpening(sale.opensAt, tz, nowMs),
+          zoneLabel: tenantZoneLabel(tz),
+          price: sale.price,
+        }
+      : null;
   const paidFields = paid
     ? {
         paid: true as const,
         tag:
-          !viewerIn && !cancelled && phase !== 'P3' ? t('ticket.badge') : (null as string | null),
+          !viewerIn && !cancelled && phase !== 'P3'
+            ? t(soonTag ? 'ticket.soon.badge' : 'ticket.badge')
+            : (null as string | null),
         sale,
+        ...(soon === null ? {} : { soon }),
         refundedNote:
           event.viewerRefunded === true && sale !== null && sale.kind !== 'none'
             ? t('ticket.refunded.note')
@@ -1190,6 +1295,12 @@ export type EventActionState = {
   viewerOrigin?: ViewerOrigin | null;
   checkoutHref?: string | null;
   priceLabel?: string | null;
+  /**
+   * Phase 10.2 (D-786, D-788): the `Em breve` zone's block, present ONLY when `zone` is `soon`: the opening
+   * and the server seed as ISO strings for the island, and the finished date, time and zone labels. The
+   * opening also joins the boundaries the island passes to the shared refresh (plan 13).
+   */
+  soon?: EventSoonView;
 };
 
 /** `EventDetail` + its `EventDetailView` → the island's props (the view already holds the phase). */
@@ -1207,7 +1318,7 @@ export function eventActionState(
     | 'endsAt'
     | 'startTime'
   > &
-    Partial<Pick<EventDetailView, 'paid' | 'sale'>>,
+    Partial<Pick<EventDetailView, 'paid' | 'sale' | 'soon'>>,
 ): EventActionState {
   const answer =
     event.viewerStatus === 'going' || event.viewerStatus === 'not_going'
@@ -1232,6 +1343,7 @@ export function eventActionState(
           viewerOrigin: event.viewerOrigin ?? null,
           checkoutHref: view.sale?.kind === 'buy' ? view.sale.href : null,
           priceLabel: view.sale?.kind === 'buy' ? view.sale.price : null,
+          ...(view.sale?.kind === 'soon' && view.soon ? { soon: view.soon } : {}),
         }
       : {}),
   };
