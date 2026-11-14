@@ -25,18 +25,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const nav = vi.hoisted(() => ({ refresh: vi.fn() }));
-const { catalog } = await vi.hoisted(async () => {
+const { catalog, icu } = await vi.hoisted(async () => {
   const { readFileSync } = await import('node:fs');
   const { join } = await import('node:path');
+  const { createTranslator } = await import('next-intl');
+  const { loadMessages } = await import('@/i18n/messages');
   const read = (name: string) =>
     JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
-  return { catalog: read('events').events as Record<string, unknown> };
+  // The real ICU translator, for the plural and select keys of the count (Phase 10.2).
+  const real = createTranslator({
+    locale: 'pt-BR',
+    messages: loadMessages(join(process.cwd(), 'messages', 'pt-BR')),
+    namespace: 'events' as never,
+  }) as unknown as (key: string, values?: Record<string, unknown>) => string;
+  return { catalog: read('events').events as Record<string, unknown>, icu: real };
 });
 
 const lookup = (key: string, values?: Record<string, unknown>) => {
   const raw = key
     .split('.')
     .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], catalog);
+  if (typeof raw === 'string' && /\{\w+, (plural|select)/.test(raw)) return icu(key, values);
   return String(raw ?? key).replace(/\{(\w+)\}/g, (_, name: string) =>
     String(values?.[name] ?? ''),
   );
@@ -400,5 +409,110 @@ describe('PaidEventZone — the persistent live region (D-756, UI-D-748)', () =>
     nav.refresh.mockReset();
     fake.emit(TOPIC, 'notifications.changed');
     expect(nav.refresh).not.toHaveBeenCalled();
+  });
+});
+
+/* ── Phase 10.2-13: the `soon` branch (OPEN-08, D-786, D-789, UI-D-784) ─────────────────────────── */
+
+const SEED = '2026-11-13T12:00:00.000Z';
+const SEED_MS = Date.parse(SEED);
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+
+function soonBlock(remainingMs: number, overrides: Record<string, unknown> = {}) {
+  return {
+    opensAt: new Date(SEED_MS + remainingMs).toISOString(),
+    serverNow: SEED,
+    dateLabel: '20 nov',
+    timeLabel: '10:00',
+    zoneLabel: 'Horário de Brasília',
+    price: 'R$ 80,00',
+    ...overrides,
+  } as NonNullable<Props['soon']>;
+}
+
+function soonZone(remainingMs: number, overrides: Partial<Props> = {}) {
+  return zone({ zone: 'soon', checkoutHref: null, soon: soonBlock(remainingMs), ...overrides });
+}
+
+const cellTexts = () =>
+  screen.queryAllByTestId('live-countdown-cell').map((cell) => cell.textContent);
+
+describe('PaidEventZone — the soon branch, the tracer (OPEN-08, D-786, D-789)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SEED_MS);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('S1. a paid event before its opening draws the seeded cells, the exact opening and nothing to click', () => {
+    const { container } = soonZone(2 * DAY + 4 * HOUR + 13 * MIN, { priceLabel: 'R$ 80,00' });
+    expect(cellTexts()).toEqual(['02dias', '04horas', '13min']);
+    expect(screen.getByTestId('event-soon-opens-at').textContent).toBe('Abertura: 20 nov, 10:00');
+    expect(screen.getByTestId('event-soon-zone-label').textContent).toBe(
+      'Fuso horário: Horário de Brasília',
+    );
+    expect(screen.getByTestId('event-soon-price').textContent).toBe('Ingresso: R$ 80,00');
+    expect(container.querySelectorAll('button, a, [href]')).toHaveLength(0);
+    expect(buy()).toBeNull();
+    expect(screen.queryByTestId('event-actions-disabled')).toBeNull();
+  });
+
+  it('S2. a link prop is present and IGNORED: no anchor and no href anywhere in the soon zone (D-789, T-10.2-01)', () => {
+    const { container } = soonZone(2 * DAY, { checkoutHref: HREF });
+    expect(container.querySelectorAll('a')).toHaveLength(0);
+    expect(container.querySelectorAll('[href]')).toHaveLength(0);
+    expect(container.innerHTML).not.toContain(HREF);
+    expect(container.innerHTML).not.toContain('pay.example');
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    // And the zone has none of the sale words before the opening.
+    expect(screen.queryByText(T.cta.soldOut)).toBeNull();
+    expect(screen.queryByText(T.cta.salesClosed)).toBeNull();
+    expect(screen.queryByText(T.cta.unavailable)).toBeNull();
+    expect(screen.queryByText(T.cta.buy)).toBeNull();
+  });
+
+  it('S3. zero by the seeded clock says Abrindo agora and still draws no link, even with a link prop', () => {
+    const { container } = soonZone(0, { checkoutHref: HREF });
+    expect(cellTexts()).toEqual(['Abrindo agora']);
+    expect(container.querySelectorAll('a, button, [href]')).toHaveLength(0);
+  });
+
+  it('S4. the zone is a SIBLING of the polite wrapper, never inside it, and the wrapper holds no cell', () => {
+    soonZone(2 * DAY + 4 * HOUR + 13 * MIN);
+    const wrapper = screen.getByTestId('event-actions-live');
+    expect(wrapper.getAttribute('aria-live')).toBe('polite');
+    expect(wrapper.contains(screen.getByTestId('event-actions'))).toBe(false);
+    expect(wrapper.querySelectorAll('[data-testid="live-countdown-cell"]')).toHaveLength(0);
+    expect(wrapper.querySelectorAll('[role="timer"]')).toHaveLength(0);
+    expect(screen.getAllByRole('timer')).toHaveLength(1);
+    expect(screen.getByRole('timer').closest('[aria-live]')).toBeNull();
+  });
+
+  it('S5. an unseeded answer (an older API) draws the static opening line and no count', () => {
+    soonZone(2 * DAY, { soon: soonBlock(2 * DAY, { serverNow: null }) });
+    expect(cellTexts()).toEqual([]);
+    expect(screen.queryAllByRole('timer')).toHaveLength(0);
+    expect(screen.getByTestId('event-soon-opens-at').textContent).toBe('Abertura: 20 nov, 10:00');
+    expect(screen.getByTestId('event-soon-hint')).toBeTruthy();
+  });
+
+  it('S6. an online event adds the Lock hint and never an Entrar button', () => {
+    soonZone(2 * DAY, { format: 'online' });
+    expect(screen.getByTestId('event-actions-online-hint').textContent).toBe(T.hint.onlineLink);
+    expect(screen.queryByTestId('event-actions-enter')).toBeNull();
+  });
+
+  it('S7. a cancelled or ended event draws nothing even if the zone says soon', () => {
+    const { container } = soonZone(2 * DAY, { cancelled: true });
+    expect(container.innerHTML).toBe('');
+    cleanup();
+    const ended = soonZone(2 * DAY, { phase: 'P3' });
+    expect(ended.container.innerHTML).toBe('');
   });
 });

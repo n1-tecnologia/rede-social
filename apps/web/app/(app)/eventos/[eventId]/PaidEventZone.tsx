@@ -4,10 +4,12 @@ import { Button } from '@rede-social/ui';
 import { Info, Lock, Ticket } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
+import { useCountdownClock } from '@/components/events/useCountdownClock';
 import { useLiveRefresh } from '@/components/useLiveRefresh';
 import { safeCheckoutHref } from '@/lib/event-ticket';
-import type { EventPhase, EventSaleState } from '@/lib/events-view';
+import type { EventPhase, EventSaleState, EventSoonView } from '@/lib/events-view';
+import { SoonZone } from './SoonZone';
 import { GOLD, Zone } from './zone';
 
 /**
@@ -23,6 +25,7 @@ import { GOLD, Zone } from './zone';
  * | cancelled, ended (`none`) | nothing (the cancelled banner explains) |
  * | `salesClosed` (under way) | the disabled brand "Vendas encerradas" + its hint |
  * | `unavailable` (module off, gateway down, no link) | the disabled "Venda indisponível" + its hint |
+ * | `soon` (the opening is ahead, Phase 10.2) | the `Em breve` zone (`SoonZone`): the count, the exact opening, the zone, the price and the hint; NO control of any kind, whatever link prop arrives (D-789) |
  * | `soldOut` | the disabled "Esgotado" + the shipped full hint |
  * | `buy` | the ONE external anchor "Comprar ingresso" + "Depois de pagar, sua presença aparece aqui sozinha." |
  *
@@ -45,6 +48,15 @@ import { GOLD, Zone } from './zone';
  * and holds `children`, the shipped zone for a member who is in, so the swap is announced, not just
  * painted; the hook is gone by then. A cancelled or ended event has nothing to wait for: no wrapper, no
  * hook.
+ *
+ * **The `soon` zone (Phase 10.2, UI-D-784, UI-D-787, UI-D-789).** `SoonZone` is a SIBLING of the polite
+ * wrapper, never inside it, so a changing digit is never spoken. The wrapper and its `useLiveRefresh`
+ * listener stay mounted through `soon` (an early payer's presence swaps the zone to the confirmed block,
+ * count and all) and hold ONLY visually hidden sentences: the status sentence that changes at three
+ * thresholds (the last 24 hours, the last hour, the last minute) and, once, "As inscrições abriram." when
+ * THIS client saw the zone go from `soon` to `buy` (never on a first load of an already-open event). That
+ * is at most four polite announcements in the whole wait. The count's own `role="timer"` sits outside the
+ * wrapper and changes silently.
  */
 export interface PaidEventZoneProps {
   /** `EventActionState.zone`: the sale zone the server computed, null for a viewer who is in. */
@@ -66,8 +78,18 @@ export interface PaidEventZoneProps {
   /** The viewer's own ids: the topic is `tenant:{id}:user:{id}`; absent, only the visibility refresh runs. */
   tenantId?: string | null;
   userId?: string | null;
+  /**
+   * Phase 10.2: the `Em breve` block (the opening and the server seed as ISO strings, the finished
+   * opening labels, the zone name and the reference price), present only while `zone` is `soon`.
+   */
+  soon?: EventSoonView | null;
   children?: ReactNode;
 }
+
+/** The unit thresholds of the polite status sentence (UI-D-787). */
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const MINUTE_MS = 60 * 1000;
 
 export function PaidEventZone({
   zone,
@@ -80,30 +102,76 @@ export function PaidEventZone({
   waiting = true,
   tenantId = null,
   userId = null,
+  soon = null,
   children,
 }: PaidEventZoneProps) {
+  const t = useTranslations('events');
+  // The count draws only while the server says `soon` AND sent its block; the zone never has a link.
+  const showSoon = waiting && zone === 'soon' && soon !== null;
+  // Whether THIS client has seen the `Em breve` zone: only then does the swap to the buy zone announce
+  // "As inscrições abriram." (A-UI-16); a first load of an already-open event never does.
+  const [seenSoon, setSeenSoon] = useState(false);
+  if (showSoon && !seenSoon) setSeenSoon(true);
+
   // (1) cancelled and (2) ended: the zone is empty, and so is the wait.
   const empty = cancelled || phase === 'P3' || zone === null || zone === 'none';
   if (waiting && empty) return null;
 
   return (
-    <div aria-live="polite" data-testid="event-actions-live">
-      {waiting ? (
-        <>
-          <LiveRefresh tenantId={tenantId} userId={userId} />
-          <PaidZone
-            zone={zone}
-            phase={phase}
-            format={format}
-            checkoutHref={checkoutHref}
-            priceLabel={priceLabel}
-            refundedNote={refundedNote}
-          />
-        </>
-      ) : (
-        children
-      )}
-    </div>
+    <>
+      {showSoon ? <SoonZone soon={soon} phase={phase} format={format} /> : null}
+      <div aria-live="polite" data-testid="event-actions-live">
+        {waiting ? (
+          <>
+            <LiveRefresh tenantId={tenantId} userId={userId} />
+            {showSoon ? <SoonStatus opensAt={soon.opensAt} serverNow={soon.serverNow} /> : null}
+            {seenSoon && zone === 'buy' ? (
+              <p className="sr-only" data-testid="event-actions-opened">
+                {t('ticket.soon.opened')}
+              </p>
+            ) : null}
+            {showSoon ? null : (
+              <PaidZone
+                zone={zone}
+                phase={phase}
+                format={format}
+                checkoutHref={checkoutHref}
+                priceLabel={priceLabel}
+                refundedNote={refundedNote}
+              />
+            )}
+          </>
+        ) : (
+          children
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * The visually hidden status sentence inside the polite wrapper (UI-D-787): "As inscrições abrem em
+ * menos de 1 dia / 1 hora / 1 minuto." It changes at three thresholds only (the last 24 hours begin, the
+ * last hour, the last minute), so a person using a screen reader hears at most three sentences in the
+ * whole wait, and nothing earlier than 24 hours or at zero (the swap speaks for itself). It follows the
+ * seeded clock, never the device's. The count blocks are NOT here.
+ */
+function SoonStatus({ opensAt, serverNow }: { opensAt: string; serverNow: string | null }) {
+  const t = useTranslations('events');
+  const { remainingMs } = useCountdownClock(opensAt, serverNow);
+  const left = remainingMs;
+  const sentence =
+    left === null || left <= 0 || left >= DAY_MS
+      ? null
+      : left < MINUTE_MS
+        ? t('ticket.soon.milestone.minute')
+        : left < HOUR_MS
+          ? t('ticket.soon.milestone.hour')
+          : t('ticket.soon.milestone.day');
+  return (
+    <p className="sr-only" data-testid="event-soon-status">
+      {sentence}
+    </p>
   );
 }
 
