@@ -171,3 +171,42 @@ describe('SoonZone, the states of the count', () => {
     expect(container).toBeTruthy();
   });
 });
+
+describe('SoonZone, the long zone name wraps and nothing is clipped (A-UI-8, EP backstop)', () => {
+  const LONG =
+    'Horário Padrão da Austrália Central Ocidental, com horário de verão do hemisfério sul e mais um trecho longo para forçar três linhas';
+
+  it('the zone line carries the whole long name, wraps and has no truncation class', () => {
+    zone(2 * DAY, { zoneLabel: LONG });
+    const line = screen.getByTestId('event-soon-zone-label');
+    expect(line.textContent).toBe(`Fuso horário: ${LONG}`);
+    expect(line.className).toContain('break-words');
+    expect(line.className).toContain('text-xs');
+    expect(line.className).not.toMatch(
+      /truncate|line-clamp|overflow-hidden|text-ellipsis|whitespace-nowrap/,
+    );
+  });
+
+  it('every text row of the zone wraps instead of clipping', () => {
+    const { container } = zone(2 * DAY, { zoneLabel: LONG });
+    const rows = container.querySelectorAll('p');
+    for (const row of Array.from(rows)) {
+      expect(row.className).not.toMatch(
+        /truncate|line-clamp|overflow-hidden|text-ellipsis|whitespace-nowrap/,
+      );
+    }
+  });
+
+  it('an untrusted zone name is a React text node, never markup', () => {
+    zone(2 * DAY, { zoneLabel: '<img src=x onerror=alert(1)><b>x</b>' });
+    expect(screen.getByTestId('event-soon-zone-label').textContent).toBe(
+      'Fuso horário: <img src=x onerror=alert(1)><b>x</b>',
+    );
+    expect(screen.getByTestId('event-soon-zone-label').querySelector('img, b')).toBeNull();
+  });
+
+  it('the cells carry no animation or transition class', () => {
+    const { container } = zone(2 * DAY);
+    expect(container.innerHTML).not.toMatch(/animate-|transition|duration-/);
+  });
+});

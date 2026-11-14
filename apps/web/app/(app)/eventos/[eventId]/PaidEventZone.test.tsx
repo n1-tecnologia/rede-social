@@ -645,3 +645,64 @@ function buyProps(overrides: Partial<Props> = {}): Props {
     ...overrides,
   };
 }
+
+describe('PaidEventZone — the count is silent and moves no focus (UI-D-787)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SEED_MS);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('A1. the timer text changes every advanced minute while no aria-live region text changes', () => {
+    soonZone(5 * HOUR);
+    const timer = screen.getByRole('timer');
+    const live = screen.getByTestId('event-actions-live');
+    const liveBefore = live.textContent;
+    const seen = new Set<string>();
+    for (let minute = 0; minute < 6; minute += 1) {
+      act(() => {
+        vi.advanceTimersByTime(MIN);
+      });
+      seen.add(timer.textContent ?? '');
+      expect(live.textContent).toBe(liveBefore);
+    }
+    // A new spoken value every minute, none of them in a live region.
+    expect(seen.size).toBe(6);
+    expect(timer.closest('[aria-live]')).toBeNull();
+    expect(live.contains(timer)).toBe(false);
+  });
+
+  it('A2. focus does not move on a tick, a threshold or the swap to the buy zone', () => {
+    const view = render(
+      <>
+        <button type="button" data-testid="focus-anchor">
+          foco
+        </button>
+        <PaidEventZone
+          {...buyProps({ zone: 'soon', checkoutHref: null, soon: soonBlock(2 * MIN) })}
+        />
+      </>,
+    );
+    const anchor = screen.getByTestId('focus-anchor') as HTMLButtonElement;
+    anchor.focus();
+    for (let step = 0; step < 4; step += 1) {
+      act(() => {
+        vi.advanceTimersByTime(MIN);
+      });
+      expect(document.activeElement).toBe(anchor);
+    }
+    view.rerender(
+      <>
+        <button type="button" data-testid="focus-anchor">
+          foco
+        </button>
+        <PaidEventZone {...buyProps()} />
+      </>,
+    );
+    expect(buy()).toBeTruthy();
+    expect(document.activeElement).toBe(anchor);
+  });
+});

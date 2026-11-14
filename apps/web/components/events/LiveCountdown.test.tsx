@@ -34,6 +34,26 @@ const { translate } = await vi.hoisted(async () => {
   return { translate: real };
 });
 
+// The device clock is read in exactly one place (`serverClock`); counting `now()` proves the value
+// never comes from it when there is no seed.
+const clockReads = vi.hoisted(() => ({ now: 0 }));
+vi.mock('./serverClock', async (orig) => {
+  const real = await orig<typeof import('./serverClock')>();
+  return {
+    ...real,
+    serverClock: (seedIso?: string | null) => {
+      const clock = real.serverClock(seedIso);
+      return {
+        ...clock,
+        now: () => {
+          clockReads.now += 1;
+          return clock.now();
+        },
+      };
+    },
+  };
+});
+
 vi.mock('next-intl', () => ({ useTranslations: () => translate }));
 vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
@@ -75,6 +95,7 @@ function cells(): string[] {
 
 beforeEach(() => {
   refresh.mockReset();
+  clockReads.now = 0;
   vi.useFakeTimers();
   vi.setSystemTime(SEED_MS);
 });
@@ -281,5 +302,110 @@ describe('LiveCountdown text, the surfaces draw the server view words (UI-D-782,
     cleanup();
     count(at, { variant: 'text', announce: 'none' });
     expect(screen.queryAllByRole('timer')).toHaveLength(0);
+  });
+});
+
+describe('LiveCountdown, accessibility and silence (UI-D-787, OPEN-21)', () => {
+  it('the role=timer element exists exactly once per blocks instance, is visually hidden and has no aria-live ancestor', () => {
+    const { container } = count(2 * DAY + 4 * HOUR + 13 * MIN);
+    const timers = screen.getAllByRole('timer');
+    expect(timers).toHaveLength(1);
+    expect(timers[0]?.className).toContain('sr-only');
+    expect(timers[0]?.closest('[aria-live]')).toBeNull();
+    expect(container.querySelectorAll('[aria-live]')).toHaveLength(0);
+    expect(timers[0]?.textContent).toBe(
+      'Tempo restante para a abertura: 2 dias, 4 horas e 13 minutos.',
+    );
+  });
+
+  it('the visible cells are aria-hidden and sit inside no live region', () => {
+    const { container } = count(2 * DAY);
+    const wrap = screen.getByTestId('live-countdown-cells');
+    expect(wrap.getAttribute('aria-hidden')).toBe('true');
+    expect(wrap.closest('[aria-live]')).toBeNull();
+    expect(container.querySelector('[role="status"], [role="alert"]')).toBeNull();
+  });
+
+  it('the spoken value changes silently with each advanced minute, in no live region', () => {
+    count(3 * MIN + 30_000);
+    const timer = screen.getByRole('timer');
+    expect(timer.textContent).toBe('Tempo restante para a abertura: 3 minutos.');
+    act(() => {
+      vi.advanceTimersByTime(MIN);
+    });
+    expect(timer.textContent).toBe('Tempo restante para a abertura: 2 minutos.');
+    act(() => {
+      vi.advanceTimersByTime(MIN);
+    });
+    expect(timer.textContent).toBe('Tempo restante para a abertura: 1 minuto.');
+    act(() => {
+      vi.advanceTimersByTime(MIN);
+    });
+    expect(timer.textContent).toBe('Tempo restante para a abertura: menos de 1 minuto.');
+    act(() => {
+      vi.advanceTimersByTime(MIN);
+    });
+    expect(timer.textContent).toBe('Abrindo agora');
+    expect(timer.closest('[aria-live]')).toBeNull();
+  });
+
+  it('draws no animation and no transition: the digits change in place', () => {
+    const { container } = count(2 * DAY + 4 * HOUR + 13 * MIN);
+    const classes = Array.from(container.querySelectorAll('*'))
+      .map((node) => node.getAttribute('class') ?? '')
+      .join(' ');
+    expect(classes).not.toMatch(/animate-|transition|duration-|motion-|ease-|pulse|spin|flip/);
+    // No seconds counter exists: the text never shows a seconds unit.
+    expect(container.textContent).not.toMatch(/\bseg|\bs\b/);
+  });
+
+  it('moves no focus on a tick, a threshold or zero', () => {
+    const { baseElement } = render(
+      <>
+        <button type="button" data-testid="anchor">
+          x
+        </button>
+        <LiveCountdown
+          targetIso={opening(2 * MIN + 5_000)}
+          seedIso={SEED}
+          kind="opening"
+          variant="blocks"
+        />
+      </>,
+    );
+    const anchor = screen.getByTestId('anchor') as HTMLButtonElement;
+    anchor.focus();
+    expect(baseElement.ownerDocument.activeElement).toBe(anchor);
+    for (let step = 0; step < 4; step += 1) {
+      act(() => {
+        vi.advanceTimersByTime(MIN);
+      });
+      expect(baseElement.ownerDocument.activeElement).toBe(anchor);
+    }
+    expect(cells()).toEqual(['Abrindo agora']);
+  });
+});
+
+describe('LiveCountdown, the device clock never decides the value (OPEN-21, D-788, T-10.2-01)', () => {
+  it('with no seed the clock is never asked for the value, no timer is armed and nothing is drawn', () => {
+    const { container } = count(2 * DAY, { seedIso: null });
+    expect(clockReads.now).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(container.innerHTML).toBe('');
+    // Even a device in 2099 draws nothing: there is no fallback to it.
+    cleanup();
+    vi.setSystemTime(Date.parse('2099-01-01T00:00:00.000Z'));
+    const far = count(2 * DAY, { seedIso: null });
+    expect(clockReads.now).toBe(0);
+    expect(far.container.innerHTML).toBe('');
+  });
+
+  it('with a seed the displayed count is the same with the device clock a day fast, a day slow and in 2099', () => {
+    for (const device of [SEED_MS + DAY, SEED_MS - DAY, Date.parse('2099-01-01T00:00:00.000Z')]) {
+      vi.setSystemTime(device);
+      count(2 * DAY + 4 * HOUR + 13 * MIN);
+      expect(cells()).toEqual(['02 dias', '04 horas', '13 min']);
+      cleanup();
+    }
   });
 });
