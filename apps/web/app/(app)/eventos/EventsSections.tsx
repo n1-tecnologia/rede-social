@@ -6,6 +6,7 @@ import { CalendarDays, Plus, TriangleAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useId, useState } from 'react';
 import { EventLiveNote } from '@/components/events/EventLiveNote';
+import { GalleryBoundaryRefresh } from '@/components/events/GalleryBoundaryRefresh';
 import { eventListPoster } from '@/lib/cover-fallback';
 import type { EventCardView, EventSectionsView } from '@/lib/events-view';
 import { refreshEventSectionsAction } from './actions';
@@ -169,6 +170,31 @@ function Gallery({
 }
 
 /**
+ * The ONE shared refresh of the page's `Em breve` openings (Phase 10.2, D-788, UI-D-786): the opening of every
+ * card whose descriptor counts to it, the first descriptor's server seed and a key built from the ids and
+ * tags of every tagged card. `null` (no island) for a page with no such card, so no timer is mounted.
+ */
+function boundaryRefreshFor(sections: EventSectionsView): ReactNode {
+  const cards = [...sections.mine, ...sections.others];
+  const soon = cards.flatMap((card) =>
+    card.countdown?.kind === 'opening' ? [card.countdown] : [],
+  );
+  const first = soon[0];
+  if (!first) return null;
+  const tags = cards
+    .filter((card) => card.tag !== undefined)
+    .map((card) => `${card.id}:${card.tag}`)
+    .join('|');
+  return (
+    <GalleryBoundaryRefresh
+      openings={soon.map((countdown) => countdown.targetIso)}
+      serverNow={first.seedIso}
+      tags={tags}
+    />
+  );
+}
+
+/**
  * The galleries' skeleton, shared with `loading.tsx`: the real headers (their words are fixed) and
  * two posters each, in the galleries' own geometry, so nothing moves when the cards swap in.
  */
@@ -253,6 +279,7 @@ export function EventsSections({
   } else {
     body = (
       <>
+        {boundaryRefreshFor(sections)}
         <Gallery
           section="mine"
           title={t('sections.mine.title')}

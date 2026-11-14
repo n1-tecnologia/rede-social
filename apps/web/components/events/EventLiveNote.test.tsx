@@ -46,7 +46,7 @@ const DAY = 24 * HOUR;
 const at = (ms: number) => new Date(SEED_MS + ms).toISOString();
 
 function note(props: Partial<Props> & Pick<Props, 'note'>) {
-  return render(<EventLiveNote surface="poster" {...(props as Props)} />);
+  return render(<EventLiveNote {...({ surface: 'poster', ...props } as Props)} />);
 }
 
 beforeEach(() => {

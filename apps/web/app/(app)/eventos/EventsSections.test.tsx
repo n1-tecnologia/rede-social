@@ -53,6 +53,14 @@ vi.mock('next-intl', () => ({
 
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock('./actions', () => ({ refreshEventSectionsAction: refresh }));
+// The shared refresh island has its own suite: here only what the gallery hands it is under test.
+const island = vi.hoisted(() => ({ mounts: [] as Array<Record<string, unknown>> }));
+vi.mock('@/components/events/GalleryBoundaryRefresh', () => ({
+  GalleryBoundaryRefresh: (props: Record<string, unknown>) => {
+    island.mounts.push(props);
+    return <span data-testid="gallery-boundary-refresh" />;
+  },
+}));
 // A STABLE router, as Next's is (the countdown hooks depend on it).
 const nav = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => nav }));
@@ -63,6 +71,7 @@ afterEach(() => {
   cleanup();
   refresh.mockReset();
   nav.refresh.mockReset();
+  island.mounts.length = 0;
   vi.useRealTimers();
 });
 
@@ -463,5 +472,78 @@ describe('EventsSections — the Em breve card (10.2-14, D-784, D-785)', () => {
       />,
     );
     expect(within(direct.container).getByTestId('event-poster').outerHTML).toBe(html);
+  });
+});
+
+/**
+ * Phase 10.2-14 (D-788, OPEN-10, UI-D-786, T-10.2-06) - the gallery mounts the ONE shared refresh island with
+ * the openings of its `Em breve` cards, the server seed and a key carrying the tags; a gallery with no such
+ * card mounts none.
+ */
+describe('EventsSections - the one shared refresh of the openings (10.2-14)', () => {
+  const SEED = '2026-10-05T08:47:00.000000Z';
+  const soonCard = (id: string, opens: string) =>
+    card(id, {
+      tag: 'Em breve',
+      note: 'x',
+      countdown: { kind: 'opening', targetIso: opens, seedIso: SEED, price: null },
+    });
+
+  it('mounts the island exactly once, with every Em breve opening, the seed and the tags key', () => {
+    render(
+      <EventsSections
+        tenantName={TENANT}
+        initial={{
+          mine: [],
+          others: [
+            soonCard('a', '2026-10-05T10:00:00.000000Z'),
+            soonCard('b', '2026-10-05T09:00:00.000000Z'),
+            card('p', { tag: 'Pago', note: 'x' }),
+            card('f'),
+          ],
+        }}
+      />,
+    );
+    expect(screen.getAllByTestId('gallery-boundary-refresh')).toHaveLength(1);
+    const props = island.mounts.at(-1) as Record<string, unknown>;
+    expect(props.openings).toEqual(['2026-10-05T10:00:00.000000Z', '2026-10-05T09:00:00.000000Z']);
+    expect(props.serverNow).toBe(SEED);
+    expect(props.tags).toBe('a:Em breve|b:Em breve|p:Pago');
+  });
+
+  it('a gallery with no Em breve card mounts none, and neither does an unreadable first load', () => {
+    render(
+      <EventsSections
+        tenantName={TENANT}
+        initial={{ mine: [], others: [card('p', { tag: 'Pago', note: 'x' }), card('f')] }}
+      />,
+    );
+    expect(screen.queryByTestId('gallery-boundary-refresh')).toBeNull();
+    cleanup();
+    render(<EventsSections tenantName={TENANT} initial={null} />);
+    expect(screen.queryByTestId('gallery-boundary-refresh')).toBeNull();
+  });
+
+  it('a holder card (a count to the event) is not an opening and mounts none', () => {
+    render(
+      <EventsSections
+        tenantName={TENANT}
+        initial={{
+          mine: [
+            card('h', {
+              note: 'Faltam 2 dias',
+              countdown: {
+                kind: 'event',
+                targetIso: '2026-10-07T13:00:00.000000Z',
+                seedIso: SEED,
+                price: null,
+              },
+            }),
+          ],
+          others: [],
+        }}
+      />,
+    );
+    expect(screen.queryByTestId('gallery-boundary-refresh')).toBeNull();
   });
 });
