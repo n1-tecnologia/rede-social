@@ -1745,7 +1745,7 @@ export type AttendeeView = {
 
 /** One pill of the marks line (UI-D-754): a word, never a colour alone. */
 export type AttendeeMark = {
-  kind: 'paid' | 'courtesy' | 'beforeTicket' | 'refunded' | 'overLimit';
+  kind: 'paid' | 'beforeOpening' | 'courtesy' | 'beforeTicket' | 'refunded' | 'overLimit';
   tone: 'success' | 'neutral' | 'warning';
   label: string;
 };
@@ -1821,6 +1821,15 @@ function paidAttendeeFields(
     if (origin !== null) {
       const { kind, tone } = ORIGIN_MARK[origin];
       marks.push({ kind, tone, label: t(`participants.origin.${kind}`) });
+    }
+    // Phase 10.2 (D-791, OPEN-14): a neutral pill right after `Pago` for a payment that confirmed before the
+    // opening; only a paid origin ever carries the flag, and a `Não vão` row never reaches this branch.
+    if (origin === 'ticket' && attendee.beforeOpening === true) {
+      marks.push({
+        kind: 'beforeOpening',
+        tone: 'neutral',
+        label: t('participants.origin.beforeOpening'),
+      });
     }
     if (attendee.refunded === true) {
       marks.push({ kind: 'refunded', tone: 'warning', label: t('participants.origin.refunded') });

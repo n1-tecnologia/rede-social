@@ -383,6 +383,7 @@ describe('eventRowView (UI-D-519): finished strings from the neutral event', () 
       received: 'recebido há 3 min',
       canGrant: false,
       canRegister: false,
+      marker: null,
     });
   });
 
@@ -603,5 +604,29 @@ describe('eventRowView: a ticket delivery (D-758, UI-D-758)', () => {
     expect(eventRowView(event({ eventTitle: 'Encontro' }), t, { serverNow: NOW }).product).toBe(
       'Assinatura mensal',
     );
+  });
+});
+
+describe('eventRowView: the early-payment marker (D-791, OPEN-15)', () => {
+  it('is the catalog label for an item applied before the opening and null for every other item', () => {
+    const marked = eventRowView(ticket({ beforeOpening: true }), rec, { serverNow: NOW });
+    expect(marked.marker).toBe('payments.events.beforeOpening');
+    expect(eventRowView(ticket({ beforeOpening: true }), t, { serverNow: NOW }).marker).toBe(
+      'Antes da abertura',
+    );
+    expect(eventRowView(ticket(), rec, { serverNow: NOW }).marker).toBeNull();
+    expect(
+      eventRowView(ticket({ beforeOpening: undefined }), rec, { serverNow: NOW }).marker,
+    ).toBeNull();
+    // A store or access item, a late ticket, a refunded or ignored one: none carries the key.
+    expect(eventRowView(event(), rec, { serverNow: NOW }).marker).toBeNull();
+    expect(
+      eventRowView(ticket({ state: 'event_ended', outcome: 'event_ended' }), rec, {
+        serverNow: NOW,
+      }).marker,
+    ).toBeNull();
+    expect(
+      eventRowView(ticket({ outcome: 'ticket_revoked' }), rec, { serverNow: NOW }).marker,
+    ).toBeNull();
   });
 });

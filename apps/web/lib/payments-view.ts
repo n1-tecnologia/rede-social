@@ -337,6 +337,11 @@ export interface EventRowView {
   canGrant: boolean;
   /** "Cadastrar produto" exists on an unknown-product row only. */
   canRegister: boolean;
+  /**
+   * Phase 10.2 (D-791, OPEN-15): "Antes da abertura" for a ticket delivery applied before the event's
+   * registration opening, `null` for every other item. Pure data: the neutral pill is drawn by the component.
+   */
+  marker: string | null;
 }
 
 const EVENT_STATE_WORD: Record<EventItemState, string> = {
@@ -410,6 +415,7 @@ export function eventRowView(
     received: t('payments.events.received', { when: whenText(item.receivedAt, ctx.serverNow) }),
     canGrant: item.state === 'no_account',
     canRegister: item.state === 'unknown_product',
+    marker: item.beforeOpening === true ? t('payments.events.beforeOpening') : null,
   };
 }
 

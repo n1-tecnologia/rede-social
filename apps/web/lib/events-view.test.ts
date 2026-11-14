@@ -2185,3 +2185,52 @@ describe('10.2-10 the hero overline of a paid holder (UI-D-783, UI-D-788)', () =
     expect(view).not.toHaveProperty('overlineCountdown');
   });
 });
+
+describe('10.2-10 attendeeView: the neutral Antes da abertura mark (D-791, OPEN-14)', () => {
+  const row = (overrides: Partial<Attendee> = {}): Attendee => ({
+    id: 'aaaaaaaa-0000-4000-8000-000000000001',
+    displayName: 'Iris Muñoz',
+    avatarAssetId: null,
+    avatarVariantWidths: [],
+    removed: false,
+    status: 'going',
+    respondedAt: '2026-10-02T15:00:00.000000Z',
+    checkedInAt: null,
+    walkIn: false,
+    ...overrides,
+  });
+  const NOW = at('2026-10-12T23:00:00Z');
+  const view = (attendee: Attendee, list: 'confirmed' | 'present' | 'not_going' = 'confirmed') =>
+    attendeeView(attendee, list, { tz: SP, nowMs: NOW, t: rec });
+  const kinds = (attendee: Attendee, list: 'confirmed' | 'present' | 'not_going' = 'confirmed') =>
+    view(attendee, list).marks?.map((mark) => mark.kind);
+
+  it('sits right after Pago and before Reembolsado and Acima do limite, with the neutral tone', () => {
+    const all = row({
+      status: 'checked_in',
+      checkedInAt: '2026-10-12T21:30:00.000000Z',
+      origin: 'ticket',
+      beforeOpening: true,
+      refunded: true,
+      overLimit: true,
+    });
+    expect(kinds(all, 'present')).toEqual(['paid', 'beforeOpening', 'refunded', 'overLimit']);
+    expect(kinds(all, 'confirmed')).toEqual(['paid', 'beforeOpening', 'refunded', 'overLimit']);
+    expect(view(row({ origin: 'ticket', beforeOpening: true })).marks).toEqual([
+      { kind: 'paid', tone: 'success', label: 'participants.origin.paid' },
+      { kind: 'beforeOpening', tone: 'neutral', label: 'participants.origin.beforeOpening' },
+    ]);
+  });
+
+  it('is absent for a courtesy, a before-the-ticket row, a Não vão row, a row without the key and a free event', () => {
+    expect(kinds(row({ origin: 'courtesy', beforeOpening: true }))).toEqual(['courtesy']);
+    expect(kinds(row({ origin: 'before_ticket', beforeOpening: true }))).toEqual(['beforeTicket']);
+    expect(
+      kinds(row({ status: 'not_going', origin: null, beforeOpening: true }), 'not_going'),
+    ).toEqual([]);
+    expect(kinds(row({ origin: 'ticket' }))).toEqual(['paid']);
+    expect(kinds(row({ origin: 'ticket', beforeOpening: false }))).toEqual(['paid']);
+    // A free event's row carries no `origin` at all: no marks key, whatever stray flag it holds.
+    expect(view(row({ beforeOpening: true }))).not.toHaveProperty('marks');
+  });
+});
