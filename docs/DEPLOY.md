@@ -4756,6 +4756,191 @@ And in the app, on a test event of a tenant with the payments module on and a ga
 
 See the ledger named at the top. A row becomes `passed` only with the evidence you paste and your own date.
 
+## Phase 10.2 release (opening of the event sale)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them: nothing of
+Phase 10.2 has been pushed, deployed or applied to a hosted project, and no agent touches homolog or production.
+No command here prints a secret. Phase 10.2 ships ON TOP of the Phase 10.1 release (paid events through the payment
+gateway) and of every release above it. The proofs only the owner can run (the first real early purchase, the real
+phone with a wrong device clock, the screen-reader reading of the counter, the held-out visual checks at 320 px, the
+homolog deploy, every production step, the sketch 022 approval record, the full `pnpm verify`, the planner
+assumptions to confirm) are in the ledger `.planning/phases/10.2-*/10.2-MANUAL-PROOFS.md`; it ships with every row
+`pending`, and a row becomes `passed` only with the evidence you paste and your own date.
+
+**This release does not, by itself, change any event.** Nothing changes for any event until an administrator types a
+registration opening date on a PAID event (see "Per-tenant effect" below). An event with no date is open from the
+first second, exactly as before this release.
+
+### What ships
+
+- **Three migrations, all expand-only, applied in timestamp order** (the order `ls supabase/migrations` prints, all
+  after `20261113144645_event_gateway_grant_replay_first.sql`). Each applies on an EMPTY tenant project and on an
+  existing one: both new columns are nullable with no default, so no row is required by any of them.
+  1. `20261113230004_event_opening.sql` (generated): `events.registration_opens_at` (nullable, check
+     `events_registration_opens_chk`: null, or strictly before `starts_at`) and `event_attendances.ticket_confirmed_at`
+     (nullable, check `event_attendances_ticket_confirmed_chk`: only origin `ticket`). Two ADD COLUMN and two ADD
+     CONSTRAINT, nothing else.
+  2. `20261113230509_event_opening_reads.sql` (hand-written): `app.event_checkout_url(uuid)` now also reads the database
+     clock, so the purchase link is null until the opening; the new `app.event_sale_ready(uuid)` tells a closed sale
+     from one that has not opened; the trigger `events_opening_guard` (function `app.event_opening_guard()`) refuses a
+     change of the date once a paid presence exists (`opening_locked`); `app.event_ticket_reset(uuid)` also clears the
+     date when the ticket is turned off.
+  3. `20261113231417_event_opening_grant.sql` (hand-written): `app.event_gateway_grant` stamps
+     `ticket_confirmed_at` on every write path and still never checks the opening (an early payment confirms the
+     presence), `app.event_attendance_guard()` keeps that column out of the member lane, and the new
+     `app.event_ticket_before_opening(uuid, uuid, text, text)` (service role only) answers the Eventos recentes mark.
+- **The web.** The opening field of the event form, the Em breve tag and short note on the card, the hero and
+  `Meus eventos`, the Em breve zone with the live count (seeded from the server, so a wrong device clock changes
+  nothing) and its by-itself swap to Comprar ingresso, the holder's live count to the event, and the Antes da
+  abertura marks on Participantes and Eventos recentes. The web reads every new key of the API as optional.
+- **The API and the worker.** The optional `registrationOpens` key on the event write, the codes
+  `opening_after_start` (400) and `opening_locked` (409), the optional `registrationOpensAt`, `serverNow`,
+  `saleReady` and `beforeOpening` keys on the reads, and the early-payment flag on the Pagamentos list. No new route,
+  table, queue or job name.
+
+### Read-only check on EVERY hosted project (run before anything else)
+
+Run these on each hosted tenant project, **including the one that holds several tenants**, in the Supabase SQL
+editor or with `psql` and a read-only role. They only read. Paste the shapes and counts in the ledger; never a
+project reference or a tenant name.
+
+```sql
+-- A. Is any of this release already on the project? (expected before the release: no row)
+select table_name, column_name from information_schema.columns
+ where table_schema = 'public'
+   and ((table_name = 'events' and column_name = 'registration_opens_at')
+     or (table_name = 'event_attendances' and column_name = 'ticket_confirmed_at'));
+-- B. Which of this release's versions are already recorded? (expected before the release: no row)
+select version from supabase_migrations.schema_migrations
+ where version in ('20261113230004', '20261113230509', '20261113231417') order by version;
+```
+
+Then, from the repository, the two local checks that need no project:
+
+- `pnpm db:migrate-all -- --dry-run` lists the pending versions per project and writes nothing; on a project that
+  already has the Phase 10.1 release the three files above are the pending ones.
+- The expand-only grep over the three files prints nothing:
+  `grep -inE 'drop (table|column)|rename|set not null|alter column .* type' supabase/migrations/*_event_opening.sql
+  supabase/migrations/*_event_opening_reads.sql supabase/migrations/*_event_opening_grant.sql`.
+
+### Order
+
+1. Migrations on every tenant database first, through the ledgered fan-out (the Phase 09.2 Cloud Run Job `migrateAll`, D-544: databases before the services); the three files apply in the order of their names, the runner is serialised per database and idempotent, so a re-run is safe and reports nothing pending. Locally, `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole tenant set to an empty second local database.
+2. Web second, once every project is current.
+3. API and worker last and together, from a REBUILT image (the image bakes the migrations manifest built by `scripts/build-migrations-manifest.mjs`; an image built before these files does not know them, and a production boot without the manifest stops with `migrations manifest empty`).
+
+**Why this order.** The web reads every new key as optional, so an old API is fine behind a new web (nothing in it
+asks for an opening fact the old API does not send), while the new API reads the migrated columns and calls the
+redefined definers, so it must never run before the migrations reach a project: the schema gate holds such a project
+out as `updating` instead of letting a member meet the error.
+
+**The gap between the web step and the API step.** The form sends the opening key only when the administrator typed
+or cleared a date, so between the two steps an unchanged save, a save with no date, and every event that has no
+opening keep saving as before. Only a save that CARRIES a date answers a generic error (the previous API's strict
+input refuses the unknown key), and nothing is stored by it. The API step follows in the same sitting; do not leave
+the web ahead of the API for longer than that, and do not tell an administrator to set a date before the API step is
+done.
+
+### What keeps the previous API revision working during the fan-out
+
+- **An event with no opening behaves as before.** `app.event_checkout_url` answers exactly as it did for a null
+  `registration_opens_at` (the stored `https:` link while the gateway mode is on, null otherwise), and no event has an
+  opening until an administrator sets one, which only the new API can write.
+- **Every redefined function keeps its name, signature and grants.** `app.event_checkout_url(uuid)`,
+  `app.event_ticket_reset(uuid)`, `app.event_gateway_grant(uuid, uuid, uuid, text, text, boolean)` and
+  `app.event_attendance_guard()` are `create or replace` with the same arguments, return types and grants; the three
+  additions (`app.event_sale_ready`, `app.event_opening_guard`, `app.event_ticket_before_opening`) are never called by
+  the previous revision. The previous apply job reaches the grant through its unchanged call, so an approved purchase
+  still confirms a presence; the 10.1 integration files that call these by those names (`events-tickets`,
+  `payments-apply-tickets`, `payments-apply`) run UNCHANGED against the migrated database in this phase's gate (ledger,
+  "Phase exit gate").
+- **The old code never selects the new columns**, and the member lane still writes the same attendance columns, so it
+  keeps working against the new database.
+- **The new columns are optional and the new keys are optional**, so an older reader of an event payload, strict
+  schemas included, only ever meets keys it already knows until an opening is set.
+
+### Per-tenant effect
+
+Nothing changes for any event, in any tenant, until an administrator sets a date on a PAID event. After that, and only
+for that event: members see the Em breve tag, the count and the exact opening instead of Comprar ingresso, the server
+hands the purchase link out only from the opening instant, and a payment that arrives early still confirms the
+presence and is marked Antes da abertura for the administrator. The date cannot change once a ticket is sold and turning
+the ticket off clears it. A tenant with the `payments` module off, or a gateway not connected, still sees Venda
+indisponível before anything else.
+
+### Rollback limit
+
+- **Migrations are never rolled back** (forward-only; there is no down migration, and these three are expand-only).
+  Roll forward with a fix.
+- **Before any administrator sets a date,** redeploy the previous API and worker revision, then the previous web.
+- **After a date is set, do not roll the API back.** An older API rejects the new input key (a strict input) and does
+  not know the two codes `opening_after_start` and `opening_locked`, so an administrator could not read why a save
+  failed, and the stored date would sit unseen.
+- **An older web against the new API shows Venda indisponível for a sale that has not opened:** it knows no opening,
+  and the purchase link is null until the opening, so it draws the closed sale it already draws for a null link.
+  Roll the web forward, not back, once a date is set.
+- **The new API against an old schema is held out `updating`.** Do not release the API before the migrations reach
+  every project.
+
+### Smoke checks (on the homolog host once it serves this release)
+
+Read-only SQL on a tenant project, after the Job:
+
+```sql
+select table_name, column_name from information_schema.columns
+ where table_schema = 'public'
+   and ((table_name = 'events' and column_name = 'registration_opens_at')
+     or (table_name = 'event_attendances' and column_name = 'ticket_confirmed_at'));
+-- two rows
+select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app' and proname in ('event_sale_ready', 'event_opening_guard', 'event_ticket_before_opening');
+-- three rows
+select tgname from pg_trigger where tgname = 'events_opening_guard' and not tgisinternal;
+-- one row
+select pg_get_functiondef('app.event_gateway_grant(uuid,uuid,uuid,text,text,boolean)'::regprocedure) like '%ticket_confirmed_at%';
+-- t
+select count(*) from public.events where registration_opens_at is not null;
+-- 0 on a project where no administrator has set a date yet
+```
+
+And in the app, on a test event of a tenant with the payments module on and a gateway connected:
+
+- Set a date a few minutes ahead on a test paid event (Cobrar ingresso on, product id, link, price, then Abertura das
+  inscrições). Read it as a member: the Em breve tag, the count, the exact opening, and no Comprar ingresso.
+- Keep the page open and watch the swap: at the opening instant the zone becomes the Comprar ingresso link by itself,
+  with no reload, whatever the phone's clock says.
+- On a second test event with a date still ahead, make a test purchase with the member's e-mail before the opening: the
+  open page becomes Presença confirmada by itself, Participantes marks Pago and Antes da abertura, and Pagamentos,
+  Eventos recentes shows the same mark.
+- Try to change the date of that event in the form: it shows the date read-only with the sold line.
+- On a third event with no sale, turn Cobrar ingresso off and save: the date is cleared and the member sees a free event.
+
+### Note for Phase 13
+
+Plan 13-18 (the purchase switch of the native app) does NOT cover the Comprar ingresso zone or the Em breve zone of an
+event: its `files_modified` lists no events file, only the Loja, the locked community and lesson screens, the social
+locked post and the sign-up access notices. Whether store policy reaches the admission to a paid event is the
+developer's decision to take in Phase 13. Nothing native is built in Phase 10.2.
+
+### Open items for the developer (recorded, not decided here)
+
+- **The re-seed guard of the countdown hook is per instance.** A tab hidden for more than 60 s asks the server for one
+  fresh seed per mounted countdown when it comes back: twice on the event page (the blocks and the hidden status),
+  once per card on the gallery and the profile rail. It is bounded (one return, one round), never per tick, and the
+  shipped visibility refresh already exists beside it. A shared guard would collapse it to one refresh per return and
+  needs a change in `useCountdownClock`.
+- **At the start, a fresh render of Meus eventos shows `É hoje!` for a paid holder** where the sketch says `Acontecendo
+  agora` (the holder branch covers the hours before the start only). The live count hands over at zero while the page
+  is open. To decide together with A-UI-15.
+- **Two local-database residues unrelated to the phase** (not release items): four story-data cases of the integration
+  suite fail on the developer's local database because every local story is older than 24 hours (`feed-query-budget`
+  story tables, `isolation` b3 and b8, the 10-10 stories sweep), and pgTAP `154-moderation-log` test 65 fails on
+  orphan rows left by earlier integration runs. A fresh seed clears them; no agent runs one.
+
+### Manual proofs (hosted)
+
+See the ledger named at the top. A row becomes `passed` only with the evidence you paste and your own date.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event

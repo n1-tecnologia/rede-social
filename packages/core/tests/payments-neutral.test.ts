@@ -178,6 +178,111 @@ describe('the files of the paid-event work name no gateway (EP-34, TICK-20)', ()
   });
 });
 
+/**
+ * Phase 10.2-16 (OPEN-25; EP-55 to EP-58): the files the opening of the sale added, scanned beside the
+ * ticket files. The migrations whose names contain `event_opening`, its pgTAP file, the browser spec (only
+ * when it exists), the two web libraries and the components of the events folder; the catalogs are read as
+ * DATA (the 10.1 walk above runs over the new keys too, because it reads every parsed value). The scanned
+ * list and the hit report are SORTED, so two runs print the same thing.
+ */
+const OPENING_MIGRATION = /event_opening/;
+
+function openingFiles() {
+  return {
+    migrations: listDir(
+      'supabase/migrations',
+      (n) => OPENING_MIGRATION.test(n) && n.endsWith('.sql'),
+    ).sort(),
+    pgtap: listDir('supabase/tests', (n) => n === '234-event-opening.sql'),
+    // Optional by design: a checkout without the browser spec still scans everything else.
+    e2e: listDir('apps/web/e2e', (n) => n === 'events-opening.spec.ts'),
+    web: listDir(
+      'apps/web/lib',
+      (n) => n === 'event-countdown.ts' || n === 'event-opening-form.ts',
+    ).sort(),
+    components: listDir('apps/web/components/events', (n) => /\.(ts|tsx)$/.test(n)).sort(),
+  };
+}
+
+/** Pure and ordered: the offending files of a group, sorted, whatever order the walk produced. */
+function sortedOffenders(files: string[], read: (file: string) => string): string[] {
+  return offenders(files, read).sort();
+}
+
+describe('the files of the opening work name no gateway (OPEN-25)', () => {
+  it('walked the three opening migrations, the pgTAP file, the web libraries and the events components', () => {
+    const groups = openingFiles();
+    expect(groups.migrations).toHaveLength(3);
+    expect(groups.pgtap).toHaveLength(1);
+    expect(groups.web).toHaveLength(2);
+    expect(groups.components.length).toBeGreaterThanOrEqual(8);
+  });
+
+  for (const [name, files] of Object.entries(openingFiles())) {
+    it(`${name}: no file names the brand`, () => {
+      expect(sortedOffenders(files, (file) => readFileSync(file, 'utf8'))).toEqual([]);
+    });
+  }
+
+  it('the browser spec is scanned when it exists, and names no brand', () => {
+    const spec = join(ROOT, 'apps/web/e2e/events-opening.spec.ts');
+    if (!existsSync(spec)) return;
+    expect(offenders([spec], (file) => readFileSync(file, 'utf8'))).toEqual([]);
+  });
+
+  it('every parsed value of the events and payments catalogs, the new Em breve keys included, names no brand', () => {
+    for (const name of ['events.json', 'payments.json']) {
+      const text = readFileSync(join(ROOT, 'apps/web/messages/pt-BR', name), 'utf8');
+      expect(catalogHits(text), name).toEqual([]);
+    }
+    const events = readFileSync(join(ROOT, 'apps/web/messages/pt-BR/events.json'), 'utf8');
+    // The walk is not vacuous: the new copy is among the values it just read.
+    expect(catalogValues(JSON.parse(events) as unknown)).toContain('Em breve');
+  });
+});
+
+describe('the matcher, the edge cases of the opening work (EP-55 to EP-58)', () => {
+  it('EP-55: words around {gateway}, and a longer word that only shares letters with the brand, are not hits', () => {
+    const text = JSON.stringify({
+      around: 'Venda pelo {gateway}, depois confira no {gateway} e volte.',
+      shares: 'kiwi wifi kiosk ki wi fy',
+      longer: `${BRAND.slice(0, 3)} ${BRAND.slice(3)}`,
+    });
+    expect(catalogHits(text)).toEqual([]);
+    // ...while the whole word inside a longer one stays a hit.
+    expect(catalogHits(JSON.stringify({ a: `pre${BRAND}post` }))).toHaveLength(1);
+  });
+
+  it('EP-56: an empty value and a bare {gateway} placeholder are not hits, alone or nested', () => {
+    expect(catalogHits(JSON.stringify({ a: '' }))).toEqual([]);
+    expect(catalogHits(JSON.stringify({ a: '{gateway}' }))).toEqual([]);
+    expect(catalogHits(JSON.stringify({ a: [{ b: '' }, { c: '{gateway}' }] }))).toEqual([]);
+    expect(catalogHits('{}')).toEqual([]);
+  });
+
+  it('EP-57: a value spelled with a unicode escape of the brand is caught on the parsed text, in any case', () => {
+    const escaped = `{"soon":{"hint":"Abre pelo ${BRAND.slice(0, 2).toUpperCase()}\\u0057${BRAND.slice(3)}."}}`;
+    expect(BRAND_PATTERN.test(escaped)).toBe(false);
+    expect(catalogHits(escaped)).toHaveLength(1);
+  });
+
+  it('EP-58: the scanned list and the hit report are sorted, so two scans print the same', () => {
+    const first = openingFiles();
+    const second = openingFiles();
+    expect(second).toEqual(first);
+    for (const files of [first.migrations, first.web, first.components]) {
+      expect(files).toEqual([...files].sort());
+    }
+    // A report over a shuffled list is the same, sorted, report.
+    const files = ['/x/b.ts', '/x/a.ts', '/x/c.ts'];
+    const read = () => BRAND;
+    const forward = sortedOffenders(files, read);
+    const backward = sortedOffenders([...files].reverse(), read);
+    expect(forward).toEqual(backward);
+    expect(forward).toEqual([...forward].sort());
+  });
+});
+
 describe('the neutral layer names no gateway (PAY-02)', () => {
   const groups = neutralFiles();
 
