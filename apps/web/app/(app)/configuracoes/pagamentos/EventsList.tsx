@@ -244,6 +244,7 @@ export function EventsList({ initialItems, serverNow, gatewayName, tenantName }:
                       product={view.product}
                       effect={view.effect}
                       received={view.received}
+                      marker={view.marker}
                       action={action}
                     />
                   );

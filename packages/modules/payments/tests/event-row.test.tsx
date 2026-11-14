@@ -218,3 +218,47 @@ describe('EventRowSkeleton and the events skeleton (UI-D-528)', () => {
     expect(container.textContent).toBe('');
   });
 });
+
+describe('EventRow: the optional neutral marker (Phase 10.2-15, D-791, OPEN-15)', () => {
+  it('draws the finished marker as a neutral pill INSIDE the span that holds the state pill', () => {
+    const li = row({ effect: 'Presença confirmada', marker: 'Antes da abertura' });
+    const pill = li.querySelector('[data-event-marker]') as HTMLElement;
+    expect(pill.textContent).toBe('Antes da abertura');
+    expect(pill.className).toContain('bg-bg-tertiary');
+    expect(pill.className).toContain('text-text-secondary');
+    const statePill = li.querySelector('[data-state]') as HTMLElement;
+    expect(pill.parentElement).toBe(statePill.parentElement);
+    // The state pill first, then the marker, then the received time.
+    const children = Array.from((pill.parentElement as HTMLElement).children);
+    expect(children.indexOf(statePill)).toBe(0);
+    expect(children.indexOf(pill)).toBe(1);
+    expect(children[2]?.textContent).toBe('recebido há 3 min');
+    // The effect line is untouched and the span keeps its wrapping classes (the pill drops under the
+    // state pill below 360px).
+    expect(li.textContent).toContain('Presença confirmada');
+    const span = pill.parentElement as HTMLElement;
+    expect(span.className).toBe('mt-1 flex flex-wrap items-center gap-x-2 gap-y-1');
+  });
+
+  it('a row without a marker (missing, null or empty) is byte-identical to the shipped markup', () => {
+    const shipped = row().outerHTML;
+    cleanup();
+    expect(row({ marker: undefined }).outerHTML).toBe(shipped);
+    cleanup();
+    expect(row({ marker: null }).outerHTML).toBe(shipped);
+    cleanup();
+    expect(row({ marker: '' }).outerHTML).toBe(shipped);
+    expect(shipped).not.toContain('data-event-marker');
+  });
+
+  it('draws the same marker on a row that has an action without moving the action', () => {
+    const li = row({
+      marker: 'Antes da abertura',
+      action: <button type="button">Liberar manualmente</button>,
+    });
+    expect(li.querySelector('[data-event-marker]')).not.toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Liberar manualmente' }).parentElement?.className,
+    ).toContain('shrink-0');
+  });
+});

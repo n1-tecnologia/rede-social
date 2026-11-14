@@ -637,6 +637,64 @@ describe('EventsList: ticket deliveries (UI-D-758)', () => {
   });
 });
 
+describe('EventsList: the early-payment marker (Phase 10.2-15, D-791, OPEN-15)', () => {
+  const EARLY: EventItem = {
+    id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    type: 'purchase_approved',
+    state: 'applied',
+    email: 'otavio@exemplo.com.br',
+    productName: 'Ingresso do encontro',
+    externalProductId: 'tk0002',
+    outcome: 'ticket_granted',
+    receivedAt: THREE_MIN,
+    kind: 'event',
+    eventTitle: 'Encontro anual',
+    beforeOpening: true,
+  };
+  const LATE: EventItem = {
+    ...EARLY,
+    id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    email: 'paula@exemplo.com.br',
+    beforeOpening: false,
+  };
+  const REFUNDED: EventItem = {
+    ...EARLY,
+    id: '12121212-1212-4212-8212-121212121212',
+    email: 'quico@exemplo.com.br',
+    type: 'purchase_refunded',
+    outcome: 'ticket_revoked',
+    beforeOpening: undefined as never,
+  };
+  const marker = (row: HTMLElement) =>
+    row.querySelector('[data-event-marker]') as HTMLElement | null;
+
+  it('a ticket delivery applied before the opening carries the neutral pill beside the state pill and keeps its effect line', () => {
+    mount({ initialItems: [EARLY, LATE, REFUNDED, APPLIED] });
+    const early = rowWith('otavio@exemplo.com.br');
+    const pill = marker(early) as HTMLElement;
+    expect(pill.textContent).toBe('Antes da abertura');
+    expect(pill.className).toContain('bg-bg-tertiary');
+    expect(pill.parentElement).toBe(early.querySelector('[data-state]')?.parentElement);
+    expect(pill.parentElement?.className).toContain('flex-wrap');
+    expect(early.textContent).toContain('Presença confirmada');
+    expect(early.querySelector('[data-state]')?.textContent).toBe('Aplicado');
+  });
+
+  it('a late ticket delivery, a refunded one and a store delivery render no marker', () => {
+    mount({ initialItems: [EARLY, LATE, REFUNDED, APPLIED] });
+    expect(marker(rowWith('paula@exemplo.com.br'))).toBeNull();
+    expect(marker(rowWith('quico@exemplo.com.br'))).toBeNull();
+    expect(marker(rowWith('ana@exemplo.com.br'))).toBeNull();
+    expect(list().querySelectorAll('[data-event-marker]')).toHaveLength(1);
+  });
+
+  it('adds no notification, no toast and no action for the opening: the only trace is the pill', () => {
+    mount({ initialItems: [EARLY] });
+    expect(toast.show).not.toHaveBeenCalled();
+    expect(within(rowWith('otavio@exemplo.com.br')).queryAllByRole('button')).toHaveLength(0);
+  });
+});
+
 describe('EventsList: "Liberar manualmente" on a ticket (D-749, D-750, UI-D-759)', () => {
   const NO_ACCOUNT_TICKET: EventItem = {
     id: '66666666-6666-4666-8666-666666666666',

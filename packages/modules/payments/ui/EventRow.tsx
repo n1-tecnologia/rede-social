@@ -1,4 +1,4 @@
-import { Skeleton } from '@rede-social/ui';
+import { Skeleton, StatusPill } from '@rede-social/ui';
 import {
   CalendarX2,
   CircleCheck,
@@ -46,6 +46,12 @@ export interface EventRowProps {
   /** "recebido há 3 min", finished from the server's clock. */
   received: string;
   /**
+   * Phase 10.2 (D-791, OPEN-15): the finished marker ("Antes da abertura") of a ticket delivery applied
+   * before the event's opening, drawn as a neutral pill beside the state pill. `null` or missing renders
+   * nothing and the row is byte-identical to today's; the effect line is unchanged.
+   */
+  marker?: string | null | undefined;
+  /**
    * The row's action, filled by the caller (an `outline sm` button or a text link). It is a SIBLING of
    * the text column and never shrinks; below 360px it moves under the column so a long e-mail keeps
    * its width (finding F-4 of sketch 013).
@@ -68,6 +74,7 @@ export function EventRow({
   product,
   effect,
   received,
+  marker,
   action,
 }: EventRowProps) {
   const Glyph = GLYPH[state];
@@ -92,6 +99,11 @@ export function EventRow({
         {effect ? <span className="text-xs font-normal text-text-tertiary">{effect}</span> : null}
         <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
           <AccessStatePill state={state} label={stateLabel} />
+          {marker ? (
+            <StatusPill tone="neutral" data-event-marker>
+              {marker}
+            </StatusPill>
+          ) : null}
           <span className="text-xs font-normal text-text-tertiary">{received}</span>
         </span>
       </div>
