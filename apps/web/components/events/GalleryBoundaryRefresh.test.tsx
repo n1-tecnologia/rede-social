@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *  1. however many openings the gallery holds there is ONE scheduled refresh, for the soonest, just after it,
  *     then the bounded retry chain while the key is unchanged (never one chain per card);
  *  2. a new `tags` key (a card turned `Pago`) clears the chain and re-arms for the next opening;
- *  3. no opening, or only openings more than 24 hours away, mounts no timer;
+ *  3. no opening mounts no timer, and an opening more than 24 hours away is still scheduled (WR-02);
  *  4. the seed makes a wrong device clock schedule correctly.
  */
 
@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe('GalleryBoundaryRefresh (10.2-14)', () => {
-  it('1. several openings within 24 h and one beyond: ONE refresh for the soonest, then the bounded chain', () => {
+  it('1. several openings, one of them beyond 24 h: ONE refresh for the soonest, then the bounded chain', () => {
     render(
       <GalleryBoundaryRefresh
         openings={[at(5 * HOUR), at(2 * HOUR), at(10 * HOUR), at(30 * HOUR)]}
@@ -93,15 +93,21 @@ describe('GalleryBoundaryRefresh (10.2-14)', () => {
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
-  it('3. no openings, or only openings beyond 24 h, arm no timer', () => {
+  it('3. no openings arm no timer', () => {
     render(<GalleryBoundaryRefresh openings={[]} serverNow={SEED} tags="" />);
     expect(vi.getTimerCount()).toBe(0);
-    cleanup();
-    render(
-      <GalleryBoundaryRefresh openings={[at(25 * HOUR)]} serverNow={SEED} tags="a:Em breve" />,
-    );
-    expect(vi.getTimerCount()).toBe(0);
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('3b. an opening 3 days away is still scheduled: the tab left open refreshes once, just after it (WR-02)', () => {
+    const DAY = 24 * HOUR;
+    render(<GalleryBoundaryRefresh openings={[at(3 * DAY)]} serverNow={SEED} tags="a:Em breve" />);
+    // A timer is armed at once (a capped wait that re-evaluates), and nothing refreshes on the way.
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(3 * DAY);
+    expect(refresh).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it('4. the seed schedules by the server clock, whatever the device says', () => {
