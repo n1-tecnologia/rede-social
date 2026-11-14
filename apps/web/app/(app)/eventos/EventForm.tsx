@@ -398,6 +398,7 @@ export function EventForm({
   );
   const [openingServerError, setOpeningServerError] = useState<OpeningErrorKey | null>(null);
   const [openingLockedAlert, setOpeningLockedAlert] = useState(false);
+  const [openingFocus, setOpeningFocus] = useState(false);
   /** A create that succeeded while its second write did not: the next save updates THIS event. */
   const createdId = useRef<string | null>(null);
 
@@ -499,6 +500,14 @@ export function EventForm({
     ? tm('progress', { percent: upload.progress })
     : '';
   const busy = pending || uploading || posterUploading;
+
+  // The opening's server refusal moves focus to the date input, but only once the submit has ended: a
+  // control is disabled while it runs, and a disabled input cannot take focus.
+  useEffect(() => {
+    if (!openingFocus || busy) return;
+    document.getElementById('event-opens-date')?.focus();
+    setOpeningFocus(false);
+  }, [openingFocus, busy]);
   const inPerson = format === 'in_person';
   const structured = addressMode === 'structured';
 
@@ -962,7 +971,7 @@ export function EventForm({
         // date-fold input the schema cannot see (EP-39).
         setOpeningServerError('afterStart');
         setStep(1);
-        setFocusTarget('event-opens-date');
+        setOpeningFocus(true);
       } else if (result.code === 'opening_locked') {
         // A paid presence landed meanwhile (D-783): re-read the section as locked, show what the server
         // holds again, and say so at the top of the section.

@@ -2349,4 +2349,299 @@ describe('EventForm — the registration opening (Phase 10.2-12)', () => {
       expect(document.getElementById('event-opens-time')).not.toBeNull();
     });
   });
+
+  const O = (key: string) => lookup('events', `form.ticket.opensAt.${key}`);
+  const opensTexts = () =>
+    [...document.querySelectorAll('[data-ticket-opening] [role="alert"]')].map(
+      (node) => node.textContent,
+    );
+  const clearButton = () => document.querySelector('[data-opening-clear]') as HTMLElement | null;
+  const activeId = () => document.activeElement?.id;
+
+  describe('locked once a paid presence exists (D-794, D-783, OPEN-17)', () => {
+    it('disables both inputs with the stored value, hides the clear button and sends no key', async () => {
+      renderEditWith({ ...SAVED, soldCount: 3 }, { registrationOpens: OPENS });
+      expect(field('event-opens-date').disabled).toBe(true);
+      expect(field('event-opens-time').disabled).toBe(true);
+      expect(field('event-opens-date').value).toBe(OPENS.date);
+      expect(field('event-opens-time').value).toBe(OPENS.time);
+      expect(clearButton()).toBeNull();
+      expect(document.querySelector('[data-opening-locked]')).not.toBeNull();
+      expect(document.querySelector('[data-opening-helper]')).toBeNull();
+
+      type('event-title', 'Encontro anual 2');
+      await submitForm();
+      expect(update).toHaveBeenCalledTimes(1);
+      expect('registrationOpens' in sent(update)).toBe(false);
+    });
+
+    it('a locked event with no stored date shows both inputs empty and disabled (setting one is forbidden too)', async () => {
+      renderEditWith({ ...SAVED, soldCount: 1 }, { registrationOpens: null });
+      expect(field('event-opens-date').value).toBe('');
+      expect(field('event-opens-time').value).toBe('');
+      expect(field('event-opens-date').disabled).toBe(true);
+      expect(field('event-opens-time').disabled).toBe(true);
+      expect(clearButton()).toBeNull();
+      expect(document.querySelector('[data-opening-locked]')).not.toBeNull();
+      await submitForm();
+      expect('registrationOpens' in sent(update)).toBe(false);
+    });
+  });
+
+  describe('a past date is information, never an error (D-781, OPEN-04)', () => {
+    it('shows the Info row and still saves', async () => {
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggle();
+      type('event-gateway-id', PAIR.externalProductId);
+      type('event-checkout-url', PAIR.checkoutUrl);
+      typeOpening({ date: '2026-09-01', time: '09:00' });
+
+      expect(document.querySelector('[data-opening-past]')?.textContent).toBe(O('past'));
+      await submitForm();
+      expect(opensTexts()).toEqual([]);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(sent(create).registrationOpens).toEqual({ date: '2026-09-01', time: '09:00' });
+    });
+
+    it('a future pair draws no Info row; without a server now the form never guesses', () => {
+      renderCreateWith(TICKET);
+      toggle();
+      typeOpening(OPENS);
+      expect(document.querySelector('[data-opening-past]')).toBeNull();
+      cleanup();
+      render(<EventForm mode="create" tenantName="Rede Demo" zoneLabel={ZONE} ticket={TICKET} />);
+      toggle();
+      typeOpening({ date: '2020-01-01', time: '00:00' });
+      expect(document.querySelector('[data-opening-past]')).toBeNull();
+    });
+  });
+
+  describe('the errors wait for the first submit (UI-D-790 e, EP-38)', () => {
+    function readyToSubmit() {
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggle();
+      type('event-gateway-id', PAIR.externalProductId);
+      type('event-checkout-url', PAIR.checkoutUrl);
+    }
+
+    it('one half filled: silent before the submit, the sentence after it, gone once the other half arrives', async () => {
+      readyToSubmit();
+      type('event-opens-date', OPENS.date);
+      expect(opensTexts()).toEqual([]);
+      await submitForm();
+      expect(create).not.toHaveBeenCalled();
+      expect(opensTexts()).toEqual([O('errors.incomplete')]);
+      type('event-opens-time', OPENS.time);
+      expect(opensTexts()).toEqual([]);
+      await submitForm();
+      expect(create).toHaveBeenCalledTimes(1);
+    });
+
+    it('both empty is valid and sends no key', async () => {
+      readyToSubmit();
+      await submitForm();
+      expect(create).toHaveBeenCalledTimes(1);
+      expect('registrationOpens' in sent(create)).toBe(false);
+    });
+
+    it('EP-38: equal to the start and a minute after are the error, a minute before is accepted', async () => {
+      readyToSubmit();
+      // The event starts 2026-10-12 19:00.
+      typeOpening({ date: '2026-10-12', time: '19:00' });
+      await submitForm();
+      expect(opensTexts()).toEqual([O('errors.afterStart')]);
+      expect(create).not.toHaveBeenCalled();
+      typeOpening({ date: '2026-10-12', time: '19:01' });
+      expect(opensTexts()).toEqual([O('errors.afterStart')]);
+      typeOpening({ date: '2026-10-12', time: '18:59' });
+      expect(opensTexts()).toEqual([]);
+      await submitForm();
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(sent(create).registrationOpens).toEqual({ date: '2026-10-12', time: '18:59' });
+    });
+
+    it('EP-38: the opening is re-judged against the TYPED start, not the stored one', async () => {
+      renderEditWith(SAVED, { registrationOpens: { date: '2026-10-12', time: '12:00' } });
+      type('event-start-time', '11:00');
+      type('event-end-time', '21:00');
+      await submitForm();
+      expect(update).not.toHaveBeenCalled();
+      expect(opensTexts()).toEqual([O('errors.afterStart')]);
+      type('event-start-time', '13:00');
+      expect(opensTexts()).toEqual([]);
+    });
+
+    it('marks the pair invalid and describes it by the alert', async () => {
+      readyToSubmit();
+      typeOpening({ date: '2026-10-12', time: '19:00' });
+      await submitForm();
+      for (const id of ['event-opens-date', 'event-opens-time']) {
+        expect(field(id).getAttribute('aria-invalid')).toBe('true');
+        expect(field(id).getAttribute('aria-describedby')).toBe('event-opens-error');
+      }
+    });
+  });
+
+  describe('the clear button (UI-D-790, A-UI-17)', () => {
+    it('shows only when a value exists, empties both inputs and focuses the date input', () => {
+      renderCreateWith(TICKET);
+      toggle();
+      expect(clearButton()).toBeNull();
+      type('event-opens-date', OPENS.date);
+      expect(clearButton()).not.toBeNull();
+      expect(clearButton()?.textContent).toBe(O('clear'));
+      typeOpening(OPENS);
+      fireEvent.click(clearButton() as HTMLElement);
+      expect(field('event-opens-date').value).toBe('');
+      expect(field('event-opens-time').value).toBe('');
+      expect(clearButton()).toBeNull();
+      expect(activeId()).toBe('event-opens-date');
+    });
+
+    it('clearing a stored pair sends an explicit null', async () => {
+      renderEditWith(SAVED, { registrationOpens: OPENS });
+      fireEvent.click(clearButton() as HTMLElement);
+      await submitForm();
+      expect(sent(update).registrationOpens).toBeNull();
+    });
+
+    it('adds no disabled reason to the submit', () => {
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggle();
+      type('event-gateway-id', PAIR.externalProductId);
+      type('event-checkout-url', PAIR.checkoutUrl);
+      type('event-opens-date', OPENS.date);
+      expect(submitButton()?.disabled).toBe(false);
+    });
+  });
+
+  describe('turning the ticket off (D-793, UI-D-791)', () => {
+    it('warns before saving when a date is stored, and the inputs leave with the section', () => {
+      renderEditWith(SAVED, { registrationOpens: OPENS });
+      expect(document.querySelector('[data-opening-off-warning]')).toBeNull();
+      toggle();
+      expect(document.querySelector('[data-opening-off-warning]')?.textContent).toBe(
+        O('offWarning'),
+      );
+      expect(document.getElementById('event-opens-date')).toBeNull();
+      // Right under the shipped off-effect note.
+      const note = document.querySelector('[data-ticket-off-note]') as HTMLElement;
+      const warning = document.querySelector('[data-opening-off-warning]') as HTMLElement;
+      expect(note.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('draws no warning when there is no date anywhere', () => {
+      renderEditWith({ ...SAVED }, { registrationOpens: null });
+      toggle();
+      expect(document.querySelector('[data-opening-off-warning]')).toBeNull();
+    });
+
+    it('a value typed in the session survives a mis-click on the switch', () => {
+      renderCreateWith(TICKET);
+      toggle();
+      typeOpening(OPENS);
+      toggle();
+      expect(document.querySelector('[data-opening-off-warning]')?.textContent).toBe(
+        O('offWarning'),
+      );
+      toggle();
+      expect(field('event-opens-date').value).toBe(OPENS.date);
+      expect(field('event-opens-time').value).toBe(OPENS.time);
+    });
+
+    it('saving with a saved mapping sends NO key (the mapping removal clears it) and starts empty after', async () => {
+      renderEditWith(SAVED, { registrationOpens: OPENS });
+      toggle();
+      await submitForm();
+      expect(update).toHaveBeenCalledTimes(1);
+      expect('registrationOpens' in sent(update)).toBe(false);
+      expect(removeTicket).toHaveBeenCalledTimes(1);
+      // After the save the typed pair is gone: the switch on again starts with an empty field.
+      toggle();
+      expect(field('event-opens-date').value).toBe('');
+      expect(field('event-opens-time').value).toBe('');
+    });
+
+    it('with no mapping and a date stored by a first write, the save sends an explicit null', async () => {
+      saveTicket.mockResolvedValue({ ok: false, issue: 'link_invalid' });
+      renderCreateWith(TICKET);
+      fillOnline();
+      toggle();
+      type('event-gateway-id', PAIR.externalProductId);
+      type('event-checkout-url', PAIR.checkoutUrl);
+      typeOpening(OPENS);
+      await submitForm();
+      expect(sent(create).registrationOpens).toEqual(OPENS);
+      // The event exists with its date but no mapping: the admin turns the ticket off and saves.
+      toggle();
+      await submitForm();
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(sent(update, 0).registrationOpens).toBeNull();
+    });
+  });
+
+  describe('the server refusals (EP-39, D-783)', () => {
+    it('opening_after_start lands under the pair, not in the top card or the toast, and clears on an edit', async () => {
+      update.mockResolvedValue({ ok: false, code: 'opening_after_start' });
+      renderEditWith(SAVED, { registrationOpens: OPENS });
+      type('event-opens-time', '09:30');
+      await submitForm();
+
+      expect(opensTexts()).toEqual([O('errors.afterStart')]);
+      expect(document.querySelector('[data-event-form-error]')).toBeNull();
+      expect(toast.show).not.toHaveBeenCalled();
+      expect(activeId()).toBe('event-opens-date');
+      type('event-opens-date', '2026-10-02');
+      expect(opensTexts()).toEqual([]);
+    });
+
+    it('opening_locked re-reads the section as locked, reverts the typed pair and draws the alert row', async () => {
+      update.mockResolvedValue({ ok: false, code: 'opening_locked' });
+      renderEditWith(SAVED, { registrationOpens: OPENS });
+      type('event-opens-time', '09:30');
+      await submitForm();
+
+      expect(document.querySelector('[data-ticket-state]')?.getAttribute('data-ticket-state')).toBe(
+        'locked',
+      );
+      expect(field('event-opens-date').disabled).toBe(true);
+      expect(field('event-opens-time').disabled).toBe(true);
+      expect(field('event-opens-date').value).toBe(OPENS.date);
+      expect(field('event-opens-time').value).toBe(OPENS.time);
+      expect(clearButton()).toBeNull();
+      expect(document.querySelector('[data-opening-section-error]')?.textContent).toBe(
+        O('errors.locked'),
+      );
+      expect(document.querySelector('[data-opening-locked]')).not.toBeNull();
+      expect(document.querySelector('[data-event-form-error]')).toBeNull();
+      expect(toast.show).not.toHaveBeenCalled();
+      // A resubmit sends nothing for a locked opening.
+      update.mockResolvedValue({ ok: true, eventId: EVENT_ID });
+      await submitForm();
+      expect('registrationOpens' in sent(update, 1)).toBe(false);
+    });
+
+    it('every control is disabled while the submit runs', async () => {
+      let release: (value: { ok: true; eventId: string }) => void = () => {};
+      update.mockReturnValue(
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+      );
+      renderEditWith(SAVED, { registrationOpens: OPENS });
+      type('event-opens-time', '09:30');
+      await act(async () => {
+        fireEvent.submit(document.querySelector('[data-event-form]') as HTMLFormElement);
+      });
+      expect(field('event-opens-date').disabled).toBe(true);
+      expect(field('event-opens-time').disabled).toBe(true);
+      expect((clearButton() as HTMLButtonElement | null)?.disabled).toBe(true);
+      await act(async () => {
+        release({ ok: true, eventId: EVENT_ID });
+      });
+    });
+  });
 });

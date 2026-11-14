@@ -451,4 +451,136 @@ describe('the registration opening field (Phase 10.2-12)', () => {
     );
     expect(q('[data-opening-past]')).toBeNull();
   });
+
+  it('locked: both inputs disabled with the stored value, the Lock line with the ICU plural for 1 and for 3, no clear button', () => {
+    const view = section(
+      {},
+      {
+        ...SAVED,
+        opening: opening({ pair: OPENS, fieldState: 'locked', soldCount: 3 }),
+      },
+    );
+    expect(el('event-opens-date')?.disabled).toBe(true);
+    expect(el('event-opens-time')?.disabled).toBe(true);
+    expect(el('event-opens-date')?.value).toBe(OPENS.date);
+    expect(q('[data-opening-locked]')?.textContent).toBe(
+      '3 ingressos vendidos. A abertura não pode mudar.',
+    );
+    expect(q('[data-opening-locked] svg')).not.toBeNull();
+    expect(q('[data-opening-clear]')).toBeNull();
+    expect(q('[data-opening-helper]')).toBeNull();
+    view.view.unmount();
+
+    section({}, { ...SAVED, opening: opening({ fieldState: 'locked', soldCount: 1 }) });
+    expect(q('[data-opening-locked]')?.textContent).toBe(
+      '1 ingresso vendido. A abertura não pode mudar.',
+    );
+    // A locked event with no date: both inputs empty and disabled, the same line.
+    expect(el('event-opens-date')?.value).toBe('');
+    expect(el('event-opens-date')?.disabled).toBe(true);
+  });
+
+  it('past: the Info row sits after the filled helper and the clear button follows', () => {
+    section({}, { ...SAVED, opening: opening({ pair: OPENS, fieldState: 'past' }) });
+    expect(q('[data-opening-past]')?.textContent).toBe(
+      'Essa data já passou: a venda abre na hora.',
+    );
+    const clear = q('[data-opening-clear]') as HTMLElement;
+    expect(clear.textContent).toBe('Limpar abertura');
+    const past = q('[data-opening-past]') as HTMLElement;
+    expect(past.compareDocumentPosition(clear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Never an error.
+    expect(q('[data-opening-error]')).toBeNull();
+  });
+
+  it('the clear button shows with a value, not locked, and asks the form to clear', () => {
+    const o = opening({ pair: OPENS, fieldState: 'filled' });
+    section({}, { ...SAVED, opening: o });
+    fireEvent.click(q('[data-opening-clear]') as HTMLElement);
+    expect(o.onClear).toHaveBeenCalledTimes(1);
+  });
+
+  it('no clear button while both inputs are empty', () => {
+    section({}, { ...SAVED, opening: opening() });
+    expect(q('[data-opening-clear]')).toBeNull();
+  });
+
+  it('the two field errors take the inline alert slot under the pair, linked to both inputs', () => {
+    section(
+      {},
+      { ...SAVED, opening: opening({ pair: OPENS, fieldState: 'filled', error: 'incomplete' }) },
+    );
+    const alert = q('[data-opening-error]') as HTMLElement;
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toBe('Informe a data e a hora da abertura.');
+    expect(el('event-opens-date')?.getAttribute('aria-describedby')).toBe(alert.id);
+    expect(el('event-opens-time')?.getAttribute('aria-invalid')).toBe('true');
+    cleanup();
+
+    section(
+      {},
+      { ...SAVED, opening: opening({ pair: OPENS, fieldState: 'filled', error: 'afterStart' }) },
+    );
+    expect(q('[data-opening-error]')?.textContent).toBe(
+      'A abertura precisa ser antes do início do evento.',
+    );
+  });
+
+  it('the stale-tab refusal is an alert row at the top of the section', () => {
+    section(
+      {},
+      {
+        ...SAVED,
+        opening: opening({ pair: OPENS, fieldState: 'locked', soldCount: 1, lockedAlert: true }),
+      },
+    );
+    const row = q('[data-opening-section-error]') as HTMLElement;
+    expect(row.getAttribute('role')).toBe('alert');
+    expect(row.textContent).toBe('Já há ingressos vendidos. A abertura não pode mudar.');
+    const heading = q('#event-ticket-title') as HTMLElement;
+    expect(heading.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const toggle = q('[role="switch"]') as HTMLElement;
+    expect(row.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('the off warning row draws with the switch off, under the shipped off-effect note, and the field is gone', () => {
+    section({}, { on: false, offNote: true, opening: opening({ offWarning: true }) });
+    const note = q('[data-ticket-off-note]') as HTMLElement;
+    const warning = q('[data-opening-off-warning]') as HTMLElement;
+    expect(warning.textContent).toBe(
+      'Sem ingresso, a abertura das inscrições é apagada ao salvar. Para vender de novo, informe a data outra vez.',
+    );
+    expect(warning.className).toContain('bg-warning/10');
+    expect(note.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fieldset()).toBeNull();
+  });
+
+  it('every control is disabled while the submit runs', () => {
+    section({}, { ...SAVED, busy: true, opening: opening({ pair: OPENS, fieldState: 'filled' }) });
+    expect(el('event-opens-date')?.disabled).toBe(true);
+    expect(el('event-opens-time')?.disabled).toBe(true);
+    expect((q('[data-opening-clear]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('long text wraps: the zone line and the helpers carry break-words', () => {
+    section(
+      {},
+      {
+        ...SAVED,
+        opening: opening({
+          pair: OPENS,
+          fieldState: 'past',
+          zoneLabel: 'Horário Padrão da Austrália Central Ocidental',
+        }),
+      },
+    );
+    for (const selector of [
+      '[data-opening-zone]',
+      '[data-opening-helper]',
+      '[data-opening-past]',
+    ]) {
+      expect((q(selector) as HTMLElement).className).toContain('break-words');
+    }
+    expect(q('[data-opening-zone]')?.textContent).toContain('Austrália Central Ocidental');
+  });
 });
