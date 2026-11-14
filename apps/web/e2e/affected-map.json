@@ -829,6 +829,22 @@
         "payments-store.spec.ts",
         "notifications.spec.ts"
       ]
+    },
+    {
+      "id": "event-opening-web",
+      "why": "The opening of the sale of a paid event (Phase 10.2): the opening field of the event form, the Em breve tag, zone and live count on the card and the page, the server-seeded countdown and boundary-refresh hooks, the holder's count to the event, and the Antes da abertura marks on Participantes and Eventos recentes; events-opening.spec walks the path with a wrong browser clock, and the existing events-tickets, events and payments-admin specs read the same screens.",
+      "globs": [
+        "apps/web/lib/event-{countdown,opening-form}*",
+        "apps/web/app/(app)/eventos/[eventId]/SoonZone*",
+        "apps/web/components/events/{LiveCountdown,EventLiveNote,GalleryBoundaryRefresh,useCountdownClock,useBoundaryRefresh,serverClock}*",
+        "apps/web/e2e/events-opening.spec.ts"
+      ],
+      "specs": [
+        "events-opening.spec.ts",
+        "events-tickets.spec.ts",
+        "events.spec.ts",
+        "payments-admin.spec.ts"
+      ]
     }
   ]
 }

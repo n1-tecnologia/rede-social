@@ -328,6 +328,36 @@ export async function moveEventStart(eventId: string, startsInMinutes: number): 
 }
 
 /**
+ * 10.2-16 (D-793): sets the stored opening of an event's sale to `secondsAhead` from the DATABASE's `now()`
+ * (negative = already open), or clears it with `null`. The shape of `moveEventStart`: the opening is
+ * written in SQL because only the database's clock is the server's (`page.clock` moves the browser's, and
+ * nothing else). The `events_registration_opens_chk` CHECK keeps it before the start; the opening-lock
+ * trigger only refuses a change once a ticket exists, which no fixture that calls this has.
+ */
+export async function setEventOpening(eventId: string, secondsAhead: number | null): Promise<void> {
+  if (secondsAhead === null) {
+    await sql()`
+      update public.events
+         set registration_opens_at = null, updated_at = now()
+       where id = ${eventId}::uuid`;
+    return;
+  }
+  await sql()`
+    update public.events
+       set registration_opens_at = now() + make_interval(secs => ${secondsAhead}), updated_at = now()
+     where id = ${eventId}::uuid`;
+}
+
+/** 10.2-16: the stored opening of an event as an ISO string, or null (what the browser cannot read). */
+export async function eventOpeningFor(eventId: string): Promise<string | null> {
+  const rows = await sql()<{ registration_opens_at: Date | null }[]>`
+    select registration_opens_at from public.events where id = ${eventId}::uuid`;
+  const row = rows[0];
+  if (!row) throw new Error(`no event ${eventId}`);
+  return row.registration_opens_at ? row.registration_opens_at.toISOString() : null;
+}
+
+/**
  * 2026-10-03: moves an event's END to `seconds` from the DATABASE's `now()`, to the second, leaving
  * its start alone (it must stay before the end) — how the tab-dot spec puts the last event's end a
  * few seconds ahead and then waits out the REAL boundary (Pitfall 7: the server clock is real).
