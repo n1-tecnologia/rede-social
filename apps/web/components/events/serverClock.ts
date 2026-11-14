@@ -3,10 +3,16 @@
  *
  * The device clock is untrusted: it can be a day off, or in another year. The server sends its own
  * instant as a seed (`serverNow` of the read models, plan 07), and this module turns it into ONE offset
- * against the device clock, taken when the clock is built. `now()` is the device time plus that offset,
- * the estimate of the server time. The estimate lags the true server time by at most the render-to-
- * hydration latency, so a count built on it shows at most that much too much and reaches zero at most
- * that much late, never early (EP-25).
+ * against the device clock, taken when the clock is built (in the effect, after hydration). `now()` is
+ * the device time plus that offset, the estimate of the server time. By construction the estimate equals
+ * the seed at the instant the effect runs, whatever the AGE of the seed, so it lags the true server time
+ * by the age of the payload at that instant. For a payload rendered moments before hydration that is the
+ * render-to-hydration latency; for a payload older than hydration (a client router cache served on a back
+ * or forward navigation, or a service worker response) it can be minutes. Either way the lag is in the
+ * safe direction: the count shows too much time and reaches zero late, never early (EP-25), and it never
+ * reveals a link, which only the server sends. A re-seed (a `pageshow` with `persisted`, a tab hidden over
+ * a minute) fixes it; an in-app navigation that reuses a stale payload is not covered by either (ledger
+ * row P18 of `10.2-MANUAL-PROOFS.md`).
  *
  * This is the only file of the stack (`useCountdownClock`, `useBoundaryRefresh`) that reads the device
  * clock; the others call `serverClock()` and a grep checks that. With no seed the offset is zero and
