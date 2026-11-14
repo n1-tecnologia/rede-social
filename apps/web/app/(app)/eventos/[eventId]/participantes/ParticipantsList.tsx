@@ -87,10 +87,15 @@ export function ParticipantsSkeleton() {
  * the neutral `StatusPill` "Sem confirmação" as its trailing tag; in the other chips there is none.
  *
  * **Phase 10.1-14 (UI-D-754, UI-D-756).** The rows of a PAID event arrive with `marks` (the origin pill,
- * then "Reembolsado", then "Acima do limite") and an `action`; a free event's rows carry neither key and
- * render exactly as before. "Remover cortesia" opens a danger `ConfirmDialog`, and the row leaves the list
+ * then "Antes da abertura", then "Reembolsado", then "Acima do limite") and an `action`; a free event's
+ * rows carry neither key and render exactly as before. "Remover cortesia" opens a danger `ConfirmDialog`, and the row leaves the list
  * ONLY from the server's answer (nothing is optimistic); a refusal leaves the row, toasts and re-reads
  * the chip.
+ *
+ * **Phase 10.2 (D-791, OPEN-14, UI-D-792).** The list draws any mark it is given, so the neutral "Antes da
+ * abertura" pill of a payment that confirmed before the opening needs no code here: the attendee view model
+ * finishes it, right after "Pago" and only on a paid origin (never a courtesy, a before-the-ticket presence
+ * or a "Não vão" row), and the admin-only attendance read is the only source (a member never sees it).
  *
  * Four states: an unreadable first page (the generic error card with a retry), the chip's own empty
  * state, the rows, and the load-more failure. The code card above always renders, so the screen is

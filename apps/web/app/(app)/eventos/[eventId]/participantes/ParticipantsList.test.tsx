@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MotionGlobalConfig } from 'motion/react';
 import type { ComponentProps, ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AttendeeView } from '@/lib/events-view';
+import { type AttendeeView, attendeeView } from '@/lib/events-view';
 
 /**
  * 06-07 — the `Participantes` screen (UI-D-213, sketch 006 Surface 6, UI E11), rendered from the RSC
@@ -809,5 +809,112 @@ describe('Participantes: the Acima do limite notice and the paid empty body', ()
     unmount();
     renderList({ list: 'not_going', paid: true });
     expect(screen.getByText('Quem responder Não vou aparece aqui.')).toBeTruthy();
+  });
+});
+
+/**
+ * Phase 10.2-15 (D-791, OPEN-14, UI-D-792, A-UI-19) — the neutral `Antes da abertura` pill right after
+ * `Pago`. The rows are built by the REAL `attendeeView` from attendee payloads and drawn by the real list
+ * with the real `events.json` catalog, so a missing mark, a wrong order or a leak onto a courtesy fails here.
+ */
+describe('ParticipantsList: the Antes da abertura mark (Phase 10.2, admin lane)', () => {
+  const NOW = Date.parse('2026-10-12T23:00:00Z');
+  const tz = 'America/Sao_Paulo';
+  const P1 = 'aaaaaaaa-0000-4000-8000-000000000011';
+  const P2 = 'aaaaaaaa-0000-4000-8000-000000000012';
+  const P3 = 'aaaaaaaa-0000-4000-8000-000000000013';
+  const P4 = 'aaaaaaaa-0000-4000-8000-000000000014';
+  const P5 = 'aaaaaaaa-0000-4000-8000-000000000015';
+  const P6 = 'aaaaaaaa-0000-4000-8000-000000000016';
+
+  const paidAttendee = (id: string, name: string, overrides: Partial<Attendee> = {}): Attendee =>
+    attendee(id, { displayName: name, origin: 'ticket', ...overrides });
+
+  const viewOf = (a: Attendee, list: 'confirmed' | 'present' | 'not_going') =>
+    attendeeView(a, list, { tz, nowMs: NOW, t: t as never });
+
+  const rowOf = (name: string) =>
+    screen.getAllByTestId('attendee-row').find((el) => within(el).queryByText(name)) as HTMLElement;
+  const kinds = (el: HTMLElement) =>
+    Array.from(el.querySelectorAll('[data-mark]')).map((pill) => pill.getAttribute('data-mark'));
+
+  const items = (list: 'confirmed' | 'present' | 'not_going') => [
+    viewOf(paidAttendee(P1, 'Iris Early', { beforeOpening: true }), list),
+    viewOf(paidAttendee(P2, 'Lia Late', { beforeOpening: false }), list),
+    viewOf(
+      attendee(P3, { displayName: 'Cora Cortesia', origin: 'courtesy', beforeOpening: true }),
+      list,
+    ),
+    viewOf(
+      attendee(P4, { displayName: 'Bia Antes', origin: 'before_ticket', beforeOpening: true }),
+      list,
+    ),
+    viewOf(
+      paidAttendee(P5, 'Maria Tudo', {
+        beforeOpening: true,
+        refunded: true,
+        overLimit: true,
+      }),
+      list,
+    ),
+  ];
+
+  it('15a. tracer: an early payer reads Pago then a neutral Antes da abertura, in Confirmados and Presentes', () => {
+    for (const list of ['confirmed', 'present'] as const) {
+      const { unmount } = renderList({ list, initialItems: items(list), paid: true });
+      const early = rowOf('Iris Early');
+      expect(kinds(early)).toEqual(['paid', 'beforeOpening']);
+      const second = early.querySelectorAll('[data-mark]')[1] as HTMLElement;
+      expect(second.textContent).toBe('Antes da abertura');
+      expect(second.className).toContain('bg-bg-tertiary');
+      expect(second.className).not.toContain('bg-warning/10');
+      unmount();
+    }
+  });
+
+  it('15b. a row may carry all four marks, in the order Pago, Antes da abertura, Reembolsado, Acima do limite', () => {
+    renderList({ list: 'confirmed', initialItems: items('confirmed'), paid: true });
+    const full = rowOf('Maria Tudo');
+    expect(kinds(full)).toEqual(['paid', 'beforeOpening', 'refunded', 'overLimit']);
+    expect(Array.from(full.querySelectorAll('[data-mark]')).map((el) => el.textContent)).toEqual([
+      'Pago',
+      'Antes da abertura',
+      'Reembolsado',
+      'Acima do limite',
+    ]);
+    // The pills line wraps and the meta line stays one line (the classes that produce it).
+    const marks = full.querySelector('[data-attendee-marks]') as HTMLElement;
+    expect(marks.className).toBe('mt-1 flex flex-wrap gap-1');
+    const meta = full.querySelector('p.tabular-nums') as HTMLElement;
+    expect(meta.className).toContain('truncate');
+  });
+
+  it('15c. no early payment means no pill: a late payer, a courtesy and a before-the-ticket presence carry none', () => {
+    renderList({ list: 'confirmed', initialItems: items('confirmed'), paid: true });
+    expect(kinds(rowOf('Lia Late'))).toEqual(['paid']);
+    expect(kinds(rowOf('Cora Cortesia'))).toEqual(['courtesy']);
+    expect(kinds(rowOf('Bia Antes'))).toEqual(['beforeTicket']);
+    expect(screen.getAllByText('Antes da abertura')).toHaveLength(2);
+  });
+
+  it('15d. a Não vão row never carries the mark', () => {
+    renderList({
+      list: 'not_going',
+      canManage: true,
+      paid: true,
+      initialItems: [
+        viewOf(
+          attendee(P6, {
+            displayName: 'Nina Nao',
+            status: 'not_going',
+            origin: null,
+            beforeOpening: true,
+          }),
+          'not_going',
+        ),
+      ],
+    });
+    expect(document.querySelector('[data-mark]')).toBeNull();
+    expect(screen.queryByText('Antes da abertura')).toBeNull();
   });
 });
