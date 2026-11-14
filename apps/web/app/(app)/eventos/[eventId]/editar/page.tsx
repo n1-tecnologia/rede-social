@@ -3,6 +3,7 @@ import { PAYMENTS_PERMISSIONS } from '@rede-social/module-payments/contracts';
 import { notFound } from 'next/navigation';
 import { EventForm } from '@/app/(app)/eventos/EventForm';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { tenantWallClockNow } from '@/lib/event-opening-form';
 import { eventFormTicket } from '@/lib/event-ticket';
 import { loadEvent, loadEventForEdit } from '@/lib/events';
 import { tenantZoneLabel } from '@/lib/events-view';
@@ -30,6 +31,11 @@ import { loadTicketIntegration } from '@/lib/payments';
  * caller who is not the admin, sends none and the form then draws no section and sends no price key),
  * the Pagamentos flag and permission off the bootstrap, the overview's connection for an event with no
  * product, and the confirmed count of the member-facing read for the "already confirmed" note.
+ *
+ * **The registration opening** (Phase 10.2-12, D-792, D-781): the stored pair arrives as the edit read
+ * gave it (the tenant's wall clock, converted by the database) and `nowWallClock` is the SAME request
+ * instant formatted in the tenant's zone here on the server, so the form can tell a past date without
+ * ever reading a clock.
  */
 export default async function EditEventPage({ params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = await params;
@@ -48,6 +54,7 @@ export default async function EditEventPage({ params }: { params: Promise<{ even
       : await ticketFacts(event.id, event.ticket, moduleOn, canManagePayments);
 
   const nowMs = Date.now();
+  const nowWallClock = tenantWallClockNow(nowMs, bootstrap.tenant.timezone);
   const started = nowMs >= Date.parse(event.startsAt);
   const ended = nowMs >= Date.parse(event.endsAt);
   const cancelled = event.status === 'cancelled';
@@ -75,6 +82,8 @@ export default async function EditEventPage({ params }: { params: Promise<{ even
         // An API that predates the column sends none: the form then reads the legacy text schedule.
         schedule: event.schedule ?? [],
         ticketPriceCents: event.ticketPriceCents ?? null,
+        // 10.2-12: an API that predates the opening (or a free event) sends none: "no opening".
+        registrationOpens: event.registrationOpens ?? null,
       }}
       tenantName={bootstrap.tenant.displayName}
       zoneLabel={tenantZoneLabel(bootstrap.tenant.timezone)}
@@ -82,6 +91,7 @@ export default async function EditEventPage({ params }: { params: Promise<{ even
       canReactivate={cancelled && !started}
       cancelledLocked={cancelled && started}
       ticket={ticket}
+      nowWallClock={nowWallClock}
     />
   );
 }

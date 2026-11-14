@@ -3,6 +3,7 @@ import { PAYMENTS_PERMISSIONS } from '@rede-social/module-payments/contracts';
 import { notFound } from 'next/navigation';
 import { EventForm } from '@/app/(app)/eventos/EventForm';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { tenantWallClockNow } from '@/lib/event-opening-form';
 import { eventFormTicket } from '@/lib/event-ticket';
 import { tenantZoneLabel } from '@/lib/events-view';
 import { loadTicketIntegration } from '@/lib/payments';
@@ -23,6 +24,9 @@ import { loadTicketIntegration } from '@/lib/payments';
  * `payments.manage` off the bootstrap, and the overview's gateway name and connection, read only while
  * the module is on AND the viewer holds the permission (the route's own guard). Anything unreadable is
  * the safe reading: not connected, the catalog's neutral gateway word.
+ *
+ * **The registration opening** (Phase 10.2-12, D-781): `nowWallClock` is the request instant formatted
+ * in the tenant's zone on the server, the only "now" the form receives.
  */
 export default async function NewEventPage() {
   const bootstrap = await requireBootstrap();
@@ -38,6 +42,7 @@ export default async function NewEventPage() {
       tenantName={bootstrap.tenant.displayName}
       zoneLabel={tenantZoneLabel(bootstrap.tenant.timezone)}
       ticket={eventFormTicket({ moduleOn, canManagePayments, integration })}
+      nowWallClock={tenantWallClockNow(Date.now(), bootstrap.tenant.timezone)}
     />
   );
 }
