@@ -119,6 +119,28 @@ async function labEvent(label: string): Promise<string> {
   return ticketEvent(labTenantId, { title: `${PREFIX}-${label}` });
 }
 
+/**
+ * Turns the payments module on for one tenant and returns the closure that puts the tenant back:
+ * the previous row (enabled and settings) is restored, or the row is deleted when there was none.
+ */
+async function enablePayments(tenantId: string): Promise<() => Promise<void>> {
+  const [previous] = await adminSql<{ enabled: boolean; settings: Record<string, unknown> }[]>`
+    select enabled, settings from public.tenant_modules
+     where tenant_id = ${tenantId}::uuid and module_key = 'payments'`;
+  await setPaymentsRow(tenantId, { enabled: true, settings: {} });
+  moduleFlags.invalidate(tenantId);
+  return async () => {
+    if (previous) {
+      await setPaymentsRow(tenantId, { enabled: previous.enabled, settings: previous.settings });
+    } else {
+      await adminSql`
+        delete from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'payments'`;
+    }
+    moduleFlags.invalidate(tenantId);
+  };
+}
+
 beforeAll(async () => {
   const [tenant] = await adminSql<{ id: string }[]>`
     select id::text as id from public.tenants where slug = 'rede-lab'`;
@@ -129,20 +151,18 @@ beforeAll(async () => {
   await removePaymentIntegrations(labTenantId);
   await removeIdentitiesByPrefix(PREFIX);
 
-  const [previous] = await adminSql<{ enabled: boolean; settings: Record<string, unknown> }[]>`
-    select enabled, settings from public.tenant_modules
-     where tenant_id = ${labTenantId}::uuid and module_key = 'payments'`;
-  await setPaymentsRow(labTenantId, { enabled: true, settings: {} });
-  moduleFlags.invalidate(labTenantId);
+  const restoreLab = await enablePayments(labTenantId);
+  restorePayments = restoreLab;
+  // The foreign-tenant cases call the module-gated routes with the demo host. A freshly seeded database
+  // has no payments row for demo, so the module gate would answer MODULE_DISABLED before the ownership
+  // check (CI run 43866055430). Enable it here and put it back in teardown, the way lab is.
+  const [demoTenant] = await adminSql<{ id: string }[]>`
+    select id::text as id from public.tenants where slug = 'rede-demo'`;
+  if (!demoTenant) throw new Error('rede-demo is not seeded');
+  const restoreDemo = await enablePayments(demoTenant.id);
   restorePayments = async () => {
-    if (previous) {
-      await setPaymentsRow(labTenantId, { enabled: previous.enabled, settings: previous.settings });
-    } else {
-      await adminSql`
-        delete from public.tenant_modules
-         where tenant_id = ${labTenantId}::uuid and module_key = 'payments'`;
-    }
-    moduleFlags.invalidate(labTenantId);
+    await restoreDemo();
+    await restoreLab();
   };
   integration = await seedPaymentIntegration(labTenantId);
   raceSql = postgres('postgres://postgres:postgres@127.0.0.1:54322/postgres', {
