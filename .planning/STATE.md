@@ -4,11 +4,11 @@ current_phase: "10.2"
 current_phase_name: Abertura das inscrições do evento com contagem regressiva
 current_plan: 1
 status: human_needed
-stopped_at: "Phase 10.2 executed 2026-11-14: 16/16 plans, review fixed, verification human_needed (UAT 8 groups, ledger P1..P18 are Igor's); phase not marked complete; nothing pushed"
-last_updated: "2026-11-14T13:16:31.073Z"
+stopped_at: "Phase 10.2 executed 2026-11-14: 16/16 plans, review fixed, verification human_needed (UAT 8 groups, ledger P1..P18 are Igor's); phase not marked complete; pushed to origin/master 2026-11-16 (run 43866055430 stopped at checks on two 10.2 tests, fixed by quick 261116-hj0, second push pending deploy)"
+last_updated: "2026-11-16T15:43:55.139Z"
 last_activity: 2026-11-13
 last_activity_desc: Phase 10.2 execution started
-state_head: 58d3cd4d5027cfb980a58d9392f8acbd24fe7ad6
+state_head: 2bf58b9c8cb0b36ad0e3eac69794879f8987d783
 progress:
   total_phases: 33
   completed_phases: 0
@@ -33,7 +33,7 @@ Current Plan: 1
 Total Plans in Phase: 16
 Plan: 1 of 16
 Status: Executing Phase 10.2
-Last activity: 2026-11-13 — Phase 10.2 execution started
+Last activity: 2026-11-16 - Completed quick task 261116-hj0: Fix the two Phase 10.2 tests that failed in CI run 43866055430
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -1233,6 +1233,7 @@ None yet.
 | 50 | Fix the two stale test pins that turned the master CI red: events-rsvp detail key set (12.3 poster keys) and the PWA cache check vs the branding bucket (e3ee30b7) | 2026-11-10 | e3ee30b7 | — | — |
 | 261110-ij7 | Profile form: new `professional_id` question type with 8 admin-chosen masks (CRO, CRM, CRBM, CRF, COREN, CREFITO, CRBio, CNPJ traditional + alphanumeric with check digits); format in `limits.format`, locked once answered; 2 migrations applied to the local DB only (nothing pushed or deployed) | 2026-11-10 | e35bf3a | complete | [261110-ij7-tipo-de-pergunta-professional-id-com-m-s](./quick/261110-ij7-tipo-de-pergunta-professional-id-com-m-s/) |
 | 261112-kuk | Phase 10 gap MPUB-04: one migration with database write gates for member stories (update guard trigger, delete gate), highlights and highlight items, the staff branch of the community post insert gate, and hidden-community video (WR-03, WR-04, WR-05); `resolveHighlight` reads unlocked before locking; pgTAP 65 files / 4552 tests, 20 integration files green; ninth Phase 10 migration, deploy with the API; nothing pushed | 2026-11-12 | 2a522c06 | complete | [261112-kuk-close-phase-10-mpub-04-database-write-ga](./quick/261112-kuk-close-phase-10-mpub-04-database-write-ga/) |
+| 261116-hj0 | Fix the two Phase 10.2 tests that failed in CI run 43866055430 (demo payments module in the event-mapping integration test, 30s timeout on events-payload 9v) | 2026-11-16 | 2bf58b9c | — | [261116-hj0-fix-the-two-phase-10-2-tests-that-failed](./quick/261116-hj0-fix-the-two-phase-10-2-tests-that-failed/) |
 
 ### Roadmap Evolution
 
@@ -1285,5 +1286,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-14T13:16:30.228Z
-Stopped at: Phase 10.2 executed 2026-11-14: 16/16 plans, review fixed, verification human_needed (UAT 8 groups, ledger P1..P18 are Igor's); phase not marked complete; nothing pushed
+Stopped at: Phase 10.2 executed 2026-11-14: 16/16 plans, review fixed, verification human_needed (UAT 8 groups, ledger P1..P18 are Igor's); phase not marked complete; pushed to origin/master 2026-11-16 (run 43866055430 stopped at checks on two 10.2 tests, fixed by quick 261116-hj0, second push pending deploy)
 Resume file: .planning/phases/10.2-abertura-das-inscricoes-do-evento-com-contagem-regressiva/10.2-UAT.md
