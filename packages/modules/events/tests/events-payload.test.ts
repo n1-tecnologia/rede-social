@@ -1400,6 +1400,7 @@ describe('2026-11-13 (10.2-07) — the read models carry the opening for a paid 
     ends_at: ENDS_AT,
   };
 
+  // The first paid edit read in this file pays for the cold dynamic import of the payments modules, slow on a CI runner.
   it('9v. the edit read gives the wall-clock pair, the instant and the seed only to the admin of a paid event', async () => {
     const paid = {
       ...edit,
@@ -1462,7 +1463,7 @@ describe('2026-11-13 (10.2-07) — the read models carry the opening for a paid 
     for (const key of ['ticket', 'registrationOpens', 'registrationOpensAt', 'serverNow']) {
       expect(Object.keys(support), key).not.toContain(key);
     }
-  });
+  }, 30_000);
 
   it('9w. the attendee mark rides the paid-origin rows only, spread when true, with the expression of pgTAP 234', async () => {
     const attendee = (id: string, extra: Record<string, unknown>) => ({
