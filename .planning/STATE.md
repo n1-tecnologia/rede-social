@@ -5,12 +5,12 @@ current_phase_name: Abertura das inscrições do evento com contagem regressiva
 current_plan: 1
 status: human_needed
 stopped_at: "Phase 10.2 executed 2026-11-14: 16/16 plans, review fixed, verification human_needed (UAT 8 groups, ledger P1..P18 are Igor's); phase not marked complete; pushed to origin/master 2026-11-16 (run 43866055430 stopped at checks on two 10.2 tests, fixed by quick 261116-hj0, second push pending deploy)"
-last_updated: "2026-11-16T15:43:55.139Z"
-last_activity: 2026-11-13
+last_updated: "2026-11-16T22:44:40.238Z"
+last_activity: 2026-11-16
 last_activity_desc: Phase 10.2 execution started
-state_head: 2bf58b9c8cb0b36ad0e3eac69794879f8987d783
+state_head: 11a329f7fefaaae88e6e12c83f00fe54dcda92f5
 progress:
-  total_phases: 33
+  total_phases: 34
   completed_phases: 0
   total_plans: 451
   completed_plans: 423
@@ -1274,6 +1274,7 @@ None yet.
 - Phase 12.3 inserted after Phase 12.2: Pendências de backend do front de novembro: os 10 itens da Parte 1 do documento 'O que mudou no front' (branch ATUALIZAÇÕES-NOVEMBRO, be6374a3) que o front já mostra mas o back ainda não guarda
 - Phase 10.1 inserted after Phase 10: Rede Social - Ingresso pago do evento pela Kiwify (URGENT)
 - Phase 10.2 inserted after Phase 10.1: Abertura das inscrições do evento com contagem regressiva (pedida em 13/11, executa antes da Fase 11) (URGENT)
+- Phase 12.4 inserted after Phase 12: Abertura de chamado no suporte: next delivery of the Cronograma Social e App chosen by Igor on 2026-11-16, placed after 12.3 and before 13; reverses D-221/D-225 of Phase 7
 
 ## Deferred Items
 

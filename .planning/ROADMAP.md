@@ -53,6 +53,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 10.2: Abertura das inscrições do evento com contagem regressiva (INSERTED)** - A paid event gets an optional registration-opening date: before it the member sees "Em breve" and a days/hours/minutes countdown and cannot buy, after it a presence holder sees the countdown to the event; free events do not change
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 - [x] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it right after their first login, members without a completed profile and members who had completed it before the form existed answer it too
+- [ ] **Phase 12.4: Abertura de chamado no suporte (INSERTED)** - A member's message to support opens a case with a number and a status; the support team takes it, answers it, resolves it and closes it from an inbox with tabs by status; reverses D-221/D-225 of Phase 7 (the support chat had no status, owner or closing)
 - [ ] **Phase 13: App nativo iOS e Android por tenant (white-label)** - Post-MVP, additive: each tenant gets its own native iOS and Android app (stage 1: a native shell around the web's own screens), fixed to the tenant's host, with every feature of the web app (member area and tenant admin), native push and links that open the app; the web, the PWA and the API stay as they are for a browser
 
 **MVP scope** (user decision 2026-09-25): the MVP is the pilot going live, closed by the go-live gate (D-344, 2026-10-01: Phase 8 runs the full gate, and the MVP is declared closed at 08.1's exit gate). It covers Phases 1-8 and their decimal insertions (01.1, 05.1, 05.2, 05.3). The "Rede social" module (Phases 9-11) is V2 scope promoted into this milestone; it is post-MVP, runs after Phase 8, and no MVP phase may depend on it.
@@ -2038,6 +2039,31 @@ Plans:
 
 - [x] 12.3-17-PLAN.md — The release notes of the four blocks, the owner's ledger, the pendencies list and the phase exit gate (NOVF-01..11)
 
+### Phase 12.4: Abertura de chamado no suporte (INSERTED)
+
+**Goal:** A member's message to the tenant's support opens a case (a "chamado") for the team, who take it, answer it, resolve it and close it. Today the support chat is one conversation per member with no status, no owner and no closing, on purpose (D-221 and D-225 of Phase 7); this phase reverses that decision formally, adds the database, the API and the screens, and reuses the conversation, the messages, Realtime and the push to the support staff that already exist.
+**Scope**: Post-MVP, additive to the support chat. Chosen by Igor on 2026-11-16 as the next delivery of the "Cronograma Social e App" (its "Chamados no suporte" section), ahead of Phase 11 and the buyer-permissions delivery; the cronograma had it after both. Nothing else in the chat changes for a member who never writes to support.
+**Depends on:** Phase 07 (the support chat, Realtime, notifications and Web Push to the staff), Phase 08.7 (the owner's "Visão do dono" counters). Runs before Phase 13, which opens the web's screens inside the native app.
+**Requirements**: TBD (written in `/gsd-discuss-phase 12.4`; none exist for cases today)
+**Success Criteria** (provisional, from the cronograma; `/gsd-discuss-phase 12.4` settles them and fixes the three open decisions below):
+
+  1. A member who writes to support gets a case with a number and a visible status; the team sees every case of the tenant in an inbox with tabs by status.
+  2. `support_tenant` and `admin_tenant` take a case, assign it, answer it, resolve it, close it and reopen it, and the case's own history records who did each step and when; a member and a user of another tenant can do none of it.
+  3. The support conversations that already exist become cases with the right status, and the messages, Realtime and push to the staff keep working as they do today.
+  4. The staff is notified of a new case, a case assigned to them and a reopened case; the member's notice on resolve or close follows the decision of discuss-phase.
+  5. The "em aberto" and "aguardando resposta" counters and the owner's panel read the case status.
+  6. Tenant isolation holds: a staff member of one tenant never sees, assigns or closes a case of another (cross-tenant negative tests in pgTAP and the API).
+
+**UI hint**: yes. The team's inbox with status tabs and the case actions, and the member's case number, status and (if several) list with "novo chamado"; the design prototype already carries protocol, category and priority screens to read first.
+
+Open decisions (for `/gsd-discuss-phase 12.4`): (1) one case per member that reopens in the same place (about 10 to 12 plans) or several cases per member, a new one after each close, the helpdesk default (about 15 to 18); the cronograma assumes the middle, about 14; (2) the states (open, in progress, resolved, closed), who may assign, whether the member can reopen, whether the member is notified on resolve or close; (3) the fields beyond the number: protocol, category and priority as in the prototype, or only status and owner.
+
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 12.4 to break down)
+
 ### Phase 13: App nativo iOS e Android por tenant (white-label)
 
 **Goal**: Each tenant gets its own native iOS and Android app (own store listing, name, icon and bundle id), built from one codebase and fixed to that tenant's host. Stage 1 (this phase) is a native shell that opens the tenant's existing web screens and adds the native layer around them. Members and the tenant's staff find in it every feature of the web app, against the same API, with native push. Stage 2 (screens rebuilt 100% natively) is a later phase.
@@ -2160,6 +2186,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 16/16 | In Progress|  |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
+| 12.4. Abertura de chamado no suporte (INSERTED) | 0/TBD | Not started | - |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |
 
 ---
