@@ -202,7 +202,16 @@
         "chartLabel": "Conversas de atendimento por semana: as últimas 8 semanas"
       },
       "subjects": {
-        "title": "Atendimentos por assunto"
+        "title": "Atendimentos por assunto",
+        "summary": "{count, plural, one {# chamado} other {# chamados}} em 30 dias",
+        "empty": "Nenhum chamado aberto nos últimos 30 dias.",
+        "category": {
+          "check_in": "Check-in",
+          "events": "Eventos",
+          "payment": "Pagamento",
+          "account": "Conta",
+          "other": "Outro"
+        }
       },
       "team": {
         "title": "Equipe",

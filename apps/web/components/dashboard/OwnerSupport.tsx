@@ -1,4 +1,8 @@
-import type { OwnerSupportReady } from '@rede-social/module-dashboard/contracts';
+import {
+  type OwnerSupportReady,
+  SUPPORT_SUBJECT_KEYS,
+  type SupportBySubjectCounts,
+} from '@rede-social/module-dashboard/contracts';
 import {
   BarList,
   Collapsible,
@@ -75,6 +79,40 @@ function lastWeeksDelta(
   };
 }
 
+/**
+ * "Atendimentos por assunto" (D-813, UI-D-831, A-UI-20): the cases opened in the last 30 days by
+ * category, the five always listed and sorted by count with ties in the fixed list order (the sort
+ * is stable over `SUPPORT_SUBJECT_KEYS`), the largest row highlighted, a zero a row with an empty
+ * track. The card takes the five counts only (EP-43: never a subject, a text or a member); with no
+ * case in the window the bars give way to the empty card.
+ */
+function SubjectsCard({ t, counts }: { t: DashboardT; counts: SupportBySubjectCounts }) {
+  const total = sumOf(SUPPORT_SUBJECT_KEYS, (key) => counts[key]);
+  const rows = SUPPORT_SUBJECT_KEYS.map((key) => ({ key, value: counts[key] })).sort(
+    (a, b) => b.value - a.value,
+  );
+  return (
+    <Collapsible
+      title={t('tenantOwner.subjects.title')}
+      summary={t('tenantOwner.subjects.summary', { count: total })}
+    >
+      {total > 0 ? (
+        <BarList
+          rows={rows.map((row, i) => ({
+            id: row.key,
+            label: t(`tenantOwner.subjects.category.${row.key}`),
+            value: row.value,
+            display: formatCount(row.value),
+            highlight: i === 0,
+          }))}
+        />
+      ) : (
+        <Empty id="subjects" text={t('tenantOwner.subjects.empty')} />
+      )}
+    </Collapsible>
+  );
+}
+
 interface OwnerSupportViewProps {
   t: DashboardT;
   answer: OwnerSupportReady;
@@ -85,15 +123,21 @@ interface OwnerSupportViewProps {
  * UI-D-481, INSIGHT-13), on the member report's look: the queue at the last update (two cards, the
  * waiting one a link to `/suporte`) and the weekly first-response median in a wide card with its
  * chart beside it, a row of their own at two columns and side by side at four; then closed:
- * conversations per week, "Atendimentos por assunto" as an "Em breve" block in place of its
- * collapsible (not expandable, D-465), the client's team (staff names only, as stored) and
+ * cases per week, "Atendimentos por assunto" as a collapsible of the five categories (12.4-16,
+ * D-813; an "Em breve" block for a snapshot built before builder v9), the client's team (staff names only, as stored) and
  * moderation with its removal rate (removed ÷ the window's live comments; none without comments).
  * A median with no answered turn is a gap in the chart, never 0; with no answered turn in 8 weeks
  * the chart gives way to its empty sentence, as an empty team does.
  */
 export function OwnerSupportView({ t, answer }: OwnerSupportViewProps) {
-  const { awaiting, weeklyMedianMinutes, weeklyConversations, answeredByStaff, moderation } =
-    answer;
+  const {
+    awaiting,
+    weeklyMedianMinutes,
+    weeklyConversations,
+    answeredByStaff,
+    bySubject,
+    moderation,
+  } = answer;
   const evenWeeks = (values: readonly unknown[]) =>
     values.map((_, i) => ((i + 1) % 2 === 0 ? t('tenantOwner.weekly.week', { week: i + 1 }) : ''));
   const answeredWeeks = weeklyMedianMinutes.some((value) => value !== null);
@@ -179,11 +223,24 @@ export function OwnerSupportView({ t, answer }: OwnerSupportViewProps) {
         />
       </Collapsible>
 
-      <ComingSoonBlock
-        title={t('tenantOwner.subjects.title')}
-        label={t('report.comingSoon.value')}
-        note={t('report.comingSoon.block')}
-      />
+      {bySubject.measured ? (
+        <SubjectsCard
+          t={t}
+          counts={{
+            check_in: bySubject.check_in,
+            events: bySubject.events,
+            payment: bySubject.payment,
+            account: bySubject.account,
+            other: bySubject.other,
+          }}
+        />
+      ) : (
+        <ComingSoonBlock
+          title={t('tenantOwner.subjects.title')}
+          label={t('report.comingSoon.value')}
+          note={t('report.comingSoon.block')}
+        />
+      )}
 
       <Collapsible
         title={t('tenantOwner.team.title')}

@@ -167,7 +167,7 @@ describe('the team, the subjects and moderation (D-465, UI-D-474)', () => {
     );
   });
 
-  it('shows "Atendimentos por assunto" as a dashed Em breve block, not expandable', () => {
+  it('keeps "Atendimentos por assunto" as a dashed Em breve block, not expandable, for an old snapshot (T-12.4-75)', () => {
     const root = view();
     expect(details(root, 'Atendimentos por assunto')).toBeUndefined();
     const block = [...root.querySelectorAll('[data-coming-soon-block]')].find((el) =>
@@ -187,6 +187,79 @@ describe('the team, the subjects and moderation (D-465, UI-D-474)', () => {
     expect(kpiValue(moderation, 'Bloqueios')).toBe('1');
     expect(kpiValue(moderation, 'Desbloqueios')).toBe('0');
     expect(moderation.querySelector('summary')?.textContent).toContain('taxa de remoção 5%');
+  });
+});
+
+const MEASURED = {
+  measured: true,
+  check_in: 3,
+  events: 0,
+  payment: 7,
+  account: 3,
+  other: 1,
+} as const;
+
+/** The labels of a card's rows, in drawn order. */
+function rowLabels(card: Element | undefined): string[] {
+  return [...(card?.querySelectorAll('li') ?? [])].map(
+    (row) => row.querySelector('span')?.textContent?.trim() ?? '',
+  );
+}
+
+describe('"Atendimentos por assunto" by category (D-813, UI-D-831, tracer)', () => {
+  it('is a collapsible closed by default with the plural summary over the 30 days', () => {
+    const root = view({ ...READY, bySubject: MEASURED });
+    const card = details(root, 'Atendimentos por assunto');
+    expect(card).toBeTruthy();
+    expect(card?.hasAttribute('open')).toBe(false);
+    expect(card?.querySelector('summary')?.textContent).toContain('14 chamados em 30 dias');
+    expect(root.querySelector('[data-coming-soon-block]')?.textContent ?? '').not.toContain(
+      'Atendimentos por assunto',
+    );
+  });
+
+  it('says "1 chamado em 30 dias" for a single case', () => {
+    const answer = {
+      ...READY,
+      bySubject: { measured: true, check_in: 0, events: 0, payment: 1, account: 0, other: 0 },
+    } as OwnerSupportReady;
+    const card = details(view(answer), 'Atendimentos por assunto');
+    expect(card?.querySelector('summary')?.textContent).toContain('1 chamado em 30 dias');
+  });
+
+  it('lists the five categories by count, ties in list order, zero kept, the top row highlighted', () => {
+    const card = details(view({ ...READY, bySubject: MEASURED }), 'Atendimentos por assunto');
+    expect(rowLabels(card)).toEqual(['Pagamento', 'Check-in', 'Conta', 'Outro', 'Eventos']);
+    const rows = [...(card?.querySelectorAll('li') ?? [])];
+    expect(rows[0]?.querySelector('span')?.className).toContain('font-bold');
+    expect(rows[1]?.querySelector('span')?.className).not.toContain('font-bold');
+    const values = rows.map((row) => row.querySelector('span.tabular-nums')?.textContent?.trim());
+    expect(values).toEqual(['7', '3', '3', '1', '0']);
+    // A zero is a row with an empty track, never a hidden row.
+    const zeroFill = rows[4]?.querySelector('[data-bar-fill]') as HTMLElement | null;
+    expect(zeroFill?.style.width).toBe('0%');
+  });
+
+  it('breaks a full tie in the fixed list order and highlights the first', () => {
+    const answer = {
+      ...READY,
+      bySubject: { measured: true, check_in: 2, events: 2, payment: 2, account: 2, other: 2 },
+    } as OwnerSupportReady;
+    const card = details(view(answer), 'Atendimentos por assunto');
+    expect(rowLabels(card)).toEqual(['Check-in', 'Eventos', 'Pagamento', 'Conta', 'Outro']);
+  });
+
+  it('shows the empty card when no case was opened in the window', () => {
+    const answer = {
+      ...READY,
+      bySubject: { measured: true, check_in: 0, events: 0, payment: 0, account: 0, other: 0 },
+    } as OwnerSupportReady;
+    const card = details(view(answer), 'Atendimentos por assunto');
+    expect(card?.querySelectorAll('li')).toHaveLength(0);
+    expect(card?.querySelector('[data-owner-empty="subjects"]')?.textContent).toBe(
+      'Nenhum chamado aberto nos últimos 30 dias.',
+    );
+    expect(card?.querySelector('summary')?.textContent).toContain('0 chamado em 30 dias');
   });
 });
 
