@@ -303,6 +303,7 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
 
   // ── /v1/chat ────────────────────────────────────────────────────────────────────────────────
   'GET /v1/chat/support': { case: 'phase 7 sweep' },
+  'GET /v1/chat/support/cases': { case: 'chat cases' },
   'POST /v1/chat/support/messages': { case: 'phase 7 sweep' },
   'GET /v1/chat/conversations/:conversationId/messages': { case: 'b12' },
   'POST /v1/chat/conversations/:conversationId/messages': { case: 'phase 7 sweep' },

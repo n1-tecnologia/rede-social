@@ -1643,6 +1643,167 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("chat cases: a lab member's cases are invisible to demo lanes and the other way round, my cases lists a member's own cases only, each negative beside its positive control (12.4-06, CASE-23)", async () => {
+    // The member side of a support case (D-803, D-804): `GET /v1/chat/support/cases`, the member `case` of
+    // `GET /v1/chat/support` and of `GET /v1/chat/conversations/{id}`, and the first message carrying a category and
+    // a subject. rede-lab has `chat` OFF in the seed, so it is turned on here and restored in `finally`.
+    const labClosed = '0b140000-0000-4000-8000-000000000001';
+    const labActive = '0b140000-0000-4000-8000-000000000002';
+    const [labUser] = await adminSql<{ id: string }[]>`
+      select id::text as id from auth.users where email = 'member@rede-lab.local'`;
+    const labUserId = labUser?.id ?? '';
+    const [labFlag] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+    const asHost = (token: string, host: string, path: string, init: RequestInit = {}) =>
+      api.request(path, {
+        ...init,
+        headers: {
+          authorization: `Bearer ${token}`,
+          [TENANT_HOST_HEADER]: host,
+          ...((init.headers as Record<string, string> | undefined) ?? {}),
+        },
+      });
+    const myCases = async (token: string, host: string) => {
+      const res = await asHost(token, host, '/v1/chat/support/cases');
+      expect(res.status).toBe(200);
+      return (await res.json()) as {
+        current: { id: string } | null;
+        items: { id: string }[];
+        total: number;
+        nextCursor: string | null;
+      };
+    };
+    const detail = (token: string, host: string, id: string) =>
+      asHost(token, host, `/v1/chat/conversations/${id}`);
+    const expectBare404 = async (res: Response) => {
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error).not.toHaveProperty('details');
+    };
+    const bystanderEmail = (tenant: 'demo' | 'lab') =>
+      `cases-${tenant}-${RUN}@rede-${tenant}.local`;
+    let demoConversation = '';
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'chat', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(tenantIds.lab);
+
+      // The lab member's two cases: a closed one, then an active one (one active case per member).
+      for (const id of [labClosed, labActive]) {
+        await adminSql`
+          insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+          values (${id}::uuid, ${tenantIds.lab}::uuid, 'support', ${labUserId}::uuid)`;
+        await adminSql`
+          insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+          values (${id}::uuid, ${tenantIds.lab}::uuid, ${labUserId}::uuid, 'member')`;
+        await adminSql`
+          insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+          values (${tenantIds.lab}::uuid, ${id}::uuid, ${labUserId}::uuid, 'member',
+                  'Oi, preciso de ajuda com meu cadastro.')`;
+        if (id === labClosed) {
+          await adminSql`
+            update public.chat_conversations
+               set state = 'closed', closed_at = now(), staff_last_read_seq = last_seq
+             where id = ${labClosed}::uuid`;
+        }
+      }
+
+      // A demo member opens a case with a category and a subject; two bystanders (one per tenant) have none.
+      const demoMember = await throwawayMember(
+        tenantIds.demo,
+        bystanderEmail('demo').replace('cases-', 'owner-'),
+      );
+      const demoBystander = await throwawayMember(tenantIds.demo, bystanderEmail('demo'));
+      const labBystander = await throwawayMember(tenantIds.lab, bystanderEmail('lab'));
+      const sent = await asHost(demoMember, HOSTS.demo, '/v1/chat/support/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          body: 'Oi, preciso de ajuda com meu cadastro.',
+          category: 'account',
+          subject: 'Cadastro',
+        }),
+      });
+      expect(sent.status).toBe(201);
+      demoConversation = ((await sent.json()) as { conversationId: string }).conversationId;
+
+      // Positive controls: each member lists their own cases on their own host.
+      const labList = await myCases(tokens.labMember, HOSTS.lab);
+      expect(labList.current?.id).toBe(labActive);
+      expect(labList.items.map((card) => card.id)).toEqual([labClosed]);
+      expect(labList.total).toBe(1);
+      const demoList = await myCases(demoMember, HOSTS.demo);
+      expect(demoList.current?.id).toBe(demoConversation);
+      expect(demoList.items).toEqual([]);
+      const own = await asHost(demoMember, HOSTS.demo, '/v1/chat/support');
+      expect(((await own.json()) as { case: { id: string; category: string } }).case).toMatchObject(
+        { id: demoConversation, category: 'account' },
+      );
+      const closedOwn = await detail(tokens.labMember, HOSTS.lab, labClosed);
+      expect(closedOwn.status).toBe(200);
+      expect(((await closedOwn.json()) as { case: { state: string } }).case.state).toBe('closed');
+
+      // No lane lists another tenant's cases: a lab bystander and a demo bystander read an empty list while
+      // both tenants have cases, and a list never names the other tenant's ids.
+      const empty = { current: null, items: [], total: 0, nextCursor: null };
+      expect(await myCases(labBystander, HOSTS.lab)).toEqual(empty);
+      expect(await myCases(demoBystander, HOSTS.demo)).toEqual(empty);
+      expect(JSON.stringify(demoList)).not.toContain(labActive);
+      expect(JSON.stringify(demoList)).not.toContain(labClosed);
+      expect(JSON.stringify(labList)).not.toContain(demoConversation);
+
+      // The detail of a case that is not the caller's is one bare 404: another tenant's, another member's.
+      await expectBare404(await detail(demoMember, HOSTS.demo, labClosed));
+      await expectBare404(await detail(demoMember, HOSTS.demo, labActive));
+      await expectBare404(await detail(tokens.labMember, HOSTS.lab, demoConversation));
+      await expectBare404(await detail(demoBystander, HOSTS.demo, demoConversation));
+      await expectBare404(await detail(labBystander, HOSTS.lab, labActive));
+
+      // A demo session on the lab's registered host is refused before any read or write (D-23).
+      for (const [path, init] of [
+        ['/v1/chat/support/cases', {}],
+        ['/v1/chat/support', {}],
+        [
+          '/v1/chat/support/messages',
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ body: 'Oi.', category: 'payment', subject: 'Outro' }),
+          },
+        ],
+      ] as const) {
+        const refused = await asHost(demoMember, HOSTS.lab, path, init);
+        expect(refused.status).toBe(403);
+        expect(await code(refused)).toBe('TENANT_HOST_MISMATCH');
+      }
+      const [count] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.chat_conversations
+         where kind = 'support' and tenant_id = ${tenantIds.demo}::uuid
+           and id = ${demoConversation}::uuid`;
+      expect(count?.n).toBe(1);
+    } finally {
+      await adminSql`
+        delete from public.chat_conversations where id in (${labClosed}::uuid, ${labActive}::uuid)`;
+      if (demoConversation) {
+        await adminSql`delete from public.chat_conversations where id = ${demoConversation}::uuid`;
+      }
+      if (labFlag) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${labFlag.enabled}
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+      }
+      moduleFlags.invalidate(tenantIds.lab);
+    }
+  });
+
   it('phase 7 sweep: every Phase 7 route answers a demo session about its own tenant only, each block beside its positive control (07-11, TENANT-05)', async () => {
     // The route inventory this case closes (07-11). "b10/b11/b12" = already covered by that case;
     // "sweep" = asserted below. Every negative sits beside a demo positive control in this test, and

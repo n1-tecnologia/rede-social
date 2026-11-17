@@ -4,6 +4,7 @@ import {
   type ConversationDetail,
   type MyCasesPage,
   myCasesPageSchema,
+  myCasesQuerySchema,
   type SendResult,
   type SupportThread,
 } from '@rede-social/module-chat/contracts';
@@ -324,6 +325,263 @@ describe('case member reads', () => {
   it('a staff lane is refused on the member route (D-223)', async () => {
     const { tokens } = await caseKit();
     expect((await request('/v1/chat/support/cases', tokens.demoSupport)).status).toBe(403);
+  });
+});
+
+describe('case isolation and edges', () => {
+  const send = (token: string, body: Record<string, unknown>) =>
+    post('/v1/chat/support/messages', token, body);
+  const storedOf = async (conversationId: string) => {
+    const [row] = await adminSql<{ category: string; subject: string | null }[]>`
+      select category, subject from public.chat_conversations where id = ${conversationId}::uuid`;
+    return row;
+  };
+  const countFor = async (memberId: string) => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.chat_conversations
+       where kind = 'support' and created_by_user_id = ${memberId}::uuid`;
+    return row?.n ?? 0;
+  };
+
+  it('EP-028 adjacency: a subject of exactly 80 code points is stored, 81 is subject_too_long and writes no conversation', async () => {
+    const ok = await throwawayMember('subject-80');
+    const accepted = await send(ok.token, { body: 'Oi', subject: 'a'.repeat(80) });
+    expect(accepted.status).toBe(201);
+    const result = (await accepted.json()) as SendResult;
+    expect((await storedOf(result.conversationId))?.subject).toBe('a'.repeat(80));
+
+    const over = await throwawayMember('subject-81');
+    const refused = await send(over.token, { body: 'Oi', subject: 'a'.repeat(81) });
+    expect(refused.status).toBe(400);
+    const envelope = (await refused.json()) as { error: { code: string; details: unknown } };
+    expect(envelope.error.code).toBe('VALIDATION_FAILED');
+    expect(envelope.error.details).toEqual({ chat: 'subject_too_long' });
+    expect(await countFor(over.id)).toBe(0);
+  });
+
+  it('EP-029 empty: a blank subject stores null, an absent category stores other, and the shipped { body } alone still answers a case', async () => {
+    for (const subject of ['', '   \n\t ']) {
+      const member = await throwawayMember('subject-blank');
+      const sent = await send(member.token, { body: 'Oi', subject });
+      expect(sent.status).toBe(201);
+      const result = (await sent.json()) as SendResult;
+      expect(await storedOf(result.conversationId)).toEqual({ category: 'other', subject: null });
+    }
+    const { ids } = await caseKit();
+    const base = await highestNumber(ids.demo);
+    const bare = await throwawayMember('body-only');
+    const sent = await send(bare.token, { body: 'Só o corpo' });
+    expect(sent.status).toBe(201);
+    const result = (await sent.json()) as SendResult;
+    expect(result.case).toMatchObject({ number: base + 1, opened: true, reopened: false });
+  });
+
+  it('EP-030 encoding: the subject counts code points (80 emoji pass, 81 do not, the CHECK agrees), is not normalised and a line break is stored as sent', async () => {
+    const emoji = await throwawayMember('subject-emoji');
+    const accepted = await send(emoji.token, { body: 'Oi', subject: '😀'.repeat(80) });
+    expect(accepted.status).toBe(201);
+    const over = await throwawayMember('subject-emoji-81');
+    const refused = await send(over.token, { body: 'Oi', subject: '😀'.repeat(81) });
+    expect(refused.status).toBe(400);
+    // The database CHECK counts the same code points as the schema.
+    const { ids } = await caseKit();
+    await expect(
+      adminSql`
+        insert into public.chat_conversations (tenant_id, kind, created_by_user_id, subject)
+        values (${ids.demo}::uuid, 'support', ${over.id}::uuid, ${'😀'.repeat(81)})`,
+    ).rejects.toMatchObject({ constraint_name: 'chat_conversations_subject_chk' });
+
+    // No Unicode normalisation: a decomposed "e" + combining acute is stored byte for byte.
+    const decomposed = 'Café';
+    const raw = await throwawayMember('subject-nfd');
+    const nfd = await send(raw.token, { body: 'Oi', subject: decomposed });
+    const nfdResult = (await nfd.json()) as SendResult;
+    expect((await storedOf(nfdResult.conversationId))?.subject).toBe(decomposed);
+    expect((await storedOf(nfdResult.conversationId))?.subject).not.toBe(
+      decomposed.normalize('NFC'),
+    );
+
+    // A line break inside the subject is stored as sent and shown as one line by the label rule.
+    const broken = await throwawayMember('subject-break');
+    const lines = await send(broken.token, { body: 'Oi', subject: 'Linha um\nlinha dois' });
+    const linesResult = (await lines.json()) as SendResult;
+    expect((await storedOf(linesResult.conversationId))?.subject).toBe('Linha um\nlinha dois');
+    const thread = (await (
+      await request('/v1/chat/support', broken.token)
+    ).json()) as SupportThread;
+    expect(thread.case?.subjectLabel).toBe('Linha um linha dois');
+  });
+
+  it('EP-031 ordering: two first messages racing from two devices create one case with the winner whole, never a per-field mix', async () => {
+    const member = await throwawayMember('race-fields');
+    const [one, two] = await Promise.all([
+      send(member.token, { body: 'Do aparelho um', category: 'payment', subject: 'Alfa' }),
+      send(member.token, { body: 'Do aparelho dois', category: 'events', subject: 'Beta' }),
+    ]);
+    expect([one.status, two.status]).toEqual([201, 201]);
+    const results = [(await one.json()) as SendResult, (await two.json()) as SendResult];
+    expect(results[0]?.conversationId).toBe(results[1]?.conversationId);
+    expect(results.map((result) => result.case?.opened).sort()).toEqual([false, true]);
+    expect(await countFor(member.id)).toBe(1);
+    const stored = await storedOf(results[0]?.conversationId ?? '');
+    expect([
+      { category: 'payment', subject: 'Alfa' },
+      { category: 'events', subject: 'Beta' },
+    ]).toContainEqual(stored);
+  });
+
+  it('EP-032 empty: a case with no subject and no message has an empty label, and a whitespace-only-collapsed first message is that text', async () => {
+    const { ids } = await caseKit();
+    const lone = await throwawayMember('label-empty');
+    const [created] = await adminSql<{ id: string }[]>`
+      insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+      values (${ids.demo}::uuid, 'support', ${lone.id}::uuid) returning id::text as id`;
+    await adminSql`
+      insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+      values (${created?.id ?? ''}::uuid, ${ids.demo}::uuid, ${lone.id}::uuid, 'member')`;
+    const detail = (await (
+      await request(`/v1/chat/conversations/${created?.id}`, lone.token)
+    ).json()) as ConversationDetail;
+    expect(detail).toMatchObject({ viewer: 'member', case: { subject: null, subjectLabel: '' } });
+
+    const spaced = await throwawayMember('label-spaced');
+    await send(spaced.token, { body: 'Texto   com\n\n  espaços\tvários' });
+    const thread = (await (
+      await request('/v1/chat/support', spaced.token)
+    ).json()) as SupportThread;
+    expect(thread.case?.subjectLabel).toBe('Texto com espaços vários');
+  });
+
+  it('EP-033 encoding: the label cut counts graphemes, never splits a ZWJ sequence, never exceeds 80, adds the ellipsis only when it cut and the typed subject is never cut', async () => {
+    const family = '👨‍👩‍👧‍👦';
+    const graphemes = (text: string) =>
+      [...new Intl.Segmenter('pt-BR', { granularity: 'grapheme' }).segment(text)].length;
+    const labelOf = async (token: string) =>
+      ((await (await request('/v1/chat/support', token)).json()) as SupportThread).case
+        ?.subjectLabel ?? '';
+
+    const cut = await throwawayMember('label-cut');
+    await send(cut.token, { body: `${'a'.repeat(78)}${family}${'b'.repeat(40)}` });
+    const label = await labelOf(cut.token);
+    expect(graphemes(label)).toBeLessThanOrEqual(80);
+    expect(label.endsWith('…')).toBe(true);
+    expect(label).toContain(family);
+
+    const words = await throwawayMember('label-words');
+    await send(words.token, { body: Array.from({ length: 60 }, () => 'palavra').join(' ') });
+    const wordsLabel = await labelOf(words.token);
+    expect(graphemes(wordsLabel)).toBeLessThanOrEqual(80);
+    expect(wordsLabel.endsWith('…')).toBe(true);
+    expect(wordsLabel.replace(/…$/, '')).toMatch(/palavra$/);
+
+    const exact = await throwawayMember('label-exact');
+    await send(exact.token, { body: 'x'.repeat(80) });
+    expect(await labelOf(exact.token)).toBe('x'.repeat(80));
+
+    const typed = await throwawayMember('label-typed');
+    // 73 + 7 code points of the family sequence = exactly 80 code points, 74 graphemes.
+    const typedSent = await send(typed.token, {
+      body: 'Outro texto',
+      subject: `${'y'.repeat(73)}${family}`,
+    });
+    expect(typedSent.status).toBe(201);
+    expect(await labelOf(typed.token)).toBe(`${'y'.repeat(73)}${family}`);
+  });
+
+  it('EP-044 boundary: 2000 code points send and 2001 is body_too_long, the number is an integer of at least 1 and the page size clamps', async () => {
+    const member = await throwawayMember('boundary');
+    const ok = await send(member.token, { body: '😀'.repeat(2000) });
+    expect(ok.status).toBe(201);
+    const result = (await ok.json()) as SendResult;
+    expect(Number.isInteger(result.case?.number)).toBe(true);
+    expect(result.case?.number ?? 0).toBeGreaterThanOrEqual(1);
+    const over = await send(member.token, { body: '😀'.repeat(2001) });
+    expect(over.status).toBe(400);
+    expect(((await over.json()) as { error: { details: unknown } }).error.details).toEqual({
+      chat: 'body_too_long',
+    });
+    // The page size: 20 by default, `limit=1` and `limit=50` stand, anything beyond clamps.
+    expect(myCasesQuerySchema.parse({}).limit).toBe(20);
+    expect(myCasesQuerySchema.parse({ limit: '1' }).limit).toBe(1);
+    expect(myCasesQuerySchema.parse({ limit: '50' }).limit).toBe(50);
+    expect(myCasesQuerySchema.parse({ limit: '500' }).limit).toBe(50);
+    expect(myCasesQuerySchema.parse({ limit: '0' }).limit).toBe(1);
+    expect(myCasesQuerySchema.parse({ limit: 'abc' }).limit).toBe(20);
+  });
+
+  it('EP-045 adjacency: a plain message, the message that opened a case and the message that reopened a resolved one are mutually exclusive', async () => {
+    const member = await throwawayMember('outcomes');
+    const outcome = (result: SendResult) => [result.case?.opened, result.case?.reopened];
+    const first = (await (await send(member.token, { body: 'Abrindo' })).json()) as SendResult;
+    expect(outcome(first)).toEqual([true, false]);
+    const plain = (await (await send(member.token, { body: 'Mais um' })).json()) as SendResult;
+    expect(outcome(plain)).toEqual([false, false]);
+    expect(plain.case?.state).toBe('open');
+    await adminSql`
+      update public.chat_conversations
+         set state = 'resolved', resolved_at = now()
+       where id = ${first.conversationId}::uuid`;
+    const reopened = (await (await send(member.token, { body: 'Voltei' })).json()) as SendResult;
+    expect(outcome(reopened)).toEqual([false, true]);
+    expect(reopened.case).toMatchObject({ id: first.conversationId, state: 'open' });
+  });
+
+  it('EP-046 empty: a member with no case reads null, an empty list and the GETs write nothing', async () => {
+    const { ids } = await caseKit();
+    const member = await throwawayMember('no-case');
+    const countAll = async () => {
+      const [row] = await adminSql<{ conversations: number; participants: number }[]>`
+        select (select count(*)::int from public.chat_conversations where tenant_id = ${ids.demo}::uuid) as conversations,
+               (select count(*)::int from public.chat_participants where tenant_id = ${ids.demo}::uuid) as participants`;
+      return row;
+    };
+    const before = await countAll();
+    const thread = await request('/v1/chat/support', member.token);
+    expect(await thread.json()).toEqual({
+      conversation: null,
+      messages: [],
+      hasOlder: false,
+      case: null,
+      hasAnyCase: false,
+    });
+    const cases = await request('/v1/chat/support/cases', member.token);
+    expect(await cases.json()).toEqual({ current: null, items: [], total: 0, nextCursor: null });
+    expect(await countAll()).toEqual(before);
+  });
+
+  it('EP-049 precision: openedAt carries microseconds, numbers are plain integers and the cursor number is a string of digits', async () => {
+    const { tokens } = await caseKit();
+    const member = await throwawayMember('precision');
+    const opened: SendResult[] = [];
+    for (const body of ['Primeiro', 'Segundo']) {
+      const result = (await (await send(member.token, { body })).json()) as SendResult;
+      opened.push(result);
+      await adminSql`
+        update public.chat_conversations
+           set state = 'closed', closed_at = now(), staff_last_read_seq = last_seq
+         where id = ${result.conversationId}::uuid`;
+    }
+    await send(member.token, { body: 'Ativo' });
+    const page = (await (
+      await request('/v1/chat/support/cases?limit=1', member.token)
+    ).json()) as MyCasesPage;
+    expect(page.items).toHaveLength(1);
+    const card = page.items[0];
+    expect(card?.openedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/);
+    expect(Number.isInteger(card?.number)).toBe(true);
+    const decoded = JSON.parse(
+      Buffer.from(page.nextCursor ?? '', 'base64url').toString('utf8'),
+    ) as {
+      n: unknown;
+      id: string;
+    };
+    expect(typeof decoded.n).toBe('string');
+    expect(decoded.n).toMatch(/^[1-9]\d*$/);
+    expect(decoded.n).toBe(String(card?.number));
+    expect(decoded.id).toBe(card?.id);
+    // The staff lane never reads it (EP-043 flagged assumption: the matrix of this describe and `case member reads`
+    // is the acceptance of CASE-14; a reviewer should confirm no edge category is missing).
+    expect((await request('/v1/chat/support/cases', tokens.demoAdmin)).status).toBe(403);
   });
 });
 
