@@ -27,6 +27,9 @@ export const ROUTE_HANDLER_INVENTORY: Record<string, RouteHandlerEntry> = {
   'api/chat/conversations/[conversationId]/route.ts': {
     proxies: 'GET /v1/chat/conversations/:conversationId',
   },
+  'api/chat/conversations/[conversationId]/case/history/route.ts': {
+    proxies: 'GET /v1/chat/conversations/:conversationId/case/history',
+  },
   'api/chat/conversations/[conversationId]/messages/route.ts': {
     proxies: 'GET /v1/chat/conversations/:conversationId/messages',
   },
@@ -34,6 +37,8 @@ export const ROUTE_HANDLER_INVENTORY: Record<string, RouteHandlerEntry> = {
     proxies: 'POST /v1/chat/conversations/:conversationId/read',
   },
   'api/chat/inbox/route.ts': { proxies: 'GET /v1/chat/inbox' },
+  'api/chat/staff/route.ts': { proxies: 'GET /v1/chat/staff' },
+  'api/chat/support/cases/route.ts': { proxies: 'GET /v1/chat/support/cases' },
   // 08.5-08: the lesson player's page-hide progress beacon (the /api/stories/views clone).
   'api/courses/progress/route.ts': {
     proxies: 'PUT /v1/courses/learn/lessons/:lessonId/progress',

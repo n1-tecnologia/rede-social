@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, getBootstrap } from '@/lib/bootstrap';
-import { fetchInbox } from '@/lib/chat';
+import { fetchInbox, parseInboxFilters } from '@/lib/chat';
 import { inboxRowView, tenantDayKeys } from '@/lib/chat-view';
 import { empty, sameOriginGet } from '@/lib/notifications-bff';
 import { createClient } from '@/lib/supabase/server';
@@ -17,7 +17,9 @@ import { createClient } from '@/lib/supabase/server';
  * `chat.support` (a member gets its 403 passed through, T-07-66) and answers only this tenant's rows.
  *
  * The answer is FORMATTED here, in the tenant zone from ONE `Date.now()` (UI-D-262: "HH:mm", "Ontem",
- * `dd/MM`), so the client list never reads a clock or a catalog: `{ items: InboxRowView[], nextCursor }`.
+ * `dd/MM`), so the client list never reads a clock or a catalog: `{ items: InboxRowView[], nextCursor }`,
+ * each row with its case facts (UI-D-824) finished. The 12.4 filters (`tab`, `owner`, `priority`,
+ * `awaiting=1`) pass through in the API's vocabulary after the enum check; an unknown value is dropped.
  * `no-store` always; logs carry the shape only (status and code, never a preview or an id).
  */
 export const dynamic = 'force-dynamic';
@@ -28,11 +30,21 @@ export async function GET(request: Request): Promise<Response> {
   const { data } = await (await createClient()).auth.getClaims();
   if (!data?.claims) return empty(401);
 
+  // 12.4 (D-805): the inbox filters ride the query in the API's own vocabulary, each validated against
+  // its enum HERE and DROPPED when unknown, so the API only ever sees a documented value.
+  const search = new URL(request.url).searchParams;
+  const filters = parseInboxFilters({
+    tab: search.get('tab'),
+    owner: search.get('owner'),
+    priority: search.get('priority'),
+    awaiting: search.get('awaiting'),
+  });
+
   try {
     const [bootstrap, t, page] = await Promise.all([
       getBootstrap(),
       getTranslations('chat'),
-      fetchInbox({ cursor: null }),
+      fetchInbox({ cursor: null, filters }),
     ]);
     const timeZone = bootstrap.tenant.timezone;
     const keys = tenantDayKeys(Date.now(), timeZone);

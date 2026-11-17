@@ -637,3 +637,120 @@ export function caseCardView(
     closed: card.state === 'closed',
   };
 }
+
+/** The whole "Meus chamados" page, finished (UI-D-821, 12.4-20): the current card, the closed ones, the counts. */
+export interface MyCasesPageView {
+  current: CaseCardView | null;
+  items: CaseCardView[];
+  total: number;
+  nextCursor: string | null;
+}
+
+/**
+ * The finished "Meus chamados" page the BFF handler and the server action both answer. EVERY page,
+ * the first and a later one, carries `current` and `total` (the API sends them on every page), so a
+ * pull-to-refresh that asks for page 1 replaces the section counts, the current card and the list,
+ * while a load-more appends `items` only. Named fields only: nothing a member must not see exists.
+ */
+export function myCasesPageView(
+  page: { current: CaseCard | null; items: CaseCard[]; total: number; nextCursor: string | null },
+  context: { timeZone: string; keys: ChatDayKeys; t: Translator },
+): MyCasesPageView {
+  return {
+    current: page.current ? caseCardView(page.current, context) : null,
+    items: page.items.map((card) => caseCardView(card, context)),
+    total: page.total,
+    nextCursor: page.nextCursor,
+  };
+}
+
+/** `Hoje`, `Ontem` or `dd/MM` for a calendar day in the tenant zone (the details sheet's day rule). */
+function caseDayWord(iso: string, keys: ChatDayKeys, timeZone: string, t: Translator): string {
+  const dayKey = tenantDayKey(iso, timeZone);
+  if (dayKey === keys.todayKey) return t('day.today');
+  if (dayKey === keys.yesterdayKey) return t('day.yesterday');
+  return formatDayMonthNumeric(iso, timeZone);
+}
+
+/** "Hoje · 14:02", "Ontem · 09:10" or "12/10 · 16:40" in the tenant zone (UI-D-829). Clock-free. */
+function caseMoment(iso: string, keys: ChatDayKeys, timeZone: string, t: Translator): string {
+  return `${caseDayWord(iso, keys, timeZone, t)} · ${formatEventTime(iso, timeZone)}`;
+}
+
+/** One history row as the details sheet draws it: the finished sentence (actor in the bold part) and its time. */
+export interface CaseHistoryRowView {
+  kind: CaseEvent['kind'];
+  text: string;
+  parts: CaseEventPart[];
+  time: string;
+}
+
+/** One earlier case of the same member (UI-D-829): the anchor target, the "#38 · subject" line, the pill and the opening date. */
+export interface EarlierCaseView {
+  id: string;
+  href: string;
+  subjectLine: string;
+  state: CaseStateView;
+  date: string;
+}
+
+export interface CaseHistoryView {
+  events: CaseHistoryRowView[];
+  earlier: EarlierCaseView[];
+  hasMoreEarlier: boolean;
+}
+
+/**
+ * UI-D-829, 12.4-20: the details sheet's history and earlier cases, finished and in the API's order
+ * (events oldest first). The history row carries no bit for the two sentences that differ, so the hints
+ * `caseEventSentence` takes are derived HERE from what the rows do say:
+ * - `byMember`: a reopen whose actor is the very person who opened the case (the member's own reply
+ *   reopens it; a team reopen names a staff member);
+ * - `actorGone`: a close with no actor that started from a known state other than `resolved` (the 7-day job only closes
+ *   `resolved` cases, so a close from any other state had a person behind it who has since left).
+ * A manual close of a `resolved` case by a person who has since left reads as the automatic one: the
+ * row cannot say otherwise.
+ */
+export function caseHistoryView(
+  history: {
+    events: CaseEvent[];
+    earlierCases: Array<{
+      id: string;
+      number: number;
+      state: ChatCaseState;
+      subjectLabel: string;
+      openedAt: string;
+    }>;
+    hasMoreEarlier: boolean;
+  },
+  { timeZone, keys, t }: { timeZone: string; keys: ChatDayKeys; t: Translator },
+): CaseHistoryView {
+  const openedBy = history.events.find((event) => event.kind === 'opened')?.actorName;
+  return {
+    events: history.events.map((event) => {
+      const sentence = caseEventSentence(t, {
+        ...event,
+        byMember:
+          event.kind === 'reopened' && openedBy !== undefined && event.actorName === openedBy,
+        actorGone:
+          event.kind === 'closed' &&
+          event.fromState !== undefined &&
+          event.fromState !== 'resolved',
+      });
+      return {
+        kind: sentence.kind,
+        text: sentence.text,
+        parts: sentence.parts,
+        time: caseMoment(event.at, keys, timeZone, t),
+      };
+    }),
+    earlier: history.earlierCases.map((earlier) => ({
+      id: earlier.id,
+      href: `/suporte/${earlier.id}`,
+      subjectLine: caseSubjectLine(t, earlier.number, earlier.subjectLabel),
+      state: caseStateView(earlier.state, t),
+      date: caseDayWord(earlier.openedAt, keys, timeZone, t),
+    })),
+    hasMoreEarlier: history.hasMoreEarlier,
+  };
+}
