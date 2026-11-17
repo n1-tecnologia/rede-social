@@ -372,11 +372,11 @@ describe('case staff detail', () => {
 
     for (const leave of [
       () =>
-        adminSql`update public.memberships set role = 'member' where user_id = ${gone.id}::uuid`,
+        adminSql`update public.memberships set "role" = 'member' where user_id = ${gone.id}::uuid`,
       () =>
-        adminSql`update public.memberships set role = 'support_tenant', blocked_at = now(), status = 'blocked' where user_id = ${gone.id}::uuid`,
+        adminSql`update public.memberships set "role" = 'support_tenant', blocked_at = now(), status = 'blocked' where user_id = ${gone.id}::uuid`,
       () =>
-        adminSql`update public.memberships set role = 'support_tenant', blocked_at = null, status = 'active', deleted_at = now() where user_id = ${gone.id}::uuid`,
+        adminSql`update public.memberships set "role" = 'support_tenant', blocked_at = null, status = 'active', deleted_at = now() where user_id = ${gone.id}::uuid`,
     ]) {
       await leave();
       const detail = staffCaseSchema.parse(

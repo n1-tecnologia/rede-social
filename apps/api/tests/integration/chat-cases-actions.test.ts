@@ -904,7 +904,7 @@ describe('case isolation', () => {
     expect([memberRefused.status, memberRefused.code]).toEqual([403, 'FORBIDDEN']);
     const demoted = await throwawayMember('ep078-demoted', 'support_tenant');
     await adminSql`
-      update public.memberships set role = 'member'
+      update public.memberships set "role" = 'member'
        where tenant_id = ${ids.demo}::uuid and user_id = ${demoted.id}::uuid`;
     const demotedRefused = await refusal(
       await act(demoted.token, id, 'resolve', { expectedState: 'in_progress' }),
