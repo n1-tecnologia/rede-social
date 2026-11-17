@@ -1,3 +1,4 @@
+import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import type {
@@ -18,7 +19,7 @@ import {
   throwawayMember,
 } from './chat-case-fixtures';
 import { readyVoiceAsset, removeVoiceRows } from './chat-voice-fixtures';
-import { adminSql } from './setup';
+import { adminSql, pushSendJobsOf, runNotificationJobs } from './setup';
 
 /**
  * The previews and the case label of a recording, end to end against the live local stack (Phase 12.5, plan 09;
@@ -37,6 +38,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (endpoints.length > 0) {
+    await adminSql`delete from public.push_subscriptions where endpoint = any(${endpoints}::text[])`;
+  }
+  await closeWaitingJobs();
   await sweepCases();
   await removeVoiceRows(memberIds);
   await removeThrowaways();
@@ -205,5 +210,116 @@ describe('voice previews', () => {
     const mine = await myCases(member.token);
     expect(mine.items[0]?.subjectLabel).toBe(VOICE_LABEL);
     expect(mine.items[0]?.lastMessage?.voiceSeconds).toBe(2);
+  });
+});
+
+/* -- the push words (Task 2) ------------------------------------------------------------------------- */
+
+const FAKE_PUSH = 'https://push.fake.test';
+const endpoints: string[] = [];
+
+const deviceKeys = (): { p256dh: string; auth: string } => {
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  return {
+    p256dh: ecdh.getPublicKey().toString('base64url'),
+    auth: randomBytes(16).toString('base64url'),
+  };
+};
+
+/** One push device for the caller, through the real route (the shape of `chat-cases-notices.test.ts`). */
+async function subscribeDevice(token: string, label: string): Promise<void> {
+  const endpoint = `${FAKE_PUSH}/sub/previews-${label}-${randomUUID()}`;
+  endpoints.push(endpoint);
+  const res = await request('/v1/notifications/push-subscriptions', token, {
+    method: 'POST',
+    body: JSON.stringify({ endpoint, keys: deviceKeys(), userAgent: 'vitest' }),
+  });
+  expect(res.status).toBeLessThan(300);
+}
+
+async function closeWaitingJobs(): Promise<void> {
+  await adminSql`
+    update pgboss.job_common set state = 'completed', completed_on = now()
+     where name in ('notifications.fanout', 'notifications.push-send') and state = 'created'`;
+}
+
+async function caseNumberOf(conversationId: string): Promise<number> {
+  const [row] = await adminSql<{ n: number }[]>`
+    select case_number::int as n from public.chat_conversations where id = ${conversationId}::uuid`;
+  return row?.n ?? -1;
+}
+
+/** The push-send jobs of the demo tenant for ONE dedupe key. */
+async function jobsFor(tenantId: string, dedupeKey: string) {
+  return (await pushSendJobsOf(tenantId)).filter((job) => job.data.dedupeKey === dedupeKey);
+}
+
+describe('voice push words', () => {
+  it('the team reads "Novo chamado #N de {member}: Mensagem de voz · 0:02" and the member reads the reply as the preview alone (D-860, VOICE-29)', async () => {
+    const { tokens, ids } = await caseKit();
+    await subscribeDevice(tokens.demoSupport, 'support');
+    await subscribeDevice(tokens.demoAdmin, 'admin');
+    const member = await throwawayMember('push-voice');
+    memberIds.push(member.id);
+    await subscribeDevice(member.token, 'member');
+    await closeWaitingJobs();
+
+    const mediaId = await readyVoiceAsset(member.token, 'voice-2s.webm');
+    const sent = await post('/v1/chat/support/voice-messages', member.token, { mediaId });
+    expect(sent.status).toBe(201);
+    const first = (await sent.json()) as SendResult;
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+    const number = await caseNumberOf(first.conversationId);
+    const jobs = await jobsFor(ids.demo, `chat.case_new:${first.message.id}`);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.data.userIds).toEqual(expect.arrayContaining([ids.demoSupport, ids.demoAdmin]));
+    expect(jobs[0]?.data.userIds).not.toContain(member.id);
+    expect(jobs[0]?.data.push).toMatchObject({
+      title: 'tenant',
+      body: `Novo chamado #${number} de Pessoa push-voice: Mensagem de voz · 0:02`,
+      url: `/suporte/${first.conversationId}`,
+    });
+
+    // The team answers with a recording: the member's body is the preview alone, nothing else.
+    await closeWaitingJobs();
+    const replyAsset = await readyVoiceAsset(tokens.demoSupport, 'voice-2s.webm');
+    const reply = await post(
+      `/v1/chat/conversations/${first.conversationId}/voice-messages`,
+      tokens.demoSupport,
+      { mediaId: replyAsset },
+    );
+    expect(reply.status).toBe(201);
+    const replied = (await reply.json()) as SendResult;
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+    const back = await jobsFor(ids.demo, `chat.support_reply:${replied.message.id}`);
+    expect(back).toHaveLength(1);
+    expect(back[0]?.data.userIds).toEqual([member.id]);
+    expect(back[0]?.data.push).toMatchObject({
+      title: 'team',
+      body: 'Mensagem de voz · 0:02',
+      url: '/suporte',
+    });
+
+    // The same member writes a second recording on the open case: "Nova mensagem de ... no chamado #N: ...".
+    await closeWaitingJobs();
+    const secondAsset = await readyVoiceAsset(member.token, 'voice-2s.webm');
+    const second = await post('/v1/chat/support/voice-messages', member.token, {
+      mediaId: secondAsset,
+    });
+    expect(second.status).toBe(201);
+    const secondResult = (await second.json()) as SendResult;
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+    const more = await jobsFor(ids.demo, `chat.member_message:${secondResult.message.id}`);
+    expect(more).toHaveLength(1);
+    expect(more[0]?.data.push).toMatchObject({
+      body: `Nova mensagem de Pessoa push-voice no chamado #${number}: Mensagem de voz · 0:02`,
+    });
+
+    // Chat messages stay push-only: no bell row exists for a voice message, in either direction.
+    const [bell] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications
+       where tenant_id = ${ids.demo}::uuid and kind like 'chat.%' and kind <> 'chat.case_resolved'`;
+    expect(bell?.n).toBe(0);
   });
 });

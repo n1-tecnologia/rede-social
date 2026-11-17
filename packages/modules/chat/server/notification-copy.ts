@@ -24,6 +24,26 @@ export const CHAT_VOICE_COPY = {
   deleted: 'Mensagem de voz apagada',
 } as const;
 
+/** The longest recording, in seconds (`CHAT_VOICE_MAX_SECONDS`, repeated here so this copy file imports no contract). */
+const VOICE_CLOCK_MAX_SECONDS = 300;
+
+/**
+ * The clock of a recording, `m:ss` (D-860, VOICE-29): no leading zero on the minutes, the seconds always two digits
+ * (`0:42`, `1:05`, `5:00`). The input is the stored whole number of seconds; anything else is clamped to 0..300 and
+ * rounded, and a non-finite value reads `0:00` (a forged or missing length never prints `NaN`).
+ */
+export function formatVoiceClock(seconds: number): string {
+  const whole = Number.isNaN(seconds)
+    ? 0
+    : Math.min(Math.max(Math.round(seconds), 0), VOICE_CLOCK_MAX_SECONDS);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+}
+
+/** The preview of a recording where a text preview would go: "Mensagem de voz · 0:42" (D-860, VOICE-29). */
+export function voicePreview(seconds: number): string {
+  return `${CHAT_VOICE_COPY.label} · ${formatVoiceClock(seconds)}`;
+}
+
 /** A banner body is about one line on a lock screen (the feed's `PUSH_BODY_MAX`). */
 export const CHAT_PUSH_BODY_MAX = 100;
 

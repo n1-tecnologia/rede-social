@@ -12,7 +12,9 @@ import {
   caseResolvedPushCopy,
   memberMessagePushCopy,
   supportReplyPushCopy,
+  voicePreview,
 } from './notification-copy';
+import { voiceGoneSql } from './voice-sql';
 
 /**
  * The chat module's notification sources (07-08, D-228, D-235; 12.4-09, D-808, D-809, D-841), declared in the chat
@@ -42,6 +44,10 @@ import {
  * Every push uses the conversation id without hyphens (exactly 32 hex characters, RFC 8030's `Topic` limit) as `tag`
  * and `topic`: one device tag per case, so a newer notice replaces the older banner of the same case and still
  * re-alerts (`renotify: true`), with `urgency: 'high'` and a 72 h TTL.
+ *
+ * A recording (12.5, D-860, VOICE-29) takes the slot a text preview takes, in every sentence above: the preview is
+ * "Mensagem de voz · m:ss" from the STORED length (no join to the asset), built in TypeScript. A recording whose asset
+ * is gone (D-868) pushes nothing.
  *
  * `resolve` runs in the WORKER, inside the event tenant's lane (`notificationsSystemCtx`, role `support_tenant`, so the
  * staff-aware chat policies admit it), and reads only chat's own tables plus the kernel's memberships and profiles,
@@ -76,15 +82,16 @@ const pushHint = (
   };
 };
 
-/** Placeholder banner for a staff voice reply until plan 09 writes the real wording. */
-const VOICE_REPLY_PLACEHOLDER = 'Mensagem de voz';
-
 type MessageFactsRow = {
   kind: string;
   member_user_id: string | null;
   member_name: string | null;
-  /** Null on a recording (12.5): the banner wording of a voice message is plan 09's. */
+  /** Null on a recording (12.5, D-846): its banner words come from `voice_seconds` (D-860). */
   body: string | null;
+  /** The STORED length of a recording (never the asset's), null on text. Optional so a text-only fixture stays valid. */
+  voice_seconds?: number | null;
+  /** True when the recording's asset is gone (D-868); the stored length survives the purge. */
+  voice_gone?: boolean;
   author_side: 'member' | 'staff';
   author_user_id: string;
   case_number: number | null;
@@ -101,6 +108,8 @@ async function resolveMessageSent(tx: Tx, payload: ChatMessageSent): Promise<Not
            c.created_by_user_id as member_user_id,
            mp.display_name as member_name,
            m.body,
+           m.voice_seconds::int as voice_seconds,
+           ${voiceGoneSql('m')} as voice_gone,
            m.author_side,
            m.author_user_id,
            c.case_number::int as case_number,
@@ -146,9 +155,12 @@ async function resolveMessageSent(tx: Tx, payload: ChatMessageSent): Promise<Not
     facts: {},
   } as const;
 
-  // A recording has no body (12.5, D-846). Until the voice banner wording lands (plan 09), the staff reply banner of a
-  // recording is a neutral placeholder and the member-message previews read an empty string, so nothing crashes.
-  const text = row.body ?? '';
+  // ONE preview string for every slot a preview takes (12.5, D-860, VOICE-29): a recording is "Mensagem de voz · m:ss"
+  // from the STORED length, text is its body. A recording whose asset is gone has no preview worth sending (D-868):
+  // the preview is the empty string, nothing is pushed, and no length can leak (T-12.5-38).
+  const isVoice = row.voice_seconds !== null && row.voice_seconds !== undefined;
+  if (isVoice && row.voice_gone === true) return [];
+  const text = isVoice ? voicePreview(Number(row.voice_seconds)) : (row.body ?? '');
 
   if (row.author_side === 'staff') {
     return [
@@ -159,12 +171,7 @@ async function resolveMessageSent(tx: Tx, payload: ChatMessageSent): Promise<Not
         excludeUserIds: [row.author_user_id],
         dedupeKey: `${CHAT_NOTIFICATION_KINDS.supportReply}:${payload.messageId}`,
         channels: ['push'],
-        push: pushHint(
-          payload.conversationId,
-          'team',
-          row.body === null ? VOICE_REPLY_PLACEHOLDER : supportReplyPushCopy(text),
-          '/suporte',
-        ),
+        push: pushHint(payload.conversationId, 'team', supportReplyPushCopy(text), '/suporte'),
       },
     ];
   }

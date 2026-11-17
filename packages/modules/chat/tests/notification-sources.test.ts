@@ -2,6 +2,7 @@ import type { Tx } from '@rede-social/core/db/tenant-tx';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 import { CHAT_NOTIFICATION_KINDS } from '../contracts/index';
+import { subjectLabelOf } from '../server/cases';
 import {
   CHAT_PUSH_BODY_MAX,
   caseAssignedPushCopy,
@@ -36,7 +37,9 @@ type MessageRow = {
   kind: string;
   member_user_id: string | null;
   member_name: string | null;
-  body: string;
+  body: string | null;
+  voice_seconds?: number | null;
+  voice_gone?: boolean;
   author_side: 'member' | 'staff';
   author_user_id: string;
   case_number: number | null;
@@ -86,6 +89,8 @@ const row = (over: Partial<MessageRow>): MessageRow => ({
   member_user_id: MEMBER,
   member_name: 'Membro Rede Demo',
   body: 'Oi! Como posso ajudar?',
+  voice_seconds: null,
+  voice_gone: false,
   author_side: 'staff',
   author_user_id: STAFF,
   case_number: 7,
@@ -402,6 +407,111 @@ describe('chat notification sources', () => {
   it('closing, reopening, taking and editing notify the member of nothing: no source listens to them', () => {
     expect(chatNotificationSources.map((s) => s.event)).not.toContain('chat.case_closed');
     expect(chatNotificationSources.map((s) => s.event)).not.toContain('chat.case_reopened');
+  });
+});
+
+/** A recording has no body: the row carries the STORED length and whether its asset is gone (12.5, D-860, D-868). */
+const voiceRow = (over: Partial<MessageRow> = {}): MessageRow =>
+  memberRow({ body: null, voice_seconds: 42, voice_gone: false, ...over });
+
+describe('chat voice banners (12.5, D-860, VOICE-29)', () => {
+  it('the select reads the stored length and the gone fragment, and builds no words in SQL', async () => {
+    const tx = fakeTx([voiceRow()], [{ user_id: ADMIN }]);
+    await messageSource.resolve(tx, payload('member', MEMBER, 1), meta);
+    const text = tx.statements[0] ?? '';
+    expect(text).toContain('m.voice_seconds');
+    expect(text).toContain('media_assets va');
+    expect(text).not.toContain('Mensagem de voz');
+  });
+
+  it('new: a recording on the first message reads "Novo chamado #7 de {member}: Mensagem de voz · 0:42"', async () => {
+    const tx = fakeTx([voiceRow()], [{ user_id: ADMIN }, { user_id: STAFF }]);
+    const intents = await messageSource.resolve(tx, payload('member', MEMBER, 1), meta);
+    expect(intents).toHaveLength(1);
+    expect(intents[0]).toMatchObject({
+      kind: 'chat.case_new',
+      channels: ['push'],
+      dedupeKey: `chat.case_new:${M}`,
+      push: { body: 'Novo chamado #7 de Membro Rede Demo: Mensagem de voz · 0:42' },
+    });
+    // No bell row and nothing but the one push intent (chat messages stay push-only).
+    expect(intents[0]?.channels).not.toContain('in_app');
+  });
+
+  it('reopened: a recording that reopens the case reads "O chamado #7 de {member} foi reaberto: Mensagem de voz · 0:42"', async () => {
+    const tx = fakeTx([voiceRow({ reopened: true })], [{ user_id: ADMIN }]);
+    const intents = await messageSource.resolve(tx, payload('member', MEMBER, 5), meta);
+    expect(intents[0]).toMatchObject({
+      kind: 'chat.case_reopened',
+      push: { body: 'O chamado #7 de Membro Rede Demo foi reaberto: Mensagem de voz · 0:42' },
+    });
+  });
+
+  it('a recording on a case with a number reads "Nova mensagem de {member} no chamado #7: Mensagem de voz · 1:05"', async () => {
+    const tx = fakeTx([voiceRow({ voice_seconds: 65, owner_user_id: OWNER, owner_live: true })]);
+    const intents = await messageSource.resolve(tx, payload('member', MEMBER, 4), meta);
+    expect(intents[0]).toMatchObject({
+      kind: 'chat.member_message',
+      audience: { type: 'users', userIds: [OWNER] },
+      push: { body: 'Nova mensagem de Membro Rede Demo no chamado #7: Mensagem de voz · 1:05' },
+    });
+  });
+
+  it('a recording on a legacy thread keeps the shipped sentence with the voice preview, never "#null"', async () => {
+    const tx = fakeTx([voiceRow({ case_number: null })], [{ user_id: ADMIN }]);
+    const intents = await messageSource.resolve(tx, payload('member', MEMBER, 1), meta);
+    expect(intents[0]?.push?.body).toBe(
+      'Nova mensagem de Membro Rede Demo: Mensagem de voz · 0:42',
+    );
+  });
+
+  it('a staff voice reply pushes the member the preview alone, titled for the team, url /suporte', async () => {
+    const tx = fakeTx([voiceRow({ author_side: 'staff', author_user_id: STAFF })]);
+    const intents = await messageSource.resolve(tx, payload('staff', STAFF), meta);
+    expect(tx.calls).toBe(1);
+    expect(intents).toHaveLength(1);
+    expect(intents[0]).toMatchObject({
+      kind: 'chat.support_reply',
+      audience: { type: 'users', userIds: [MEMBER] },
+      channels: ['push'],
+      push: { title: 'team', body: 'Mensagem de voz · 0:42', url: '/suporte' },
+    });
+  });
+
+  it('a text row is the shipped body byte for byte, whatever the voice columns hold', async () => {
+    const tx = fakeTx([memberRow()], [{ user_id: ADMIN }]);
+    const intents = await messageSource.resolve(tx, payload('member', MEMBER, 1), meta);
+    expect(intents[0]?.push?.body).toBe(
+      'Novo chamado #7 de Membro Rede Demo: Quero trocar meu e-mail.',
+    );
+    const reply = await messageSource.resolve(fakeTx([row({})]), payload('staff', STAFF), meta);
+    expect(reply[0]?.push?.body).toBe('Oi! Como posso ajudar?');
+  });
+
+  it('D-868: a recording whose asset is gone is no push at all, to the team or to the member, and reads no audience', async () => {
+    const teamTx = fakeTx([voiceRow({ voice_gone: true })], [{ user_id: ADMIN }]);
+    expect(await messageSource.resolve(teamTx, payload('member', MEMBER, 1), meta)).toEqual([]);
+    expect(teamTx.calls).toBe(1);
+    const memberTx = fakeTx([
+      voiceRow({ author_side: 'staff', author_user_id: STAFF, voice_gone: true }),
+    ]);
+    expect(await messageSource.resolve(memberTx, payload('staff', STAFF), meta)).toEqual([]);
+  });
+
+  it('T-12.5-37: no produced body carries an id, a path or a file name', async () => {
+    const tx = fakeTx([voiceRow()], [{ user_id: ADMIN }]);
+    const intents = await messageSource.resolve(tx, payload('member', MEMBER, 1), meta);
+    const body = intents[0]?.push?.body ?? '';
+    expect(body).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-|\/media\/|https?:|\.(webm|mp4)/);
+  });
+});
+
+describe('subjectLabelOf with the first message kind (12.5, D-861)', () => {
+  it('the typed subject, else the constant voice label, else the cut first text, else nothing', () => {
+    expect(subjectLabelOf('Pagamento', 'x', true)).toBe('Pagamento');
+    expect(subjectLabelOf(null, null, true)).toBe('Mensagem de voz');
+    expect(subjectLabelOf(null, 'Quero trocar meu e-mail', false)).toBe('Quero trocar meu e-mail');
+    expect(subjectLabelOf(null, null, false)).toBe('');
   });
 });
 
