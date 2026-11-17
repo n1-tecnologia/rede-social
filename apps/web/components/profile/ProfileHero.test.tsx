@@ -13,7 +13,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  *     focus order is the reading order;
  *  2. the name is an `h2` that wraps (never `truncate`), with the administrator mark after it;
  *  3. the Instagram handle is ONE link opening a new tab, never inside a paragraph;
- *  4. the hero's paragraphs are exactly the e-mail and the bio, and no bio means no paragraph;
+ *  4. the hero's paragraphs are the bio plus the e-mail only when one is passed (the administrator's
+ *     alone since 2026-11-17, decided by the page), and no bio means no paragraph;
  *  5. without a photo the avatar is the neutral icon named after the person; with one, the photo
  *     is requested for the 96px seat (`w320` over the avatar ladder, eager);
  *  6. there is no `<header>` (the profile spec asserts `main header` is absent);
@@ -186,6 +187,22 @@ describe('ProfileHero (2026-10-12)', () => {
     expect(paragraphs(container)).toEqual(['ana@example.com']);
     rerender(<ProfileHero {...props} bio={null} />);
     expect(paragraphs(container)).toEqual([]);
+  });
+
+  it('9. without an e-mail prop (a member, 2026-11-17) the hero draws no e-mail text and no paragraph for it', () => {
+    const props = { displayName: 'Ana Souza', avatarAssetId: null, instagram: INSTAGRAM };
+    const paragraphs = (container: HTMLElement) =>
+      Array.from(heroOf(container).querySelectorAll('p')).map((p) => p.textContent);
+
+    const { container, rerender } = render(<ProfileHero {...props} bio="Corro aos domingos." />);
+    expect(heroOf(container).textContent).not.toContain('example.com');
+    expect(paragraphs(container)).toEqual(['Corro aos domingos.']);
+
+    rerender(<ProfileHero {...props} bio={null} />);
+    expect(paragraphs(container)).toEqual([]);
+    rerender(<ProfileHero {...props} email="" bio={null} />);
+    expect(paragraphs(container)).toEqual([]);
+    expect(heroOf(container).textContent).not.toContain('example.com');
   });
 
   it('5. the avatar: the person-named icon without a photo, the 96px request with one', () => {

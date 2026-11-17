@@ -14,7 +14,11 @@ export interface ProfileHeroProps {
   bio: string | null;
   /** The member's Instagram (`instagramLinkView`), a link under the name; absent or `null`, no line. */
   instagram?: InstagramLink | null;
-  /** The owner's own e-mail: only `/perfil` passes it (D-45/D-46). */
+  /**
+   * The account e-mail under the name. Since 2026-11-17 the `/perfil` page passes it ONLY for the
+   * tenant's administrator (the page decides, on the server); the platform preview passes a sample in
+   * its administrator view alone. Absent or empty, no e-mail line is drawn.
+   */
   email?: string;
   /** The administrator mark's accessible name (the viewer's OWN role, D-47); absent, no mark. */
   adminLabel?: string | null;
@@ -74,16 +78,16 @@ const AVATAR_SEAT = 'relative mx-auto -mt-12 flex w-fit rounded-full shadow-lg r
  * The own-profile hero of `/perfil` (2026-10-12, inspired by the REINE prototype's profile, not a
  * copy of it): the tenant's `--brand-gradient` band with the icon links in its corner (`actions`,
  * "Editar perfil" and "Configurações" since the rows are gone), the 96px avatar overlapping it, and
- * the identity under it: the name (with the administrator mark), the Instagram link, the e-mail and
- * the bio. Since 2026-10-13 the avatar and the identity are CENTRED on the band (the owner's ask). `ProfileHeader` stays as it was for `/membros/[id]`.
+ * the identity under it: the name (with the administrator mark), the Instagram link, the e-mail (only
+ * when a value is passed: the administrator's alone since 2026-11-17) and the bio. Since 2026-10-13 the avatar and the identity are CENTRED on the band (the owner's ask). `ProfileHeader` stays as it was for `/membros/[id]`.
  *
  * **The root is a `<div>`, never a `<header>`:** `/perfil` is a tab page with no header bar, and the
  * profile spec asserts `main header` is absent. The actions come FIRST in the DOM, inside the band,
  * so the focus order is the reading order (corner icons, then the Instagram link).
  *
- * **Paragraphs are exactly the e-mail and the bio** (the profile spec counts them inside the hero):
- * the Instagram handle is a bare link, never a `<p>`, and no bio means no paragraph at all, no
- * placeholder line. The name WRAPS instead of truncating (E1/overflow); the bio keeps a 448px
+ * **Paragraphs are exactly the e-mail (when one is passed) and the bio** (the profile spec counts them
+ * inside the hero): without an e-mail the hero's only paragraph is the bio. The Instagram handle is a
+ * bare link, never a `<p>`, and no bio means no paragraph at all, no placeholder line. The name WRAPS instead of truncating (E1/overflow); the bio keeps a 448px
  * measure (`max-w-md`).
  *
  * The photo goes through `MediaImage` exactly like `ProfileHeader`'s: `w320` (a 96px avatar at 3×
@@ -171,7 +175,8 @@ export function ProfileHero({
 /**
  * The hero while `/perfil` loads, in its geometry: the band itself (it needs no data, so the brand
  * shows at once and nothing changes colour when the page arrives), the 96px circle in the same seat,
- * and two bars for the name and the e-mail.
+ * and two bars for the name and the line under it (the bio or the Instagram link; a member's hero has
+ * no e-mail line since 2026-11-17, the geometry is unchanged).
  */
 export function ProfileHeroSkeleton() {
   return (

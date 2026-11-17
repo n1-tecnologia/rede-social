@@ -1185,7 +1185,8 @@ function PreviewReels({ name, admin }: { name: string; admin: boolean }) {
  * neither. The card goes without its "Completar
  * perfil" link: it is a `next/link`, which would prefetch the panel's own host. The hero is `phone`,
  * since a `md:` variant reads the panel's window here, never the device. A tab page, so no
- * sub-header.
+ * sub-header. The sample e-mail shows in the administrator view only (2026-11-17): the real `/perfil`
+ * gives it to the tenant's administrator alone, and the preview shows what each real viewer gets.
  */
 function PreviewProfile({ member, communities }: { member: boolean; communities: boolean }) {
   const t = useTranslations();
@@ -1198,7 +1199,7 @@ function PreviewProfile({ member, communities }: { member: boolean; communities:
         displayName={t('platform.devicePreview.sample.memberName')}
         avatarAssetId={null}
         bio={t('platform.devicePreview.sample.memberBio')}
-        email={t('platform.devicePreview.sample.memberEmail')}
+        email={member ? undefined : t('platform.devicePreview.sample.memberEmail')}
         actions={
           <>
             <a
