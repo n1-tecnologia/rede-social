@@ -42,7 +42,7 @@ begin;
 --    branch answers).
 --
 -- Fixture ids use the `1e360000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(114);
+select plan(116);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-voice-a', 'Voz A', '1e360000-0000-4000-8000-000000000001');
@@ -636,6 +636,17 @@ select ok((select prosecdef and array_to_string(proconfig, ',') like '%search_pa
 select is(
   (select count(*)::int from regexp_matches(pg_get_functiondef('app.chat_voice_orphans_sweep(int)'::regprocedure), 'interval ''24 hours''', 'g')),
   1, 'D-869: the 24 hours are ONE literal in the function definition');
+
+-- ── 10. the removal premises (VOICE-37; D-868; T-12.5-34, T-12.5-36) ───────────────────────────────
+-- What the account-deletion step and the sweep both rely on. A take the sweep soft-deleted (9a01) is `retired` for the read gate
+-- of its own tenant at once, before the hourly purge; and a recording a message references (9a03) cannot be hard-deleted: the
+-- foreign key refuses it with 23503, which is exactly the refusal the purge's tombstone branch answers (kernel `purgeAsset`).
+select is(tests.retired_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', '1e360000-0000-4000-8000-000000009a01'), true,
+  'D-868: a take the sweep soft-deleted is retired for the read gate at once');
+select throws_ok(
+  $$ delete from public.media_assets where id = '1e360000-0000-4000-8000-000000009a03' $$,
+  '23503', 'update or delete on table "media_assets" violates foreign key constraint "chat_messages_media_asset_id_media_assets_id_fk" on table "chat_messages"',
+  'T-12.5-36: a recording a message references cannot be hard-deleted (the purge keeps its row as a tombstone)');
 
 select * from finish();
 rollback;

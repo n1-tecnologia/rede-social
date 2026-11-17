@@ -50,6 +50,13 @@ export const media: readonly AdminLaneEntry[] = [
     ['deriveVoice', 'T', 5, undefined, 'migrated'],
     ['armSweeper', 'L', 9, undefined, 'migrated'],
     ['purgeAsset', 'T', 5, undefined, 'migrated'],
+    [
+      'purgeAsset',
+      'T',
+      5,
+      'the tombstone of a purged recording a message references (12.5, D-868)',
+      'migrated',
+    ],
   ]),
   ...group('packages/core/server/media/sweep-job.ts', [
     ['runSweepFunction', 'L', 9, undefined, 'migrated'],

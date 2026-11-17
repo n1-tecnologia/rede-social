@@ -1,10 +1,18 @@
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { registeredSweepFunctions } from '@rede-social/core/server/jobs/sweep-functions';
+import type { MessagePage, SendResult } from '@rede-social/module-chat/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { caseKit, removeThrowaways, sweepCases, throwawayMember } from './chat-case-fixtures';
-import { removeVoiceRows } from './chat-voice-fixtures';
-import { adminSql, api } from './setup';
+import {
+  caseKit,
+  post,
+  removeThrowaways,
+  request,
+  sweepCases,
+  throwawayMember,
+} from './chat-case-fixtures';
+import { readyVoiceAsset, removeVoiceRows } from './chat-voice-fixtures';
+import { adminSql, api, HOSTS } from './setup';
 
 /**
  * The two system removals of a chat recording, against the live local stack (Phase 12.5, plan 08; D-844,
@@ -13,6 +21,12 @@ import { adminSql, api } from './setup';
  * `voice orphan sweep`: a recording nobody sent leaves the quota after 24 hours, through the kernel's EXISTING
  * hourly sweeper (`kernel.media-sweep-orphans`) running `app.chat_voice_orphans_sweep(500)` through the admin
  * lane; a SENT recording never does (D-856). The 24 hours are ONE literal in the SQL function, pinned here.
+ *
+ * `voice account deletion`: the account-deletion step (`app.account_anonymise`, D-868, VOICE-37) soft-deletes a
+ * member's recordings; the thread keeps the message and projects it as deleted, the recording is served to nobody
+ * at once, the hourly sweeper purges the Storage objects, and the message's foreign key (NO ACTION) no longer
+ * makes the purge loop: a SENT recording keeps its row as a tombstone (`status = 'failed'`, `failure_reason =
+ * 'purged_referenced'`, `deleted_at` set), an unsent one is deleted with its row.
  *
  * The sweeper and its imports load INSIDE the tests (the media-sweeper precedent's heavy-import rule), after
  * `api` pulled in the registry. Every fixture belongs to a throwaway member and is removed in `afterAll`.
@@ -128,7 +142,11 @@ describe('voice orphan sweep', () => {
     const sent = await insertAsset({ tenantId: ids.demo, ownerId: member.id, age: '25 hours' });
     await sendDirect(ids.demo, member.id, sent);
     // The other tenant's unsent take is swept in its OWN tenant (VOICE-34): the row keeps its tenant.
-    const otherTenant = await insertAsset({ tenantId: ids.lab, ownerId: member.id, age: '25 hours' });
+    const otherTenant = await insertAsset({
+      tenantId: ids.lab,
+      ownerId: member.id,
+      age: '25 hours',
+    });
 
     await sweepOrphansJob.handler({});
 
@@ -147,7 +165,11 @@ describe('voice orphan sweep', () => {
       deleted: true,
       tenantId: ids.lab,
     });
-    expect(await assetState(young)).toEqual({ status: 'ready', deleted: false, tenantId: ids.demo });
+    expect(await assetState(young)).toEqual({
+      status: 'ready',
+      deleted: false,
+      tenantId: ids.demo,
+    });
     expect(await assetState(sent), 'a recording a message references stays').toEqual({
       status: 'ready',
       deleted: false,
@@ -179,7 +201,155 @@ describe('voice orphan sweep', () => {
   it('the 24 hours are one literal in the SQL function (D-869)', async () => {
     const [row] = await adminSql<{ def: string }[]>`
       select pg_get_functiondef('app.chat_voice_orphans_sweep(int)'::regprocedure) as def`;
-    const hours = [...(row?.def ?? '').matchAll(/interval '(\d+) hours?'/g)].map((m) => Number(m[1]));
+    const hours = [...(row?.def ?? '').matchAll(/interval '(\d+) hours?'/g)].map((m) =>
+      Number(m[1]),
+    );
     expect(hours).toEqual([VOICE_ORPHAN_HOURS]);
+  });
+});
+
+/** `GET /v1/media/{id}/original` as `token` on the demo host: 302 with a signed URL, or a refusal. */
+const original = (assetId: string, token: string) =>
+  api.request(`/v1/media/${assetId}/original`, {
+    headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.demo },
+  });
+
+/** The Storage objects of one asset (the original and any derived rung) in the private `media` bucket. */
+async function objectsOf(assetId: string): Promise<number> {
+  const [row] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from storage.objects
+     where bucket_id = 'media' and name like ${`%/media/${assetId}/%`}`;
+  return row?.n ?? -1;
+}
+
+type RetiredRow = { status: string; reason: string | null; deleted: boolean };
+
+async function rowOf(assetId: string): Promise<RetiredRow | null> {
+  const [row] = await adminSql<{ status: string; reason: string | null; deleted: boolean }[]>`
+    select status, failure_reason as reason, deleted_at is not null as deleted
+      from public.media_assets where id = ${assetId}::uuid`;
+  return row ?? null;
+}
+
+describe('voice account deletion', () => {
+  it('a deleted member recordings stop playing at once, read as deleted, are purged once and the purge does not loop on the message foreign key (D-868, VOICE-37, T-12.5-34, T-12.5-36)', async () => {
+    const sweepOrphansJob = await loadSweeper();
+    const { ids, tokens } = await caseKit();
+    const member = await voiceMember('deletion-chain');
+    const sentAsset = await readyVoiceAsset(member.token, 'voice-2s.webm');
+    const unsentAsset = await readyVoiceAsset(member.token, 'voice-2s.webm');
+    const sent = await post('/v1/chat/support/voice-messages', member.token, {
+      mediaId: sentAsset,
+    });
+    expect(sent.status).toBe(201);
+    const { conversationId, message } = (await sent.json()) as SendResult;
+
+    const thread = async () => {
+      const res = await request(
+        `/v1/chat/conversations/${conversationId}/messages`,
+        tokens.demoSupport,
+      );
+      expect(res.status).toBe(200);
+      const page = (await res.json()) as MessagePage;
+      const found = page.items.find((item) => item.id === message.id);
+      if (!found) throw new Error('the voice message is not in the thread');
+      return found;
+    };
+
+    // Before: the recording plays for the staff and the thread shows a live recording.
+    expect((await original(sentAsset, tokens.demoSupport)).status).toBe(302);
+    expect((await thread()).voice).toEqual({ mediaId: sentAsset, durationSeconds: 2 });
+    expect(await objectsOf(sentAsset)).toBeGreaterThan(0);
+    expect(await objectsOf(unsentAsset)).toBeGreaterThan(0);
+
+    // The member is due for anonymisation exactly as 222 builds its `a3` member, then the step runs.
+    const [membership] = await adminSql<{ id: string }[]>`
+      update public.memberships
+         set deletion_requested_at = now() - interval '20 days',
+             deletion_due_at = now() - interval '1 day',
+             deleted_at = now() - interval '15 days'
+       where tenant_id = ${ids.demo}::uuid and user_id = ${member.id}::uuid
+      returning id::text as id`;
+    const [done] = await adminSql<{ ok: boolean }[]>`
+      select app.account_anonymise(${membership?.id ?? ''}::uuid) as ok`;
+    expect(done?.ok).toBe(true);
+
+    // The thread keeps the message: no body, the same seconds, and `deleted: true`.
+    const after = await thread();
+    expect(after.voice).toEqual({ mediaId: sentAsset, durationSeconds: 2, deleted: true });
+    expect(after.body).toBe('');
+    const [still] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.chat_messages where id = ${message.id}::uuid`;
+    expect(still?.n).toBe(1);
+
+    // The recording is served to nobody at once: the staff and the tenant admin get the bare 404.
+    for (const token of [tokens.demoSupport, tokens.demoAdmin]) {
+      const res = await original(sentAsset, token);
+      expect(res.status).toBe(404);
+    }
+
+    // Both recordings are soft-deleted, the bytes are still on Storage until the sweeper runs.
+    expect(await rowOf(sentAsset)).toEqual({ status: 'deleted', reason: null, deleted: true });
+    expect(await rowOf(unsentAsset)).toEqual({ status: 'deleted', reason: null, deleted: true });
+    expect(await objectsOf(sentAsset)).toBeGreaterThan(0);
+
+    // An hour passes: the REAL hourly sweeper purges the objects of both.
+    await adminSql`
+      update public.media_assets set deleted_at = now() - interval '2 hours'
+       where id in (${sentAsset}::uuid, ${unsentAsset}::uuid)`;
+    await sweepOrphansJob.handler({});
+
+    expect(await objectsOf(sentAsset)).toBe(0);
+    expect(await objectsOf(unsentAsset)).toBe(0);
+    // The unsent one is gone with its row; the SENT one stays as a tombstone the message can still point at.
+    expect(await rowOf(unsentAsset)).toBeNull();
+    expect(await rowOf(sentAsset)).toEqual({
+      status: 'failed',
+      reason: 'purged_referenced',
+      deleted: true,
+    });
+    expect((await thread()).voice?.deleted).toBe(true);
+
+    // A second run changes nothing: the tombstone is no longer collectable, so the hourly loop is over, and a direct
+    // purge of the same row is a clean no-op that reports success instead of throwing on the foreign key.
+    await sweepOrphansJob.handler({});
+    expect(await rowOf(sentAsset)).toEqual({
+      status: 'failed',
+      reason: 'purged_referenced',
+      deleted: true,
+    });
+    const { purgeAsset } = await import('@rede-social/core/server/media/service');
+    expect(
+      await purgeAsset({ id: sentAsset, tenantId: ids.demo, kind: 'audio', providerAssetId: null }),
+    ).toEqual({ purged: true, objects: 0 });
+  });
+
+  it('the step leaves a live member recordings and another tenant alone (VOICE-34)', async () => {
+    const { ids } = await caseKit();
+    const gone = await voiceMember('deletion-gone');
+    const live = await voiceMember('deletion-live');
+    const goneAsset = await readyVoiceAsset(gone.token, 'voice-2s.webm');
+    const liveAsset = await readyVoiceAsset(live.token, 'voice-2s.webm');
+    // The same departing person also owns a recording in the OTHER tenant (a direct row: the throwaway is demo-only).
+    const [other] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets (tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds)
+      values (${ids.lab}::uuid, ${gone.id}::uuid, 'audio', 'voice', 'ready', 'audio/mp4', 8000, 2)
+      returning id::text as id`;
+    const otherAsset = other?.id ?? '';
+
+    const [membership] = await adminSql<{ id: string }[]>`
+      update public.memberships
+         set deletion_requested_at = now() - interval '20 days',
+             deletion_due_at = now() - interval '1 day',
+             deleted_at = now() - interval '15 days'
+       where tenant_id = ${ids.demo}::uuid and user_id = ${gone.id}::uuid
+      returning id::text as id`;
+    const [done] = await adminSql<{ ok: boolean }[]>`
+      select app.account_anonymise(${membership?.id ?? ''}::uuid) as ok`;
+    expect(done?.ok).toBe(true);
+
+    expect((await rowOf(goneAsset))?.deleted).toBe(true);
+    expect(await rowOf(liveAsset)).toEqual({ status: 'ready', reason: null, deleted: false });
+    expect(await rowOf(otherAsset)).toEqual({ status: 'ready', reason: null, deleted: false });
   });
 });

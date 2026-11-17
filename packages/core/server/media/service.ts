@@ -28,6 +28,7 @@ import { enqueueInTx } from '../jobs/boss';
 import { moduleLogger } from '../logging';
 import { decodeCursor, encodeCursor } from '../paging';
 import { permissionsForRequest } from '../rbac/permissions';
+import { sqlstateOf } from '../safety/sqlstate';
 import { MEDIA_DERIVE_QUEUE, MEDIA_SWEEP_QUEUE, MEDIA_SWEEP_SINGLETON } from './index';
 import {
   fileSignaturePrefixBytes,
@@ -1430,6 +1431,14 @@ export type PurgeOutcome = { purged: boolean; objects: number };
  * again — the "a failure leaves a recoverable state" discipline 02-09 established for `checkDomain`.
  * Everything here is therefore safe to re-run: an already-empty prefix and an already-deleted
  * provider asset both converge on the same end state.
+ *
+ * THE TOMBSTONE (12.5, D-868). The row delete is refused with SQLSTATE 23503 for a voice recording a chat message
+ * references (`chat_messages.media_asset_id` is NO ACTION: a message is never deleted, so its recording's row cannot go;
+ * the account-deletion step soft-deletes a SENT recording and the thread then reads "Mensagem de voz apagada"). That
+ * refusal is caught narrowly AFTER the objects are gone: the row is kept, `status = 'failed'` with `failure_reason =
+ * 'purged_referenced'` and `deleted_at` still set, so every lane hides it, the byte sums skip it and the collector (which
+ * reads `pending`, `deleted` and `rejected`) never picks it up again; the call reports `purged: true` and logs once at
+ * info. A never-sent recording has no reference and is deleted normally. Any other error still throws.
  */
 export async function purgeAsset(row: PurgeableAsset): Promise<PurgeOutcome> {
   const prefix = mediaAssetPrefix(row.tenantId, row.id);
@@ -1492,11 +1501,36 @@ export async function purgeAsset(row: PurgeableAsset): Promise<PurgeOutcome> {
     }
   }
 
-  await withAdminTx({ tenantId: row.tenantId }, async (tx) =>
-    tx
-      .delete(mediaAssets)
-      .where(and(eq(mediaAssets.id, row.id), eq(mediaAssets.tenantId, row.tenantId))),
-  );
+  try {
+    await withAdminTx({ tenantId: row.tenantId }, async (tx) =>
+      tx
+        .delete(mediaAssets)
+        .where(and(eq(mediaAssets.id, row.id), eq(mediaAssets.tenantId, row.tenantId))),
+    );
+  } catch (error) {
+    // Only a foreign-key refusal AFTER the objects are gone is answered here; every other error still throws.
+    if (sqlstateOf(error) !== '23503') throw error;
+    // The tombstone (D-868): a chat message references this recording (`chat_messages.media_asset_id`, NO ACTION),
+    // so the row cannot go. The delete transaction rolled back, so a NEW one keeps the row as a tombstone whose
+    // `deleted_at` stays set (every lane hides it and the byte sums skip it) and whose status leaves the two the
+    // collector reads, so the next hourly run does not pick it up again.
+    await withAdminTx({ tenantId: row.tenantId }, async (tx) =>
+      tx
+        .update(mediaAssets)
+        .set({ status: 'failed', failureReason: 'purged_referenced' })
+        .where(and(eq(mediaAssets.id, row.id), eq(mediaAssets.tenantId, row.tenantId))),
+    );
+    log.info(
+      {
+        event: 'media.purge.row_kept',
+        tenantId: row.tenantId,
+        assetId: row.id,
+        objects: keys.length,
+      },
+      'media asset objects purged; the row is kept as a tombstone because a message references it',
+    );
+    return { purged: true, objects: keys.length };
+  }
 
   log.info(
     {
