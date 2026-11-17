@@ -1025,5 +1025,21 @@ describe('chat suporte', () => {
     expect(actDefiner?.body.match(/tenant_role\(\) = 'admin_tenant'/g)).toHaveLength(1);
     expect(editDefiner?.body).not.toMatch(/tenant_role\(\) = 'admin_tenant'/);
     expect([...typescriptRoles].sort()).toEqual(['admin_tenant', 'support_tenant']);
+    // The TypeScript half of the assign guard (D-806, T-12.4-22): the roles that hold `chat.support.assign` in the
+    // manifest are exactly the one role the definer's assign branch spells.
+    const assignRoles = TENANT_ROLES.filter((role) =>
+      permissionsFor(role, allKeys).includes('chat.support.assign'),
+    );
+    expect([...assignRoles]).toEqual(['admin_tenant']);
+    expect(
+      literalRoles(
+        actDefiner?.body ?? '',
+        /p_action = 'assign' and not coalesce\(app\.tenant_role\(\) = ('[a-z_]+')/,
+      ),
+    ).toEqual([...assignRoles].sort());
+    // With chat off the permission goes with `chat.support` (D-223): the manifest is its only source.
+    expect(permissionsFor('admin_tenant', new Set<ModuleKey>())).not.toContain(
+      'chat.support.assign',
+    );
   });
 });

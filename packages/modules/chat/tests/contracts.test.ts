@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CHAT_CASE_ACTIONS,
+  CHAT_CASE_CATEGORIES,
+  CHAT_CASE_PRIORITIES,
+  CHAT_CASE_STATES,
   CHAT_ISSUE_SET,
   CHAT_ISSUES,
   CHAT_MAX_BODY,
@@ -46,6 +50,13 @@ describe('chat contracts', () => {
       'case_nothing_to_edit',
     ]);
     for (const issue of CHAT_ISSUES) expect(CHAT_ISSUE_SET.has(issue)).toBe(true);
+  });
+
+  it('EP-081: the case lists are closed ordered tuples, a reorder or an addition is a red test', () => {
+    expect(CHAT_CASE_STATES).toEqual(['open', 'in_progress', 'resolved', 'closed']);
+    expect(CHAT_CASE_CATEGORIES).toEqual(['check_in', 'events', 'payment', 'account', 'other']);
+    expect(CHAT_CASE_PRIORITIES).toEqual(['low', 'normal', 'high']);
+    expect(CHAT_CASE_ACTIONS).toEqual(['take', 'assign', 'resolve', 'close', 'reopen', 'edit']);
   });
 
   it('CHAT-02 empty: an empty or whitespace-only body is body_required', () => {

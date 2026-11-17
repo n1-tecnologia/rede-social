@@ -21,7 +21,25 @@ Main contract names (`./contracts`): `chatBodySchema`, `sendMessageInputSchema`,
 `messageRowSchema`, `messageQuerySchema`, `messagePageSchema`, `memberThreadMetaSchema`,
 `supportThreadSchema`, `readInputSchema`, `conversationDetailSchema`, `inboxQuerySchema`,
 `inboxRowSchema`, `inboxPageSchema`, the permission names `CHAT_PERMISSIONS` (`chat.support`,
-`chat.support.contact`), the refusal vocabulary `CHAT_ISSUES` and `CHAT_NOTIFICATION_KINDS`.
+`chat.support.contact`, `chat.support.assign`), the refusal vocabulary `CHAT_ISSUES` and
+`CHAT_NOTIFICATION_KINDS`.
+
+Support cases (Phase 12.4, all strict; every new key of an existing response is optional):
+`supportSendInputSchema` (the member's first message: body, category, subject; a priority, state or
+owner is refused), `memberCaseSchema` (no priority, owner or history), `staffCaseSchema`,
+`caseCardSchema`, `myCasesQuerySchema`, `myCasesPageSchema`, `caseActionInputSchema`,
+`caseAssignInputSchema`, `caseEditInputSchema`, `caseResultSchema`, `caseHistorySchema`,
+`staffRosterSchema`, and the closed lists `CHAT_CASE_STATES`, `CHAT_CASE_CATEGORIES`,
+`CHAT_CASE_PRIORITIES` and `CHAT_CASE_ACTIONS`.
+
+## Permissions
+
+- `chat.support`: answer support (the inbox, the staff reply, the case actions). Both staff roles.
+- `chat.support.contact`: write to the team. Members only.
+- `chat.support.assign`: hand a case to a colleague. `admin_tenant` only; the case definer repeats
+  the role once and the drift test compares both.
+
+All three come from this manifest, so turning chat off revokes them.
 
 Main server names (`./server`): `chatRoutes`, `sendSupportMessage`, `replyToConversation`,
 `getSupportThread`, `getConversation`, `listMessages`, `listInbox`, `markConversationRead`,
@@ -31,6 +49,10 @@ Main server names (`./server`): `chatRoutes`, `sendSupportMessage`, `replyToConv
 
 - `chat.message_sent`: `tenantId`, `conversationId`, `messageId`, `seq`, `authorUserId`,
   `authorSide`. Never the body.
+- Declared on the kernel event map for the case notices, ids only and never any text (they are
+  emitted by the case routes that follow in this phase): chat.case_resolved (`tenantId`,
+  `conversationId`, `resolvedAt`) and chat.case_assigned (`tenantId`, `conversationId`,
+  `assigneeUserId`, `actorUserId`).
 - Realtime signal (not a bus event): the ids-only Broadcast signal named chat.case, published by the
   case definers and by the auto-close sweep on the conversation, the support inbox and the member's
   own topic. Its payload is the conversation id (plus the injected message id), never a title,
@@ -83,8 +105,8 @@ grant lives in this manifest rather than in the kernel.
 The worked example lives in `packages/reuse-fixture` (it mounts the events module the same way). A
 host app must provide: a request id and a per-request logger, `flushEventsAfterHandler`, an
 `onError` rendering `errorEnvelope`, `setPermissionResolver` with the kernel grants plus
-`defaultRolePermissions` (`admin_tenant` and `support_tenant`: `chat.support`; `member`:
-`chat.support.contact`), `setCountersResolver` composing `counters`, and
+`defaultRolePermissions` (`admin_tenant`: `chat.support` and `chat.support.assign`;
+`support_tenant`: `chat.support`; `member`: `chat.support.contact`), `setCountersResolver` composing `counters`, and
 `.route('/v1/chat', chatRoutes)`. The routes carry their own `requireAuth`, `requireModule('chat')`
 and `requirePermission` chain. Push for new messages needs the notifications module's sink; the web
 side subscribes to the Realtime signals read-only.
