@@ -739,14 +739,15 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     await expect(page).toHaveURL(/\/entrar$/);
   });
 
-  test("/perfil: e-mail, no role pill, the desktop account menu's Ver perfil current on the desktop (the header's since 2026-10-26), TopBar avatar current on the phone (2026-10-23: no Perfil tab in rede-demo's BottomNav); back from Configurações returns here", async ({
+  test("/perfil: name, no e-mail, no role pill, the desktop account menu's Ver perfil current on the desktop (the header's since 2026-10-26), TopBar avatar current on the phone (2026-10-23: no Perfil tab in rede-demo's BottomNav); back from Configurações returns here", async ({
     page,
   }, testInfo) => {
     const mobile = testInfo.project.name === 'mobile-chromium';
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/perfil`);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Perfil');
-    await expect(page.getByText(users.demoMember)).toBeVisible();
+    await expect(page.locator('main [data-profile-name]')).toHaveText('Membro Rede Demo');
+    await expect(page.locator('main').getByText(users.demoMember)).toHaveCount(0);
     // The role pill left this screen in 03-05 (UI-D-01/D-45); pinned absent so it cannot return.
     await expect(page.getByText('Membro', { exact: true })).toHaveCount(0);
 

@@ -35,11 +35,13 @@ test.describe('AUTH-02 — login on the tenant host', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início');
     await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
     // D-42: the signed-in identity lives on the profile page (the Perfil tab), not on the home.
-    // The e-mail is what proves WHICH identity landed there. The role pill this line used to look
+    // The profile's name proves WHICH identity landed there (since 2026-11-17 the account e-mail is the
+    // administrator's alone, so it is pinned ABSENT for a member and cannot return). The role pill this line used to look
     // for was deliberately removed from `/perfil` in 03-05 (UI-D-01/D-45: a profile is a person,
     // not a rank), so it is asserted ABSENT instead — a removal worth keeping is worth pinning.
     await page.goto('/perfil');
-    await expect(page.getByText(users.demoMember)).toBeVisible();
+    await expect(page.locator('main [data-profile-name]')).toHaveText('Membro Rede Demo');
+    await expect(page.locator('main').getByText(users.demoMember)).toHaveCount(0);
     await expect(page.getByText('Membro', { exact: true })).toHaveCount(0);
 
     // T-02-01: the session lives in HttpOnly cookies set by the server, never in client JS.

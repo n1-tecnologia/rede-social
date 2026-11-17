@@ -87,7 +87,9 @@ test.describe('PROF-01 — /perfil and /perfil/editar', () => {
     await expect(page.locator('main header')).toHaveCount(0);
     await expect(profileName(page)).toHaveCount(1);
     await expect(profileName(page)).toHaveText(SEEDED.displayName);
-    await expect(page.getByText(users.demoMember)).toBeVisible();
+    // 2026-11-17: the account e-mail under the name is the administrator's alone; a member's page
+    // does not carry it at all.
+    await expect(page.locator('main').getByText(users.demoMember)).toHaveCount(0);
 
     // The seeded member has no photo and no bio: the neutral avatar, and no placeholder line.
     await expect(hero(page).locator('[role="img"][aria-label="Membro Rede Demo"]')).toBeVisible();
@@ -115,6 +117,20 @@ test.describe('PROF-01 — /perfil and /perfil/editar', () => {
     // to `main` since 07-08: the shell's chat slot is labelled "Suporte" (the support conversation,
     // not a role), and it lives in the TopBar / rail, outside the profile.
     await expect(page.locator('main').getByText(/^(Administrador|Membro|Suporte)$/)).toHaveCount(0);
+  });
+
+  test('the e-mail under the name is the administrator alone (2026-11-17)', async ({ page }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+    // The owner's panel on the same page may print other things: look inside the hero only.
+    await expect(hero(page).getByText(users.demoAdmin)).toHaveCount(1);
+
+    // A fresh session as the seeded member: the same screen has no e-mail.
+    await page.context().clearCookies();
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+    await expect(profileName(page)).toHaveText(SEEDED.displayName);
+    await expect(page.locator('main').getByText(users.demoMember)).toHaveCount(0);
   });
 
   test('a member renames themselves and writes a bio, and it persists', async ({ page }) => {
@@ -253,9 +269,10 @@ test.describe('PROF-01 — the states of the profile screens', () => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto('/perfil');
 
-    // The bio block is OMITTED, not replaced by a placeholder: the hero ends at the e-mail.
+    // The bio block is OMITTED, not replaced by a placeholder: the hero ends at the name (a member
+    // has no e-mail line since 2026-11-17, so the hero has no paragraph at all).
     await expect(page.getByText('Sem bio')).toHaveCount(0);
-    await expect(hero(page).locator('p')).toHaveCount(1); // the e-mail, and nothing else
+    await expect(hero(page).locator('p')).toHaveCount(0);
 
     await page.goto('/perfil/editar');
     await expect(page.getByRole('button', { name: 'Salvar alterações' })).toBeDisabled();
