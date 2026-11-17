@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import {
   CASE_ACTIVE_STATES,
+  type ConversationDetail,
+  type MyCasesPage,
+  myCasesPageSchema,
   type SendResult,
   type SupportThread,
 } from '@rede-social/module-chat/contracts';
@@ -170,6 +173,157 @@ describe('case first message', () => {
       );
     }
     expect(await conversationRows(member.id)).toEqual([]);
+  });
+});
+
+describe('case member reads', () => {
+  const closeAsAdmin = (conversationId: string) => adminSql`
+      update public.chat_conversations
+         set state = 'closed', closed_at = now(), staff_last_read_seq = last_seq
+       where id = ${conversationId}::uuid`;
+
+  const send = async (token: string, body: Record<string, unknown>) => {
+    const sent = await post('/v1/chat/support/messages', token, body);
+    expect(sent.status).toBe(201);
+    return (await sent.json()) as SendResult;
+  };
+
+  /** A member with two closed cases (A then B) and an active one (C), the first closed one answered by staff. */
+  async function memberWithThreeCases(label: string) {
+    const { tokens } = await caseKit();
+    const member = await throwawayMember(label);
+    const a = await send(member.token, { body: 'Primeiro assunto', subject: 'Check-in travado' });
+    const reply = await post(
+      `/v1/chat/conversations/${a.conversationId}/messages`,
+      tokens.demoSupport,
+      {
+        body: 'Já resolvemos o seu check-in',
+      },
+    );
+    expect(reply.status).toBe(201);
+    await closeAsAdmin(a.conversationId);
+    const b = await send(member.token, { body: 'Segundo chamado sem assunto digitado' });
+    await closeAsAdmin(b.conversationId);
+    const c = await send(member.token, { body: 'Terceiro', category: 'events', subject: 'Evento' });
+    return { member, a, b, c };
+  }
+
+  const myCases = async (token: string, query = '') => {
+    const res = await request(`/v1/chat/support/cases${query}`, token);
+    expect(res.status).toBe(200);
+    return (await res.json()) as MyCasesPage;
+  };
+
+  it('answers the active case, the closed ones newest first, the total and the last message of each (D-803)', async () => {
+    const { member, a, b, c } = await memberWithThreeCases('mycases');
+    const page = await myCases(member.token);
+    // The strict schema: a staff fact in a card would not parse.
+    expect(myCasesPageSchema.parse(page)).toEqual(page);
+    expect(page.current?.id).toBe(c.conversationId);
+    expect(page.current).toMatchObject({
+      state: 'open',
+      category: 'events',
+      subjectLabel: 'Evento',
+    });
+    expect(page.items.map((card) => card.id)).toEqual([b.conversationId, a.conversationId]);
+    expect(page.total).toBe(2);
+    expect(page.nextCursor).toBeNull();
+    // The label of a case with no typed subject is the start of its first message.
+    expect(page.items[0]).toMatchObject({
+      subject: null,
+      subjectLabel: 'Segundo chamado sem assunto digitado',
+      state: 'closed',
+    });
+    expect(page.items[1]?.lastMessage).toEqual({
+      side: 'staff',
+      preview: 'Já resolvemos o seu check-in',
+    });
+    expect(page.items[0]?.lastMessage).toEqual({
+      side: 'member',
+      preview: 'Segundo chamado sem assunto digitado',
+    });
+    for (const card of [page.current, ...page.items]) {
+      expect(card).not.toHaveProperty('priority');
+      expect(card).not.toHaveProperty('ownerUserId');
+    }
+  });
+
+  it('a limit=1 keyset walk visits each closed case once, and a tampered cursor degrades to page 1 (EP-048, T-12.4-29)', async () => {
+    const { member, a, b } = await memberWithThreeCases('keyset');
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let step = 0; step < 5; step += 1) {
+      const query: string = cursor ? `?limit=1&cursor=${encodeURIComponent(cursor)}` : '?limit=1';
+      const page: MyCasesPage = await myCases(member.token, query);
+      seen.push(...page.items.map((card) => card.id));
+      cursor = page.nextCursor;
+      if (!cursor) break;
+    }
+    // The union of the pages equals the closed set, newest first, with no repeat.
+    expect(seen).toEqual([b.conversationId, a.conversationId]);
+    expect(new Set(seen).size).toBe(seen.length);
+
+    const first = await myCases(member.token, '?limit=1');
+    const forge = (n: string) =>
+      Buffer.from(JSON.stringify({ v: 1, n, id: a.conversationId })).toString('base64url');
+    for (const tampered of [
+      'not-a-cursor',
+      forge('1; drop table chat_conversations'),
+      forge('99999999999999999999'),
+      forge('-3'),
+      forge('1.5'),
+    ]) {
+      const degraded = await myCases(
+        member.token,
+        `?limit=1&cursor=${encodeURIComponent(tampered)}`,
+      );
+      expect(degraded.items.map((card) => card.id)).toEqual(first.items.map((card) => card.id));
+    }
+  });
+
+  it('GET /conversations/{id} answers the member case for the active and for a closed own case, and one bare 404 for anything else (D-804, CASE-14)', async () => {
+    const { member, a, c } = await memberWithThreeCases('detail');
+    const detail = async (id: string, token: string) =>
+      request(`/v1/chat/conversations/${id}`, token);
+
+    const active = (await (
+      await detail(c.conversationId, member.token)
+    ).json()) as ConversationDetail;
+    expect(active).toMatchObject({
+      viewer: 'member',
+      case: { id: c.conversationId, state: 'open' },
+    });
+    const closedRes = await detail(a.conversationId, member.token);
+    expect(closedRes.status).toBe(200);
+    const closed = (await closedRes.json()) as ConversationDetail;
+    expect(closed).toMatchObject({
+      viewer: 'member',
+      case: { id: a.conversationId, state: 'closed', subject: 'Check-in travado' },
+    });
+    expect(closed).not.toHaveProperty('case.priority');
+
+    const stranger = await throwawayMember('detail-stranger');
+    const refusals = [
+      await detail(a.conversationId, stranger.token),
+      await detail('00000000-0000-4000-8000-0000000000aa', member.token),
+    ];
+    expect(refusals.map((res) => res.status)).toEqual([404, 404]);
+    // Indistinguishable apart from the per-request id.
+    const bodies = (await Promise.all(refusals.map((res) => res.json()))) as {
+      error: Record<string, unknown>;
+    }[];
+    const bare = (body: { error: Record<string, unknown> }) => {
+      const { requestId: _requestId, ...rest } = body.error;
+      return rest;
+    };
+    expect(bare(bodies[0] as never)).toEqual(bare(bodies[1] as never));
+    expect(bare(bodies[0] as never).code).toBe('NOT_FOUND');
+    expect(JSON.stringify(bodies[0])).not.toContain(a.conversationId);
+  });
+
+  it('a staff lane is refused on the member route (D-223)', async () => {
+    const { tokens } = await caseKit();
+    expect((await request('/v1/chat/support/cases', tokens.demoSupport)).status).toBe(403);
   });
 });
 

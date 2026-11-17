@@ -11,12 +11,15 @@ import {
   inboxQuerySchema,
   messagePageSchema,
   messageQuerySchema,
+  myCasesPageSchema,
+  myCasesQuerySchema,
   readInputSchema,
   sendMessageInputSchema,
   sendResultSchema,
   supportSendInputSchema,
   supportThreadSchema,
 } from '../contracts/index';
+import { getMyCases } from './cases';
 import {
   getConversation,
   getSupportThread,
@@ -118,6 +121,21 @@ const supportSendRoute = createRoute({
   },
 });
 
+const myCasesRoute = createRoute({
+  method: 'get',
+  path: '/support/cases',
+  middleware: [requirePermission('chat.support.contact')] as const,
+  request: { query: myCasesQuerySchema },
+  responses: {
+    200: {
+      description:
+        "D-803, CASE-14: the CALLER's own cases only. `current` is the active case (null when none), `items` the closed ones newest first (`case_number desc`), 20 per page by keyset, `total` the count of closed cases. A GET: nothing is created. A member sees no priority, owner or staff id (UI-D-835) and no route looks a case up by its number (D-804).",
+      content: { 'application/json': { schema: myCasesPageSchema } },
+    },
+    403: { description: '`FORBIDDEN` for staff: the team works from the inbox (D-223).' },
+  },
+});
+
 const messagesRoute = createRoute({
   method: 'get',
   path: '/conversations/{conversationId}/messages',
@@ -213,6 +231,9 @@ export const chatRoutes = chat
   .openapi(supportThreadRoute, async (c) => c.json(await getSupportThread(c.get('ctx')), 200))
   .openapi(supportSendRoute, async (c) =>
     c.json(await sendSupportMessage(c.get('ctx'), c.req.valid('json')), 201),
+  )
+  .openapi(myCasesRoute, async (c) =>
+    c.json(await getMyCases(c.get('ctx'), c.req.valid('query')), 200),
   )
   .openapi(messagesRoute, async (c) =>
     c.json(

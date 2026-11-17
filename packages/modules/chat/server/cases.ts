@@ -1,13 +1,19 @@
 import { cutOnWord } from '@rede-social/contracts/text';
-import type { Tx } from '@rede-social/core/db/tenant-tx';
+import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { sql } from 'drizzle-orm';
 import {
   CASE_ACTIVE_STATES,
+  type CaseCard,
+  CHAT_PREVIEW_GRAPHEMES,
   CHAT_SUBJECT_MAX,
   type ChatCaseCategory,
   type ChatCaseState,
+  type ChatSide,
   type MemberCase,
+  type MyCasesPage,
+  type MyCasesQuery,
 } from '../contracts/index';
 
 /**
@@ -135,4 +141,117 @@ export async function hasAnyCaseOf(tx: Tx, ctx: RequestContext): Promise<boolean
                 and c.created_by_user_id = ${ctx.userId}::uuid
            ) as any_case`);
   return rows[0]?.any_case === true;
+}
+
+/**
+ * A "Meus chamados" cursor's `n` is the case NUMBER as a string of digits (EP-049). It is re-checked here, before any
+ * cast, so a tampered cursor degrades to page 1 and never reaches SQL as anything but a bounded integer (T-12.4-29).
+ * Nine digits at most: the number is an `integer` column and the cursor only ever carries a number this service issued.
+ */
+const CURSOR_NUMBER = /^[1-9]\d{0,8}$/;
+
+function decodeNumberCursor(raw: string | undefined): { n: number; id: string } | null {
+  const decoded = decodeCursor(raw);
+  if (!decoded || !CURSOR_NUMBER.test(decoded.n)) return null;
+  return { n: Number(decoded.n), id: decoded.id };
+}
+
+type CardDbRow = MemberCaseDbRow & {
+  lm_body: string | null;
+  lm_side: ChatSide | null;
+  last_message_at: string | null;
+};
+
+const toCard = (row: CardDbRow): CaseCard => ({
+  ...toMemberCase(row),
+  lastMessage:
+    row.lm_side === null
+      ? null
+      : { preview: cutOnWord(row.lm_body ?? '', CHAT_PREVIEW_GRAPHEMES), side: row.lm_side },
+  lastMessageAt: row.last_message_at,
+});
+
+/** The card columns shared by the active and the closed statements (the latest message like `listInbox`'s). */
+const cardColumns = sql`
+           c.id,
+           c.case_number::int as case_number,
+           c.state,
+           c.subject,
+           c.category,
+           to_char(c.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as opened_at,
+           fm.body as first_body,
+           lm.body as lm_body,
+           lm.author_side as lm_side,
+           to_char(c.last_message_at at time zone 'utc', ${ISO_MICROSECONDS}) as last_message_at`;
+
+const lastMessageJoin = sql`
+        left join lateral (
+          select m.body, m.author_side
+            from chat_messages m
+           where m.tenant_id = c.tenant_id
+             and m.conversation_id = c.id
+             and m.deleted_at is null
+           order by m.seq desc
+           limit 1
+        ) lm on true`;
+
+/**
+ * `GET /v1/chat/support/cases?cursor=&limit=` (D-803, CASE-14): the member's own cases and nobody else's.
+ * `current` is the ACTIVE case (null when none), `items` the CLOSED cases newest first (`case_number desc, id desc`,
+ * keyset over the pair so a `limit=1` walk visits each once), `total` the count of closed cases. Three tenant-pinned
+ * statements in one transaction; over-fetch by one decides `nextCursor`. A GET: nothing is created or touched.
+ */
+export async function getMyCases(ctx: RequestContext, query: MyCasesQuery): Promise<MyCasesPage> {
+  const limit = query.limit;
+  const after = decodeNumberCursor(query.cursor);
+  const afterNumber = after?.n ?? null;
+  const afterId = after?.id ?? null;
+  return withTenantTx(ctx, async (tx) => {
+    const active = await tx.execute<CardDbRow>(sql`
+      select ${cardColumns}
+        from chat_conversations c
+        ${firstMessageJoin}
+        ${lastMessageJoin}
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.kind = 'support'
+         and c.created_by_user_id = ${ctx.userId}::uuid
+         and c.state in (${ACTIVE_STATES})
+       order by c.case_number desc nulls last
+       limit 1`);
+    const closed = await tx.execute<CardDbRow>(sql`
+      select ${cardColumns}
+        from chat_conversations c
+        ${firstMessageJoin}
+        ${lastMessageJoin}
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.kind = 'support'
+         and c.created_by_user_id = ${ctx.userId}::uuid
+         and c.state = 'closed'
+         and (
+           ${afterNumber}::int is null
+           or (c.case_number, c.id) < (${afterNumber}::int, ${afterId}::uuid)
+         )
+       order by c.case_number desc, c.id desc
+       limit ${limit + 1}`);
+    const counted = await tx.execute<{ total: number }>(sql`
+      select count(*)::int as total
+        from chat_conversations c
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.kind = 'support'
+         and c.created_by_user_id = ${ctx.userId}::uuid
+         and c.state = 'closed'`);
+    const page = closed.slice(0, limit);
+    const last = page[page.length - 1];
+    const nextCursor =
+      closed.length > limit && last
+        ? encodeCursor({ n: String(last.case_number), id: last.id })
+        : null;
+    const current = active[0];
+    return {
+      current: current ? toCard(current) : null,
+      items: page.map(toCard),
+      total: Number(counted[0]?.total ?? 0),
+      nextCursor,
+    };
+  });
 }
