@@ -20,10 +20,12 @@ import { chatCounters } from './server/service';
  * database definer spells the same role once, and the drift test compares both. The permission gates the UI and the
  * API, never roles (D-223); with chat off it is revoked together with `chat.support`.
  *
- * `counters` (D-237, D-238): the member's dot or the staff count, decided from the caller's composed
- * permissions. `notificationSources` (D-228): `chat.message_sent` becomes a PUSH-ONLY intent to the
- * other side of the thread, delivered by the notifications module's push channel through the kernel
- * seam; chat never imports that module, and support messages never write a bell row.
+ * `counters` (D-237, D-238, D-840): the member's dot or the staff count of ACTIVE cases (never a closed one), decided from the
+ * caller's composed permissions. `notificationSources` (D-228, D-808, D-809): `chat.message_sent` becomes a PUSH-ONLY
+ * intent (to the other side of the thread, or to the right part of the team for a new, reopened or ongoing case),
+ * `chat.case_assigned` a push to the assignee and `chat.case_resolved` the member's one notice (a bell row plus a push,
+ * ids-only facts); all are delivered by the notifications module's channels through the kernel seam, and chat never
+ * imports that module.
  *
  * `sweepFunctions` (D-844, D-807): `chat_cases_auto_close` closes every support case left `resolved` for 7 days, run
  * by the kernel's existing hourly sweeper through the admin lane (no new queue, no new job name). The 7 days live in the

@@ -5,7 +5,8 @@ tenant's staff: the member sends lazily (the first message creates the conversat
 from the inbox, every message gets a gapless `seq` assigned by a trigger under the conversation row
 lock, and reads catch up by `seq`. Realtime Broadcast carries ids-only signals published by a
 definer trigger and by `app.realtime_signal`; the data is always fetched through the API. The module
-also contributes the chat badges and a push-only notification source for new messages.
+also contributes the chat badges and the notification sources of the support cases: push-only for messages and
+assignments, a bell row plus a push for the member's resolved case.
 
 ## Contracts
 
@@ -64,7 +65,12 @@ Main server names (`./server`): `chatRoutes`, `sendSupportMessage`, `replyToConv
 
 - Manifest subscriptions: none.
 - Notification sources (handed to the notifications module through the kernel seam):
-  `chat.message_sent`, delivered as push only.
+  `chat.message_sent`, delivered as push only: a staff message pushes the member; a member message pushes the team
+  as a new case (`seq = 1`), a reopened case (a `reopened` history row carries the message id) or an ongoing one
+  (the owner only when the owner is live staff, every live staff member otherwise);
+  `chat.case_assigned`, a push to the assignee only (never the actor);
+  `chat.case_resolved`, the member's one case notice, a bell row plus a push with ids-only facts `{ caseId, number }`,
+  issued only when the case is still resolved at the event's instant (compared in SQL as timestamptz).
 - Notification retractions: none.
 
 ## Flag key
