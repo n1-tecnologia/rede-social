@@ -210,6 +210,12 @@ export function SupportInbox({
 
   /** How many keyset pages the list holds: page 1's cursor is replaced only while it is the last. */
   const pagesRef = useRef(1);
+  /**
+   * A load-more is in flight: its page is not appended yet, so `pagesRef` still counts one page while the cursor
+   * already belongs to a page on its way. A refetch that lands now must not read the list as the whole view
+   * (WR-06). A boolean is enough: the sentinel keeps one page in flight at a time.
+   */
+  const loadingMoreRef = useRef(false);
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const apiKeyRef = useRef(apiKey);
@@ -285,8 +291,10 @@ export function SupportInbox({
         }
         // The fresh page replaces the window of the server order it covers (WR-01): a case that left the
         // tab leaves here, a row still listed is updated in place once. Only the server's order key is used.
+        // A read in flight counts as "more than page 1" (WR-06): the refetch takes the not-whole path, deeper
+        // rows stay, the cursor is left alone and the late page is appended with the id de-duplication.
         const { items: next, whole } = reconcileInboxPage(itemsRef.current, page.items, {
-          holdsOnlyPage1: pagesRef.current <= 1,
+          holdsOnlyPage1: pagesRef.current <= 1 && !loadingMoreRef.current,
           hasMore: page.nextCursor !== null,
         });
         itemsRef.current = next;
@@ -323,6 +331,7 @@ export function SupportInbox({
     if (!cursor) return;
     const key = apiKeyRef.current;
     try {
+      loadingMoreRef.current = true;
       const page = await loadMoreInboxAction(cursor, inboxApiFilters(query));
       // The staff changed view while the page was on its way: it belongs to the previous one.
       if (apiKeyRef.current !== key || heldRef.current !== key) return;
@@ -340,6 +349,9 @@ export function SupportInbox({
     } catch (error) {
       console.error('chat.inbox_load_more_failed', { error: String(error) });
       setPageFailed(true);
+    } finally {
+      // Every exit (page appended, changed-view return, refused page return, the catch) passes through here.
+      loadingMoreRef.current = false;
     }
   }, [cursor, query]);
 
