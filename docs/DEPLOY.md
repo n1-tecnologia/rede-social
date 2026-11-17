@@ -4941,6 +4941,237 @@ developer's decision to take in Phase 13. Nothing native is built in Phase 10.2.
 
 See the ledger named at the top. A row becomes `passed` only with the evidence you paste and your own date.
 
+## Phase 12.4 release (support cases)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them: nothing of
+Phase 12.4 has been pushed, deployed or applied to a hosted project, and no agent touches homolog or production.
+No command here prints a secret. Phase 12.4 ships ON TOP of the Phase 10.2 release (opening of the event sale) and of
+every release above it. The proofs only the owner can run (the first real phone walk of a case, the read-only counts
+on a hosted project, the 7-day close on homolog, the held-out visual rows, the screen-reader walk, the sketch 023
+approval record, the planner assumptions to confirm) are in the ledger
+`.planning/phases/12.4-*/12.4-MANUAL-PROOFS.md`; it ships with every row `pending`, and a row becomes `passed` only
+with the evidence you paste and your own date.
+
+**This release changes nothing for a member who never wrote to support.** A member who never opened a support
+conversation sees no case, no number and no new screen they did not already have; the direct and group conversations
+of the module are never touched (every case column stays null for them). What changes is told in "Per-tenant effect"
+below, and it changes on the day of the release for every member who HAS a support conversation.
+
+### What ships
+
+- **Eleven migrations, applied in timestamp order** (the order `ls supabase/migrations` prints, all after
+  `20261113231417_event_opening_grant.sql` and its 10.2 siblings). The first ten are expand-only apart from the one
+  allowed statement of the activation; the eleventh is the dashboard's second `create or replace`. Each applies on an
+  EMPTY tenant project and on an existing one.
+  1. `20261117082348_chat_cases.sql` (generated): the seven nullable case columns of `chat_conversations`
+     (`case_number`, `state`, `owner_user_id`, `category`, `priority`, `resolved_at`, `closed_at`), the tables
+     `chat_case_counters` (one row per tenant) and `chat_case_events` (the append-only history), the legacy-safe CHECKs
+     (a null state is valid, so a legacy row passes), the unique number per tenant, the open-inbox, member-cases and
+     resolved-sweep indexes, the events policy and the insert policy of a born-open case. No NOT NULL, no default.
+  2. `20261117082355_chat_cases_functions.sql` (hand-written): the BEFORE INSERT trigger that fills `state = open`,
+     `priority = normal`, `category = other` on a support row that left them null (so every writer that only knows the
+     old columns keeps working) and the AFTER INSERT trigger that takes the number from the tenant's counter. Only a
+     `support` row is touched.
+  3. `20261117082657_chat_cases_constraints.sql` (hand-written): the privileges. `chat_case_events` is append-only for
+     every lane (UPDATE, DELETE and TRUNCATE revoked) and `chat_case_counters` has no policy and no lane privilege (a
+     lane gets 42501, never "zero rows").
+  4. `20261117084153_chat_cases_transitions.sql` (hand-written): the REPLACED message trigger function (the same name,
+     signature and binding; it also moves the case: a member's reply reopens a resolved case, a staff reply takes an
+     unowned open one, a message to a closed case is refused with SQLSTATE CS004) and `app.chat_cases_backfill()`.
+  5. `20261117084235_chat_cases_activate.sql` (hand-written, **the one-way step**): ONE `do` block (one statement, so one
+     transaction under the ledgered runner AND under the local CLI, which does not wrap a file in a transaction):
+     `lock table chat_conversations in share row exclusive mode`, the backfill, the `state` is-not-null CHECK for a
+     support row (added not valid, then validated), the new unique index
+     `chat_conversations_one_active_case_per_member` and the DROP of `chat_conversations_one_support_per_member`.
+  6. `20261117085644_chat_cases_actions.sql` (hand-written): the signal helper `app.chat_case_signal` and the first
+     version of `app.chat_case_act` (the take branch only).
+  7. `20261117085928_chat_cases_actions_matrix.sql` (hand-written): `app.chat_case_act` redefined whole with every
+     action (take, assign, resolve, close, reopen) and the transition table; this is the final definition.
+  8. `20261117090105_chat_cases_edit.sql` (hand-written): `app.chat_case_edit`, the category, subject and priority
+     edit, one history row per changed field.
+  9. `20261117090857_chat_cases_sweep.sql` (hand-written): `app.chat_cases_auto_close(batch)`, executable by the service
+     role only. It rides the kernel's EXISTING hourly sweeper through the chat manifest's `sweepFunctions`: no new queue
+     and no new job name.
+  10. `20261117092714_dashboard_cases.sql` (hand-written, expand-only): the owner's Atendimento builder per case
+      (`app.dashboard_area_support`, with the new `bySubject` key) and the snapshot builder at version 9.
+  11. `20261117092952_dashboard_cases_first_response.sql` (hand-written, expand-only): the first response per case; it
+      redefines `app.dashboard_area_support` whole and holds its final definition.
+- **The web.** The case opener (category and subject on the first message), the case bar and the polite region, `Meus
+  chamados` and the bell row of a resolved case, the team's inbox (tabs, owner, priority and awaiting filters, kept in
+  the URL), the staff bar with its dialogs and sheets (take, assign, resolve, close, reopen, edit, details), and the
+  owner's Atendimento area per case with the `Atendimentos por assunto` card. The web reads every new key of the API as
+  optional.
+- **The API and the worker.** The case routes and the staff actions, the optional `category` and `subject` keys of the
+  member's first message, the optional `case` key on every existing read, the new permission `chat.support.assign`
+  (held by `admin_tenant` only), the resolved notice (bell row plus push) and the sweep registered on the hourly
+  sweeper. No new table beyond the two above, no new queue, no new job name.
+
+### Read-only check on EVERY hosted project (run before anything else)
+
+Run these on each hosted tenant project, **including the one that holds several tenants**, in the Supabase SQL editor
+or with `psql` and a read-only role. They only read. Paste the shapes and counts in the ledger; never a project
+reference, a tenant name or a member's e-mail.
+
+```sql
+-- A. Is any of this release already on the project? (expected before the release: no row)
+select table_name, column_name from information_schema.columns
+ where table_schema = 'public'
+   and ((table_name = 'chat_conversations'
+         and column_name in ('case_number', 'state', 'owner_user_id', 'category', 'priority', 'resolved_at', 'closed_at'))
+     or table_name in ('chat_case_counters', 'chat_case_events'));
+-- B. Which of this release's versions are already recorded? (expected before the release: no row)
+select version from supabase_migrations.schema_migrations
+ where version in ('20261117082348', '20261117082355', '20261117082657', '20261117084153', '20261117084235',
+                   '20261117085644', '20261117085928', '20261117090105', '20261117090857', '20261117092714',
+                   '20261117092952')
+ order by version;
+-- C. How big is the table the activation locks? (judge that the lock lasts seconds)
+select (select count(*) from public.chat_conversations) as conversations,
+       (select count(*) from public.chat_conversations where kind = 'support') as support_conversations,
+       (select count(*) from public.chat_messages) as messages;
+```
+
+Then, from the repository, the two local checks that need no project:
+
+- `pnpm db:migrate-all -- --dry-run` lists the pending versions per project and writes nothing; on a project that
+  already has the Phase 10.2 release the eleven files above are the pending ones.
+- The expand-only grep over the phase's files prints nothing except the one allowed statement:
+  `grep -inE 'drop (table|column)|rename|set not null|alter column .* type' supabase/migrations/*_chat_cases*.sql
+  supabase/migrations/*_dashboard_cases*.sql`. The one destructive statement of the phase is
+  `drop index chat_conversations_one_support_per_member` inside the activation (D-802: the old index guaranteed one
+  conversation per member, which is exactly what the phase gives up); a `drop index` is not matched by the pattern above,
+  so the grep prints nothing at all, and the drop is the line to read by hand in `20261117084235_chat_cases_activate.sql`.
+
+### Order
+
+1. **Migrations** on every tenant database first, through the ledgered fan-out (the Phase 09.2 Cloud Run Job `migrateAll`, databases before the services); the eleven files apply in the order of their names, the runner is serialised per database and idempotent, so a re-run is safe and reports nothing pending. Locally, `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole tenant set to an empty second local database.
+2. **Web** second, once every project is current, and in the SAME sitting as step 3.
+3. **API and worker** last and together, from a REBUILT image (the image bakes the migrations manifest built by `scripts/build-migrations-manifest.mjs`; an image built before these files does not know them, and a production boot without the manifest stops with `migrations manifest empty`).
+
+**The whole set runs in one sitting.** The three steps follow each other without a pause for the night or for another
+task: the failing window below lasts from the activation migration until step 3 is serving, and every minute spent
+between them is a minute in which no member can send a message to support.
+
+**Why this order.** The web reads every new KEY of the API as optional, so a previous API behind the new web still
+answers every READ; the new API reads the migrated columns and calls the redefined definers, so it must never run
+before the migrations reach a project: the schema gate holds such a project out as `updating` instead of letting a
+member meet the error.
+
+**The one forbidden adjacency, and the one allowed window, are different things.**
+
+- **Forbidden:** the API (or the worker) before the migrations reached a project. The project is held out `updating`
+  instead of letting a member meet the error, until it is current.
+- **Allowed, for ONE sitting:** the web ahead of the API, and only because READS tolerate it (every new response key is
+  optional). Do not read steps 1 to 3 as interchangeable and do not leave the web ahead of the API beyond the sitting
+  (next section).
+
+### What the previous API revision does against the migrated database, and what the new web does against the previous API
+
+The failing windows, in order:
+
+- **Window 1, from `20261117082348_chat_cases.sql` to the activation (seconds to a few minutes per project, benign).**
+  The previous API keeps serving every route. A support conversation it inserts after the functions file is born open
+  and numbered by the new triggers; the one visible effect is that such a row may take a number BEFORE the backfill
+  numbers the older conversations of its tenant (a cosmetic ordering of one row, planner assumption A-12.4-WINDOW,
+  recorded in the ledger). Nothing is refused: the case CHECKs are written so a legacy row with a null state passes.
+- **Window 2, from the activation migration until the new API serves (the failing window).** Every member message
+  through the previous API revision fails with **SQLSTATE 42P10**, because its `on conflict (tenant_id,
+  created_by_user_id) where kind = 'support'` text no longer matches any index once the old one is dropped; the member
+  sees the send error and nothing is stored. A staff reply to a migrated **Fechado** case fails with the case-closed
+  refusal (SQLSTATE CS004, a 500 for the previous code). The share-row-exclusive lock of the activation itself holds
+  concurrent writers of `chat_conversations` for seconds, never reads.
+- **What keeps working in window 2:** every read; the previous inbox listing (it also lists the closed cases); staff
+  replies to Aberto, Em atendimento and Resolvido cases; the direct and group conversations; every other module. The
+  owner's Atendimento shows "preparing" if the version 9 snapshot is built by the hourly dispatcher before the API
+  deploy (the previous API's strict payload parse refuses the new key), for minutes and for the owner only.
+- **The new web against the PREVIOUS API.** Between the web step and the API step the new web's first message sends
+  `category` and `subject`, which the previous API's strict body refuses; its staff actions and inbox filters call
+  routes and query keys the previous API does not have; and member sends already fail with 42P10 once the activation
+  ran. So the web step and the API step MUST be run in one sitting (as the Phase 10.2 notes require), and the new web
+  never stays ahead of the API beyond it. Only READS tolerate the gap.
+- **Two runs of `db:migrate-all` must never overlap.** The fan-out runs the projects one at a time, each file in its
+  own transaction; a second run started while the first holds the activation's lock only waits, but two runs at once
+  are never the plan.
+
+### Per-tenant effect
+
+- **The first-day effect (D-814).** The backfill turns every ANSWERED conversation into a **Fechado** case and every
+  conversation whose last message is the member's and unread into an **Aberto** one; none is Em atendimento or
+  Resolvido right after the migration. So on release day a member who had a conversation opens `/suporte` to the
+  opener (the first-message screen) and finds their history under `Meus chamados`, and their next message opens case
+  N+1 even if the talk was alive an hour before. A tenant whose members were all answered ends with every migrated case
+  Fechado and none Aberto: that is expected, not a defect.
+- **Every migrated case is category Outro**, so the owner's `Atendimentos por assunto` card is dominated by Outro until
+  new cases arrive.
+- **The number is a lower bound of the tenant's volume.** A member sees only their own case number; it reveals a lower
+  bound of how many cases the tenant has had (accepted, A12 of the research; recorded in the ledger).
+- **A project with no support conversation** (and a tenant with the chat module off) is untouched: the activation is a
+  no-op that still swaps the index, and the read-only counts print 0, which is correct.
+- **The team** gets the inbox tabs, the owner and priority filters and the case bar; only `admin_tenant` holds the new
+  `chat.support.assign` permission (assign to a colleague). A team member who was answering a member keeps answering.
+
+### Rollback limit
+
+- **Migrations are never rolled back** (forward-only; there is no down migration). Roll forward with a fix.
+- **The previous API revision cannot serve once a member has two cases or any case is resolved or closed under the new
+  code**: its member send fails with 42P10 from the activation on, and a staff reply to a Fechado case fails. The
+  rollback limit is roll-forward: fix and redeploy the new API, never the previous one.
+- **An older web against the new API** shows the thread without the opener, the case bar and `Meus chamados`; it still
+  reads and sends, because every new key of the API is optional, but the team loses the inbox tabs, the filters and
+  the case actions. Roll the web forward, not back.
+- **The new API against an old schema is held out `updating`.** Do not release the API before the migrations reach
+  every project.
+
+### After the migration: read-only counts (every project)
+
+```sql
+-- D. Per-state counts, in this order: open, in_progress, resolved, closed.
+--    Right after the migration in_progress and resolved are 0 on every project.
+select state, count(*) from public.chat_conversations where kind = 'support'
+ group by state
+ order by array_position(array['open', 'in_progress', 'resolved', 'closed'], state);
+-- E. Numbers are 1..N per tenant: max(case_number) equals the count of support conversations. Paste the pair per tenant as
+--    "tenant 1, tenant 2" (never the tenant id). One off in either direction is a defect.
+select max(case_number) as max_number, count(*) as cases
+  from public.chat_conversations where kind = 'support' group by tenant_id;
+-- F. The same, summarised: expected 0 rows.
+select count(*) from (select 1 from public.chat_conversations where kind = 'support'
+ group by tenant_id having max(case_number) <> count(*)) t;
+```
+
+### Smoke checks (on the homolog host once it serves this release)
+
+Read-only SQL on a tenant project, after the Job:
+
+```sql
+select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app' and proname in ('chat_case_act', 'chat_case_edit', 'chat_case_signal', 'chat_cases_auto_close',
+   'chat_cases_backfill', 'chat_conversations_before_insert', 'chat_conversations_after_insert');
+-- 7
+select indexname from pg_indexes where indexname in ('chat_conversations_one_active_case_per_member',
+   'chat_conversations_one_support_per_member');
+-- one row: the new index only
+select count(*) from public.chat_conversations where kind = 'support' and (state is null or case_number is null);
+-- 0
+```
+
+And in the app, on a homolog tenant with the chat module on, one member account and one admin account:
+
+- As the member, open `/suporte` with no open case: the opener with the category and the subject. Send the first message:
+  the case bar shows `Chamado #N` and the thread opens.
+- As the team, find the case in the inbox, Em aberto: take it (Em atendimento), reply, resolve it. As the member, see the
+  bell row of the resolved case and the push on the phone.
+- As the member, reply to the resolved case: it reopens (Aberto). The team closes it. As the member, send again: the
+  opener appears and the message opens the NEXT number.
+- As the owner, open Atendimento: the queue counts cases, and `Atendimentos por assunto` lists the five categories (the
+  migrated ones under Outro).
+- The 7-day close is observed on homolog only, with `resolved_at` set back by hand (ledger row): the sweep is hourly, so
+  a case set back by 7 days and a minute closes within the hour, and one set back by exactly 7 days closes on the next run.
+
+### Manual proofs (hosted)
+
+See the ledger named at the top. A row becomes `passed` only with the evidence you paste and your own date.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
