@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import type {
+  CaseCard,
   InboxRow,
   MemberCase,
   MessageRow,
@@ -7,15 +8,22 @@ import type {
 } from '@rede-social/module-chat/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
+import { firstNameOf as serverFirstNameOf } from '../../../packages/modules/chat/server/first-name';
 import { loadMessages } from '../i18n/messages';
 import {
   type ChatMessageView,
+  caseCardView,
+  caseEventSentence,
   caseHeaderView,
+  caseMetaText,
+  casePriorityView,
   caseStateView,
+  caseSubjectLine,
   caseTitle,
   chatDayLabel,
   chatMessageView,
   chatRuns,
+  firstNameOf,
   inboxRowView,
   inboxTime,
   tenantDayKeys,
@@ -483,5 +491,346 @@ describe('12.4-11 tracer — caseStateView, caseTitle and caseHeaderView', () =>
     );
     expect(header.subject).toBe('Não consigo entrar na minha conta desde ontem…');
     expect(header.subjectLine).toBe('#42 · Não consigo entrar na minha conta desde ontem…');
+  });
+});
+
+describe('12.4-11 — caseSubjectLine, caseMetaText and casePriorityView (UI-D-824, UI-D-825)', () => {
+  it('1. the subject line is "#number · subject" on one line', () => {
+    expect(caseSubjectLine(t, 42, 'Cobrança duplicada')).toBe('#42 · Cobrança duplicada');
+    expect(caseSubjectLine(t, 1204, 'Duas\nlinhas   aqui')).toBe('#1204 · Duas linhas aqui');
+  });
+
+  it("2. the inbox meta text: owned (first name only), unowned and the viewer's own", () => {
+    const base = { category: 'check_in' as const };
+    expect(caseMetaText(t, { ...base, ownerName: 'Carla Souza', ownerIsViewer: false })).toBe(
+      'Check-in · Com Carla',
+    );
+    expect(caseMetaText(t, { ...base, ownerName: null, ownerIsViewer: false })).toBe(
+      'Check-in · Sem responsável',
+    );
+    expect(caseMetaText(t, { ...base, ownerName: 'Carla Souza', ownerIsViewer: true })).toBe(
+      'Check-in · Com você',
+    );
+    // An owner who is no longer live staff has no name: nobody, not an empty "Com ".
+    expect(caseMetaText(t, { ...base, ownerName: '   ', ownerIsViewer: false })).toBe(
+      'Check-in · Sem responsável',
+    );
+  });
+
+  it('3. the staff bar writes the priority out, Normal included', () => {
+    const base = { category: 'account' as const, ownerName: null, ownerIsViewer: false };
+    expect(caseMetaText(t, { ...base, priority: 'normal' })).toBe(
+      'Conta · Normal · Sem responsável',
+    );
+    expect(caseMetaText(t, { ...base, priority: 'low', ownerName: 'Bruno Lima' })).toBe(
+      'Conta · Baixa · Com Bruno',
+    );
+    expect(caseMetaText(t, { ...base, priority: 'high', ownerIsViewer: true })).toBe(
+      'Conta · Alta · Com você',
+    );
+  });
+
+  it('4. the priority pill is drawn for Alta (danger) and Baixa (neutral), never for Normal (A-UI-7)', () => {
+    expect(casePriorityView('high', t)).toEqual({
+      priority: 'high',
+      label: 'Alta',
+      tone: 'danger',
+      pill: true,
+    });
+    expect(casePriorityView('low', t)).toEqual({
+      priority: 'low',
+      label: 'Baixa',
+      tone: 'neutral',
+      pill: true,
+    });
+    expect(casePriorityView('normal', t).pill).toBe(false);
+  });
+});
+
+describe('12.4-11 — caseEventSentence (UI-D-829, D-810)', () => {
+  const at = '2026-09-30T17:00:00.000000Z';
+  const sentence = (event: Parameters<typeof caseEventSentence>[1]) =>
+    caseEventSentence(t, event).text;
+
+  it('1. one sentence per event kind, the actor in the catalog slot', () => {
+    expect(sentence({ kind: 'opened', at, actorName: 'Ana Souza' })).toBe(
+      'Ana Souza abriu o chamado.',
+    );
+    expect(sentence({ kind: 'taken', at, actorName: 'Carla Souza' })).toBe(
+      'Carla Souza assumiu o chamado.',
+    );
+    expect(
+      sentence({ kind: 'assigned', at, actorName: 'Diego Reis', targetName: 'Carla Souza' }),
+    ).toBe('Diego Reis atribuiu o chamado a Carla Souza.');
+    expect(sentence({ kind: 'resolved', at, actorName: 'Carla Souza' })).toBe(
+      'Carla Souza marcou como resolvido.',
+    );
+    expect(sentence({ kind: 'closed', at, actorName: 'Carla Souza' })).toBe(
+      'Carla Souza fechou o chamado.',
+    );
+    expect(sentence({ kind: 'reopened', at, actorName: 'Carla Souza' })).toBe(
+      'Carla Souza reabriu o chamado.',
+    );
+  });
+
+  it('2. the actor is the bold part and nothing else is', () => {
+    const { parts } = caseEventSentence(t, { kind: 'taken', at, actorName: 'Carla Souza' });
+    expect(parts).toEqual([
+      { text: 'Carla Souza', strong: true },
+      { text: ' assumiu o chamado.', strong: false },
+    ]);
+    const assigned = caseEventSentence(t, {
+      kind: 'assigned',
+      at,
+      actorName: 'Diego Reis',
+      targetName: 'Carla Souza',
+    });
+    expect(assigned.parts.filter((part) => part.strong).map((part) => part.text)).toEqual([
+      'Diego Reis',
+    ]);
+    expect(assigned.parts.map((part) => part.text).join('')).toBe(assigned.text);
+  });
+
+  it('3. the automatic close has no actor and its own sentence', () => {
+    const auto = caseEventSentence(t, { kind: 'closed', at, fromState: 'resolved' });
+    expect(auto.text).toBe('O chamado foi fechado automaticamente após 7 dias resolvido.');
+    expect(auto.parts.some((part) => part.strong)).toBe(false);
+  });
+
+  it('4. a team actor who left the tenant reads "Alguém da equipe" (A-12.4-ACTOR-GONE)', () => {
+    expect(sentence({ kind: 'taken', at })).toBe('Alguém da equipe assumiu o chamado.');
+    expect(sentence({ kind: 'resolved', at })).toBe('Alguém da equipe marcou como resolvido.');
+    // A close with no actor is the automatic one unless the host says the actor is gone.
+    expect(sentence({ kind: 'closed', at, actorGone: true })).toBe(
+      'Alguém da equipe fechou o chamado.',
+    );
+    expect(sentence({ kind: 'assigned', at, actorName: 'Diego Reis' })).toBe(
+      'Diego Reis atribuiu o chamado a Alguém da equipe.',
+    );
+  });
+
+  it('5. a member who left reads "Membro removido" in the member slots', () => {
+    expect(sentence({ kind: 'opened', at })).toBe('Membro removido abriu o chamado.');
+    expect(sentence({ kind: 'reopened', at, byMember: true })).toBe(
+      'Membro removido respondeu e o chamado foi reaberto.',
+    );
+  });
+
+  it('6. the member reply that reopens has its own sentence', () => {
+    expect(sentence({ kind: 'reopened', at, actorName: 'Ana Souza', byMember: true })).toBe(
+      'Ana Souza respondeu e o chamado foi reaberto.',
+    );
+  });
+
+  it('7. an edit names the field: the category and the priority with their words, the subject alone', () => {
+    expect(
+      sentence({
+        kind: 'edited',
+        at,
+        actorName: 'Carla Souza',
+        field: 'category',
+        from: 'account',
+        to: 'payment',
+      }),
+    ).toBe('Carla Souza mudou a categoria de Conta para Pagamento.');
+    expect(
+      sentence({
+        kind: 'edited',
+        at,
+        actorName: 'Carla Souza',
+        field: 'priority',
+        from: 'normal',
+        to: 'high',
+      }),
+    ).toBe('Carla Souza mudou a prioridade de Normal para Alta.');
+    expect(
+      sentence({
+        kind: 'edited',
+        at,
+        actorName: 'Carla Souza',
+        field: 'subject',
+        from: 'a',
+        to: 'b',
+      }),
+    ).toBe('Carla Souza mudou o assunto.');
+  });
+
+  it('8. a name carrying the split markers cannot forge a bold run', () => {
+    const { parts } = caseEventSentence(t, {
+      kind: 'taken',
+      at,
+      actorName: '\uE000Fake\uE001 Name',
+    });
+    expect(parts.filter((part) => part.strong).map((part) => part.text)).toEqual(['Fake Name']);
+  });
+});
+
+describe('12.4-11 — caseCardView, the "Meus chamados" card (UI-D-821)', () => {
+  const now = at('2026-10-01T01:30:00Z');
+  const keys = tenantDayKeys(now, SP);
+
+  function card(overrides: Partial<CaseCard> = {}): CaseCard {
+    return {
+      ...memberCase({ state: 'resolved', category: 'events' }),
+      lastMessage: { preview: 'Obrigada!', side: 'member' },
+      lastMessageAt: '2026-10-01T01:10:00Z',
+      ...overrides,
+    };
+  }
+
+  it('1. the finished card: number, state, subject, own-prefixed preview, category and tenant time', () => {
+    expect(caseCardView(card(), { timeZone: SP, keys, t })).toEqual({
+      id: CASE_ID,
+      href: `/suporte/${CASE_ID}`,
+      number: 42,
+      title: 'Chamado #42',
+      state: { state: 'resolved', label: 'Resolvido', tone: 'success', glyph: 'CircleCheck' },
+      subject: 'Cobrança duplicada',
+      hasSubject: true,
+      preview: 'Você: Obrigada!',
+      category: 'Eventos',
+      time: '22:10',
+      closed: false,
+    });
+  });
+
+  it('2. a team message previews with "Equipe: " and a closed case is marked closed', () => {
+    const view = caseCardView(
+      card({
+        state: 'closed',
+        lastMessage: { preview: 'Resolvido por aqui', side: 'staff' },
+        lastMessageAt: '2026-09-20T15:00:00Z',
+      }),
+      { timeZone: SP, keys, t },
+    );
+    expect(view.preview).toBe('Equipe: Resolvido por aqui');
+    expect(view.closed).toBe(true);
+    expect(view.time).toBe('20/09');
+  });
+
+  it('3. a case with no typed subject shows its label, flagged so the card renders it in regular weight', () => {
+    const view = caseCardView(card({ subject: null, subjectLabel: 'Não consigo entrar…' }), {
+      timeZone: SP,
+      keys,
+      t,
+    });
+    expect(view.subject).toBe('Não consigo entrar…');
+    expect(view.hasSubject).toBe(false);
+  });
+
+  it('4. no message yet: an empty preview and the opening instant as the time', () => {
+    const view = caseCardView(
+      card({ lastMessage: null, lastMessageAt: null, openedAt: '2026-10-01T01:00:00Z' }),
+      { timeZone: SP, keys, t },
+    );
+    expect(view.preview).toBe('');
+    expect(view.time).toBe('22:00');
+  });
+
+  it('5. a newline in the preview is one line, and a member-shaped card carries no staff fact', () => {
+    const view = caseCardView(card({ lastMessage: { preview: 'a\nb', side: 'member' } }), {
+      timeZone: SP,
+      keys,
+      t,
+    });
+    expect(view.preview).toBe('Você: a b');
+    expect(view).not.toHaveProperty('priority');
+    expect(view).not.toHaveProperty('ownerName');
+  });
+});
+
+describe('12.4-11 — firstNameOf agrees with the server helper (D-222)', () => {
+  const NAMES: (string | null | undefined)[] = [
+    'Carla Rocha',
+    'Ana Carolina Albuquerque de Vasconcellos',
+    '  Íris   Muñoz ',
+    'Bruno\tLima',
+    'Sofia\nD’Ávila',
+    'Carla',
+    "D'Ávila",
+    '',
+    '   \n ',
+    null,
+    undefined,
+    'Zoë\u00A0Lima',
+    '\u3000Yuki Tanaka',
+  ];
+
+  it.each(NAMES.map((name) => [JSON.stringify(name), name]))('%s', (_label, name) => {
+    expect(firstNameOf(name as string | null | undefined)).toBe(
+      serverFirstNameOf(name as string | null | undefined),
+    );
+  });
+});
+
+describe('12.4-11 — the inbox row gains the case facts as finished strings (UI-D-824)', () => {
+  const keys = tenantDayKeys(at('2026-10-01T01:30:00Z'), SP);
+  const base = (): InboxRow =>
+    ({
+      conversationId: CASE_ID,
+      member: {
+        membershipId: OWNER_ID,
+        displayName: 'Ana Souza',
+        avatarAssetId: null,
+        state: 'active',
+      },
+      lastMessage: {
+        seq: 3,
+        preview: 'Quero trocar meu e-mail.',
+        side: 'member',
+        authorFirstName: null,
+      },
+      lastMessageAt: '2026-09-30T17:02:00Z',
+      awaiting: true,
+    }) as InboxRow;
+  const inbox = (kase: NonNullable<InboxRow['case']>): InboxRow => ({ ...base(), case: kase });
+  const kase = (overrides: Partial<NonNullable<InboxRow['case']>> = {}) => ({
+    number: 42,
+    state: 'open' as const,
+    subjectLabel: 'Cobrança duplicada',
+    category: 'payment' as const,
+    priority: 'high' as const,
+    ownerName: null,
+    ownerIsViewer: false,
+    ...overrides,
+  });
+
+  it('1. an unowned open case with Alta priority', () => {
+    const view = inboxRowView(inbox(kase()), { timeZone: SP, keys, t });
+    expect(view.case).toEqual({
+      number: 42,
+      subjectLine: '#42 · Cobrança duplicada',
+      state: { state: 'open', label: 'Aberto', tone: 'warning', glyph: 'CircleDot' },
+      priority: { priority: 'high', label: 'Alta', tone: 'danger', pill: true },
+      meta: 'Pagamento · Sem responsável',
+    });
+  });
+
+  it('2. Normal priority draws no pill; Baixa draws a neutral one', () => {
+    const normal = inboxRowView(inbox(kase({ priority: 'normal' })), { timeZone: SP, keys, t });
+    expect(normal.case?.priority).toBeNull();
+    const low = inboxRowView(inbox(kase({ priority: 'low' })), { timeZone: SP, keys, t });
+    expect(low.case?.priority).toMatchObject({ label: 'Baixa', tone: 'neutral' });
+  });
+
+  it('3. an owned case reads "Com {first name}" and the viewer\'s own reads "Com você"', () => {
+    const owned = inboxRowView(inbox(kase({ state: 'in_progress', ownerName: 'Carla Souza' })), {
+      timeZone: SP,
+      keys,
+      t,
+    });
+    expect(owned.case?.meta).toBe('Pagamento · Com Carla');
+    expect(owned.case?.state.label).toBe('Em atendimento');
+    const mine = inboxRowView(
+      inbox(kase({ state: 'in_progress', ownerName: 'Carla Souza', ownerIsViewer: true })),
+      { timeZone: SP, keys, t },
+    );
+    expect(mine.case?.meta).toBe('Pagamento · Com você');
+  });
+
+  it('4. the previous API (no case key) gives a row with no case facts, and the old fields stay', () => {
+    const view = inboxRowView(base(), { timeZone: SP, keys, t });
+    expect(view.case).toBeNull();
+    expect(view).toMatchObject({ name: 'Ana Souza', preview: 'Quero trocar meu e-mail.' });
   });
 });

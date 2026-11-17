@@ -230,8 +230,8 @@ export function SupportInbox({
       <EmptyState
         icon={MessageCircle}
         data-inbox-empty
-        title={t('inbox.empty.title')}
-        body={t('inbox.empty.body')}
+        title={t('inbox.empty.open.title')}
+        body={t('inbox.empty.open.body')}
       />
     );
   } else {

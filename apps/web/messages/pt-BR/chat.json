@@ -10,7 +10,7 @@
       "back": "Voltar",
       "empty": {
         "title": "Fale com a equipe de {tenant}",
-        "body": "Mande sua dúvida ou pedido por aqui. Avisamos quando a equipe responder."
+        "body": "Escolha o assunto, conte o que você precisa e avisamos quando a equipe responder."
       }
     },
     "thread": {
@@ -42,25 +42,69 @@
       "counter": "{count}/2.000",
       "errors": {
         "failed": "Não foi possível enviar. Sua mensagem continua no campo. Tente de novo."
-      }
+      },
+      "placeholderNew": "Conte o que você precisa",
+      "sendNew": "Abrir chamado"
     },
     "inbox": {
       "title": "Suporte",
       "back": "Voltar",
       "empty": {
-        "title": "Nenhuma conversa ainda",
-        "body": "Quando um membro mandar mensagem, a conversa aparece aqui."
+        "open": {
+          "title": "Nenhum chamado em aberto",
+          "body": "Quando um membro pedir ajuda, o chamado aparece aqui."
+        },
+        "awaiting": {
+          "title": "Ninguém aguardando resposta",
+          "body": "Todos os chamados em aberto já foram respondidos."
+        },
+        "resolved": {
+          "title": "Nenhum chamado resolvido",
+          "body": "Os chamados marcados como resolvidos aparecem aqui até serem fechados."
+        },
+        "closed": {
+          "title": "Nenhum chamado fechado",
+          "body": "Os chamados fechados ficam guardados aqui."
+        },
+        "filtered": {
+          "title": "Nenhum chamado com esses filtros",
+          "body": "Tente outro responsável ou outra prioridade."
+        }
       },
       "idle": {
-        "title": "Escolha uma conversa",
-        "body": "Qualquer pessoa da equipe pode responder. Quando alguém abre a conversa, ela deixa de aparecer como aguardando para toda a equipe."
+        "title": "Escolha um chamado",
+        "body": "Qualquer pessoa da equipe pode responder. Quando alguém abre o chamado, ele deixa de aparecer como aguardando para toda a equipe."
       },
       "errors": {
-        "loadMore": "Não foi possível carregar mais conversas."
+        "loadMore": "Não foi possível carregar mais chamados."
       },
       "teamPreview": "{firstName}: {preview}",
       "awaitingSr": ", aguardando resposta",
-      "rowSubject": "#{number} · {subject}"
+      "rowSubject": "#{number} · {subject}",
+      "tab": {
+        "open": "Em aberto",
+        "resolved": "Resolvidos",
+        "closed": "Fechados",
+        "label": "Chamados por estado"
+      },
+      "filter": {
+        "owner": "Responsável",
+        "ownerValue": "Responsável: {value}",
+        "priority": "Prioridade",
+        "priorityValue": "Prioridade: {value}",
+        "awaiting": "Aguardando resposta",
+        "clear": "Limpar filtros",
+        "ownerAll": "Todos",
+        "ownerMe": "Eu",
+        "ownerNone": "Sem responsável",
+        "priorityAll": "Todas",
+        "rosterError": "Não foi possível carregar a equipe."
+      },
+      "meta": {
+        "owned": "{category} · Com {name}",
+        "unowned": "{category} · Sem responsável",
+        "mine": "{category} · Com você"
+      }
     },
     "blocked": {
       "pill": "Bloqueado",
@@ -75,9 +119,9 @@
       "profile": "Ver o perfil de {name}"
     },
     "notFound": {
-      "title": "Conversa não encontrada",
-      "body": "Ela não existe ou não é de {tenant}.",
-      "cta": "Ver conversas"
+      "title": "Chamado não encontrado",
+      "body": "Ele não existe ou não é de {tenant}.",
+      "cta": "Ver chamados"
     },
     "state": {
       "open": "Aberto",
@@ -98,14 +142,27 @@
       "high": "Alta"
     },
     "case": {
-      "title": "Chamado #{number}"
+      "title": "Chamado #{number}",
+      "mine": "Meus chamados",
+      "srName": "Chamado #{number}, {state}",
+      "opened": {
+        "title": "Chamado #{number} aberto.",
+        "body": "A equipe responde por aqui. Avisamos quando houver resposta."
+      },
+      "resolvedNotice": "Este chamado foi marcado como resolvido. Se ainda precisar de ajuda, responda aqui e ele volta a ser atendido.",
+      "reopenedToast": "Chamado #{number} reaberto.",
+      "closedNotice": "Este chamado foi fechado. Para falar com a equipe de novo, abra um novo chamado.",
+      "newCase": "Novo chamado"
     },
     "staffCase": {
       "meta": {
         "owned": "{category} · {priority} · Com {name}",
         "unowned": "{category} · {priority} · Sem responsável",
         "mine": "{category} · {priority} · Com você"
-      }
+      },
+      "detailsLabel": "Ver detalhes do chamado #{number}",
+      "takeOnReply": "Ao responder, você assume este chamado.",
+      "closedNotice": "Este chamado está fechado. A conversa fica disponível só para leitura."
     },
     "action": {
       "more": "Mais ações",
@@ -116,6 +173,119 @@
       "close": "Fechar",
       "edit": "Editar categoria, assunto e prioridade",
       "details": "Ver detalhes e histórico"
+    },
+    "open": {
+      "category": "Sobre o que é?",
+      "subject": {
+        "label": "Assunto (opcional)",
+        "placeholder": "Resuma em uma frase"
+      }
+    },
+    "mine": {
+      "title": "Meus chamados",
+      "current": "Chamado atual",
+      "previous": "Anteriores",
+      "previewOwn": "Você: {text}",
+      "previewTeam": "Equipe: {text}",
+      "empty": {
+        "title": "Você ainda não abriu nenhum chamado",
+        "body": "Quando você falar com a equipe, o chamado aparece aqui.",
+        "cta": "Falar com a equipe"
+      },
+      "errors": {
+        "load": {
+          "title": "Não foi possível carregar seus chamados.",
+          "body": "Verifique sua conexão e tente de novo."
+        },
+        "more": "Não foi possível carregar mais chamados."
+      }
+    },
+    "dialog": {
+      "cancel": "Cancelar",
+      "resolve": {
+        "title": "Marcar o chamado #{number} como resolvido?",
+        "body": "O membro recebe um aviso. Se ele responder, o chamado volta a ficar aberto.",
+        "confirm": "Sim, resolver"
+      },
+      "close": {
+        "title": "Fechar o chamado #{number}?",
+        "body": "A conversa fica só para leitura e ninguém poderá reabri-la. Se o membro escrever de novo, abre um novo chamado.",
+        "confirm": "Sim, fechar"
+      },
+      "reopen": {
+        "title": "Reabrir o chamado #{number}?",
+        "body": "Ele volta para Em aberto, sem responsável. O membro não é avisado.",
+        "confirm": "Sim, reabrir"
+      },
+      "take": {
+        "title": "Assumir o chamado #{number}?",
+        "body": "Hoje ele está com {name}. Ele deixa de ser responsável.",
+        "confirm": "Sim, assumir"
+      }
+    },
+    "sheet": {
+      "assign": {
+        "title": "Atribuir chamado #{number}",
+        "current": "responsável hoje",
+        "hint": "A pessoa escolhida recebe um aviso.",
+        "confirm": "Atribuir"
+      },
+      "edit": {
+        "title": "Editar chamado #{number}",
+        "category": "Categoria",
+        "subject": "Assunto",
+        "subjectHelp": "Em branco, usamos o começo da primeira mensagem.",
+        "priority": "Prioridade",
+        "confirm": "Salvar alterações"
+      }
+    },
+    "toast": {
+      "taken": "Chamado #{number} assumido.",
+      "resolved": "Chamado #{number} resolvido.",
+      "closed": "Chamado #{number} fechado.",
+      "reopened": "Chamado #{number} reaberto.",
+      "assigned": "Chamado #{number} atribuído a {name}.",
+      "saved": "Alterações salvas.",
+      "stale": "Este chamado mudou enquanto você olhava. A tela foi atualizada.",
+      "failed": "Não foi possível concluir. Tente de novo."
+    },
+    "details": {
+      "title": "Chamado #{number}",
+      "data": "Dados",
+      "state": "Estado",
+      "category": "Categoria",
+      "priority": "Prioridade",
+      "owner": "Responsável",
+      "noOwner": "Sem responsável",
+      "openedAt": "Aberto em",
+      "earlier": "Chamados anteriores deste membro",
+      "earlierMore": "Mostrando os 5 mais recentes."
+    },
+    "history": {
+      "title": "Histórico",
+      "opened": "{member} abriu o chamado.",
+      "taken": "{actor} assumiu o chamado.",
+      "assigned": "{actor} atribuiu o chamado a {target}.",
+      "resolved": "{actor} marcou como resolvido.",
+      "closed": "{actor} fechou o chamado.",
+      "autoClosed": "O chamado foi fechado automaticamente após 7 dias resolvido.",
+      "reopened": "{actor} reabriu o chamado.",
+      "reopenedByMember": "{member} respondeu e o chamado foi reaberto.",
+      "category": "{actor} mudou a categoria de {from} para {to}.",
+      "priority": "{actor} mudou a prioridade de {from} para {to}.",
+      "subject": "{actor} mudou o assunto.",
+      "errors": {
+        "load": "Não foi possível carregar o histórico."
+      },
+      "actorGone": "Alguém da equipe"
+    },
+    "live": {
+      "resolved": "Seu chamado #{number} foi resolvido.",
+      "closed": "Seu chamado #{number} foi fechado.",
+      "reopened": "Seu chamado #{number} foi reaberto.",
+      "takenBy": "Chamado #{number} assumido por {name}.",
+      "resolvedBy": "Chamado #{number} resolvido por {name}.",
+      "closedBy": "Chamado #{number} fechado por {name}."
     }
   }
 }

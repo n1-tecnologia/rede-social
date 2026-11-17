@@ -1,5 +1,7 @@
 import { avatarUrlFor } from '@rede-social/contracts/profiles';
 import type {
+  CaseCard,
+  CaseEvent,
   ChatCaseAction,
   ChatCaseCategory,
   ChatCasePriority,
@@ -236,6 +238,20 @@ export interface InboxRowView {
   time: string;
   awaiting: boolean;
   state: InboxRowState;
+  /** 12.4: the case facts as finished strings (UI-D-824). `null` when the API sent none (the previous API). */
+  case: InboxCaseView | null;
+}
+
+/**
+ * The case facts of one inbox row, finished (UI-D-824): the "#42 · subject" line, the state pill, the
+ * priority pill (only `Alta` and `Baixa`, never `Normal`) and the "{categoria} · Com ..." meta text.
+ */
+export interface InboxCaseView {
+  number: number;
+  subjectLine: string;
+  state: CaseStateView;
+  priority: CasePriorityView | null;
+  meta: string;
 }
 
 /** Newlines (and any run of whitespace) as one space: the preview is ONE line (UI E11/long-text). */
@@ -276,6 +292,7 @@ export function inboxRowView(
       : '',
     awaiting: row.awaiting,
     state: row.member.state,
+    case: row.case ? inboxCaseView(row.case, t) : null,
   };
 }
 
@@ -455,5 +472,168 @@ export function caseHeaderView(
       ownerIsViewer: team.ownerIsViewer,
     }),
     actions: [...team.actions],
+  };
+}
+
+/** Format `InboxRow.case` for the row (UI-D-824). The owner shows as a first name, never an id. */
+function inboxCaseView(kase: NonNullable<InboxRow['case']>, t: Translator): InboxCaseView {
+  const priority = casePriorityView(kase.priority, t);
+  return {
+    number: kase.number,
+    subjectLine: caseSubjectLine(t, kase.number, kase.subjectLabel),
+    state: caseStateView(kase.state, t),
+    priority: priority.pill ? priority : null,
+    meta: caseMetaText(t, {
+      category: kase.category,
+      ownerName: kase.ownerName,
+      ownerIsViewer: kase.ownerIsViewer,
+    }),
+  };
+}
+
+/**
+ * One history row as the details sheet draws it (UI-D-829). The API row plus two optional hints the host
+ * may add: `byMember` (the reopen came from a member message, not from the team) and `actorGone` (the
+ * actor left the tenant, so the API omits the name; without it a close with no actor is the automatic one).
+ */
+export type CaseEventInput = CaseEvent & { byMember?: boolean; actorGone?: boolean };
+
+/** A run of a history sentence: the actor's name is `strong`, everything else is plain. */
+export interface CaseEventPart {
+  text: string;
+  strong: boolean;
+}
+
+/** One finished history sentence: the whole text and the same text split so the actor can be bold. */
+export interface CaseEventSentence {
+  kind: CaseEvent['kind'];
+  text: string;
+  parts: CaseEventPart[];
+}
+
+/** Private-use markers around the bold slot; a name that carries them has them stripped (it cannot forge a run). */
+const SLOT_OPEN = '\uE000';
+const SLOT_CLOSE = '\uE001';
+const withoutSlotMarkers = (value: string) => value.replace(/[\uE000\uE001]/gu, '');
+
+/**
+ * UI-D-829, D-810: ONE sentence for a history event, from the catalog's `history.*` keys. The actor (or the
+ * member, for the two member sentences) sits in the bold slot; an actor who left the tenant reads
+ * `history.actorGone` and a member who left reads `removed.name`; a close with no actor and no
+ * `actorGone` hint is the automatic one (`history.autoClosed`). The time is NOT in the sentence.
+ */
+export function caseEventSentence(t: Translator, event: CaseEventInput): CaseEventSentence {
+  const present = (name: string | undefined) => (name?.trim() ? withoutSlotMarkers(name) : null);
+  const bold = (value: string) => `${SLOT_OPEN}${withoutSlotMarkers(value)}${SLOT_CLOSE}`;
+  const actor = bold(present(event.actorName) ?? t('history.actorGone'));
+  const member = bold(present(event.actorName) ?? t('removed.name'));
+  const target = present(event.targetName) ?? withoutSlotMarkers(t('history.actorGone'));
+
+  let formatted: string;
+  switch (event.kind) {
+    case 'opened':
+      formatted = t('history.opened', { member });
+      break;
+    case 'taken':
+      formatted = t('history.taken', { actor });
+      break;
+    case 'assigned':
+      formatted = t('history.assigned', { actor, target });
+      break;
+    case 'resolved':
+      formatted = t('history.resolved', { actor });
+      break;
+    case 'closed':
+      formatted =
+        present(event.actorName) === null && !event.actorGone
+          ? t('history.autoClosed')
+          : t('history.closed', { actor });
+      break;
+    case 'reopened':
+      formatted = event.byMember
+        ? t('history.reopenedByMember', { member })
+        : t('history.reopened', { actor });
+      break;
+    default:
+      // `edited`: the field decides the sentence; a row with no known field reads as the subject change.
+      if (event.field === 'category')
+        formatted = t('history.category', {
+          actor,
+          from: withoutSlotMarkers(caseCategoryLabel(event.from ?? '', t)),
+          to: withoutSlotMarkers(caseCategoryLabel(event.to ?? '', t)),
+        });
+      else if (event.field === 'priority')
+        formatted = t('history.priority', {
+          actor,
+          from: withoutSlotMarkers(casePriorityLabel(event.from ?? '', t)),
+          to: withoutSlotMarkers(casePriorityLabel(event.to ?? '', t)),
+        });
+      else formatted = t('history.subject', { actor });
+  }
+
+  const parts: CaseEventPart[] = [];
+  const slot = /\uE000([^\uE001]*)\uE001/gu;
+  let cursor = 0;
+  for (const match of formatted.matchAll(slot)) {
+    const index = match.index ?? 0;
+    if (index > cursor) parts.push({ text: formatted.slice(cursor, index), strong: false });
+    parts.push({ text: match[1] ?? '', strong: true });
+    cursor = index + match[0].length;
+  }
+  if (cursor < formatted.length) parts.push({ text: formatted.slice(cursor), strong: false });
+  return { kind: event.kind, text: withoutSlotMarkers(formatted), parts };
+}
+
+/** The priority word of an `edited` row's value; a value outside the closed list reads as itself. */
+function casePriorityLabel(priority: string, t: Translator): string {
+  const key = CASE_PRIORITY_KEY[priority as ChatCasePriority];
+  return key ? t(key) : priority;
+}
+
+/** One "Meus chamados" card, finished (UI-D-821). Member facts only: no priority, owner or history. */
+export interface CaseCardView {
+  id: string;
+  href: string;
+  number: number;
+  title: string;
+  state: CaseStateView;
+  /** The server's finished label (the typed subject, else the start of the first message). */
+  subject: string;
+  /** False when the member typed no subject: the card draws the label in the regular weight. */
+  hasSubject: boolean;
+  /** One line with its "Você: " or "Equipe: " prefix; empty when the case has no message. */
+  preview: string;
+  category: string;
+  time: string;
+  /** A closed case is not faded: the card keeps its contrast and only the pill and subject tone change. */
+  closed: boolean;
+}
+
+/**
+ * UI-D-821: one API card as "Meus chamados" draws it. The time is the last message's (the case's opening
+ * instant when it has none), in the tenant zone through `inboxTime`, clock-free like the inbox row.
+ */
+export function caseCardView(
+  card: CaseCard,
+  { timeZone, keys, t }: { timeZone: string; keys: ChatDayKeys; t: Translator },
+): CaseCardView {
+  const message = card.lastMessage;
+  const text = message ? oneLine(message.preview) : '';
+  return {
+    id: card.id,
+    href: `/suporte/${card.id}`,
+    number: card.number,
+    title: caseTitle(t, card.number),
+    state: caseStateView(card.state, t),
+    subject: card.subjectLabel,
+    hasSubject: card.subject !== null && card.subject.trim() !== '',
+    preview: message
+      ? t(message.side === 'member' ? 'mine.previewOwn' : 'mine.previewTeam', { text })
+      : '',
+    category: caseCategoryLabel(card.category, t),
+    time: inboxTime(card.lastMessageAt ?? card.openedAt, keys, timeZone, {
+      yesterday: t('day.yesterday'),
+    }),
+    closed: card.state === 'closed',
   };
 }

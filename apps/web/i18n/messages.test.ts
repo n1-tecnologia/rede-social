@@ -2006,7 +2006,7 @@ describe('07-09 — chat member thread strings and placeholders', () => {
     ['chat.member.empty.title', 'Fale com a equipe de {tenant}'],
     [
       'chat.member.empty.body',
-      'Mande sua dúvida ou pedido por aqui. Avisamos quando a equipe responder.',
+      'Escolha o assunto, conte o que você precisa e avisamos quando a equipe responder.',
     ],
     ['chat.thread.label', 'Mensagens'],
     ['chat.thread.older', 'Carregar mensagens anteriores'],
@@ -2076,14 +2076,25 @@ describe('07-10 — chat staff inbox strings and placeholders', () => {
   it.each([
     ['chat.inbox.title', 'Suporte'],
     ['chat.inbox.back', 'Voltar'],
-    ['chat.inbox.empty.title', 'Nenhuma conversa ainda'],
-    ['chat.inbox.empty.body', 'Quando um membro mandar mensagem, a conversa aparece aqui.'],
-    ['chat.inbox.idle.title', 'Escolha uma conversa'],
+    ['chat.inbox.empty.open.title', 'Nenhum chamado em aberto'],
+    ['chat.inbox.empty.open.body', 'Quando um membro pedir ajuda, o chamado aparece aqui.'],
+    ['chat.inbox.empty.awaiting.title', 'Ninguém aguardando resposta'],
+    ['chat.inbox.empty.awaiting.body', 'Todos os chamados em aberto já foram respondidos.'],
+    ['chat.inbox.empty.resolved.title', 'Nenhum chamado resolvido'],
+    [
+      'chat.inbox.empty.resolved.body',
+      'Os chamados marcados como resolvidos aparecem aqui até serem fechados.',
+    ],
+    ['chat.inbox.empty.closed.title', 'Nenhum chamado fechado'],
+    ['chat.inbox.empty.closed.body', 'Os chamados fechados ficam guardados aqui.'],
+    ['chat.inbox.empty.filtered.title', 'Nenhum chamado com esses filtros'],
+    ['chat.inbox.empty.filtered.body', 'Tente outro responsável ou outra prioridade.'],
+    ['chat.inbox.idle.title', 'Escolha um chamado'],
     [
       'chat.inbox.idle.body',
-      'Qualquer pessoa da equipe pode responder. Quando alguém abre a conversa, ela deixa de aparecer como aguardando para toda a equipe.',
+      'Qualquer pessoa da equipe pode responder. Quando alguém abre o chamado, ele deixa de aparecer como aguardando para toda a equipe.',
     ],
-    ['chat.inbox.errors.loadMore', 'Não foi possível carregar mais conversas.'],
+    ['chat.inbox.errors.loadMore', 'Não foi possível carregar mais chamados.'],
     ['chat.inbox.teamPreview', '{firstName}: {preview}'],
     ['chat.inbox.awaitingSr', ', aguardando resposta'],
     ['chat.blocked.pill', 'Bloqueado'],
@@ -2108,8 +2119,9 @@ describe('07-10 — chat staff inbox strings and placeholders', () => {
       lookup('chat.state.inProgress'),
       lookup('chat.state.resolved'),
       lookup('chat.state.closed'),
+      lookup('chat.inbox.tab.resolved'),
       lookup('chat.action.assign'),
-    ]).toEqual(['Aberto', 'Em atendimento', 'Resolvido', 'Fechado', 'Atribuir a…']);
+    ]).toEqual(['Aberto', 'Em atendimento', 'Resolvido', 'Fechado', 'Resolvidos', 'Atribuir a…']);
   });
 });
 
@@ -2134,9 +2146,9 @@ describe('07-10 — chat staff thread strings and placeholders', () => {
       'chat.removed.notice',
       'Este membro saiu da comunidade. A conversa fica disponível só para leitura.',
     ],
-    ['chat.notFound.title', 'Conversa não encontrada'],
-    ['chat.notFound.body', 'Ela não existe ou não é de {tenant}.'],
-    ['chat.notFound.cta', 'Ver conversas'],
+    ['chat.notFound.title', 'Chamado não encontrado'],
+    ['chat.notFound.body', 'Ele não existe ou não é de {tenant}.'],
+    ['chat.notFound.cta', 'Ver chamados'],
   ])('%s is the UI-SPEC string', (key, expected) => {
     expect(lookup(key)).toBe(expected);
   });
@@ -2153,7 +2165,7 @@ describe('07-10 — chat staff thread strings and placeholders', () => {
       'Heitor Pacheco está bloqueado. A conversa fica disponível só para leitura.',
     );
     expect(t('notFound.body', { tenant: 'Rede Demo' })).toBe(
-      'Ela não existe ou não é de Rede Demo.',
+      'Ele não existe ou não é de Rede Demo.',
     );
   });
 });
