@@ -9,6 +9,10 @@ import { promisify } from 'node:util';
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { deriveVariantsJob } from '@rede-social/core/server/media/derive-job';
+import {
+  MEDIA_MEMBER_SHARE_OF_CEILING,
+  MEDIA_TENANT_BYTES_CEILING,
+} from '@rede-social/core/server/media/limits';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
@@ -25,6 +29,8 @@ import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
  */
 
 const MEMBER_EMAIL = 'member@rede-demo.local';
+const SUPPORT_EMAIL = 'support@rede-demo.local';
+const ADMIN_EMAIL = 'admin@rede-demo.local';
 
 const WEBM_2S = readFileSync(
   fileURLToPath(new URL('../fixtures/audio/voice-2s.webm', import.meta.url)),
@@ -33,7 +39,11 @@ const WEBM_2S = readFileSync(
 const execFileP = promisify(execFile);
 
 let memberToken = '';
+let supportToken = '';
+let adminToken = '';
 let demoTenantId = '';
+/** Throwaway quota rows (kind `file`), removed after each quota case and again in `afterAll`. */
+const quotaRowIds: string[] = [];
 /** Generated inputs (a 305 second take, a video-only MP4): built at test time, removed in `afterAll`. */
 let scratchDir = '';
 
@@ -162,6 +172,8 @@ async function cleanup(): Promise<void> {
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
   memberToken = await signInAs(MEMBER_EMAIL, SEED_PASSWORD);
+  supportToken = await signInAs(SUPPORT_EMAIL, SEED_PASSWORD);
+  adminToken = await signInAs(ADMIN_EMAIL, SEED_PASSWORD);
   const [tenant] = await adminSql<
     { id: string }[]
   >`select id from public.tenants where slug = 'rede-demo'`;
@@ -170,7 +182,15 @@ beforeAll(async () => {
   scratchDir = await mkdtemp(join(tmpdir(), 'voice-it-'));
 });
 
+async function dropQuotaRows(): Promise<void> {
+  while (quotaRowIds.length > 0) {
+    const id = quotaRowIds.pop();
+    if (id) await adminSql`delete from public.media_assets where id = ${id}::uuid`;
+  }
+}
+
 afterAll(async () => {
+  await dropQuotaRows();
   if (scratchDir) await rm(scratchDir, { recursive: true, force: true });
   await cleanup();
   await stopBoss();
@@ -415,5 +435,104 @@ describe('voice rejections: every way a recording can be wrong ends removed and 
     });
     expect(res.status).toBe(400);
     expect((await errorOf(res)).details?.media).toBe('type_not_allowed');
+  });
+});
+
+/** Starts a voice upload and remembers the pending row for cleanup. */
+async function startVoice(size: number, token?: string): Promise<Response> {
+  const res = await startUpload(
+    { kind: 'audio', purpose: 'voice', mime: 'audio/webm', size },
+    token,
+  );
+  if (res.status === 201) {
+    createdAssetIds.push(((await res.clone().json()) as { assetId: string }).assetId);
+  }
+  return res;
+}
+
+describe('who may start a voice upload (D-847, VOICE-14)', () => {
+  it('a member, the support team and the admin each get a signed target', async () => {
+    for (const token of [memberToken, supportToken, adminToken]) {
+      const res = await startVoice(2000, token);
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { signedUrl: string; path: string };
+      expect(body.signedUrl).toContain('/object/upload/sign/media/');
+      expect(body.path).toContain(`${demoTenantId}/media/`);
+    }
+  });
+
+  it('a video start by the same member is still 403: the existing rule is unchanged', async () => {
+    const res = await startUpload({
+      kind: 'video',
+      purpose: 'post',
+      mime: 'video/mp4',
+      size: 1000,
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+/**
+ * The bytes the quota arithmetic already sees for the demo tenant, read through the admin lane with the
+ * same predicates `startUpload` uses (live rows, every kind but video), so the throwaway row can land
+ * the total a fixed distance under a ceiling whatever the suite left behind.
+ */
+async function nonVideoBytes(memberOnly: boolean): Promise<number> {
+  const rows = await adminSql<{ total: string }[]>`
+    select coalesce(sum(a.bytes), 0)::text as total
+      from public.media_assets a
+     where a.tenant_id = ${demoTenantId}::uuid
+       and a.deleted_at is null
+       and a.kind <> 'video'
+       and (${!memberOnly} or exists (
+             select 1 from public.memberships m
+              where m.tenant_id = a.tenant_id and m.user_id = a.owner_user_id and m.role = 'member'))`;
+  return Number(rows[0]?.total ?? 0);
+}
+
+async function insertQuotaRow(ownerEmail: string, bytes: number): Promise<void> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.media_assets (tenant_id, owner_user_id, kind, purpose, status, mime, bytes)
+    select ${demoTenantId}::uuid, u.id, 'file', 'attachment', 'ready', 'application/pdf', ${bytes}
+      from public.users u where u.email = ${ownerEmail}
+    returning id`;
+  if (!row) throw new Error(`could not insert the quota row for ${ownerEmail}`);
+  quotaRowIds.push(row.id);
+}
+
+describe('a voice upload spends the existing quota and no new budget (D-857, VOICE-26)', () => {
+  it('a member 1000 bytes under the half share: a 6000 byte start is 413 quota_exceeded, a 500 byte start is accepted', async () => {
+    const memberLimit = Math.floor(MEDIA_MEMBER_SHARE_OF_CEILING * MEDIA_TENANT_BYTES_CEILING);
+    const used = await nonVideoBytes(true);
+    expect(memberLimit - used).toBeGreaterThan(5000);
+    try {
+      await insertQuotaRow(MEMBER_EMAIL, memberLimit - used - 1000);
+
+      const refused = await startVoice(6000);
+      expect(refused.status).toBe(413);
+      expect((await errorOf(refused)).details?.media).toBe('quota_exceeded');
+
+      const accepted = await startVoice(500);
+      expect(accepted.status).toBe(201);
+    } finally {
+      await dropQuotaRows();
+    }
+  });
+
+  it('the admin 1000 bytes under the tenant ceiling: a 6000 byte start is 413 quota_exceeded, a 500 byte start is accepted', async () => {
+    const used = await nonVideoBytes(false);
+    expect(MEDIA_TENANT_BYTES_CEILING - used).toBeGreaterThan(5000);
+    try {
+      await insertQuotaRow(ADMIN_EMAIL, MEDIA_TENANT_BYTES_CEILING - used - 1000);
+
+      const refused = await startVoice(6000, adminToken);
+      expect(refused.status).toBe(413);
+      expect((await errorOf(refused)).details?.media).toBe('quota_exceeded');
+
+      const accepted = await startVoice(500, adminToken);
+      expect(accepted.status).toBe(201);
+    } finally {
+      await dropQuotaRows();
+    }
   });
 });
