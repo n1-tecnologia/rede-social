@@ -5,12 +5,12 @@ current_phase_name: Abertura de chamado no suporte
 current_plan: 22
 status: executing
 stopped_at: Completed 12.4-22-PLAN.md; re-verification gaps_found (WR-06), phase not closed
-last_updated: "2026-11-17T16:19:32.771Z"
+last_updated: "2026-11-17T17:31:39.151Z"
 last_activity: 2026-11-17
 last_activity_desc: Phase 12.4 gap round 21 and 22 executed; re-verification found WR-06
-state_head: 78b81b54a46afb4a2b1c89a038c0663fbf19bae3
+state_head: aaf133ee1de5401b8df5a2a805175bfc7d05c1c0
 progress:
-  total_phases: 34
+  total_phases: 35
   completed_phases: 0
   total_plans: 473
   completed_plans: 445
@@ -1321,6 +1321,7 @@ None yet.
 - Phase 10.1 inserted after Phase 10: Rede Social - Ingresso pago do evento pela Kiwify (URGENT)
 - Phase 10.2 inserted after Phase 10.1: Abertura das inscrições do evento com contagem regressiva (pedida em 13/11, executa antes da Fase 11) (URGENT)
 - Phase 12.4 inserted after Phase 12: Abertura de chamado no suporte: next delivery of the Cronograma Social e App chosen by Igor on 2026-11-16, placed after 12.3 and before 13; reverses D-221/D-225 of Phase 7
+- Phase 12.5 inserted after Phase 12: Mensagem de voz no chat: gravar e enviar áudio (até 5 min) em todos os chats; pedido do Igor em 2026-11-17
 
 ## Deferred Items
 

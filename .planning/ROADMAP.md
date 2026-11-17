@@ -54,6 +54,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 - [x] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it right after their first login, members without a completed profile and members who had completed it before the form existed answer it too
 - [ ] **Phase 12.4: Abertura de chamado no suporte (INSERTED)** - A member's message to support opens a case with a number and a status; the support team takes it, answers it, resolves it and closes it from an inbox with tabs by status; reverses D-221/D-225 of Phase 7 (the support chat had no status, owner or closing)
+- [ ] **Phase 12.5: Mensagem de voz no chat (INSERTED)** - Anyone in a chat records a voice message on the spot (up to 5 minutes) and sends it; the other side plays it in the conversation; works in the support chat now and in the direct and group chats of Phase 11; previews read "Mensagem de voz"
 - [ ] **Phase 13: App nativo iOS e Android por tenant (white-label)** - Post-MVP, additive: each tenant gets its own native iOS and Android app (stage 1: a native shell around the web's own screens), fixed to the tenant's host, with every feature of the web app (member area and tenant admin), native push and links that open the app; the web, the PWA and the API stay as they are for a browser
 
 **MVP scope** (user decision 2026-09-25): the MVP is the pilot going live, closed by the go-live gate (D-344, 2026-10-01: Phase 8 runs the full gate, and the MVP is declared closed at 08.1's exit gate). It covers Phases 1-8 and their decimal insertions (01.1, 05.1, 05.2, 05.3). The "Rede social" module (Phases 9-11) is V2 scope promoted into this milestone; it is post-MVP, runs after Phase 8, and no MVP phase may depend on it.
@@ -2134,6 +2135,28 @@ Plans:
 
 - Precondition for every task (D-33, D-365, D-417): `grep -q '^approved: true' .planning/sketches/023-phase-12.4-designed-screens/README.md` succeeds (approved, provisional, 2026-11-16); if not, stop and report; the guard is the first clause of each task's verify command
 
+### Phase 12.5: Mensagem de voz no chat (INSERTED)
+
+**Goal:** Anyone in a chat can record a voice message on the spot and send it, and the other side plays it in the conversation. Today a chat message is text only (`chat_messages.body` is required, 1 to 2000 characters) and nothing in the repo records, uploads or plays audio. This phase adds a microphone button to the shared composer, a recorder that lets the sender hear the take before sending, a player in the message bubble, an audio kind in the media pipeline, and "Mensagem de voz" wherever a message's text is shown as a preview (inbox row, case cards, push).
+**Scope**: Post-MVP, additive to the chat. Requested by Igor on 2026-11-17 and settled the same day: everyone who can write in a chat can send a voice message (member and staff alike); a recording lasts at most 5 minutes; it works in every chat, so the support chat today and the direct and group conversations as soon as Phase 11 builds them (the composer, the message model and the bubble are shared, so Phase 11 inherits audio and must not plan it again). A chat with no audio sent behaves exactly as before.
+**Depends on:** Phase 07 (the chat, Realtime, notifications and Web Push), Phase 12.4 (the case-aware previews, push copy and composer it touches), the kernel media pipeline (`media_assets`, signed uploads, the private `media` bucket). Runs before Phase 11 and Phase 13.
+**Requirements**: TBD (written in `/gsd-discuss-phase 12.5`)
+**Success Criteria** (draft from the 2026-11-17 request, to be settled in `/gsd-discuss-phase 12.5`):
+
+  1. In a chat, the sender taps the microphone, records, listens to the take, discards it or sends it; a recording stops by itself at 5 minutes; a sender who refuses the microphone permission gets a plain message and the text composer keeps working.
+  2. The other side sees a voice message in the conversation with a player (play, pause, progress, duration) and hears it, on Chromium, Firefox and Safari (the recorder's formats differ: webm on the first two, mp4 on Safari).
+  3. A voice message is visible only to the people in that conversation: another member of the tenant who knows the media id cannot open it, and no user of another tenant can.
+  4. Wherever a message shows its text as a preview (inbox row, "Meus chamados" card, case subject fallback, push body), a voice message reads "Mensagem de voz"; a closed case, a blocked or removed member and the existing refusal codes behave as they do for text.
+  5. Tenant isolation holds: cross-tenant negative tests in pgTAP and the API for the new column, the new media kind and the media read gate.
+
+**UI hint**: yes. The composer's microphone and recording states and the bubble's player are drawn before they are built; the native shell's microphone permission text (`packages/contracts/src/native.ts`, today worded for video sound only) changes with it, for Phase 13 to ship.
+
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 12.5 to break down)
+
 ### Phase 13: App nativo iOS e Android por tenant (white-label)
 
 **Goal**: Each tenant gets its own native iOS and Android app (own store listing, name, icon and bundle id), built from one codebase and fixed to that tenant's host. Stage 1 (this phase) is a native shell that opens the tenant's existing web screens and adds the native layer around them. Members and the tenant's staff find in it every feature of the web app, against the same API, with native push. Stage 2 (screens rebuilt 100% natively) is a later phase.
@@ -2257,6 +2280,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 12.4. Abertura de chamado no suporte (INSERTED) | 22/22 | In Progress|  |
+| 12.5. Mensagem de voz no chat (INSERTED) | 0/TBD | Not started | - |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |
 
 ---
