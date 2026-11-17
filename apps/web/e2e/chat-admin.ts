@@ -110,7 +110,14 @@ async function tenantAndUser(
   return { tenantId: row.tenant_id, userId: row.user_id };
 }
 
-/** Deletes `email`'s support conversation (participants and messages cascade): the greeting again. */
+/**
+ * Deletes ALL of `email`'s support conversations, every case, open or closed (participants, messages and
+ * the case history cascade): the greeting and the opener again. It deletes ONLY that member's own rows and
+ * it never touches the tenant's counter row (12.4-17, checker B5): the demo tenant always holds other
+ * numbered cases, so a counter restart would collide with them on the unique `(tenant_id, case_number)`
+ * and poison every later spec. A spec therefore asserts case numbers RELATIVE to what the screen shows
+ * (the number it read, plus one), never an absolute one.
+ */
 export async function resetMemberConversation(email: string, slug = 'rede-demo'): Promise<void> {
   const { tenantId, userId } = await tenantAndUser(email, slug);
   await sql()`
@@ -118,25 +125,134 @@ export async function resetMemberConversation(email: string, slug = 'rede-demo')
      where tenant_id = ${tenantId}::uuid and kind = 'support' and created_by_user_id = ${userId}::uuid`;
 }
 
+/** The states a case moves through (the coherence CHECK of the table reads them with the owner and the instants). */
+export type CaseState = 'open' | 'in_progress' | 'resolved' | 'closed';
+
 /**
- * `email`'s support conversation, created empty as the migration role when missing (the seed's own
- * shape: the conversation row plus the member's participant row). Returns its id.
+ * Inserts a NEW born-open case for `email` as the migration role: the conversation row plus the member's
+ * participant row (the seed's own shape). The two row triggers fill the defaults (open, normal, other) and
+ * take the number from the tenant's counter, so nothing here knows a number. A member holds only ONE active
+ * case (open, in progress or resolved: the unique index of the table; a closed one does not count), so a
+ * member with one gets an error naming it: close it first (`closeCase`). Returns its id.
+ */
+export async function createCase(
+  email: string,
+  options: {
+    slug?: string;
+    subject?: string;
+    category?: 'check_in' | 'events' | 'payment' | 'account' | 'other';
+    priority?: 'low' | 'normal' | 'high';
+  } = {},
+): Promise<string> {
+  const { tenantId, userId } = await tenantAndUser(email, options.slug ?? 'rede-demo');
+  const [active] = await sql()<{ id: string }[]>`
+    select id::text as id from public.chat_conversations
+     where tenant_id = ${tenantId}::uuid and kind = 'support' and created_by_user_id = ${userId}::uuid
+       and state in ('open', 'in_progress', 'resolved')`;
+  if (active)
+    throw new Error(`${email} already holds the active case ${active.id}: close it first`);
+  const [created] = await sql()<{ id: string }[]>`
+    insert into public.chat_conversations (tenant_id, kind, created_by_user_id, subject, category, priority)
+    values (${tenantId}::uuid, 'support', ${userId}::uuid, ${options.subject ?? null},
+            ${options.category ?? null}, ${options.priority ?? null})
+    returning id::text as id`;
+  if (!created) throw new Error(`could not create a case for ${email}`);
+  await sql()`
+    insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+    values (${created.id}::uuid, ${tenantId}::uuid, ${userId}::uuid, 'member')`;
+  return created.id;
+}
+
+/**
+ * `email`'s ACTIVE support case (open, in progress or resolved), created empty and born open when the
+ * member has none (a closed case does not count: the next message of a member opens a new one). Returns its
+ * id. The seeded `1d000000-0000-4000-8000-000000000001` thread is such a case for `member@rede-demo.local`.
  */
 export async function ensureConversation(email: string, slug = 'rede-demo'): Promise<string> {
   const { tenantId, userId } = await tenantAndUser(email, slug);
   const existing = await sql()<{ id: string }[]>`
     select id::text as id from public.chat_conversations
-     where tenant_id = ${tenantId}::uuid and kind = 'support' and created_by_user_id = ${userId}::uuid`;
+     where tenant_id = ${tenantId}::uuid and kind = 'support' and created_by_user_id = ${userId}::uuid
+       and state in ('open', 'in_progress', 'resolved')`;
   if (existing[0]) return existing[0].id;
-  const [created] = await sql()<{ id: string }[]>`
-    insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
-    values (${tenantId}::uuid, 'support', ${userId}::uuid)
-    returning id::text as id`;
-  if (!created) throw new Error(`could not create a conversation for ${email}`);
-  await sql()`
-    insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
-    values (${created.id}::uuid, ${tenantId}::uuid, ${userId}::uuid, 'member')`;
-  return created.id;
+  return createCase(email, { slug });
+}
+
+async function userIdOf(email: string): Promise<string> {
+  const [row] = await sql()<
+    { id: string }[]
+  >`select id::text as id from auth.users where email = ${email}`;
+  if (!row) throw new Error(`no user ${email}`);
+  return row.id;
+}
+
+/**
+ * Moves a case to `state` the way the table's own CHECK reads it (the owner and the instants move WITH the
+ * state, in one statement, so the row is never incoherent): `open` has no owner and no instants,
+ * `in_progress` is owned (by `ownerEmail`, the seeded support user by default), `resolved` stamps
+ * `resolved_at`, `closed` stamps `closed_at` and clears `resolved_at`; a resolved or closed case also gets
+ * the team's read mark up to the last message, as the real actions do. Written as the table owner: it
+ * emits no signal, so a screen that is already open learns it only on its next read (reload the page).
+ */
+export async function setCaseState(
+  conversationId: string,
+  state: CaseState,
+  ownerEmail?: string,
+): Promise<void> {
+  const ownerId =
+    ownerEmail !== undefined
+      ? await userIdOf(ownerEmail)
+      : state === 'in_progress'
+        ? await userIdOf(SUPPORT_EMAIL)
+        : null;
+  const moved = await sql()`
+    update public.chat_conversations c set
+           state = ${state}::text,
+           owner_user_id = case when ${state}::text = 'open' then null
+                                when ${ownerId}::uuid is not null then ${ownerId}::uuid
+                                else c.owner_user_id end,
+           resolved_at = case when ${state}::text = 'resolved' then now() else null end,
+           closed_at = case when ${state}::text = 'closed' then now() else null end,
+           staff_last_read_seq = case when ${state}::text in ('resolved', 'closed') then c.last_seq
+                                      else c.staff_last_read_seq end
+     where c.id = ${conversationId}::uuid and c.kind = 'support'
+    returning c.id`;
+  if (moved.length === 0) throw new Error(`no support case ${conversationId}`);
+}
+
+/** The team closed the case (read-only for everyone; the member's next message opens a new one). */
+export async function closeCase(conversationId: string): Promise<void> {
+  await setCaseState(conversationId, 'closed');
+}
+
+/** The team resolved the case (the member's reply reopens it). */
+export async function resolveCase(conversationId: string): Promise<void> {
+  await setCaseState(conversationId, 'resolved');
+}
+
+/** What the database says about a case right now: for a spec to confirm what the screens drew. */
+export async function caseRowOf(
+  conversationId: string,
+): Promise<{
+  number: number;
+  state: CaseState;
+  ownerEmail: string | null;
+  subject: string | null;
+}> {
+  const [row] = await sql()<
+    { number: number; state: CaseState; owner_email: string | null; subject: string | null }[]
+  >`
+    select c.case_number::int as number, c.state, u.email as owner_email, c.subject
+      from public.chat_conversations c
+      left join auth.users u on u.id = c.owner_user_id
+     where c.id = ${conversationId}::uuid`;
+  if (!row) throw new Error(`no case ${conversationId}`);
+  return {
+    number: row.number,
+    state: row.state,
+    ownerEmail: row.owner_email,
+    subject: row.subject,
+  };
 }
 
 /**
