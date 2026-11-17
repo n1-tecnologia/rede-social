@@ -36,7 +36,7 @@ begin;
 --    name, and every CHECK of the table VALID.
 --
 -- Fixture ids use the `1e350000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(174);
+select plan(187);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-case-a', 'Chamado A', '1e350000-0000-4000-8000-000000000001');
@@ -1090,6 +1090,106 @@ select results_eq(
 select ok(
   (select bool_and(convalidated) from pg_constraint where conrelid = 'public.chat_conversations'::regclass and contype = 'c'),
   'EP-016: every CHECK of chat_conversations is VALID, chat_conversations_support_state_chk included');
+
+
+-- ── 9. take, end to end ────────────────────────────────────────────────────────────────────────
+-- Plan 03 (CASE-05, CASE-08, CASE-18, CASE-23; D-806, D-810, D-845; T-12.4-11, T-12.4-12, T-12.4-15). The tracer: a staff
+-- lane takes an open case through `app.chat_case_act`; every refusal is read by SQLSTATE, never by message.
+-- Tenant H: staff s1, s2 (support_tenant), admin ad, members m1..; the foreign staff is tenant B's `...00b3`.
+-- Realtime evidence is read at now(): it passes only when a partition covers it, and FAILS with a named reason otherwise.
+select set_config(
+  'tests.now_partition',
+  case when exists (
+    select 1
+      from pg_inherits i
+      join pg_class c on c.oid = i.inhrelid
+     where i.inhparent = 'realtime.messages'::regclass
+       and pg_get_expr(c.relpartbound, c.oid) like
+           '%FROM (''' || to_char(date_trunc('day', now() at time zone 'utc'), 'YYYY-MM-DD HH24:MI:SS') || ''')%'
+  ) then 'on' else '' end,
+  true
+);
+select tests.tenant('pgtap-case-h', 'Chamado H', '1e350000-0000-4000-8000-000000000007');
+select tests.auth_user('s1@case-h.local', '1e350000-0000-4000-8000-000000000401');
+select tests.auth_user('s2@case-h.local', '1e350000-0000-4000-8000-000000000402');
+select tests.auth_user('ad@case-h.local', '1e350000-0000-4000-8000-000000000403');
+select tests.member('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000401', 'support_tenant');
+select tests.member('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000402', 'support_tenant');
+select tests.member('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000403', 'admin_tenant');
+select tests.auth_user('m1@case-h.local', '1e350000-0000-4000-8000-000000000411');
+select tests.member('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000411');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e350000-0000-4000-8000-000000000501', '1e350000-0000-4000-8000-000000000007', 'support', '1e350000-0000-4000-8000-000000000411');
+
+select tests.as_tenant('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000401', 'support_tenant');
+select results_eq(
+  $$ select r->>'id', (r->>'number')::int, r->>'from_state', r->>'state', r->>'owner_user_id'
+       from (select app.chat_case_act('1e350000-0000-4000-8000-000000000501', 'take', 'open', null, null) as r) x $$,
+  $$ values ('1e350000-0000-4000-8000-000000000501'::text, 1, 'open'::text, 'in_progress'::text, '1e350000-0000-4000-8000-000000000401'::text) $$,
+  'D-806/D-845: a support staff lane takes an open case, the definer answers its id, number, from-state, state and owner');
+reset role;
+
+select results_eq(
+  $$ select state, owner_user_id::text, resolved_at is null, closed_at is null
+       from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000501' $$,
+  $$ values ('in_progress'::text, '1e350000-0000-4000-8000-000000000401'::text, true, true) $$,
+  'D-806: the row is in_progress and owned by the caller');
+select results_eq(
+  $$ select kind, actor_user_id::text, from_state, to_state, target_user_id is null, message_id is null
+       from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-000000000501' and kind = 'taken' $$,
+  $$ values ('taken'::text, '1e350000-0000-4000-8000-000000000401'::text, 'open'::text, 'in_progress'::text, true, true) $$,
+  'D-810: exactly one taken event, the caller as actor, from open to in_progress');
+
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$ select topic from realtime.messages
+      where event = 'chat.case' and payload->>'conversationId' = '1e350000-0000-4000-8000-000000000501'
+      order by topic collate "C" $$,
+  $$ values ('tenant:1e350000-0000-4000-8000-000000000007:conv:1e350000-0000-4000-8000-000000000501'::text),
+            ('tenant:1e350000-0000-4000-8000-000000000007:support-inbox'),
+            ('tenant:1e350000-0000-4000-8000-000000000007:user:1e350000-0000-4000-8000-000000000411') $$,
+  'CASE-18: one chat.case signal on the conversation topic, one on the support inbox and one on the member''s own topic'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$ select distinct array(select jsonb_object_keys(payload) order by 1)
+       from realtime.messages
+      where event = 'chat.case' and payload->>'conversationId' = '1e350000-0000-4000-8000-000000000501' $$,
+  $$ values (array['conversationId', 'id']) $$,
+  'T-12.4-15: the chat.case payload carries exactly conversationId and the injected id'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+
+-- the member lane and the foreign tenant's staff, on the same open case, with nothing moving
+select tests.auth_user('m2@case-h.local', '1e350000-0000-4000-8000-000000000412');
+select tests.member('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000412');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e350000-0000-4000-8000-000000000502', '1e350000-0000-4000-8000-000000000007', 'support', '1e350000-0000-4000-8000-000000000412');
+
+select tests.as_tenant('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000412');
+select throws_ok(
+  $$ select app.chat_case_act('1e350000-0000-4000-8000-000000000502', 'take', 'open', null, null) $$,
+  '42501', null, 'CASE-23: a member lane calling the definer is refused 42501');
+reset role;
+select tests.as_tenant('1e350000-0000-4000-8000-000000000002', '1e350000-0000-4000-8000-0000000000b3', 'support_tenant');
+select throws_ok(
+  $$ select app.chat_case_act('1e350000-0000-4000-8000-000000000502', 'take', 'open', null, null) $$,
+  'CS001', null, 'CASE-23/T-12.4-12: tenant B''s staff on tenant A''s case is CS001');
+reset role;
+select results_eq(
+  $$ select state, owner_user_id is null from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000502' $$,
+  $$ values ('open'::text, true) $$,
+  'CASE-23: ... and the case did not move');
+select is((select count(*)::int from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-000000000502' and kind <> 'opened'), 0,
+  'CASE-23: ... and its history gained nothing');
+
+select ok(
+  (select p.prosecdef and p.proconfig @> array['search_path=""']
+     from pg_proc p where p.oid = 'app.chat_case_act(uuid,text,text,uuid,uuid)'::regprocedure),
+  'D-845: app.chat_case_act is a security definer with search_path pinned to ""');
+select ok(has_function_privilege('authenticated', 'app.chat_case_act(uuid,text,text,uuid,uuid)', 'execute'),
+  'D-845: authenticated can execute app.chat_case_act');
+select ok(not has_function_privilege('anon', 'app.chat_case_act(uuid,text,text,uuid,uuid)', 'execute'),
+  'D-845: anon cannot execute app.chat_case_act');
+select ok(not has_function_privilege('public', 'app.chat_case_act(uuid,text,text,uuid,uuid)', 'execute'),
+  'D-845: public cannot execute app.chat_case_act');
 
 select * from finish();
 rollback;

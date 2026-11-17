@@ -24,6 +24,8 @@ export const REALTIME_EVENTS = {
   chatMessage: 'chat.message',
   chatRead: 'chat.read',
   chatUnread: 'chat.unread',
+  /** A support case changed (state, owner, category, subject or priority); ids only, `{ conversationId, id }` (12.4, CASE-18). */
+  chatCase: 'chat.case',
 } as const;
 export type RealtimeEvent = (typeof REALTIME_EVENTS)[keyof typeof REALTIME_EVENTS];
 
