@@ -230,6 +230,44 @@ describe('InboxRow with the case facts (UI-D-824)', () => {
     );
   });
 
+  it('12.5 (D-860, UI-D-853): previewLeading sits inside the preview line before the text, which stays one truncated line', () => {
+    render(
+      <InboxRow
+        {...base}
+        preview="Ana: preview-voice-sentinel"
+        previewLeading={<svg aria-hidden data-leading-sentinel />}
+      />,
+    );
+    const preview = row().querySelector('[data-inbox-preview]') as HTMLElement;
+    const leading = preview.querySelector('[data-leading-sentinel]');
+    expect(leading).not.toBeNull();
+    // The glyph comes first, then the text node's carrier.
+    expect(preview.firstElementChild).toBe(leading);
+    expect(preview).toHaveTextContent('Ana: preview-voice-sentinel');
+    const text = preview.querySelector('[data-inbox-preview-text]') as HTMLElement;
+    expect(text).toHaveClass('truncate', 'min-w-0');
+    expect(text).toHaveTextContent('Ana: preview-voice-sentinel');
+    expect(preview).toHaveClass('flex', 'min-w-0');
+  });
+
+  it('12.5: the preview ink is text-text while awaiting and text-text-secondary otherwise, with a leading node too', () => {
+    const leading = <svg aria-hidden />;
+    const { rerender } = render(<InboxRow {...base} previewLeading={leading} />);
+    expect(row().querySelector('[data-inbox-preview]')).toHaveClass('text-text-secondary');
+    expect(row().querySelector('[data-inbox-preview]')).not.toHaveClass('text-text');
+    rerender(<InboxRow {...base} awaiting previewLeading={leading} />);
+    expect(row().querySelector('[data-inbox-preview]')).toHaveClass('text-text');
+    expect(row().querySelector('[data-inbox-preview]')).not.toHaveClass('text-text-secondary');
+  });
+
+  it('12.5: a row with no previewLeading renders the markup it always did', () => {
+    const html = renderToStaticMarkup(<InboxRow {...base} />);
+    expect(html).toContain(
+      '<span data-inbox-preview="true" class="truncate text-sm font-normal text-text-secondary">preview-sentinel</span>',
+    );
+    expect(html).not.toContain('data-inbox-preview-text');
+  });
+
   it('still ships no words: every text node comes from a prop', () => {
     render(<InboxRow {...withCase} awaiting />);
     const stripped = [

@@ -58,6 +58,12 @@ export interface InboxRowProps {
   priorityPill?: ReactNode;
   /** "{categoria} · Com {primeiro nome}", "... · Sem responsável" or "... · Com você". */
   metaText?: string;
+  /**
+   * 12.5 (D-860, UI-D-853): a decorative node the host draws before the preview text (the microphone glyph
+   * of a voice message). The host builds it (`aria-hidden`, `shrink-0`); the finished words stay in `preview`.
+   * Absent, the preview line is exactly what it was.
+   */
+  previewLeading?: ReactNode;
 }
 
 export function InboxRow({
@@ -75,6 +81,7 @@ export function InboxRow({
   statePill,
   priorityPill,
   metaText,
+  previewLeading,
 }: InboxRowProps) {
   const removed = state === 'removed';
   const hasMeta = Boolean(statePill || priorityPill || metaText);
@@ -108,15 +115,30 @@ export function InboxRow({
             {subjectLine}
           </span>
         ) : null}
-        <span
-          data-inbox-preview
-          className={cn(
-            'truncate text-sm font-normal',
-            awaiting ? 'text-text' : 'text-text-secondary',
-          )}
-        >
-          {preview}
-        </span>
+        {previewLeading ? (
+          <span
+            data-inbox-preview
+            className={cn(
+              'flex min-w-0 items-center gap-1 text-sm font-normal',
+              awaiting ? 'text-text' : 'text-text-secondary',
+            )}
+          >
+            {previewLeading}
+            <span data-inbox-preview-text className="min-w-0 truncate">
+              {preview}
+            </span>
+          </span>
+        ) : (
+          <span
+            data-inbox-preview
+            className={cn(
+              'truncate text-sm font-normal',
+              awaiting ? 'text-text' : 'text-text-secondary',
+            )}
+          >
+            {preview}
+          </span>
+        )}
         {hasMeta ? (
           <span data-inbox-meta className="flex flex-wrap items-center gap-x-2 gap-y-1">
             {statePill}

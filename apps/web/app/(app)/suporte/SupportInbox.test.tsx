@@ -3,11 +3,16 @@
 import { join } from 'node:path';
 import { REALTIME_EVENTS } from '@rede-social/contracts/realtime';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { NextIntlClientProvider } from 'next-intl';
+import { createTranslator, NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import type { InboxCaseView, InboxRowView } from '@/lib/chat-view';
+import {
+  type InboxCaseView,
+  type InboxRowView,
+  inboxRowView,
+  tenantDayKeys,
+} from '@/lib/chat-view';
 import type { SupportInboxProps } from './SupportInbox';
 
 /**
@@ -765,5 +770,134 @@ describe('loading and error (UI-D-832; UC S04, S05)', () => {
     renderInbox({ initialError: true });
     expect(document.querySelector('[data-inbox-error]')).not.toBeNull();
     expect(document.querySelector('[data-inbox-empty]')).toBeNull();
+  });
+});
+
+describe('12.5-16 voice previews on the staff inbox row (D-860, D-868, UI-D-853, UI-D-858, UI-D-857)', () => {
+  const t = createTranslator({
+    locale: 'pt-BR',
+    messages,
+    namespace: 'chat',
+  }) as unknown as Parameters<typeof inboxRowView>[1]['t'];
+  const keys = tenantDayKeys(Date.parse('2026-10-01T01:30:00Z'), 'America/Sao_Paulo');
+  const AVATAR_ASSET = '3a000000-0000-4000-8000-000000000001';
+
+  /** A row from the real view function with the real catalog, so the words under test are the catalog's. */
+  function fromApi(lastMessage: Record<string, unknown>, name: string): InboxRowView {
+    seq += 1;
+    const id = `00000000-0000-4000-8000-${String(seq).padStart(12, '0')}`;
+    return inboxRowView(
+      {
+        conversationId: id,
+        member: {
+          membershipId: '2a000000-0000-4000-8000-000000000001',
+          displayName: name,
+          avatarAssetId: AVATAR_ASSET,
+          state: 'active',
+        },
+        lastMessage: { seq: 4, preview: '', authorFirstName: null, side: 'member', ...lastMessage },
+        lastMessageAt: '2026-09-30T17:02:00.000000Z',
+        awaiting: false,
+      } as Parameters<typeof inboxRowView>[0],
+      { timeZone: 'America/Sao_Paulo', keys, t },
+    );
+  }
+
+  const previewOf = (name: RegExp) =>
+    screen.getByRole('link', { name }).querySelector('[data-inbox-preview]') as HTMLElement;
+
+  it('tracer: a team recording shows the microphone glyph and "Ana: Mensagem de voz · 0:42" on one truncated line', () => {
+    renderInbox({
+      initialItems: [
+        fromApi({ side: 'staff', authorFirstName: 'Ana', voiceSeconds: 42 }, 'Membro Voz'),
+      ],
+    });
+    const preview = previewOf(/Membro Voz/);
+    const glyph = preview.querySelector('svg');
+    expect(glyph).not.toBeNull();
+    expect(glyph?.getAttribute('aria-hidden')).toBe('true');
+    expect(glyph?.classList.contains('shrink-0')).toBe(true);
+    expect(text(preview)).toBe('Ana: Mensagem de voz · 0:42');
+    expect(
+      hasClass(preview.querySelector('[data-inbox-preview-text]'), 'truncate', 'min-w-0'),
+    ).toBe(true);
+  });
+
+  it("a member's recording reads 'Mensagem de voz · 0:42' with the glyph", () => {
+    renderInbox({ initialItems: [fromApi({ voiceSeconds: 42 }, 'Membro Voz')] });
+    const preview = previewOf(/Membro Voz/);
+    expect(preview.querySelector('svg')).not.toBeNull();
+    expect(text(preview)).toBe('Mensagem de voz · 0:42');
+  });
+
+  it('an awaiting voice row keeps text-text on the preview; otherwise the secondary ink', () => {
+    renderInbox({
+      initialItems: [
+        { ...fromApi({ voiceSeconds: 42 }, 'Aguarda Voz'), awaiting: true },
+        fromApi({ voiceSeconds: 42 }, 'Respondido Voz'),
+      ],
+    });
+    expect(hasClass(previewOf(/Aguarda Voz/), 'text-text')).toBe(true);
+    expect(hasClass(previewOf(/Respondido Voz/), 'text-text-secondary')).toBe(true);
+  });
+
+  it('a text row has no glyph and the shipped markup', () => {
+    renderInbox({ initialItems: [fromApi({ preview: 'Oi, tudo bem?' }, 'Membro Texto')] });
+    const preview = previewOf(/Membro Texto/);
+    expect(preview.querySelector('svg')).toBeNull();
+    expect(preview.querySelector('[data-inbox-preview-text]')).toBeNull();
+    expect(hasClass(preview, 'truncate')).toBe(true);
+    expect(text(preview)).toBe('Oi, tudo bem?');
+  });
+
+  it('a deleted recording reads "Mensagem de voz apagada" with no glyph and no duration, prefixes kept', () => {
+    renderInbox({
+      initialItems: [
+        fromApi({ voiceSeconds: 42, voiceDeleted: true }, 'Membro Gone'),
+        fromApi(
+          { side: 'staff', authorFirstName: 'Ana', voiceSeconds: 42, voiceDeleted: true },
+          'Equipe Gone',
+        ),
+      ],
+    });
+    const member = previewOf(/Membro Gone/);
+    expect(member.querySelector('svg')).toBeNull();
+    expect(text(member)).toBe('Mensagem de voz apagada');
+    const team = previewOf(/Equipe Gone/);
+    expect(team.querySelector('svg')).toBeNull();
+    expect(text(team)).toBe('Ana: Mensagem de voz apagada');
+  });
+
+  it('UI-D-857: the row shows no media id, URL, file name or size beside a recording', () => {
+    renderInbox({
+      initialItems: [
+        fromApi(
+          {
+            voiceSeconds: 42,
+            mediaId: '7b000000-0000-4000-8000-000000000009',
+            url: 'https://x/a.webm',
+          },
+          'Membro Voz',
+        ),
+      ],
+    });
+    const link = screen.getByRole('link', { name: /Membro Voz/ });
+    expect(link.textContent).not.toMatch(/7b000000|https?:|\.webm|\bKB\b|\bMB\b/);
+  });
+
+  it('a case opened by voice reads "#42 · Mensagem de voz" on the row, with no duration', () => {
+    renderInbox({
+      initialItems: [
+        view(
+          { name: 'Caso Voz', preview: 'Mensagem de voz · 0:42', previewKind: 'voice' },
+          {
+            number: 42,
+            subjectLine: '#42 · Mensagem de voz',
+          },
+        ),
+      ],
+    });
+    const link = screen.getByRole('link', { name: /Caso Voz/ });
+    expect(text(link.querySelector('[data-inbox-subject]'))).toBe('#42 · Mensagem de voz');
   });
 });

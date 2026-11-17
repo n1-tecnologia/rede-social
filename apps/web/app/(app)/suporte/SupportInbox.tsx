@@ -16,6 +16,7 @@ import {
   CircleDot,
   Lock,
   MessageCircle,
+  Mic,
   TriangleAlert,
   UserCheck,
 } from 'lucide-react';
@@ -450,6 +451,11 @@ export function SupportInbox({
                   statePill={pills?.statePill}
                   priorityPill={pills?.priorityPill}
                   metaText={row.case?.meta}
+                  previewLeading={
+                    row.previewKind === 'voice' ? (
+                      <Mic aria-hidden size={14} className="shrink-0" />
+                    ) : undefined
+                  }
                 />
               </li>
             );
