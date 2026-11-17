@@ -1,0 +1,26 @@
+{
+  "confirmLink": {
+    "recovery": {
+      "title": "Redefinir senha",
+      "body": "Toque no botão abaixo para escolher uma nova senha.",
+      "action": "Escolher nova senha"
+    },
+    "signup": {
+      "title": "Confirmar e-mail",
+      "body": "Toque no botão abaixo para confirmar o seu e-mail e entrar.",
+      "action": "Confirmar e-mail"
+    },
+    "invite": {
+      "title": "Seu convite",
+      "body": "Toque no botão abaixo para abrir o seu convite.",
+      "action": "Aceitar convite"
+    },
+    "generic": {
+      "title": "Continuar",
+      "body": "Toque no botão abaixo para continuar.",
+      "action": "Continuar"
+    },
+    "note": "Este passo extra protege o seu link contra leitores automáticos de e-mail.",
+    "pending": "Continuando..."
+  }
+}
