@@ -158,6 +158,30 @@ export async function sendSupportMessage(
 }
 
 /**
+ * `POST /v1/chat/support/voice-messages { mediaId, category?, subject? }` (12.5, D-866, VOICE-18): the
+ * member's recording, by the id of the asset they uploaded and completed. The opener pair rides only
+ * when chosen, exactly as in {@link sendSupportMessage}. The API answers a recording still being
+ * normalized with a 409 `voice_not_ready` (retriable) and an unusable one with ONE 400 `voice_invalid`;
+ * a take is stored once, so the same send repeated answers the stored message. Throws `ApiClientError`
+ * on a non-2xx.
+ */
+export async function sendSupportVoice(
+  mediaId: string,
+  opening: { category?: ChatCaseCategory; subject?: string } = {},
+): Promise<SendResult> {
+  const payload: Record<string, string> = { mediaId };
+  if (opening.category !== undefined) payload.category = opening.category;
+  if (opening.subject !== undefined) payload.subject = opening.subject;
+  const res = await apiFetch('/v1/chat/support/voice-messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await apiError(res);
+  return sendResultSchema.parse(await res.json());
+}
+
+/**
  * The inbox filters in the API's own vocabulary (12.4, D-805): `tab` open, resolved or closed, `owner`
  * me, none or a uuid, `priority` low, normal or high, `awaiting` the "so quem espera" toggle. Every key
  * is optional: an absent one is the API's default.
@@ -307,6 +331,25 @@ export async function replyToConversation(
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ body }),
+    },
+  );
+  if (!res.ok) throw await apiError(res);
+  return sendResultSchema.parse(await res.json());
+}
+
+/**
+ * `POST /v1/chat/conversations/{id}/voice-messages { mediaId }` (12.5, D-866, VOICE-18): the team's
+ * recording in a support conversation, with the refusal order of {@link replyToConversation} (a
+ * blocked or departed member is a 409 `member_blocked` / `member_removed`) plus `voice_not_ready` and
+ * `voice_invalid`. Throws `ApiClientError` on a non-2xx.
+ */
+export async function replyVoice(conversationId: string, mediaId: string): Promise<SendResult> {
+  const res = await apiFetch(
+    `/v1/chat/conversations/${encodeURIComponent(conversationId)}/voice-messages`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mediaId }),
     },
   );
   if (!res.ok) throw await apiError(res);

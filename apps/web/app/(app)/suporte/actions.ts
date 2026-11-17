@@ -8,6 +8,8 @@ import {
   type SendResult,
   sendMessageInputSchema,
   supportSendInputSchema,
+  voiceReplyInputSchema,
+  voiceSendInputSchema,
 } from '@rede-social/module-chat/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
@@ -19,8 +21,10 @@ import {
   fetchMyCases,
   parseInboxFilters,
   replyToConversation,
+  replyVoice,
   runCaseAction,
   sendSupportMessage,
+  sendSupportVoice,
 } from '@/lib/chat';
 import {
   type ChatMessageView,
@@ -33,6 +37,7 @@ import {
   type StaffCaseHeaderView,
   tenantDayKeys,
 } from '@/lib/chat-view';
+import type { VoiceSendError } from '@/lib/voice-send';
 
 /**
  * The member thread's send (CHAT-02, UI-D-260), in the `notificacoes/actions.ts` conventions: the SAME
@@ -112,6 +117,99 @@ export async function sendSupportMessageAction(
         status: error instanceof ApiClientError ? error.status : null,
         code: error instanceof ApiClientError ? error.code : 'TRANSPORT',
       });
+  }
+
+  if (path) redirect(path);
+  return result;
+}
+
+/* ── 12.5-11: the voice sends ───────────────────────────────────────────────────────────────────── */
+
+/**
+ * What a voice send answers (12.5, D-862, UI-D-847). A refusal is ONE closed word the upload-and-send
+ * orchestration (`lib/voice-send.ts`) and the bubble map to their own sentences: `not_ready` (409
+ * `voice_not_ready`, the worker has not derived the take yet: retriable), `invalid` (a 400 or an input
+ * refused here, permanent), `closed` (409 `case_closed`), `member_blocked`, `member_removed`,
+ * `not_found` (404) or `retriable` (a 5xx, a 429, a bare 409, the transport). A 401 or 403 the bootstrap
+ * knows becomes a navigation OUTSIDE the try/catch (Next 16: `redirect()` throws).
+ */
+export type SendSupportVoiceResult =
+  | {
+      ok: true;
+      view: ChatMessageView;
+      conversationId: string;
+      case?: NonNullable<SendResult['case']>;
+    }
+  | { ok: false; error: VoiceSendError };
+
+export type ReplyVoiceResult =
+  | { ok: true; view: ChatMessageView; conversationId: string }
+  | { ok: false; error: VoiceSendError };
+
+const VOICE_INVALID = { ok: false, error: 'invalid' } as const;
+
+/** The closed word of an API refusal of a voice send; the API re-enforces everything this only names. */
+function voiceErrorOf(error: unknown): VoiceSendError {
+  if (!(error instanceof ApiClientError)) return 'retriable';
+  const chat = error.details?.chat;
+  if (error.status === 409) {
+    if (chat === 'voice_not_ready') return 'not_ready';
+    if (chat === 'case_closed') return 'closed';
+    if (chat === 'member_blocked') return 'member_blocked';
+    if (chat === 'member_removed') return 'member_removed';
+    return 'retriable';
+  }
+  if (error.status === 404) return 'not_found';
+  if (error.status === 429 || error.status >= 500) return 'retriable';
+  return 'invalid';
+}
+
+/**
+ * The member's recording (VOICE-18). The SAME strict Zod the API validates with (`voiceSendInputSchema`)
+ * runs BEFORE the request, so a non-uuid, an extra key, an unknown category or an over-long subject never
+ * leaves the server (T-12.5-43). The translator and the bootstrap are read BEFORE the write, so nothing
+ * can fail after the message is stored and report "not sent". Called once per attempt by
+ * `runVoiceSend`, which repeats it while the answer is `not_ready`.
+ */
+export async function sendSupportVoiceAction(
+  mediaId: unknown,
+  category?: unknown,
+  subject?: unknown,
+): Promise<SendSupportVoiceResult> {
+  const input = voiceSendInputSchema.safeParse({
+    mediaId,
+    category: category ?? undefined,
+    subject: subject ?? undefined,
+  });
+  if (!input.success) return VOICE_INVALID;
+
+  let path: string | null = null;
+  let result: SendSupportVoiceResult = { ok: false, error: 'retriable' };
+  try {
+    const [bootstrap, t] = await Promise.all([getBootstrap(), getTranslations('chat')]);
+    const sent = await sendSupportVoice(input.data.mediaId, {
+      category: input.data.category,
+      subject: input.data.subject,
+    });
+    result = {
+      ok: true,
+      conversationId: sent.conversationId,
+      view: chatMessageView(sent.message, {
+        timeZone: bootstrap.tenant.timezone,
+        viewer: 'member',
+        t,
+      }),
+      ...(sent.case ? { case: sent.case } : {}),
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) path = bootstrapRedirectPath(error);
+    if (!path) {
+      console.error('chat.support_voice_failed', {
+        status: error instanceof ApiClientError ? error.status : null,
+        code: error instanceof ApiClientError ? error.code : 'TRANSPORT',
+      });
+      result = { ok: false, error: voiceErrorOf(error) };
+    }
   }
 
   if (path) redirect(path);
@@ -234,6 +332,50 @@ export async function replyToConversationAction(
         status: error instanceof ApiClientError ? error.status : null,
         code: error instanceof ApiClientError ? error.code : 'TRANSPORT',
       });
+  }
+
+  if (path) redirect(path);
+  return result;
+}
+
+/**
+ * The team's recording in a support conversation (VOICE-18, D-866): the conventions of
+ * `replyToConversationAction` (validation first, view read before the write, the view formatted for the
+ * STAFF viewer) with the closed vocabulary of {@link SendSupportVoiceResult}.
+ */
+export async function replyVoiceToConversationAction(
+  conversationId: unknown,
+  mediaId: unknown,
+): Promise<ReplyVoiceResult> {
+  if (typeof conversationId !== 'string' || !CONVERSATION_ID_RE.test(conversationId)) {
+    return VOICE_INVALID;
+  }
+  const input = voiceReplyInputSchema.safeParse({ mediaId });
+  if (!input.success) return VOICE_INVALID;
+
+  let path: string | null = null;
+  let result: ReplyVoiceResult = { ok: false, error: 'retriable' };
+  try {
+    const [bootstrap, t] = await Promise.all([getBootstrap(), getTranslations('chat')]);
+    const sent = await replyVoice(conversationId.toLowerCase(), input.data.mediaId);
+    result = {
+      ok: true,
+      conversationId: sent.conversationId,
+      view: chatMessageView(sent.message, {
+        timeZone: bootstrap.tenant.timezone,
+        viewer: 'staff',
+        t,
+      }),
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) path = bootstrapRedirectPath(error);
+    if (!path) {
+      console.error('chat.staff_voice_failed', {
+        status: error instanceof ApiClientError ? error.status : null,
+        code: error instanceof ApiClientError ? error.code : 'TRANSPORT',
+      });
+      result = { ok: false, error: voiceErrorOf(error) };
+    }
   }
 
   if (path) redirect(path);

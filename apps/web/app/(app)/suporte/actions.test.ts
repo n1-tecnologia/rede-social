@@ -4,8 +4,10 @@ import {
   editCaseAction,
   loadMoreInboxAction,
   loadMoreMyCasesAction,
+  replyVoiceToConversationAction,
   runCaseActionAction,
   sendSupportMessageAction,
+  sendSupportVoiceAction,
 } from './actions';
 
 /**
@@ -431,5 +433,146 @@ describe('loadMoreInboxAction(cursor, filters) (checker R-I8)', () => {
     expect(await loadMoreInboxAction(5, {})).toEqual({ ok: false });
     expect(await loadMoreInboxAction('x'.repeat(513), {})).toEqual({ ok: false });
     expect(apiFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('the voice actions (12.5-11, D-862, D-866, T-12.5-43)', () => {
+  const MEDIA = '0b000000-0000-4000-8000-0000000000b9';
+  const voiceRow = (side: 'member' | 'staff') => ({
+    id: '0b000000-0000-4000-8000-0000000000b1',
+    seq: 3,
+    side,
+    body: '',
+    createdAt: '2026-11-17T17:02:00.000Z',
+    author: side === 'staff' ? { firstName: 'Ana' } : null,
+    authorIsViewer: true,
+    voice: { mediaId: MEDIA, durationSeconds: 42 },
+  });
+  const sent = (side: 'member' | 'staff', caseFacts?: unknown) => ({
+    conversationId: CONVERSATION,
+    message: voiceRow(side),
+    ...(caseFacts ? { case: caseFacts } : {}),
+  });
+
+  describe('sendSupportVoiceAction', () => {
+    it('answers the finished view with the voice labels and the API case passed through unchanged', async () => {
+      const caseFacts = {
+        id: CONVERSATION,
+        number: 7,
+        state: 'open',
+        opened: true,
+        reopened: false,
+      };
+      vi.mocked(apiFetch).mockResolvedValue(json(201, sent('member', caseFacts)));
+
+      const result = await sendSupportVoiceAction(MEDIA, 'payment', '  Cobrança  ');
+
+      expect(calledPath()).toBe('/v1/chat/support/voice-messages');
+      expect(calledMethod()).toBe('POST');
+      expect(sentBody()).toEqual({ mediaId: MEDIA, category: 'payment', subject: 'Cobrança' });
+      expect(result).toMatchObject({ ok: true, conversationId: CONVERSATION });
+      if (!result.ok) return;
+      expect(result.view.voice?.durationLabel).toBe('0:42');
+      expect(result.view.body).toBe('');
+      expect(result.case).toEqual(caseFacts);
+    });
+
+    it('a plain send is the bare { mediaId } and an answer without case is ok with no case', async () => {
+      vi.mocked(apiFetch).mockResolvedValue(json(201, sent('member')));
+      const result = await sendSupportVoiceAction(MEDIA);
+      expect(sentBody()).toEqual({ mediaId: MEDIA });
+      expect(result).toMatchObject({ ok: true });
+      expect(result).not.toHaveProperty('case');
+    });
+
+    it('a non-uuid id, an unknown category or an over-long subject is "invalid" with ZERO API calls', async () => {
+      const invalid = { ok: false, error: 'invalid' };
+      expect(await sendSupportVoiceAction('not-a-uuid')).toEqual(invalid);
+      expect(await sendSupportVoiceAction(undefined)).toEqual(invalid);
+      expect(await sendSupportVoiceAction({ mediaId: MEDIA })).toEqual(invalid);
+      expect(await sendSupportVoiceAction(MEDIA, 'banana')).toEqual(invalid);
+      expect(await sendSupportVoiceAction(MEDIA, 'other', 'x'.repeat(81))).toEqual(invalid);
+      expect(apiFetch).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['409 voice_not_ready', 409, 'CONFLICT', 'voice_not_ready', 'not_ready'],
+      ['400 voice_invalid', 400, 'VALIDATION_FAILED', 'voice_invalid', 'invalid'],
+      ['a plain 400', 400, 'VALIDATION_FAILED', undefined, 'invalid'],
+      ['409 case_closed', 409, 'CONFLICT', 'case_closed', 'closed'],
+      ['409 member_blocked', 409, 'CONFLICT', 'member_blocked', 'member_blocked'],
+      ['409 member_removed', 409, 'CONFLICT', 'member_removed', 'member_removed'],
+      ['a bare 409', 409, 'CONFLICT', undefined, 'retriable'],
+      ['404', 404, 'NOT_FOUND', undefined, 'not_found'],
+      ['429', 429, 'RATE_LIMITED', undefined, 'retriable'],
+      ['500', 500, 'INTERNAL', undefined, 'retriable'],
+      ['503', 503, 'UNAVAILABLE', undefined, 'retriable'],
+    ])('%s is the closed word %s', async (_name, status, code, chat, word) => {
+      vi.mocked(apiFetch).mockResolvedValue(refusal(status, code, chat));
+      expect(await sendSupportVoiceAction(MEDIA)).toEqual({ ok: false, error: word });
+    });
+
+    it('the transport failing is "retriable" and logs only a status and a code', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.mocked(apiFetch).mockRejectedValue(new Error('socket hang up https://secret.test/x'));
+      expect(await sendSupportVoiceAction(MEDIA)).toEqual({ ok: false, error: 'retriable' });
+      expect(JSON.stringify(spy.mock.calls)).not.toContain('secret.test');
+      expect(JSON.stringify(spy.mock.calls)).not.toContain(MEDIA);
+      spy.mockRestore();
+    });
+
+    it('a 401 is a navigation outside the try (redirect throws) and a 5xx is not', async () => {
+      vi.mocked(apiFetch).mockResolvedValue(refusal(401, 'UNAUTHORIZED'));
+      await expect(sendSupportVoiceAction(MEDIA)).rejects.toThrow('redirect:/entrar');
+    });
+  });
+
+  describe('replyVoiceToConversationAction', () => {
+    it('answers the finished staff view and posts the bare { mediaId } to the conversation', async () => {
+      vi.mocked(apiFetch).mockResolvedValue(json(201, sent('staff')));
+
+      const result = await replyVoiceToConversationAction(CONVERSATION.toUpperCase(), MEDIA);
+
+      expect(calledPath()).toBe(`/v1/chat/conversations/${CONVERSATION}/voice-messages`);
+      expect(sentBody()).toEqual({ mediaId: MEDIA });
+      expect(result).toMatchObject({ ok: true, conversationId: CONVERSATION });
+      if (!result.ok) return;
+      expect(result.view.voice?.durationLabel).toBe('0:42');
+      expect(result.view.label?.firstName).toBe('Você');
+    });
+
+    it('a bad conversation id, a non-uuid media id or an extra key is "invalid" with ZERO API calls', async () => {
+      const invalid = { ok: false, error: 'invalid' };
+      expect(await replyVoiceToConversationAction('nope', MEDIA)).toEqual(invalid);
+      expect(await replyVoiceToConversationAction(42, MEDIA)).toEqual(invalid);
+      expect(await replyVoiceToConversationAction(CONVERSATION, 'nope')).toEqual(invalid);
+      expect(await replyVoiceToConversationAction(CONVERSATION, { mediaId: MEDIA })).toEqual(
+        invalid,
+      );
+      expect(apiFetch).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['409 voice_not_ready', 409, 'CONFLICT', 'voice_not_ready', 'not_ready'],
+      ['400 voice_invalid', 400, 'VALIDATION_FAILED', 'voice_invalid', 'invalid'],
+      ['409 case_closed', 409, 'CONFLICT', 'case_closed', 'closed'],
+      ['409 member_blocked', 409, 'CONFLICT', 'member_blocked', 'member_blocked'],
+      ['409 member_removed', 409, 'CONFLICT', 'member_removed', 'member_removed'],
+      ['404', 404, 'NOT_FOUND', undefined, 'not_found'],
+      ['500', 500, 'INTERNAL', undefined, 'retriable'],
+    ])('%s is the closed word %s', async (_name, status, code, chat, word) => {
+      vi.mocked(apiFetch).mockResolvedValue(refusal(status, code, chat));
+      expect(await replyVoiceToConversationAction(CONVERSATION, MEDIA)).toEqual({
+        ok: false,
+        error: word,
+      });
+    });
+
+    it('a 401 is a navigation outside the try', async () => {
+      vi.mocked(apiFetch).mockResolvedValue(refusal(401, 'UNAUTHORIZED'));
+      await expect(replyVoiceToConversationAction(CONVERSATION, MEDIA)).rejects.toThrow(
+        'redirect:/entrar',
+      );
+    });
   });
 });
