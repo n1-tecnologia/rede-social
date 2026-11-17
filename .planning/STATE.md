@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 15
+current_plan: 16
 status: executing
-stopped_at: Completed 12.4-14-PLAN.md
-last_updated: "2026-11-17T11:46:47.995Z"
+stopped_at: Completed 12.4-15-PLAN.md
+last_updated: "2026-11-17T12:01:53.716Z"
 last_activity: 2026-11-17
 last_activity_desc: Phase 12.4 execution started
-state_head: 0a8e804cc0d85b1644a78d67e87d9b5d2b0110fd
+state_head: 5febd85b19b4f38e2cfcd7de335eb9dec932d0c0
 progress:
   total_phases: 34
   completed_phases: 0
   total_plans: 471
-  completed_plans: 439
+  completed_plans: 440
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
-Current Plan: 15
+Current Plan: 16
 Total Plans in Phase: 20
-Plan: 15 of 20
+Plan: 16 of 20
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.4 execution started
 
@@ -388,6 +388,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12.4 P12 | 14min | 3 tasks | 15 files |
 | Phase 12.4 P13 | 9 min | 3 tasks | 11 files |
 | Phase 12.4 P14 | 13 min | 3 tasks | 11 files |
+| Phase 12.4 P15 | 11 min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -1186,6 +1187,7 @@ Recent decisions affecting current work:
 - [Phase 12.4]: 12.4-13: Meus chamados page gate is two-sided (staff or no chat.support.contact gets not-found); Anteriores count is total minus current; CaseCardSkeleton lives in directive-less CaseCard.tsx — staff never own a case; server loading file must not import a client reference
 - [Phase 12.4]: 12.4-14: the staff roster (useStaffRoster) loads on demand through load(); plan 15's Atribuir sheet must call load() when it opens — One names-only fetch is shared by every consumer mounted together and forgotten on the last unmount
 - [Phase 12.4]: 12.4-14: an owner or priority filter earns the filtered empty copy even with the awaiting toggle on — A subset is never described as everyone answered
+- [Phase 12.4]: 12.4-15: stale, closed and not_allowed refusals toast the stale sentence and re-read; a take sends the stored owner id; the closed strip is drawn by the pane from live state with the blocked or removed notice winning
 
 ### Pending Todos
 
@@ -1320,6 +1322,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-17T11:46:47.666Z
-Stopped at: Completed 12.4-14-PLAN.md
+Last session: 2026-11-17T12:01:40.590Z
+Stopped at: Completed 12.4-15-PLAN.md
 Resume file: None

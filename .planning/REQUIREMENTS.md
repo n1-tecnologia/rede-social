@@ -417,9 +417,9 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **CASE-04**: A case is `Aberto`, `Em atendimento`, `Resolvido` or `Fechado` (stored as `open`, `in_progress`, `resolved`, `closed`); CHECK constraints make a case with no owner `Aberto`, an owned open case `Em atendimento`, and tie the resolve and close instants to their states *(D-805, D-806)*
 - [x] **CASE-05**: The database enforces the transition table (take, assign, resolve, close, reopen, edit, and the three automatic moves); an illegal move, a stale expected state and any message on a `Fechado` case are refused with stable codes, for every writer *(D-805, D-801, UI-D-817, UI-D-827)*
 - [x] **CASE-06**: A member message on a `Resolvido` case moves it to `Aberto` in the same case, clears the owner, records a `reopened` event and notifies the team; a member message on a `Fechado` case never touches it and opens a new case, including when the close races the message *(D-805, D-809, A-UI-9)*
-- [ ] **CASE-07**: Any `chat.support` holder may reply to any case; a reply to an unowned `Aberto` case takes it for the replier (`Em atendimento`) in the same transaction, a reply to an owned case or to a `Resolvido` case changes neither owner nor state *(D-806, A-UI-1, UI-D-828)*
+- [x] **CASE-07**: Any `chat.support` holder may reply to any case; a reply to an unowned `Aberto` case takes it for the replier (`Em atendimento`) in the same transaction, a reply to an owned case or to a `Resolvido` case changes neither owner nor state *(D-806, A-UI-1, UI-D-828)*
 - [ ] **CASE-08**: Any staff member takes a case for themselves (a take-over of another person's case needs the expected owner); only the `chat.support.assign` holder (`admin_tenant`) assigns, only to a live staff member of the same tenant; the permission is declared in the chat manifest and re-enforced by the database role literal, pinned by the drift test *(D-806, UI-D-826)*
-- [ ] **CASE-09**: The team resolves from `Aberto` or `Em atendimento`, closes from any state, and reopens `Resolvido` only (to `Aberto` with no owner, the member not told); resolve and close mark the case read for the team; every action carries the state the screen showed and a stale action answers `409 case_stale` with the case unchanged *(D-805, D-807, UI-D-827, UI-D-830)*
+- [x] **CASE-09**: The team resolves from `Aberto` or `Em atendimento`, closes from any state, and reopens `Resolvido` only (to `Aberto` with no owner, the member not told); resolve and close mark the case read for the team; every action carries the state the screen showed and a stale action answers `409 case_stale` with the case unchanged *(D-805, D-807, UI-D-827, UI-D-830)*
 - [ ] **CASE-10**: The member sets the category (five fixed codes, `Outro` default) and an optional subject (80 code points) only on the message that opens the case; the priority is born `Normal` and unreachable to the member; staff edit category, subject and priority of a case that is not `Fechado`; unknown or forbidden keys are `400` and write nothing *(D-811, D-812)*
 - [x] **CASE-11**: A case without a typed subject shows the start of its first message, one line cut on a word at 80 characters with `…` only when it cut; a migrated case has no stored subject and shows the same fallback *(D-812, D-814, UI-D-819)*
 - [ ] **CASE-12**: Every step (opened, taken, assigned, resolved, closed, reopened, a field changed) is an append-only, tenant-scoped row with actor, instant and states; the automatic close has no actor; no lane can update or delete it; only staff read it; a member never does *(D-810, UI-D-829, UI-D-835)*
@@ -1105,9 +1105,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-04 | Phase 12.4 | Complete |
 | CASE-05 | Phase 12.4 | Complete |
 | CASE-06 | Phase 12.4 | Complete |
-| CASE-07 | Phase 12.4 | Pending |
+| CASE-07 | Phase 12.4 | Complete |
 | CASE-08 | Phase 12.4 | Pending |
-| CASE-09 | Phase 12.4 | Pending |
+| CASE-09 | Phase 12.4 | Complete |
 | CASE-10 | Phase 12.4 | Pending |
 | CASE-11 | Phase 12.4 | Complete |
 | CASE-12 | Phase 12.4 | Pending |
