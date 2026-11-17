@@ -18,7 +18,7 @@ type Ctx = Pick<RequestContext, 'userId' | 'tenantId' | 'role'>;
 
 /** The detail's live lists stop at this many rows (one member's history, T-08.7-15). */
 const DETAIL_ROWS = 50;
-/** Support turns are counted over the 8 weeks (56 tenant-local days) ending D. */
+/** Support cases are counted over the 8 weeks (56 tenant-local days) ending D. */
 const SUPPORT_DAYS = 56;
 
 const count = z.number().int().nonnegative();
@@ -323,11 +323,15 @@ async function memberPurchases(tx: Tx, tenantId: string, userId: string, snapsho
 
 /**
  * The member's support of the 8 weeks (`SUPPORT_DAYS` tenant-local days) ending D: counts and
- * minutes only, never a word (T-08.7-14). One support thread per member exists, so a "conversation"
- * here is a member TURN — the first member message after a staff message (or the thread's first) —
- * the same turn the Atendimento medians use. `lastDaysAgo` = D minus the local day of the latest
- * turn; `medianResponseMinutes` = the median minutes from a turn to the next staff message before
- * `untilAt`, rounded; null without an answered turn. Deleted messages are ignored.
+ * minutes only, never a word (T-08.7-14). Since 12.4-10 (D-815, CASE-22) a "conversation" here is a
+ * CASE, the unit a member opens from "Meus chamados": a member may hold several over time (one
+ * active at a time), and each case counts once, by its FIRST live message when that is the member's,
+ * the same case rule the Atendimento medians use (`app.dashboard_area_support`), so the owner's
+ * panel and this line cannot disagree. `conversations` = cases whose first message falls in the 8
+ * weeks; `lastDaysAgo` = D minus the local day of the latest such first message;
+ * `medianResponseMinutes` = the median over the member's cases of each case's first response (the
+ * minutes from the first message to the first staff message after it, before `untilAt`), rounded;
+ * null without an answered case. Deleted messages are ignored. The JSON keys are unchanged.
  */
 async function memberSupport(tx: Tx, tenantId: string, member: MemberDb, snapshot: SnapshotMeta) {
   const untilAt = snapshot.windows.untilAt;
@@ -348,14 +352,14 @@ async function memberSupport(tx: Tx, tenantId: string, member: MemberDb, snapsho
          and m.deleted_at is null
          and m.created_at < ${untilAt}::timestamptz
     ),
-    turns as (
+    cases as (
       select t.created_at as started_at,
              (select min(s.created_at) from msgs s
                where s.conversation_id = t.conversation_id and s.seq > t.seq
                  and s.author_side = 'staff') as answered_at
         from msgs t
        where t.author_side = 'member'
-         and (t.prev_side is null or t.prev_side = 'staff')
+         and t.prev_side is null
          and t.created_at >= ((${snapshot.day}::date - ${SUPPORT_DAYS - 1}::int)::timestamp
                                at time zone ${member.timezone})
     )
@@ -365,7 +369,7 @@ async function memberSupport(tx: Tx, tenantId: string, member: MemberDb, snapsho
            round((percentile_cont(0.5) within group (
              order by extract(epoch from answered_at - started_at) / 60)
              filter (where answered_at is not null))::numeric)::int as median_minutes
-      from turns`);
+      from cases`);
   return {
     conversations: Number(row?.conversations ?? 0),
     lastDaysAgo:

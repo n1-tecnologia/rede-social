@@ -43,19 +43,22 @@ begin;
 --   `has_index` for `store_orders_tenant_paid_idx` (R-Risk 1); PR-1 (no product name stored);
 --   posture.
 --
--- SUPPORT (08.7-11, `app.dashboard_area_support`, builder v7), section 9, tenant S: the queue at build
---   time by the inbox rule (a member message past the team's read mark waits; one the team has read
---   does not), with the oldest wait in whole hours; member turns (the first member message after the
---   last staff message) and their minutes to the next staff message, a turn answered by a SECOND staff
---   member, a deleted staff reply ignored, unanswered turns out of the medians, null medians for weeks
---   with no answered turn; conversations by creation week; the team (current staff only, a staff
---   member whose only message is deleted not listed); moderation of Window30 (`role_changed` and an
---   older removal ignored) beside the live comments of Window30; the tenant pin (a shared identity's
---   thread in L), PR-1 / EP-43 (no message text, no member id), EP-42 on tenant Z, posture.
+-- SUPPORT (08.7-11, `app.dashboard_area_support`, builder v7; per case since 12.4-10, builder v9),
+--   section 9, tenant S: the queue at build time by the inbox rule over ACTIVE cases (a member message
+--   past the team's read mark waits; one the team has read does not), with the oldest wait in whole
+--   hours; the FIRST RESPONSE of each CASE (the minutes from the case's first member message to the
+--   first staff message after it, bucketed by the week of that first message; a later member turn of
+--   the same case is no second sample), a case answered by a SECOND staff member, a deleted staff reply
+--   ignored, unanswered cases out of the medians, null medians for weeks with no answered case;
+--   cases by creation week; the team (current staff only, a staff member whose only message is deleted
+--   not listed); moderation of Window30 (`role_changed` and an older removal ignored) beside the live
+--   comments of Window30; the tenant pin (a shared identity's thread in L), PR-1 / EP-43 (no message
+--   text, no member id), EP-42 on tenant Z, posture. Sections 10 and 11 (12.4-10): `bySubject`, the
+--   per-case queue and the per-case first response, with a two-tenant control.
 --
 -- Fixture ids use the `19900000-…` prefix and the tenants `pgtap-areas-k` / `-l` / `-h` / `-z` /
 -- `-e` / `-f` / `-s`, used by no other file. Like its siblings, this file ROLLS BACK.
-select plan(99);
+select plan(103);
 
 -- ── helpers (rolled back with the file) ────────────────────────────────────────────────────────
 -- D is the São Paulo yesterday; `at(k, t)` the São Paulo local instant `t` of D-k; `k_of(dow)` the
@@ -617,15 +620,15 @@ select ok(
 -- ── 9. support (08.7-11, tenant S) ─────────────────────────────────────────────────────────────
 -- S: the admin (…062), staff s2 (…063, support) and s3 (…068, support), members s1, s2m, s3m, s4m
 -- (…064..…067); s1 is also a member of L (a shared identity) with a support thread there.
---   c1 (s1, created D-2): member 10:00, admin 10:30 (turn 30 min); member 11:00 and 11:05 (one turn),
---      staff s2 12:00 (60 min, answered by a SECOND staff member).
+--   c1 (s1, created D-2): member 10:00, admin 10:30 (the case's FIRST RESPONSE, 30 min); member 11:00
+--      and 11:05, staff s2 12:00 (later turns of the same case: no further sample, 12.4-10).
 --   c2 (s2m, created D-3): member 09:00, s3's reply 09:10 DELETED, admin 09:50 (50 min: the deleted
 --      reply is ignored, and s3, whose only message is deleted, is not in the team).
 --   c3 (s3m, created D-10): member D-20 10:00, admin 10:15 (15 min, week 5); member 5 hours ago
---      (today: past the read mark, so it WAITS; not a turn of the eight weeks).
+--      (today: past the read mark, so it WAITS).
 --   c4 (s4m, created D-1): member D-1 08:00 unanswered, but READ by the team: not waiting, and an
---      unanswered turn enters no median.
--- Week 7 (D-6..D) medians of 30, 60 and 50 → 50; week 5 → 15; every other week null.
+--      unanswered case enters no median.
+-- Week 7 (D-6..D) first responses of 30 (c1) and 50 (c2) → 40; week 5 → 15; every other week null.
 -- Moderation in S: a removal at D-3, a block and an unblock at D-4, a role change at D-5 (ignored),
 -- a removal at D-40 (outside); comments: two live at D-2, one deleted at D-2, one live at D-40.
 select tests.tenant('pgtap-areas-s', 'Áreas S', '19900000-0000-4000-8000-000000000061');
@@ -702,8 +705,8 @@ select is(pg_temp.support_of('19900000-0000-4000-8000-000000000061') -> 'awaitin
   '{"count": 1, "oldestHours": 5}'::jsonb,
   'the inbox rule at build time: c3''s member message past the read mark waits (5 whole hours); c4, read by the team, does not');
 select is(pg_temp.support_of('19900000-0000-4000-8000-000000000061') -> 'weeklyMedianMinutes',
-  '[null, null, null, null, null, 15, null, 50]'::jsonb,
-  'planning decision 1: turns of 30, 60 (two member messages, answered by a second staff member) and 50 minutes (the deleted reply ignored) give week 7''s 50; c4''s unanswered turn enters no median; weeks without an answered turn are null');
+  '[null, null, null, null, null, 15, null, 40]'::jsonb,
+  'D-815 / CASE-22: ONE first response per case: c1''s 30 (its later turns, one answered by a second staff member after 60 minutes, are no samples) and c2''s 50 (the deleted reply ignored) give week 7''s 40; c3''s 15 is week 5; c4''s unanswered case enters no median; weeks without an answered case are null');
 select is(pg_temp.support_of('19900000-0000-4000-8000-000000000061') -> 'weeklyConversations',
   '[0, 0, 0, 0, 0, 0, 1, 3]'::jsonb,
   'support conversations by the week of their creation');
@@ -844,6 +847,52 @@ select is(
   (select array_agg(k order by k) from jsonb_object_keys(pg_temp.support_of('19900000-0000-4000-8000-000000000071') -> 'bySubject') as k),
   array['account', 'check_in', 'events', 'other', 'payment'],
   'EP-073: the category keys are the five exact lowercase codes');
+
+-- ── 11. the first response per case (12.4-10, tenant P) ────────────────────────────────────────────
+-- p1 (D-2): first member message 08:01, staff 09:31 (90 minutes), then member 10:00 answered 14:00 and
+--   member again D-1 09:00 unanswered: ONE sample of 90 in week 7 (the old per-turn rule made three).
+-- p2 (D-3): a member message nobody answered: no sample. p3 (D-9, week 6): answered after 20 minutes;
+-- p4 (D-10, week 6): answered after 41 minutes: week 6's median of 20 and 41 is 30.5, which rounds to 31.
+-- A case answered only by the member (p5, D-4: two member messages) yields none either.
+select tests.tenant('pgtap-areas-p', 'Áreas P', '19900000-0000-4000-8000-000000000091');
+update public.tenants set timezone = 'America/Sao_Paulo' where id = '19900000-0000-4000-8000-000000000091';
+select tests.auth_user('admin@areas-p.local', '19900000-0000-4000-8000-000000000092');
+select tests.auth_user('p1@areas-p.local', '19900000-0000-4000-8000-000000000093');
+select tests.auth_user('p2@areas-p.local', '19900000-0000-4000-8000-000000000094');
+select tests.auth_user('p3@areas-p.local', '19900000-0000-4000-8000-000000000095');
+select tests.auth_user('p4@areas-p.local', '19900000-0000-4000-8000-000000000096');
+select tests.auth_user('p5@areas-p.local', '19900000-0000-4000-8000-000000000097');
+select tests.member('19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000092', 'admin_tenant');
+select tests.member('19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000093');
+select tests.member('19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000094');
+select tests.member('19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000095');
+select tests.member('19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000096');
+select tests.member('19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000097');
+update public.memberships set joined_at = pg_temp.at(100, '10:00')
+ where tenant_id = '19900000-0000-4000-8000-000000000091';
+select pg_temp.mk_case('0000000006a1', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000093', 'other', pg_temp.at(2, '08:00'));
+select pg_temp.say('0000000006a1', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000092', 'staff', pg_temp.at(2, '09:31'));
+select pg_temp.say('0000000006a1', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000093', 'member', pg_temp.at(2, '10:00'));
+select pg_temp.say('0000000006a1', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000092', 'staff', pg_temp.at(2, '14:00'));
+select pg_temp.say('0000000006a1', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000093', 'member', pg_temp.at(1, '09:00'));
+select pg_temp.mk_case('0000000006a2', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000094', 'events', pg_temp.at(3, '08:00'));
+select pg_temp.mk_case('0000000006a3', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000095', 'payment', pg_temp.at(9, '08:00'));
+select pg_temp.say('0000000006a3', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000092', 'staff', pg_temp.at(9, '08:21'));
+select pg_temp.mk_case('0000000006a4', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000096', 'account', pg_temp.at(10, '08:00'));
+select pg_temp.say('0000000006a4', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000092', 'staff', pg_temp.at(10, '08:42'));
+select pg_temp.mk_case('0000000006a5', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000097', 'check_in', pg_temp.at(4, '08:00'));
+select pg_temp.say('0000000006a5', '19900000-0000-4000-8000-000000000091', '19900000-0000-4000-8000-000000000097', 'member', pg_temp.at(4, '08:30'));
+select is(pg_temp.build('19900000-0000-4000-8000-000000000091'), true, 'tenant P builds its yesterday');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000091') -> 'weeklyMedianMinutes',
+  '[null, null, null, null, null, null, 31, 90]'::jsonb,
+  'D-815: p1''s three member turns make ONE sample of 90 minutes in week 7; p2 and p5 (nobody on the team answered) make none; p3 (20) and p4 (41) share week 6 and the median 30.5 rounds to 31');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000091') -> 'weeklyConversations',
+  '[0, 0, 0, 0, 0, 0, 2, 3]'::jsonb,
+  'weeklyConversations counts the cases opened per week (p3 and p4 in week 6; p1, p2 and p5 in week 7)');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000091') -> 'awaiting',
+  jsonb_build_object('count', 3,
+                     'oldestHours', floor(extract(epoch from now() - pg_temp.at(4, '08:01')) / 3600)::int),
+  'the queue counts the member-last unread ACTIVE cases: p1 (waiting since D-1 09:00), p2 and p5 (waiting since D-4 08:01, the oldest); p3 and p4 end on a staff reply');
 
 select * from finish();
 rollback;

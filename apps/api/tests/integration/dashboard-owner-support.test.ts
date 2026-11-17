@@ -2,6 +2,7 @@ import { TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import {
   type OwnerSupportReady,
+  ownerOverviewAnswerSchema,
   ownerSupportAnswerSchema,
   SUPPORT_WEEKS,
 } from '@rede-social/module-dashboard/contracts';
@@ -15,6 +16,7 @@ import {
   rebuildDashboard,
   removeDashboardFixtures,
   removeSupportThreads,
+  setSupportCaseState,
   tenantIdOf,
 } from './dashboard-fixture';
 import { adminSql, api, createSharedIdentity, HOSTS, SEED_PASSWORD, signInAs } from './setup';
@@ -39,7 +41,7 @@ const MEMBER_B_NAME = `Membro B ${PREFIX}`;
 
 const tokens = { demoAdmin: '', demoMember: '', demoSupport: '', labAdmin: '' };
 const tenants = { demo: '', lab: '' };
-const users = { staff: '', a: '', b: '' };
+const users = { staff: '', a: '', b: '', c: '', d: '' };
 let memberIds: string[] = [];
 let restoreLabChat: () => Promise<void> = async () => {};
 
@@ -157,6 +159,18 @@ beforeAll(async () => {
       memberships: [{ host: 'lab', displayName: MEMBER_B_NAME }],
     })
   ).userId;
+  users.c = (
+    await createSharedIdentity({
+      prefix: `${PREFIX}-c`,
+      memberships: [{ host: 'lab', displayName: `Membro C ${PREFIX}` }],
+    })
+  ).userId;
+  users.d = (
+    await createSharedIdentity({
+      prefix: `${PREFIX}-d`,
+      memberships: [{ host: 'lab', displayName: `Membro D ${PREFIX}` }],
+    })
+  ).userId;
   memberIds = (
     await adminSql<{ id: string }[]>`
       select id::text as id from public.memberships
@@ -165,7 +179,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await removeSupportThreads([users.a, users.b].filter(Boolean));
+  await removeSupportThreads([users.a, users.b, users.c, users.d].filter(Boolean));
   await removeDashboardFixtures(PREFIX);
   await restoreLabChat();
 });
@@ -275,6 +289,66 @@ describe('08.7 support', () => {
     ]) {
       expect(raw).not.toContain(leak);
     }
+  });
+
+  it('D-815 / CASE-22: a closed case (member-last and unread) and a resolved one never count in the queue, the case lists or the overview alert, which reads the same awaiting', async () => {
+    // Member C: a case whose last message is the member's and unread, then closed by the team.
+    const closedCase = await insertSupportThreadAt({
+      tenantId: tenants.lab,
+      memberUserId: users.c,
+      createdAt: await localInstantOf(tenants.lab, 4, '09:00'),
+    });
+    await insertSupportMessageAt({
+      tenantId: tenants.lab,
+      conversationId: closedCase,
+      authorUserId: users.c,
+      side: 'member',
+      k: 4,
+      localTime: '09:00',
+    });
+    await setSupportCaseState({ conversationId: closedCase, state: 'closed' });
+    // Member D: the team answered (the case is read), then resolved it.
+    const resolvedCase = await insertSupportThreadAt({
+      tenantId: tenants.lab,
+      memberUserId: users.d,
+      createdAt: await localInstantOf(tenants.lab, 3, '09:00'),
+    });
+    await insertSupportMessageAt({
+      tenantId: tenants.lab,
+      conversationId: resolvedCase,
+      authorUserId: users.d,
+      side: 'member',
+      k: 3,
+      localTime: '09:00',
+    });
+    await insertSupportMessageAt({
+      tenantId: tenants.lab,
+      conversationId: resolvedCase,
+      authorUserId: users.staff,
+      side: 'staff',
+      k: 3,
+      localTime: '09:20',
+    });
+    await setSupportCaseState({ conversationId: resolvedCase, state: 'resolved' });
+    expect(await rebuildDashboard(tenants.lab)).toBe('built');
+
+    const { body } = await supportOf(tokens.labAdmin, HOSTS.lab);
+    // Still B alone (26 hours); C (closed) and D (resolved) are in the weeks and by subject only.
+    expect(body.awaiting).toEqual({ count: 1, oldestHours: 26 });
+    expect(body.weeklyConversations).toEqual([0, 0, 0, 0, 0, 0, 0, 4]);
+    expect(body.bySubject).toMatchObject({ measured: true, other: 4 });
+    // The first responses are per case: A's 30 and D's 20 → 25.
+    expect(body.weeklyMedianMinutes).toEqual([null, null, null, null, null, null, null, 25]);
+
+    // The overview alert is the same awaiting (resolved and closed cases never raise it).
+    const res = await request('/v1/dashboard/owner/overview', tokens.labAdmin, HOSTS.lab);
+    expect(res.status).toBe(200);
+    const overview = ownerOverviewAnswerSchema.parse(await res.json());
+    if (overview.state !== 'ready') throw new Error('expected a ready overview');
+    expect(overview.awaiting).toEqual(body.awaiting);
+    expect(overview.alerts.filter((alert) => alert.kind === 'support_waiting')).toEqual([
+      { kind: 'support_waiting', conversations: 1, oldestHours: 26 },
+    ]);
   });
 
   it('T-12.4-49: a snapshot built at version 8 (the support area has no bySubject key) still parses and still reads "Em breve"', async () => {

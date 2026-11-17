@@ -630,6 +630,28 @@ export async function insertSupportMessageAt(
             ${input.side}, ${input.body ?? 'Mensagem do teste.'}, ${at}::timestamptz)`;
 }
 
+/**
+ * 12.4-10: moves a support case to `resolved` or `closed` the way the table's coherence CHECK reads
+ * it (`resolved` sets `resolved_at` and clears `closed_at`; `closed` the reverse), as the table owner
+ * and AFTER its messages: a message to a closed case raises CS004, and a case holds at most one
+ * active (open, in progress or resolved) row per member, so a member's earlier case is closed
+ * before the next one is inserted. `at` is a UTC instant, "now" by default.
+ */
+export async function setSupportCaseState(input: {
+  conversationId: string;
+  state: 'resolved' | 'closed';
+  at?: string;
+}): Promise<void> {
+  await adminSql`
+    update public.chat_conversations
+       set state = ${input.state},
+           resolved_at = case when ${input.state} = 'resolved'
+                              then coalesce(${input.at ?? null}::timestamptz, now()) else null end,
+           closed_at = case when ${input.state} = 'closed'
+                            then coalesce(${input.at ?? null}::timestamptz, now()) else null end
+     where id = ${input.conversationId}::uuid`;
+}
+
 /** The UTC instant of the tenant-local `localTime` of D-`k` (D = the tenant-local yesterday). */
 export async function localInstantOf(
   tenantId: string,

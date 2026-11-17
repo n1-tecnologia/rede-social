@@ -24,11 +24,13 @@ import {
   insertPaidOrderAt,
   insertSupportMessageAt,
   insertSupportThreadAt,
+  localInstantOf,
   moveFixtureEvent,
   rebuildDashboard,
   removeDashboardFixtures,
   removeFixtureProduct,
   removeSupportThreads,
+  setSupportCaseState,
   tenantIdOf,
 } from './dashboard-fixture';
 import { adminSql, api, createSharedIdentity, HOSTS, SEED_PASSWORD, signInAs } from './setup';
@@ -263,7 +265,8 @@ beforeAll(async () => {
 
   // The buyer (engaged): a paid order on D-40 (primary) and on D-3 (secondary), a check-in on D-5
   // (its RSVP on D-6), "vou" on the soon event (D-4) and on an event moved to D-10 (missed, D-12),
-  // and two support turns: answered after 30 minutes on D-3, unanswered on D-2.
+  // and two support CASES (12.4-10, a case is the unit now): the first opened on D-3 and answered
+  // after 30 minutes (then closed), the second opened on D-2 and unanswered.
   const buyer = await member('buyer');
   crafted.buyer = buyer.membershipId;
   users.buyer = buyer.userId;
@@ -296,25 +299,46 @@ beforeAll(async () => {
     k: 12,
   });
   await moveFixtureEvent({ tenantId: tenants.demo, eventId: missedEventId, k: 10 });
-  const thread = await insertSupportThreadAt({
+  const firstCase = await insertSupportThreadAt({
     tenantId: tenants.demo,
     memberUserId: buyer.userId,
+    createdAt: await localInstantOf(tenants.demo, 3, '10:00'),
   });
+  // The first case carries a second member message before the answer and a later member turn after
+  // it: neither is a sample, the case's first response (30 minutes) is the only one.
   for (const [side, k, localTime] of [
     ['member', 3, '10:00'],
     ['member', 3, '10:05'],
     ['staff', 3, '10:30'],
-    ['member', 2, '09:00'],
   ] as const) {
     await insertSupportMessageAt({
       tenantId: tenants.demo,
-      conversationId: thread,
+      conversationId: firstCase,
       authorUserId: side === 'staff' ? author.userId : buyer.userId,
       side,
       k,
       localTime,
     });
   }
+  // A member holds one active case at a time: the first is closed before the second opens.
+  await setSupportCaseState({
+    conversationId: firstCase,
+    state: 'closed',
+    at: await localInstantOf(tenants.demo, 3, '11:00'),
+  });
+  const secondCase = await insertSupportThreadAt({
+    tenantId: tenants.demo,
+    memberUserId: buyer.userId,
+    createdAt: await localInstantOf(tenants.demo, 2, '09:00'),
+  });
+  await insertSupportMessageAt({
+    tenantId: tenants.demo,
+    conversationId: secondCase,
+    authorUserId: buyer.userId,
+    side: 'member',
+    k: 2,
+    localTime: '09:00',
+  });
 
   // One like on a post of the community on D-1: occasional in the base AND in that community.
   const communal = await member('communal');
@@ -586,7 +610,7 @@ describe('08.7 member lists', () => {
       [soonEventId, null],
     ]);
 
-    // Support: two member turns in the 8 weeks, the latest on D-2, one answered after 30 minutes.
+    // Support: two cases in the 8 weeks, the latest opened on D-2, one answered after 30 minutes.
     expect(detail.support).toEqual({ conversations: 2, lastDaysAgo: 2, medianResponseMinutes: 30 });
     expect(JSON.stringify(detail)).not.toContain('Mensagem do teste');
 
