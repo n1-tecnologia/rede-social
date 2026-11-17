@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 2
+current_plan: 3
 status: executing
-stopped_at: Completed 12.4-01-PLAN.md
-last_updated: "2026-11-17T08:33:22.727Z"
+stopped_at: Completed 12.4-02-PLAN.md
+last_updated: "2026-11-17T08:51:27.919Z"
 last_activity: 2026-11-17
 last_activity_desc: Phase 12.4 execution started
-state_head: dfe46a8e03cde435a34858885b279b85fb9df395
+state_head: 2b70edcc731e2f42e4ddca7d00df6b1b6547939d
 progress:
   total_phases: 34
   completed_phases: 0
   total_plans: 471
-  completed_plans: 424
+  completed_plans: 425
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
-Current Plan: 2
+Current Plan: 3
 Total Plans in Phase: 20
-Plan: 2 of 20
+Plan: 3 of 20
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.4 execution started
 
@@ -373,6 +373,7 @@ Progress: [███████████████████░] 160/162
 | Phase 10.1 P14 | 14 min | 3 tasks | 15 files |
 | Phase 10.1 P15 | 34min | 3 tasks | 6 files |
 | Phase 12.4 P01 | 12 min | 4 tasks | 11 files |
+| Phase 12.4 P02 | 14 min | 4 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -1154,6 +1155,7 @@ Recent decisions affecting current work:
 - [Phase 10.1]: 10.1-15: the Phase 10.1 release order is migrations, web, then API and worker together (the web reads every new key as optional; the API needs the migrated columns) — Written in docs/DEPLOY.md under the Order subsection with its reason; it is the reverse of the 08.x to 12.x releases
 - [Phase 10.1]: 10.1-15: the paid-event spec drains the notification fan-out backlog and waits for the page's Realtime join before sending the tracer delivery — Cold runs lost the swap to 58 integration-suite fan-out jobs and to a join that had not happened; the product was not at fault
 - [Phase 12.4]: 12.4-01: counter table has all lane privileges revoked (42501), not only no policy; coherence CHECKs follow RESEARCH Q1 (closing clears resolved_at) — Defense in depth for T-12.4-02; plan 02 and later actions must clear resolved_at on close
+- [Phase 12.4]: 12.4-02: the activation is ONE do block (atomic under the local CLI and the ledgered runner); a second CS004 on the member send is a bare 409; CASE_ACTIVE_STATES is the single spelling of the active-case predicate — the local CLI does not wrap a migration file in a transaction (bare lock table fails 25P01)
 
 ### Pending Todos
 
@@ -1288,6 +1290,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-17T08:33:22.413Z
-Stopped at: Completed 12.4-01-PLAN.md
+Last session: 2026-11-17T08:51:27.600Z
+Stopped at: Completed 12.4-02-PLAN.md
 Resume file: None
