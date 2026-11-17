@@ -2058,11 +2058,77 @@ Plans:
 
 Decided in `/gsd-discuss-phase 12.4` (2026-11-16): (1) a new case after each close, one active at a time (about 15 to 18 plans); (2) four states Aberto, Em atendimento, Resolvido and Fechado, any staff takes and only `admin_tenant` assigns, the team closes or a 7-day sweep closes a Resolvido case, the member is told only on Resolvido; (3) subject, a fixed category list and a priority set by the staff, no attachments. The UI contract and the approved sketch 023 are `12.4-UI-SPEC.md` and `.planning/sketches/023-phase-12.4-designed-screens/`.
 
-**Plans:** 0 plans
+**Plans:** 0/20 plans executed (planned 2026-11-16: 20 plans in 15 waves; the database, contract, API, notice and dashboard plans run before the gated screens, the six screen plans and the end-to-end plan wait for sketch 023, which is approved provisional; plan 02 is the one-way activation and stops at a decision checkpoint; the release, the ledger and the exit gate are plan 18)
 
 Plans:
+**Wave 1**
 
-- [ ] TBD (run /gsd-plan-phase 12.4 to break down)
+- [ ] 12.4-01-PLAN.md — Tracer: the case columns, the per-tenant counter, the append-only events table and the numbering triggers; an unchanged first message becomes case #1 (pgTAP 235 sections 1 to 5)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 12.4-02-PLAN.md — Activation (one-way, a decision checkpoint first): the backfill of every support conversation, the active-case index swap, the message-trigger transitions and the CS004 retry (pgTAP 235 sections 6 to 8)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 12.4-03-PLAN.md — Staff definers: take, the act matrix, the edit definer, the history rows, the `chat.case` signals and the role-literal drift test (pgTAP 235 sections 9 to 11)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 12.4-04-PLAN.md — The 7-day auto-close on the kernel's hourly sweeper, no new queue (pgTAP 235 sections 12 and 13)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 12.4-05-PLAN.md — Contracts: the assign permission, the closed Zod schemas, the new issue codes and notification kinds
+- [ ] 12.4-10-PLAN.md — The owner's Atendimento per case: builder version 9 and the category counts
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 12.4-06-PLAN.md — Member API: the first message with category and subject, the thread read with the active case, "Meus chamados" paging
+- [ ] 12.4-11-PLAN.md — Web view layer: the view functions, the pt-BR catalog and the shipped test pins that D-800 reverses
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 12.4-07-PLAN.md — Staff reads: the inbox with tabs and filters, the roster, the history and the legal actions of every case
+- [ ] 12.4-16-PLAN.md — The owner's panel on screen: the category card and the per-case wording (gated on sketch 023)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 12.4-08-PLAN.md — Staff write API: the take, assign, resolve, close, reopen and edit routes with the SQLSTATE mapper
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 12.4-09-PLAN.md — Notices: the resolved bell row and push, the team pushes, the staff badge and the member dot, the live signals, and the two-tenant proof
+- [ ] 12.4-20-PLAN.md — The web's server side: fetchers, BFF read handlers, inventory rows and server actions
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 12.4-12-PLAN.md — Member thread: the opener, the case bar, the lifecycle strips and the live refetch (gated on sketch 023)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
+- [ ] 12.4-13-PLAN.md — "Meus chamados" page and the bell renderer (gated on sketch 023)
+- [ ] 12.4-14-PLAN.md — Staff inbox: tabs, filters, the extended row and the URL state (gated on sketch 023)
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
+- [ ] 12.4-15-PLAN.md — Staff thread, first half: the case bar, the action sheet, four dialogs and the composer rules (gated on sketch 023)
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
+- [ ] 12.4-19-PLAN.md — Staff thread, second half: the assign, edit and details sheets, the polite region and the `next build` gate (gated on sketch 023)
+
+**Wave 14** *(blocked on Wave 13 completion)*
+
+- [ ] 12.4-17-PLAN.md — End-to-end spec and helpers that keep the seeded conversation valid, listed and typechecked only (gated on sketch 023)
+
+**Wave 15** *(blocked on Wave 14 completion)*
+
+- [ ] 12.4-18-PLAN.md — Release notes in `docs/DEPLOY.md`, the owner's ledger of proofs and the phase exit gate
+
+**Cross-cutting constraints:**
+
+- Precondition for every task (D-33, D-365, D-417): `grep -q '^approved: true' .planning/sketches/023-phase-12.4-designed-screens/README.md` succeeds (approved, provisional, 2026-11-16); if not, stop and report; the guard is the first clause of each task's verify command
 
 ### Phase 13: App nativo iOS e Android por tenant (white-label)
 
@@ -2186,7 +2252,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 16/16 | In Progress|  |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
-| 12.4. Abertura de chamado no suporte (INSERTED) | 0/TBD | Not started | - |
+| 12.4. Abertura de chamado no suporte (INSERTED) | 0/20 | Planned | - |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |
 
 ---
