@@ -82,6 +82,47 @@ describe('voiceSendDeps', () => {
     expect(sendAction).not.toHaveBeenCalled();
   });
 
+  it('a start refusal code becomes the matching failure kind and nothing else runs', async () => {
+    vi.mocked(startMediaUploadAction).mockResolvedValue({ ok: false, code: 'duration_too_long' });
+    const sendAction = vi.fn();
+    const outcome = await runVoiceSend(voiceSendDeps(sendAction), take);
+    expect(outcome).toEqual({ ok: false, kind: 'permanent' });
+    expect(uploadBytes).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
+
+    vi.mocked(startMediaUploadAction).mockResolvedValue({ ok: false, code: 'generic' });
+    expect(await runVoiceSend(voiceSendDeps(sendAction), take)).toEqual({
+      ok: false,
+      kind: 'retriable',
+    });
+  });
+
+  it('a transfer outcome of the router is "retriable" with no resume, a 413 is permanent', async () => {
+    vi.mocked(startMediaUploadAction).mockResolvedValue({ ok: true, upload });
+    vi.mocked(uploadBytes).mockResolvedValue({ ok: false, reason: 'transfer' });
+    const sendAction = vi.fn();
+    expect(await runVoiceSend(voiceSendDeps(sendAction), take)).toEqual({
+      ok: false,
+      kind: 'retriable',
+    });
+    vi.mocked(uploadBytes).mockResolvedValue({ ok: false, reason: 'too_large' });
+    expect(await runVoiceSend(voiceSendDeps(sendAction), take)).toEqual({
+      ok: false,
+      kind: 'permanent',
+    });
+    expect(completeMediaUploadAction).not.toHaveBeenCalled();
+  });
+
+  it('a complete refusal is classified by its code', async () => {
+    vi.mocked(startMediaUploadAction).mockResolvedValue({ ok: true, upload });
+    vi.mocked(uploadBytes).mockResolvedValue({ ok: true });
+    vi.mocked(completeMediaUploadAction).mockResolvedValue({ ok: false, code: 'format_mismatch' });
+    expect(await runVoiceSend(voiceSendDeps(vi.fn()), take)).toEqual({
+      ok: false,
+      kind: 'permanent',
+    });
+  });
+
   it('the send passes the action result through and the sleep is a real timer', async () => {
     vi.mocked(startMediaUploadAction).mockResolvedValue({ ok: true, upload });
     vi.mocked(uploadBytes).mockResolvedValue({ ok: true });

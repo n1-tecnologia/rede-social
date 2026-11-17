@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  classifyVoiceFailure,
   runVoiceSend,
+  VOICE_READY_POLL_MS,
+  VOICE_READY_TIMEOUT_MS,
   type VoiceSendAnswer,
   type VoiceSendDeps,
   type VoiceSendProgress,
@@ -129,5 +132,190 @@ describe('runVoiceSend (12.5-11 tracer)', () => {
     expect(percents[0]).toBe(0);
     expect(percents.at(-1)).toBe(100);
     expect(percents).toContain(50);
+  });
+});
+
+/**
+ * Task 2: which failures end a take and which can be retried (UI-D-847), the resume that makes a retry
+ * re-send the SAME asset (VOICE-23), and the 20 second wait.
+ */
+describe('classifyVoiceFailure (12.5-11 task 2)', () => {
+  it.each([
+    'too_large',
+    'type_not_allowed',
+    'format_mismatch',
+    'duration_too_long',
+    'quota_exceeded',
+    'transcode_failed',
+    'not_an_image',
+    'heic_unsupported',
+    'invalid',
+  ])('%s is permanent', (code) => {
+    expect(classifyVoiceFailure(code)).toBe('permanent');
+  });
+
+  it.each(['member_blocked', 'member_removed', 'not_found', 'closed'])(
+    '%s passes through as its own kind',
+    (code) => {
+      expect(classifyVoiceFailure(code)).toBe(code);
+    },
+  );
+
+  it.each([
+    'retriable',
+    'not_ready',
+    'generic',
+    'object_missing',
+    'video_provider_missing',
+    'zzz',
+    '',
+  ])('%j is retriable (a network, a timeout or anything unknown)', (code) => {
+    expect(classifyVoiceFailure(code)).toBe('retriable');
+  });
+});
+
+describe('runVoiceSend failures (12.5-11 task 2)', () => {
+  it.each([
+    'too_large',
+    'type_not_allowed',
+    'format_mismatch',
+    'duration_too_long',
+    'quota_exceeded',
+    'transcode_failed',
+    'not_an_image',
+    'heic_unsupported',
+  ])('a %s refusal of start is permanent and nothing after it runs', async (code) => {
+    const f = fakes([], { start: vi.fn(async () => ({ ok: false as const, code })) });
+    expect(await runVoiceSend(f.deps, take())).toEqual({ ok: false, kind: 'permanent' });
+    expect(f.put).not.toHaveBeenCalled();
+    expect(f.complete).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+  });
+
+  it('a refusal of complete after a good PUT is classified by its code and has no resume', async () => {
+    const f = fakes([], {
+      complete: vi.fn(async () => ({ ok: false as const, code: 'format_mismatch' })),
+    });
+    expect(await runVoiceSend(f.deps, take())).toEqual({ ok: false, kind: 'permanent' });
+    expect(f.send).not.toHaveBeenCalled();
+
+    const g = fakes([], { complete: vi.fn(async () => ({ ok: false as const, code: 'generic' })) });
+    expect(await runVoiceSend(g.deps, take())).toEqual({ ok: false, kind: 'retriable' });
+  });
+
+  it('a PUT that fails to transfer is retriable with NO resume; too_large is permanent; aborted is retriable', async () => {
+    for (const [reason, kind] of [
+      ['transfer', 'retriable'],
+      ['too_large', 'permanent'],
+      ['aborted', 'retriable'],
+    ] as const) {
+      const f = fakes([], { put: vi.fn(async () => ({ ok: false as const, reason })) });
+      const outcome = await runVoiceSend(f.deps, take());
+      expect(outcome).toEqual({ ok: false, kind });
+      expect(outcome).not.toHaveProperty('resume');
+      expect(f.complete).not.toHaveBeenCalled();
+      expect(f.send).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    ['invalid', 'permanent'],
+    ['closed', 'closed'],
+    ['member_blocked', 'member_blocked'],
+    ['member_removed', 'member_removed'],
+    ['not_found', 'not_found'],
+    ['retriable', 'retriable'],
+  ] as const)(
+    'a send answering %s ends as %s, is never retried and keeps the asset to resume',
+    async (error, kind) => {
+      const f = fakes([{ ok: false, error }]);
+      const outcome = await runVoiceSend(f.deps, take());
+      expect(outcome).toEqual({ ok: false, kind, resume: { mediaId: MEDIA } });
+      expect(f.send).toHaveBeenCalledTimes(1);
+      expect(f.sleep).not.toHaveBeenCalled();
+    },
+  );
+
+  it('after complete succeeds, a resume sends the SAME asset and performs no start, PUT or complete', async () => {
+    const first = fakes([{ ok: false, error: 'retriable' }]);
+    const failed = await runVoiceSend(first.deps, take());
+    expect(failed).toEqual({ ok: false, kind: 'retriable', resume: { mediaId: MEDIA } });
+    expect(first.start).toHaveBeenCalledTimes(1);
+    expect(first.put).toHaveBeenCalledTimes(1);
+    expect(first.complete).toHaveBeenCalledTimes(1);
+
+    const second = fakes([{ ok: true, sent: { view: VIEW } }]);
+    const progress: VoiceSendProgress[] = [];
+    const outcome = await runVoiceSend(
+      second.deps,
+      take(),
+      { onProgress: (p) => progress.push(p) },
+      failed.ok ? undefined : failed.resume,
+    );
+    expect(outcome).toEqual({ ok: true, sent: { view: VIEW } });
+    expect(second.start).not.toHaveBeenCalled();
+    expect(second.put).not.toHaveBeenCalled();
+    expect(second.complete).not.toHaveBeenCalled();
+    expect(second.send.mock.calls.map((c) => c[0])).toEqual([MEDIA]);
+    expect(progress).toEqual([{ phase: 'finishing' }]);
+  });
+
+  it('a send that keeps answering not_ready stops after 20 seconds of waiting, retriable with resume', async () => {
+    const f = fakes(
+      Array.from({ length: 60 }, () => ({ ok: false as const, error: 'not_ready' as const })),
+    );
+    const outcome = await runVoiceSend(f.deps, take());
+    expect(outcome).toEqual({ ok: false, kind: 'retriable', resume: { mediaId: MEDIA } });
+    expect(f.send).toHaveBeenCalledTimes(29);
+    expect(f.sleep).toHaveBeenCalledTimes(28);
+    const slept = f.sleep.mock.calls.reduce((sum, c) => sum + (c[0] as number), 0);
+    expect(slept).toBeLessThanOrEqual(VOICE_READY_TIMEOUT_MS);
+    expect(f.sleep.mock.calls.every((c) => c[0] === VOICE_READY_POLL_MS)).toBe(true);
+  });
+
+  it('a slow send counts against the 20 seconds too (the real clock, when given)', async () => {
+    let clock = 0;
+    const f = fakes(
+      Array.from({ length: 60 }, () => ({ ok: false as const, error: 'not_ready' as const })),
+      {
+        now: () => clock,
+        sleep: vi.fn(async (ms: number) => {
+          clock += ms + 600; // each round trip adds 600 ms the sleeps do not count
+        }),
+      },
+    );
+    const outcome = await runVoiceSend(f.deps, take());
+    expect(outcome).toMatchObject({ ok: false, kind: 'retriable', resume: { mediaId: MEDIA } });
+    expect(f.send.mock.calls.length).toBeLessThan(29);
+  });
+
+  it('a dependency that throws is retriable, with the resume only once the take is completed', async () => {
+    const early = fakes([], {
+      start: vi.fn(async () => {
+        throw new Error('boom https://secret.test');
+      }),
+    });
+    const earlyOutcome = await runVoiceSend(early.deps, take());
+    expect(earlyOutcome).toEqual({ ok: false, kind: 'retriable' });
+    expect(JSON.stringify(earlyOutcome)).not.toContain('secret');
+
+    const late = fakes([], {
+      send: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    });
+    expect(await runVoiceSend(late.deps, take())).toEqual({
+      ok: false,
+      kind: 'retriable',
+      resume: { mediaId: MEDIA },
+    });
+  });
+
+  it('never logs: the orchestration has no console call', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = fakes([{ ok: false, error: 'invalid' }]);
+    await runVoiceSend(f.deps, take());
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

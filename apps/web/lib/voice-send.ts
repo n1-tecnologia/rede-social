@@ -69,6 +69,8 @@ export interface VoiceSendDeps<T> {
   complete(assetId: string): Promise<{ ok: true } | { ok: false; code: string }>;
   send(mediaId: string): Promise<VoiceSendAnswer<T>>;
   sleep(ms: number): Promise<void>;
+  /** The real clock, when the host has one: a slow send then counts against the 20 seconds too. */
+  now?: () => number;
 }
 
 export type VoiceSendProgress = { phase: 'uploading'; percent: number } | { phase: 'finishing' };
@@ -77,9 +79,14 @@ export interface VoiceSendHandlers {
   onProgress?: (progress: VoiceSendProgress) => void;
 }
 
+/** What a failed take hands back to try again: the asset that is already uploaded, completed and waiting. */
+export interface VoiceResume {
+  mediaId: string;
+}
+
 export type VoiceSendOutcome<T> =
   | { ok: true; sent: T }
-  | { ok: false; kind: VoiceFailureKind; resume?: { mediaId: string } };
+  | { ok: false; kind: VoiceFailureKind; resume?: VoiceResume };
 
 /** `audio/webm;codecs=opus` becomes `audio/webm`: the recorder's parameters are not part of the contract's mime. */
 export function stripMimeParams(type: string): string {
@@ -98,45 +105,93 @@ export function voiceFileOf(take: VoiceTake): File {
   return new File([take.blob], `voice.${EXTENSIONS[mime] ?? 'bin'}`, { type: mime });
 }
 
+/**
+ * No retry can help these: the file or the member's own limits are the cause, and the sentence the bubble
+ * shows never names a size, a quota or a number. `invalid` is the send's 400 (an unusable asset).
+ */
+const PERMANENT_CODES: ReadonlySet<string> = new Set([
+  'too_large',
+  'type_not_allowed',
+  'format_mismatch',
+  'duration_too_long',
+  'quota_exceeded',
+  'transcode_failed',
+  'not_an_image',
+  'heic_unsupported',
+  'invalid',
+]);
+
+/** The refusals that are their own kind: the screen answers each with its own sentence. */
+const OWN_KINDS: ReadonlySet<string> = new Set([
+  'closed',
+  'member_blocked',
+  'member_removed',
+  'not_found',
+]);
+
+/**
+ * One closed word (a media refusal code or a send's error word) to the kind the bubble needs. A network or
+ * timeout failure, a 5xx, the 20 second wait and ANY unknown code are `retriable`: a retry costs the member
+ * one tap, while calling a recoverable failure permanent would throw their take away.
+ */
+export function classifyVoiceFailure(code: string): VoiceFailureKind {
+  if (PERMANENT_CODES.has(code)) return 'permanent';
+  if (OWN_KINDS.has(code)) return code as VoiceFailureKind;
+  return 'retriable';
+}
+
+/**
+ * Runs a take to a stored message. `resume` is the asset a previous attempt already uploaded and completed:
+ * the three stages are skipped and the SAME asset is sent again, so a retry never makes a second message
+ * (the unique index of the API makes the send idempotent per asset).
+ */
 export async function runVoiceSend<T>(
   deps: VoiceSendDeps<T>,
   take: VoiceTake,
   handlers: VoiceSendHandlers = {},
+  resume?: VoiceResume,
 ): Promise<VoiceSendOutcome<T>> {
   const report = (progress: VoiceSendProgress) => handlers.onProgress?.(progress);
+  // Set once `complete` succeeds: from then on EVERY failure carries it.
+  let mediaId: string | null = resume?.mediaId ?? null;
+  const failed = (kind: VoiceFailureKind): VoiceSendOutcome<T> =>
+    mediaId ? { ok: false, kind, resume: { mediaId } } : { ok: false, kind };
+
   try {
-    const file = voiceFileOf(take);
-    const mime = file.type;
+    if (!mediaId) {
+      const file = voiceFileOf(take);
+      const mime = file.type;
 
-    report({ phase: 'uploading', percent: 0 });
-    const started = await deps.start({ kind: 'audio', purpose: 'voice', mime, size: file.size });
-    if (!started.ok) return { ok: false, kind: 'retriable' };
+      report({ phase: 'uploading', percent: 0 });
+      const started = await deps.start({ kind: 'audio', purpose: 'voice', mime, size: file.size });
+      if (!started.ok) return failed(classifyVoiceFailure(started.code));
 
-    const put = await deps.put(started.upload, file, {
-      mime,
-      onProgress: (percent) => report({ phase: 'uploading', percent }),
-    });
-    if (!put.ok) return { ok: false, kind: 'retriable' };
+      const put = await deps.put(started.upload, file, {
+        mime,
+        onProgress: (percent) => report({ phase: 'uploading', percent }),
+      });
+      if (!put.ok) return failed(put.reason === 'too_large' ? 'permanent' : 'retriable');
 
-    const completed = await deps.complete(started.upload.assetId);
-    if (!completed.ok) return { ok: false, kind: 'retriable' };
+      const completed = await deps.complete(started.upload.assetId);
+      if (!completed.ok) return failed(classifyVoiceFailure(completed.code));
+      mediaId = started.upload.assetId;
+    }
 
     report({ phase: 'finishing' });
-    const mediaId = started.upload.assetId;
 
-    // The take is stored once (the unique index of the API), so repeating the same send is safe.
+    // The send repeats while the worker normalizes the take; any other answer ends the loop.
+    const startedAt = deps.now?.() ?? 0;
     let waited = 0;
     for (;;) {
       const answer = await deps.send(mediaId);
       if (answer.ok) return { ok: true, sent: answer.sent };
-      if (answer.error !== 'not_ready') return { ok: false, kind: 'retriable' };
-      if (waited + VOICE_READY_POLL_MS > VOICE_READY_TIMEOUT_MS) {
-        return { ok: false, kind: 'retriable' };
-      }
+      if (answer.error !== 'not_ready') return failed(classifyVoiceFailure(answer.error));
+      const elapsed = deps.now ? Math.max(waited, deps.now() - startedAt) : waited;
+      if (elapsed + VOICE_READY_POLL_MS > VOICE_READY_TIMEOUT_MS) return failed('retriable');
       await deps.sleep(VOICE_READY_POLL_MS);
       waited += VOICE_READY_POLL_MS;
     }
   } catch {
-    return { ok: false, kind: 'retriable' };
+    return failed('retriable');
   }
 }
