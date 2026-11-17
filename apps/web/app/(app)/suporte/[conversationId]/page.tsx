@@ -8,7 +8,12 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { getConversation, getMessages } from '@/lib/chat';
-import { caseHeaderView, chatMessageView, tenantDayKeys } from '@/lib/chat-view';
+import {
+  caseHeaderView,
+  chatMessageView,
+  type StaffCaseHeaderView,
+  tenantDayKeys,
+} from '@/lib/chat-view';
 import { replyToConversationAction } from '../actions';
 import { ThreadPane } from '../ThreadPane';
 
@@ -53,6 +58,10 @@ const MEMBER_COLUMN =
  * member's ACTIVE case redirects to `/suporte` so there is one canonical address, and an id that is not
  * theirs, another tenant's or unknown is the same not-found screen (the API's bare 404, no oracle).
  * Anyone else gets not-found before any request.
+ *
+ * **The team's case (12.4-15, UI-D-825):** a staff thread whose conversation has a case also hands the pane
+ * the finished staff header (the server's `actions[]`, owner and priority) for the case bar; a thread with no
+ * case has none.
  *
  * Prefetch-safe: this render records nothing. The pane POSTs the team's read mark after mount while
  * visible, which clears "awaiting" for the whole team (D-225, D-238). Every time and day label is
@@ -119,8 +128,17 @@ export default async function StaffThreadPage({
   const views = page.items.map((row) => chatMessageView(row, { timeZone, viewer: 'staff', t }));
   const blockedNotice = t('blocked.notice', { name });
   const removedNotice = t('removed.notice');
+  // The ONE notice that replaces the composer, blocked before removed (UI-D-263). A closed case is NOT folded
+  // in here: the pane draws its closed strip from the live case state and lets this notice win over it
+  // (UI-D-828e), so a case that closes while the page is open still reads right.
   const readOnlyNotice =
     member.state === 'blocked' ? blockedNotice : removed ? removedNotice : null;
+  // The team's case, finished here for the staff viewer (12.4-15): the server's own `actions[]`, owner and
+  // priority; a thread with no case simply has no bar.
+  const staffCase =
+    conversation.detail.case === undefined
+      ? null
+      : (caseHeaderView(conversation.detail.case, { viewer: 'staff', t }) as StaffCaseHeaderView);
 
   return (
     <div data-chat-thread className={COLUMN}>
@@ -145,6 +163,7 @@ export default async function StaffThreadPage({
         onSendAction={replyToConversationAction}
         readOnlyNotice={readOnlyNotice}
         raceNotices={{ member_blocked: blockedNotice, member_removed: removedNotice }}
+        initialStaffCase={staffCase}
       />
     </div>
   );

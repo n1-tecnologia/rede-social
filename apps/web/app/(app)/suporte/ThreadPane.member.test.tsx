@@ -19,7 +19,7 @@ import type { ThreadPaneProps } from './ThreadPane';
  * every (re)subscribe and on a refocus, coalesced (one in flight, one queued, the T-07-71 rule); the
  * state shown is ONLY what the server answered; a reply that reopens toasts once; a live close swaps the
  * composer for the strip with no toast and no focus move; a blocked or removed notice wins over the
- * closed strip (A-UI-4); the staff pane reads no case.
+ * closed strip (A-UI-4); the staff pane never draws the member's bar (the team's bar is `ThreadPane.staff.test.tsx`).
  */
 
 const messages = loadMessages(join(process.cwd(), 'messages', 'pt-BR'));
@@ -356,12 +356,14 @@ describe('the reply that reopens (UI-D-820d)', () => {
   });
 });
 
-describe('the staff pane reads no case', () => {
-  it('draws no bar and re-reads no header on a signal', async () => {
+describe('the staff pane never draws the member bar', () => {
+  it('re-reads the header for the team (12.4-15) but a member-shaped answer draws no bar', async () => {
     renderPane({ viewer: 'staff', initialCase: null, hasAnyCase: false });
     expect(document.querySelector('[data-case-bar]')).toBeNull();
     await fire(REALTIME_EVENTS.chatCase);
     await act(async () => {});
-    expect(headerCalls()).toBe(0);
+    expect(headerCalls()).toBe(1);
+    expect(document.querySelector('[data-case-bar]')).toBeNull();
+    expect(screen.queryByText('Aberto')).toBeNull();
   });
 });

@@ -2,7 +2,7 @@
 
 import { convTopic, REALTIME_EVENTS } from '@rede-social/contracts/realtime';
 import { TenantLogo, useRealtimeTopic } from '@rede-social/core/ui';
-import { CHAT_PAGE_SIZE } from '@rede-social/module-chat/contracts';
+import { CHAT_CASE_ACTIONS, CHAT_PAGE_SIZE } from '@rede-social/module-chat/contracts';
 import { ChatComposer, MessageList } from '@rede-social/module-chat/ui';
 import { Button, EmptyState, useToast } from '@rede-social/ui';
 import { ArrowDown, Ban, MessageCircle } from 'lucide-react';
@@ -18,14 +18,17 @@ import {
   caseTitle,
   chatRuns,
   type MemberCaseHeaderView,
+  type StaffCaseHeaderView,
 } from '@/lib/chat-view';
 import {
   type ReplyToConversationResult,
   type SendSupportMessageResult,
   sendSupportMessageAction,
 } from './actions';
+import type { StaffSheetKind } from './CaseActionSheet';
 import { CaseBar, CaseOpenedRow, ClosedStrip, ResolvedStrip } from './CaseBar';
 import { CaseOpener, type CaseOpenerValue } from './CaseOpener';
+import { StaffCaseBar, StaffClosedStrip, StaffTakeHint } from './StaffCaseBar';
 import { useBarHeightAnchor } from './useBarHeightAnchor';
 
 /**
@@ -71,6 +74,17 @@ import { useBarHeightAnchor } from './useBarHeightAnchor';
  * client only, the one-time confirmation row. Every later message is a plain reply: the opener never
  * returns for one. The pane computes no case state: it only draws what the server answered.
  *
+ * **The team's case (12.4-15, D-805, D-806, UI-D-825 to UI-D-828, UI-D-830):** the staff pane holds the finished
+ * STAFF header of the case it shows (`initialStaffCase`, `null` for a thread with no case) and draws the staff
+ * bar under the header: the primary action, the "Mais ações" sheet and the four confirm dialogs, all from the
+ * server's `actions[]`. The bar re-reads the case through the BFF header handler on every `chat.message` and
+ * `chat.case` signal, on every (re)subscribe and on a refocus, coalesced (one in flight, one queued), so two
+ * team members see each other's actions; the pane never moves focus or scroll for it. On an `Aberto` case a
+ * hint above the composer says a reply takes it; on `Fechado` the composer is replaced by the read-only strip,
+ * and a blocked or removed member's notice (`readOnlyNotice`) wins over it. The rows that open the details,
+ * assign and edit sheets only set `openSheet` here (the sheets are plan 12.4-19's). A MEMBER pane never draws
+ * any of it, whatever props it is handed (T-12.4-72).
+ *
  * Every string comes from the `chat` catalog; every time and day label is server-formatted
  * (`chat-view.ts`), and this component never reads the clock (UI-D-14).
  */
@@ -101,6 +115,11 @@ export interface ThreadPaneProps {
   initialCase?: MemberCaseHeaderView | null;
   /** 12.4-12 (UI-D-818): the member ever opened a case, so the slim bar can offer "Meus chamados". */
   hasAnyCase?: boolean;
+  /**
+   * 12.4-15 (UI-D-825): the finished STAFF header of the case, `null` when the thread has none. Only the
+   * staff pane reads it; a member pane ignores it.
+   */
+  initialStaffCase?: StaffCaseHeaderView | null;
 }
 
 interface MessagesAnswer {
@@ -205,6 +224,59 @@ async function fetchCaseHeader(conversationId: string): Promise<MemberCaseHeader
   }
 }
 
+const KNOWN_ACTIONS: readonly string[] = CHAT_CASE_ACTIONS;
+
+/**
+ * The finished STAFF header of the conversation through the same BFF handler. Rebuilt from NAMED fields, and
+ * anything that is not a staff header (a member shape, a conversation with no case, a failure) is `null`: the
+ * bar then keeps what it shows. Unknown action words are dropped; the list is otherwise the server's own.
+ */
+async function fetchStaffCaseHeader(conversationId: string): Promise<StaffCaseHeaderView | null> {
+  try {
+    const res = await fetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}`, {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      redirect: 'manual',
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      viewer?: unknown;
+      header?: Partial<StaffCaseHeaderView> | null;
+    };
+    const header = body.header;
+    if (body.viewer !== 'staff' || !header || header.viewer !== 'staff') return null;
+    if (
+      typeof header.id !== 'string' ||
+      typeof header.number !== 'number' ||
+      typeof header.title !== 'string' ||
+      typeof header.state?.state !== 'string' ||
+      typeof header.meta !== 'string' ||
+      !Array.isArray(header.actions)
+    ) {
+      return null;
+    }
+    return {
+      viewer: 'staff',
+      id: header.id,
+      number: header.number,
+      title: header.title,
+      state: header.state,
+      subject: typeof header.subject === 'string' ? header.subject : '',
+      subjectLine: typeof header.subjectLine === 'string' ? header.subjectLine : '',
+      meta: header.meta,
+      actions: header.actions.filter(
+        (action): action is StaffCaseHeaderView['actions'][number] =>
+          typeof action === 'string' && KNOWN_ACTIONS.includes(action),
+      ),
+      ownerUserId: typeof header.ownerUserId === 'string' ? header.ownerUserId : null,
+      ownerName: typeof header.ownerName === 'string' ? header.ownerName : null,
+      ownerIsViewer: header.ownerIsViewer === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchPage(conversationId: string, query: string): Promise<MessagesAnswer | null> {
   try {
     const res = await fetch(
@@ -233,6 +305,7 @@ export function ThreadPane({
   raceNotices,
   initialCase = null,
   hasAnyCase = false,
+  initialStaffCase = null,
 }: ThreadPaneProps) {
   const t = useTranslations('chat');
   const router = useRouter();
@@ -247,6 +320,12 @@ export function ThreadPane({
   const [newCount, setNewCount] = useState(0);
   /** 12.4-12: the member's case as the server last described it; `null` while there is none. */
   const [caseView, setCaseView] = useState<MemberCaseHeaderView | null>(initialCase);
+  /** 12.4-15: the team's case as the server last described it; only the staff pane ever draws it. */
+  const [staffCase, setStaffCase] = useState<StaffCaseHeaderView | null>(
+    viewer === 'staff' ? initialStaffCase : null,
+  );
+  /** 12.4-15: which sheet a bar row asked for; plan 12.4-19 mounts the sheets and clears it on close. */
+  const [openSheet, setOpenSheet] = useState<StaffSheetKind | null>(null);
   /** The case number to confirm on THIS client after its first send (A-UI-16); never set by a reload. */
   const [openedNumber, setOpenedNumber] = useState<number | null>(null);
   /** The two values the opener holds for the first send (controlled, W17). */
@@ -366,11 +445,11 @@ export function ThreadPane({
   }, [nearBottom, markRead]);
 
   /**
-   * UI-D-830: re-read the member's case header, one at a time (a request during a run schedules exactly one
-   * more). Only the member's pane reads a case; a failed or foreign answer keeps the bar as it is.
+   * UI-D-830: re-read the case header for THIS viewer, one at a time (a request during a run schedules exactly
+   * one more). The member's pane reads the member header and the staff pane the staff one; a failed or
+   * foreign-shaped answer keeps the bar as it is.
    */
   const refreshCase = useCallback(async () => {
-    if (viewer !== 'member') return;
     const state = caseReadRef.current;
     if (state.running) {
       state.again = true;
@@ -382,8 +461,13 @@ export function ThreadPane({
         state.again = false;
         const id = conversationRef.current;
         if (!id) break;
-        const header = await fetchCaseHeader(id);
-        if (header) setCaseView(header);
+        if (viewer === 'staff') {
+          const header = await fetchStaffCaseHeader(id);
+          if (header) setStaffCase(header);
+        } else {
+          const header = await fetchCaseHeader(id);
+          if (header) setCaseView(header);
+        }
       } while (state.again);
     } finally {
       state.running = false;
@@ -510,6 +594,8 @@ export function ThreadPane({
     setViews((current) => mergeViews(current, [view], [tempId]));
     setNewCount(0);
     if (next.catchUp) void catchUp();
+    // A team reply may take an unowned case: the server decides, the bar re-reads (UI-D-828a).
+    if (viewer === 'staff') void refreshCase();
     if (sentCase && viewer === 'member') {
       if (sentCase.opened) {
         // The swap: the opener leaves and the bar arrives with the server's number. Row 2 starts as what
@@ -589,6 +675,16 @@ export function ThreadPane({
         <div ref={barRef} className="shrink-0">
           <CaseBar header={caseView} hasAnyCase={hasAnyCase} />
         </div>
+      ) : staffCase && conversationId ? (
+        <div ref={barRef} className="shrink-0" data-staff-sheet={openSheet ?? undefined}>
+          <StaffCaseBar
+            conversationId={conversationId}
+            header={staffCase}
+            onHeader={setStaffCase}
+            onRefresh={() => void refreshCase()}
+            onOpenSheet={setOpenSheet}
+          />
+        </div>
       ) : null}
       <div
         ref={scrollerRef}
@@ -654,12 +750,16 @@ export function ThreadPane({
             <Ban aria-hidden size={20} className="shrink-0 text-text-tertiary" />
             <p className="text-sm font-normal text-text-secondary">{readOnlyNotice}</p>
           </div>
-        ) : caseView?.state.state === 'closed' ? (
+        ) : viewer === 'staff' && staffCase?.state.state === 'closed' ? (
+          // UI-D-828d: the team's closed case is read-only too; a blocked or removed notice above wins.
+          <StaffClosedStrip />
+        ) : viewer === 'member' && caseView?.state.state === 'closed' ? (
           // UI-D-820e: a closed case is read-only; a blocked or removed notice above wins (A-UI-4).
           <ClosedStrip />
         ) : (
           <>
-            {caseView?.state.state === 'resolved' ? <ResolvedStrip /> : null}
+            {viewer === 'member' && caseView?.state.state === 'resolved' ? <ResolvedStrip /> : null}
+            {viewer === 'staff' && staffCase?.state.state === 'open' ? <StaffTakeHint /> : null}
             <ChatComposer
               label={t('composer.label')}
               placeholder={showOpener ? t('composer.placeholderNew') : t('composer.placeholder')}

@@ -439,6 +439,14 @@ export interface StaffCaseHeaderView extends Omit<MemberCaseHeaderView, 'viewer'
   meta: string;
   /** What the server says this viewer may do, untouched (UI-D-826). */
   actions: ChatCaseAction[];
+  /**
+   * The owner facts the bar needs for a take-over (UI-D-827, D-843): the STORED owner id (sent back as the
+   * expected owner), the live display name (`null` for no owner or an owner who left the staff, who then
+   * reads as unowned) and whether the viewer is the owner. The client decides nothing from them.
+   */
+  ownerUserId: string | null;
+  ownerName: string | null;
+  ownerIsViewer: boolean;
 }
 
 export type CaseHeaderView = MemberCaseHeaderView | StaffCaseHeaderView;
@@ -472,6 +480,9 @@ export function caseHeaderView(
       ownerIsViewer: team.ownerIsViewer,
     }),
     actions: [...team.actions],
+    ownerUserId: team.ownerUserId,
+    ownerName: team.ownerName,
+    ownerIsViewer: team.ownerIsViewer,
   };
 }
 
