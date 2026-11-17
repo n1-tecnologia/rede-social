@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "12.4"
-current_phase_name: Abertura de chamado no suporte
-current_plan: 22
+current_phase: "12.5"
+current_phase_name: Mensagem de voz no chat
+current_plan: 3
 status: executing
 stopped_at: Completed 12.4-22-PLAN.md; re-verification gaps_found (WR-06), phase not closed
-last_updated: "2026-11-17T17:31:39.151Z"
+last_updated: "2026-11-17T21:56:26.890Z"
 last_activity: 2026-11-17
-last_activity_desc: Phase 12.4 gap round 21 and 22 executed; re-verification found WR-06
-state_head: aaf133ee1de5401b8df5a2a805175bfc7d05c1c0
+last_activity_desc: Phase 12.5 wave 1 complete (plans 01, 03)
+state_head: 90db20b3496e5bc08cbbc888de99e9a0ab9e2cd3
 progress:
   total_phases: 35
   completed_phases: 0
-  total_plans: 473
-  completed_plans: 445
+  total_plans: 491
+  completed_plans: 447
   percent: 0
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 12.4 — Abertura de chamado no suporte
+**Current focus:** Phase 12.5 — Mensagem de voz no chat
 
 ## Current Position
 
-Phase: 12.4 (Abertura de chamado no suporte) — EXECUTED 22/22, re-verification gaps_found (WR-06), not closed
-Current Plan: 22
-Total Plans in Phase: 22
-Plan: 22 of 22
-Status: Gap round (plans 21, 22) executed; one new gap WR-06 (SupportInbox load-more race) left to close
-Last activity: 2026-11-17 - Completed quick task 261117-n9r: /perfil shows the account e-mail only to the tenant administrator (not pushed or deployed)
+Phase: 12.5 (Mensagem de voz no chat) — EXECUTING
+Current Plan: 3
+Total Plans in Phase: 18
+Plan: 3 of 18
+Status: Ready to execute
+Last activity: 2026-11-17 — Phase 12.5 execution started
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
