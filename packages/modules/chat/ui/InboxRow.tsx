@@ -1,4 +1,5 @@
 import { Avatar, cn, StatusPill } from '@rede-social/ui';
+import type { ReactNode } from 'react';
 
 /**
  * One row of the staff inbox (UI-D-262, sketch 007 surface 1) [designed]: ONE link to the
@@ -15,11 +16,18 @@ import { Avatar, cn, StatusPill } from '@rede-social/ui';
  * - **Active** (`active`): the open conversation in the desktop split is `bg-bg-active` with
  *   `aria-current="page"`.
  *
+ * **The case facts (12.4, UI-D-824, A-UI-7, A-UI-24):** the host may add `subjectLine` ("#42 · subject", one
+ * truncated line under the name), and a meta line under the preview made of `statePill` and `priorityPill`
+ * (React nodes the host builds from the case state view; the priority pill only for Alta and Baixa, Normal
+ * draws nothing) and `metaText` ("{categoria} · Com {primeiro nome}"). The 72px floor stays, but the row no
+ * longer centres its content: it is top aligned and has NO fixed height, so it grows with its content, and
+ * the meta line wraps (never truncates), up to three lines with two pills in the 288px list pane.
+ *
  * Overflow: the name and the preview `truncate` inside a `min-w-0 flex-1` column; the trailing column
  * is `shrink-0`, so a 60-character name never pushes the time out. The preview is React text, one
  * line, with no linkifier and no HTML sink (T-07-70).
  *
- * A plain `<a>`, not `next/link`: a module package does not depend on the web framework (MOD-02). The
+ * A plain `<a>`, not the web framework's link: a module package does not depend on the web framework (MOD-02). The
  * host intercepts the click to navigate client-side, so the list keeps its scroll position.
  * Props-only: no words.
  */
@@ -42,6 +50,14 @@ export interface InboxRowProps {
   state: InboxRowState;
   /** The neutral pill text for a blocked member. */
   blockedLabel: string;
+  /** "#42 · subject", finished by the host: one truncated line under the name. */
+  subjectLine?: string;
+  /** The case state pill, built by the host. */
+  statePill?: ReactNode;
+  /** The priority pill, built by the host only for Alta and Baixa; absent for Normal. */
+  priorityPill?: ReactNode;
+  /** "{categoria} · Com {primeiro nome}", "... · Sem responsável" or "... · Com você". */
+  metaText?: string;
 }
 
 export function InboxRow({
@@ -55,8 +71,13 @@ export function InboxRow({
   awaitingSr,
   state,
   blockedLabel,
+  subjectLine,
+  statePill,
+  priorityPill,
+  metaText,
 }: InboxRowProps) {
   const removed = state === 'removed';
+  const hasMeta = Boolean(statePill || priorityPill || metaText);
   return (
     <a
       href={href}
@@ -64,14 +85,14 @@ export function InboxRow({
       data-awaiting={awaiting || undefined}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex min-h-18 items-center gap-3 border-b border-divider px-4 py-3 transition-colors hover:bg-bg-hover active:bg-bg-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand',
+        'flex min-h-18 items-start gap-3 border-b border-divider px-4 py-3 transition-colors hover:bg-bg-hover active:bg-bg-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand',
         active && 'bg-bg-active',
       )}
     >
-      <span aria-hidden className="inline-flex shrink-0">
+      <span aria-hidden className="inline-flex shrink-0 self-start">
         <Avatar size="md" src={removed ? null : avatar} alt="" />
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span
           data-inbox-name
           className={cn(
@@ -82,6 +103,11 @@ export function InboxRow({
           {name}
           {awaiting ? <span className="sr-only">{awaitingSr}</span> : null}
         </span>
+        {subjectLine ? (
+          <span data-inbox-subject className="truncate text-sm font-normal text-text">
+            {subjectLine}
+          </span>
+        ) : null}
         <span
           data-inbox-preview
           className={cn(
@@ -91,6 +117,17 @@ export function InboxRow({
         >
           {preview}
         </span>
+        {hasMeta ? (
+          <span data-inbox-meta className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {statePill}
+            {priorityPill}
+            {metaText ? (
+              <span data-inbox-meta-text className="text-xs font-normal text-text-tertiary">
+                {metaText}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
       </span>
       <span className="flex shrink-0 flex-col items-end gap-1">
         <span data-inbox-time className="text-xs font-normal tabular-nums text-text-tertiary">
