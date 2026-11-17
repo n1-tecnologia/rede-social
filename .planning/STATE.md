@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 3
+current_plan: 4
 status: executing
-stopped_at: Completed 12.4-02-PLAN.md
-last_updated: "2026-11-17T08:51:27.919Z"
+stopped_at: Completed 12.4-03-PLAN.md
+last_updated: "2026-11-17T09:03:58.324Z"
 last_activity: 2026-11-17
 last_activity_desc: Phase 12.4 execution started
-state_head: 2b70edcc731e2f42e4ddca7d00df6b1b6547939d
+state_head: 85bf636123d7647333e67300ab1474681d677d1c
 progress:
   total_phases: 34
   completed_phases: 0
   total_plans: 471
-  completed_plans: 425
+  completed_plans: 426
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
-Current Plan: 3
+Current Plan: 4
 Total Plans in Phase: 20
-Plan: 3 of 20
+Plan: 4 of 20
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.4 execution started
 
@@ -374,6 +374,7 @@ Progress: [███████████████████░] 160/162
 | Phase 10.1 P15 | 34min | 3 tasks | 6 files |
 | Phase 12.4 P01 | 12 min | 4 tasks | 11 files |
 | Phase 12.4 P02 | 14 min | 4 tasks | 11 files |
+| Phase 12.4 P03 | 8 min | 4 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -1156,6 +1157,7 @@ Recent decisions affecting current work:
 - [Phase 10.1]: 10.1-15: the paid-event spec drains the notification fan-out backlog and waits for the page's Realtime join before sending the tracer delivery — Cold runs lost the swap to 58 integration-suite fan-out jobs and to a join that had not happened; the product was not at fault
 - [Phase 12.4]: 12.4-01: counter table has all lane privileges revoked (42501), not only no policy; coherence CHECKs follow RESEARCH Q1 (closing clears resolved_at) — Defense in depth for T-12.4-02; plan 02 and later actions must clear resolved_at on close
 - [Phase 12.4]: 12.4-02: the activation is ONE do block (atomic under the local CLI and the ledgered runner); a second CS004 on the member send is a bare 409; CASE_ACTIVE_STATES is the single spelling of the active-case predicate — the local CLI does not wrap a migration file in a transaction (bare lock table fails 25P01)
+- [Phase 12.4]: 12.4-03: app.chat_case_act in 20261117085928_chat_cases_actions_matrix.sql is the final definition; staff check = claim literal plus a live membership whose role equals the claim; case and history instants use clock_timestamp() — The earlier actions file is already in local history so it is never edited; a blocked staff member with a stale token must be refused; two actions in one transaction must still order by (created_at, id)
 
 ### Pending Todos
 
@@ -1290,6 +1292,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-17T08:51:27.600Z
-Stopped at: Completed 12.4-02-PLAN.md
+Last session: 2026-11-17T09:03:53.445Z
+Stopped at: Completed 12.4-03-PLAN.md
 Resume file: None
