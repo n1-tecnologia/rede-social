@@ -124,6 +124,8 @@ describe('NotificationItem glyphs (08.6-12, UI-D-460)', () => {
     ['ShoppingBag', 'lucide-shopping-bag'],
     // Phase 10.1-13 (UI-D-760): the paid event's presence notice, same rule.
     ['Ticket', 'lucide-ticket'],
+    // Phase 12.4-13 (UI-D-822): the resolved-case notice, same rule.
+    ['CircleCheck', 'lucide-circle-check'],
   ] as const)('draws the %s glyph on the actor-less disc', (glyph, iconClass) => {
     const { container } = item({ leading: { glyph: true }, glyph });
     const disc = container.querySelector('.h-10.w-10.rounded-full.bg-bg-tertiary');

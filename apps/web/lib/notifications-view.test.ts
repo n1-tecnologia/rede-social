@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { CHAT_NOTIFICATION_KINDS } from '@rede-social/module-chat/contracts';
 import type { NotificationRow } from '@rede-social/module-notifications/contracts';
 import { PAYMENTS_NOTIFICATION_KINDS } from '@rede-social/module-payments/contracts';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -703,5 +704,93 @@ describe('notificationRowView — 10.1-13 the paid event presence notice (D-756,
       })?.sentence,
     );
     expect(html).not.toMatch(/ana@|8000|ORD-1/);
+  });
+});
+
+describe('notificationRowView — 12.4-13 the resolved-case notice (D-808, UI-D-822, T-12.4-60, T-12.4-61)', () => {
+  const KIND = 'chat.case_resolved';
+  const CASE = '0c000000-0000-4000-8000-000000000c42';
+  const resolved = (facts: NotificationRow['facts'], overrides: Partial<NotificationRow> = {}) =>
+    view({
+      kind: KIND,
+      subject: { type: 'case', id: CASE },
+      actor: null,
+      facts,
+      ...overrides,
+    });
+  const LEAD = '<span class="font-bold text-text">Seu chamado #42</span>';
+
+  it('the kind constant is the one the producer writes', () => {
+    expect(CHAT_NOTIFICATION_KINDS.caseResolved).toBe(KIND);
+  });
+
+  it('tracer: the CircleCheck disc, the bold lead, the sentence and the link to the case', () => {
+    const row = resolved({ caseId: CASE, number: 42 });
+    expect(row?.glyph).toBe('CircleCheck');
+    expect(row?.leading).toEqual({ glyph: true });
+    expect(row?.href).toBe(`/suporte/${CASE}`);
+    expect(markup(row?.sentence)).toBe(`${LEAD} foi resolvido.`);
+    expect(row?.time).toBeTruthy();
+    expect(row?.removed).toBe(false);
+  });
+
+  it('stays the glyph disc even when the row names an actor', () => {
+    const row = resolved(
+      { caseId: CASE, number: 42 },
+      { actor: { removed: false, displayName: 'Ana Souza', avatarAssetId: AVATAR } },
+    );
+    expect(row?.leading).toEqual({ glyph: true });
+  });
+
+  it('URL-encodes the id', () => {
+    expect(resolved({ caseId: 'a b/c', number: 1 })?.href).toBe('/suporte/a%20b%2Fc');
+  });
+
+  it('T-12.4-60: a missing, empty or non-string id links to /suporte, never a broken URL', () => {
+    const cases: NotificationRow['facts'][] = [
+      { number: 42 },
+      { caseId: '', number: 42 },
+      { caseId: 42, number: 42 },
+      { caseId: null, number: 42 },
+    ];
+    for (const facts of cases) {
+      expect(resolved(facts)?.href).toBe('/suporte');
+    }
+  });
+
+  it('the number renders as a plain integer, never grouped', () => {
+    const html = markup(resolved({ caseId: CASE, number: 1204 })?.sentence);
+    expect(html).toContain('Seu chamado #1204');
+    expect(html).not.toContain('1.204');
+  });
+
+  it('a missing or non-numeric number degrades without throwing and keeps the glyph row', () => {
+    for (const facts of [{ caseId: CASE }, { caseId: CASE, number: 'x' }] as const) {
+      const row = resolved({ ...facts });
+      expect(row?.glyph).toBe('CircleCheck');
+      expect(markup(row?.sentence)).toContain('foi resolvido.');
+    }
+  });
+
+  it('T-12.4-61: reads the id and the number only, never a subject, body, title or name', () => {
+    const html = markup(
+      resolved({
+        caseId: CASE,
+        number: 42,
+        subject: 'HOSTILE-SUBJECT',
+        body: 'HOSTILE-BODY',
+        title: 'HOSTILE-TITLE',
+        actorName: 'HOSTILE-ACTOR',
+      })?.sentence,
+    );
+    expect(html).toBe(`${LEAD} foi resolvido.`);
+    expect(html).not.toMatch(/HOSTILE/);
+  });
+
+  it('an unknown kind still falls back to the shipped default row', () => {
+    const row = view({ kind: 'chat.something_new', actor: null, facts: { caseId: CASE } });
+    expect(row?.glyph).toBe('Bell');
+    expect(row?.href).toBe('/inicio');
+    expect(markup(row?.sentence)).toBe('Você tem uma nova notificação.');
   });
 });

@@ -1,3 +1,4 @@
+import { CHAT_NOTIFICATION_KINDS } from '@rede-social/module-chat/contracts';
 import { COURSES_NOTIFICATION_KINDS } from '@rede-social/module-courses/contracts';
 import { EVENTS_NOTIFICATION_KINDS } from '@rede-social/module-events/contracts';
 import { FEED_NOTIFICATION_KINDS } from '@rede-social/module-feed/contracts';
@@ -273,6 +274,35 @@ const paymentsRenderers: Partial<Record<string, NotificationRenderer>> = {
   },
 };
 
+/**
+ * Phase 12.4-13 (D-808, UI-D-822, CASE-19): the member's "Seu chamado #N foi resolvido", the first chat
+ * row of the bell. An actor-less system fact: the 40px `CircleCheck` disc (`leading: 'glyph'` even if a
+ * row ever names an actor) and the lead in bold, all from the catalog. The facts carry the case id and
+ * its number only (never a subject, a message text or a staff name, T-12.4-61), and those are the only
+ * two this renderer reads. It opens the case; a missing, empty or non-string id degrades to the support
+ * page, never to a hand-built broken URL (T-12.4-60). The number is a plain integer (no grouping), and a
+ * missing one renders `#` with nothing after it rather than throwing.
+ */
+const caseHref = (facts: Record<string, unknown>) =>
+  typeof facts.caseId === 'string' && facts.caseId !== ''
+    ? `/suporte/${encodeURIComponent(facts.caseId)}`
+    : '/suporte';
+
+const caseNumberOf = (facts: Record<string, unknown>) =>
+  typeof facts.number === 'number' && Number.isInteger(facts.number) && facts.number > 0
+    ? String(facts.number)
+    : '';
+
+const chatRenderers: Partial<Record<string, NotificationRenderer>> = {
+  [CHAT_NOTIFICATION_KINDS.caseResolved]: {
+    glyph: 'CircleCheck',
+    leading: 'glyph',
+    sentence: (facts, t) =>
+      t.rich('kinds.supportResolved', { number: caseNumberOf(facts), b: actorBold }),
+    href: caseHref,
+  },
+};
+
 export const notificationRenderers: Partial<Record<string, NotificationRenderer>> = {
   [FEED_NOTIFICATION_KINDS.post]: {
     glyph: 'Newspaper',
@@ -346,4 +376,5 @@ export const notificationRenderers: Partial<Record<string, NotificationRenderer>
   },
   ...coursesRenderers,
   ...paymentsRenderers,
+  ...chatRenderers,
 };

@@ -8,6 +8,7 @@ import {
   CalendarClock,
   CalendarDays,
   CalendarX2,
+  CircleCheck,
   CirclePlay,
   Film,
   GraduationCap,
@@ -51,6 +52,9 @@ const GLYPHS = {
   ShoppingBag,
   // Phase 10.1-13 (UI-D-760): the paid event's "Presença confirmada", by name only, same rule.
   Ticket,
+  // Phase 12.4-13 (UI-D-822): the resolved-case notice, by name only. The web registry picks it per
+  // kind, so this module still names no producer module (MOD-02).
+  CircleCheck,
 } as const satisfies Record<string, LucideIcon>;
 
 export type NotificationGlyph = keyof typeof GLYPHS;
