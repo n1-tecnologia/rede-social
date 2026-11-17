@@ -155,7 +155,7 @@ describe('08.7 OwnerBell, on the overview answer’s alerts', () => {
     await renderOwnerBell(ALERTS);
     const bell = screen.getByRole('button', { name: 'Alertas, 3, 1 urgente' });
     fireEvent.click(bell);
-    expect(screen.getByText('2 conversas aguardando resposta')).toBeTruthy();
+    expect(screen.getByText('2 chamados aguardando resposta')).toBeTruthy();
     expect(
       screen.getByText('Na última atualização, a espera mais antiga era de 26 horas'),
     ).toBeTruthy();

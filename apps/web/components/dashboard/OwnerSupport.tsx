@@ -44,8 +44,11 @@ import { SPAN_ALL } from './ownerGrid';
 import { PanelSection } from './PanelSection';
 import { SnapshotFreshness } from './SnapshotFreshness';
 
-/** D-461 / UI-D-476: the queue opens the shipped support inbox. */
-const SUPPORT_INBOX_HREF = '/suporte';
+/**
+ * D-461 / UI-D-476, A-UI-6 (12.4): the queue opens the support inbox on its awaiting toggle, which the
+ * staff inbox reads from `?aguardando=1`. A constant relative path, never built from the payload.
+ */
+const SUPPORT_INBOX_HREF = '/suporte?aguardando=1';
 
 /** One block's empty sentence, inside its card (UI-D-481). */
 function Empty({ id, text }: { id: string; text: string }) {
@@ -156,7 +159,7 @@ export function OwnerSupportView({ t, answer }: OwnerSupportViewProps) {
         className={cn(SPAN_ALL, '@min-[100rem]:col-span-1')}
       >
         {/* The columns' gap is the area's, so the two cards line up with the blocks under them. */}
-        <KpiGrid className="grid-cols-2 @4xl:flex-1 @4xl:grid-cols-2 @4xl:gap-x-6 @min-[100rem]:grid-cols-1">
+        <KpiGrid className="grid-cols-2 max-[359px]:grid-cols-1 @4xl:flex-1 @4xl:grid-cols-2 @4xl:gap-x-6 @min-[100rem]:grid-cols-1">
           <CardLink href={SUPPORT_INBOX_HREF}>
             <KpiCard
               icon={MessageCircleMore}

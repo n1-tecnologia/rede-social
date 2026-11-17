@@ -538,9 +538,10 @@ says what will appear there and when. What each one renders today with no rows:
 - **Lista de espera** (`OwnerEvents`): "0 pessoa entrou na espera de 0 evento lotado" (pt-BR plural
   rules put 0 in `one`), an empty bar card, no demand line, and the "Conseguiram vaga" / "Foram ao
   evento" cards at 0.
-- **Atendimentos por assunto** (`OwnerSupport`): the closed summary drops the leader sentence and
-  keeps only the pill; opened, an empty bar card.
-- **Equipe** (`OwnerSupport`): "0 conversas respondidas por 0 pessoas em 30 dias" and, opened, an
+- **Atendimentos por assunto** (`OwnerSupport`): "0 chamado em 30 dias" (pt-BR plural rules put 0
+  in `one`) and, opened, the empty card "Nenhum chamado aberto nos últimos 30 dias."; a snapshot
+  built before builder v9 still shows the "Em breve" block.
+- **Equipe** (`OwnerSupport`): "0 chamados respondidos por 0 pessoas em 30 dias" and, opened, an
   empty bar card.
 - **Financeiro** (`OwnerFinance*`): the lists say how many and show the sample line; the charts, the
   bars and the product cards still assume rows.

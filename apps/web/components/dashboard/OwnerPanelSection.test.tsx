@@ -527,7 +527,7 @@ describe('the owner panel on /perfil', () => {
       'Interações por publicação',
       'Comparecimento em eventos',
       'Vendas do mês',
-      'Conversas aguardando resposta',
+      'Chamados aguardando resposta',
     ]) {
       expect(text).toContain(label);
     }
@@ -566,7 +566,7 @@ describe('the owner panel on /perfil', () => {
     // Attendance 10 presences of 12 + 1 walk-in.
     expect(text).toContain('77%');
     expect(text).toContain('R$ 197,00');
-    expect(markup).toMatch(/<a[^>]*href="\/suporte"[^>]*>[\s\S]*?Conversas aguardando resposta/);
+    expect(markup).toMatch(/<a[^>]*href="\/suporte"[^>]*>[\s\S]*?Chamados aguardando resposta/);
     expect(text).toContain('Responder no atendimento');
     // The bell is the answer's: the support detail at the last update (UI-D-480).
     expect(text).toContain('Na última atualização, a espera mais antiga era de 26 horas');
@@ -589,7 +589,7 @@ describe('the owner panel on /perfil', () => {
       expect((markup.match(/col-span-3/g) ?? []).length).toBeGreaterThanOrEqual(4);
       const text = textOf(markup);
       expect(text).not.toContain('Vendas do mês');
-      expect(text).not.toContain('Conversas aguardando resposta');
+      expect(text).not.toContain('Chamados aguardando resposta');
       expect(text).toContain('Comparecimento em eventos');
       expect(markup).not.toContain('data-alerts-bell');
     } finally {

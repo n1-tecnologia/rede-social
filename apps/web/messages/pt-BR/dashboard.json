@@ -111,7 +111,7 @@
       "alerts": {
         "support_waiting": {
           "tag": "{hours}h",
-          "title": "{count, plural, one {# conversa aguardando} other {# conversas aguardando}} resposta",
+          "title": "{count, plural, one {# chamado aguardando} other {# chamados aguardando}} resposta",
           "detail": "Na última atualização, a espera mais antiga era de {hours} horas"
         },
         "event_soon": {
@@ -132,7 +132,7 @@
         "orderValue": "Vendas do mês",
         "engaged": "Engajados",
         "perPost": "Interações por publicação",
-        "awaiting": "Conversas aguardando resposta"
+        "awaiting": "Chamados aguardando resposta"
       },
       "weekly": {
         "title": "Membros que interagiram por semana",
@@ -185,7 +185,7 @@
       },
       "queue": {
         "title": "Fila na última atualização",
-        "awaiting": "Aguardando resposta",
+        "awaiting": "Chamados aguardando resposta",
         "oldest": "Espera mais antiga",
         "open": "Responder no atendimento"
       },
@@ -193,13 +193,13 @@
         "title": "Tempo da 1ª resposta",
         "median": "Mediana da semana",
         "chartLabel": "Mediana da 1ª resposta por semana: as últimas 8 semanas",
-        "empty": "Nenhuma conversa respondida nas últimas 8 semanas.",
+        "empty": "Nenhum chamado respondido nas últimas 8 semanas.",
         "noLastWeek": "Nenhuma na última semana"
       },
       "volume": {
         "title": "Atendimentos por semana",
         "summary": "{count} nas últimas 4 semanas",
-        "chartLabel": "Conversas de atendimento por semana: as últimas 8 semanas"
+        "chartLabel": "Chamados de atendimento por semana: as últimas 8 semanas"
       },
       "subjects": {
         "title": "Atendimentos por assunto",
@@ -215,8 +215,8 @@
       },
       "team": {
         "title": "Equipe",
-        "summary": "{count} conversas respondidas por {people} pessoas em 30 dias",
-        "empty": "Nenhuma conversa respondida pela equipe nos últimos 30 dias."
+        "summary": "{count} chamados respondidos por {people} pessoas em 30 dias",
+        "empty": "Nenhum chamado respondido pela equipe nos últimos 30 dias."
       },
       "moderation": {
         "title": "Moderação",
@@ -363,8 +363,8 @@
         },
         "support": {
           "title": "Atendimento",
-          "summary": "{count, plural, one {# conversa} other {# conversas}} em 8 semanas · última há {days, plural, one {# dia} other {# dias}} · primeira resposta em {time}",
-          "empty": "Nenhuma conversa com o atendimento em 8 semanas."
+          "summary": "{count, plural, one {# chamado} other {# chamados}} em 8 semanas · última há {days, plural, one {# dia} other {# dias}} · primeira resposta em {time}",
+          "empty": "Nenhum chamado com o atendimento em 8 semanas."
         },
         "suggestion": {
           "title": "Sugestão de ação (base toda)",

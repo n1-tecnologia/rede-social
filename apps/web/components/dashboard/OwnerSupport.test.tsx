@@ -114,16 +114,57 @@ describe('the queue at the last update (UI-D-476, UI-D-480, INSIGHT-21)', () => 
     expect(root.textContent).not.toMatch(/agora/i);
   });
 
-  it('links "Aguardando resposta" to the support inbox with the verb "Responder no atendimento"', () => {
+  it('links "Chamados aguardando resposta" to the awaiting view of the inbox with the verb "Responder no atendimento" (INSIGHT-21, T-12.4-76)', () => {
     const queue = section(view(), 'Fila na última atualização');
     const links = [...queue.querySelectorAll('a')];
     expect(links).toHaveLength(1);
     const link = links[0];
-    expect(link?.getAttribute('href')).toBe('/suporte');
-    expect(link?.textContent).toContain('Aguardando resposta');
+    expect(link?.getAttribute('href')).toBe('/suporte?aguardando=1');
+    expect(link?.textContent).toContain('Chamados aguardando resposta');
     expect(link?.textContent).toContain('Responder no atendimento');
-    expect(kpiValue(queue, 'Aguardando resposta')).toBe('3');
+    expect(kpiValue(queue, 'Chamados aguardando resposta')).toBe('3');
     expect(kpiValue(queue, 'Espera mais antiga')).toBe('26 h');
+  });
+});
+
+describe('the per-case wording and the kept titles (D-815, UI-D-831, O04)', () => {
+  it('keeps the titles of the other blocks and the weekly chart title', () => {
+    const root = view();
+    expect(section(root, 'Tempo da 1ª resposta')).toBeTruthy();
+    expect(details(root, 'Atendimentos por semana')).toBeTruthy();
+    expect(details(root, 'Equipe')).toBeTruthy();
+    expect(details(root, 'Moderação')).toBeTruthy();
+    expect(kpiValue(section(root, 'Fila na última atualização'), 'Espera mais antiga')).toBe(
+      '26 h',
+    );
+  });
+
+  it('labels the weekly chart per case', () => {
+    const volume = details(view(), 'Atendimentos por semana');
+    expect(
+      volume?.querySelector(
+        '[aria-label="Chamados de atendimento por semana: as últimas 8 semanas"]',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('says chamado in the singular and the plural of the alert and the member line', () => {
+    expect(t('tenantOwner.alerts.support_waiting.title', { count: 1 })).toBe(
+      '1 chamado aguardando resposta',
+    );
+    expect(t('tenantOwner.alerts.support_waiting.title', { count: 3 })).toBe(
+      '3 chamados aguardando resposta',
+    );
+    expect(t('tenantOwner.kpi.awaiting')).toBe('Chamados aguardando resposta');
+    expect(t('tenantOwner.memberDetail.support.summary', { count: 1, days: 2, time: '0h30' })).toBe(
+      '1 chamado em 8 semanas · última há 2 dias · primeira resposta em 0h30',
+    );
+  });
+
+  it('draws the queue as one column below 360 px and two from there (A-12.4-KPI320)', () => {
+    const grid = section(view(), 'Fila na última atualização').querySelector('[data-dash-stagger]');
+    expect(grid?.className).toContain('grid-cols-2');
+    expect(grid?.className).toContain('max-[359px]:grid-cols-1');
   });
 });
 
@@ -163,7 +204,7 @@ describe('the team, the subjects and moderation (D-465, UI-D-474)', () => {
     );
     expect(labels).toEqual(['Ana  da Equipe', 'Bruno']);
     expect(team?.querySelector('summary')?.textContent).toContain(
-      '7 conversas respondidas por 2 pessoas em 30 dias',
+      '7 chamados respondidos por 2 pessoas em 30 dias',
     );
   });
 
@@ -266,12 +307,12 @@ describe('"Atendimentos por assunto" by category (D-813, UI-D-831, tracer)', () 
 describe('an empty tenant (EP-42, UI-D-481)', () => {
   it('renders the two empty sentences and the 0 tiles', () => {
     const root = view(EMPTY);
-    expect(root.textContent).toContain('Nenhuma conversa respondida nas últimas 8 semanas.');
+    expect(root.textContent).toContain('Nenhum chamado respondido nas últimas 8 semanas.');
     expect(root.textContent).toContain(
-      'Nenhuma conversa respondida pela equipe nos últimos 30 dias.',
+      'Nenhum chamado respondido pela equipe nos últimos 30 dias.',
     );
     const queue = section(root, 'Fila na última atualização');
-    expect(kpiValue(queue, 'Aguardando resposta')).toBe('0');
+    expect(kpiValue(queue, 'Chamados aguardando resposta')).toBe('0');
     const moderation = details(root, 'Moderação');
     if (!moderation) throw new Error('no Moderação');
     expect(kpiValue(moderation, 'Comentários removidos')).toBe('0');

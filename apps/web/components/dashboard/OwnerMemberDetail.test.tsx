@@ -219,7 +219,7 @@ describe('the member detail on real data (D-461)', () => {
     expect(text).toContain('Encontro de setembro · 20/09');
     expect(text).toContain('Foi');
     expect(text).toContain('Inscrito');
-    expect(text).toContain('2 conversas em 8 semanas');
+    expect(text).toContain('2 chamados em 8 semanas');
   });
 
   it('keeps every suggestion action disabled, with the "Em breve" pill after it (UI-D-478)', () => {
@@ -251,6 +251,6 @@ describe('the member detail on real data (D-461)', () => {
     expect(tile(container, 'Curtidas').textContent).not.toContain('Em breve');
     expect(container.textContent).toContain('Nenhuma inscrição em eventos.');
     expect(container.textContent).toContain('Nenhuma compra.');
-    expect(container.textContent).toContain('Nenhuma conversa com o atendimento em 8 semanas.');
+    expect(container.textContent).toContain('Nenhum chamado com o atendimento em 8 semanas.');
   });
 });
