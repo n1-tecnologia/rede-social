@@ -41,6 +41,9 @@ begin;
 -- 10. THE ACTION MATRIX (plan 03, CASE-05, CASE-08, CASE-09, CASE-12; D-805, D-806, D-842): every legal pair and every
 --    adjacent illegal pair of app.chat_case_act, stale and serial actions, assignee validity, the assign role guard.
 --
+-- 10b. ASSIGN CARRIES THE EXPECTED OWNER (plan 22, WR-04, CASE-08, CASE-09; D-806, D-842, D-845): a stale or ownerless assign of an
+--    in-progress case is CS002 before the assignee check, the legal one moves the case once, an open case ignores the owner.
+--
 -- 11. EDIT AND HISTORY (plan 03, CASE-10, CASE-12; D-810, D-811, D-812, D-845; EP-034..EP-036): app.chat_case_edit, one
 --    edited row per changed field, no-op edits, the closed refusal, the value bounds, the lanes and the signals.
 --
@@ -51,7 +54,7 @@ begin;
 --    tiebreak, two tenants in one call, the states it never touches, the lanes and the 5000 ceiling.
 --
 -- Fixture ids use the `1e350000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(398);
+select plan(413);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-case-a', 'Chamado A', '1e350000-0000-4000-8000-000000000001');
@@ -1330,7 +1333,7 @@ select is(tests.row(7), 'closed|-|false|true|0', 'EP-025: ... the closed case di
 select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 8, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000402') $$, 'D-806: an admin assigns an open case to a live staff member');
 select is(tests.row(8), 'in_progress|1e350000-0000-4000-8000-000000000402|false|false|0', 'D-806: assign from open makes the target the owner');
 select results_eq($$ select kind, actor_user_id::text, target_user_id::text, from_state, to_state from public.chat_case_events where conversation_id = tests.cid(8) and kind = 'assigned' $$, $$ values ('assigned'::text, '1e350000-0000-4000-8000-000000000403'::text, '1e350000-0000-4000-8000-000000000402'::text, 'open'::text, 'in_progress'::text) $$, 'D-810: the assigned event carries the actor, the target and both states');
-select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 9, 'assign', 'in_progress', null, '1e350000-0000-4000-8000-000000000402') $$, 'D-806: assign from in_progress moves the owner');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 9, 'assign', 'in_progress', '1e350000-0000-4000-8000-000000000401', '1e350000-0000-4000-8000-000000000402') $$, 'D-806: assign from in_progress moves the owner');
 select is(tests.row(9), 'in_progress|1e350000-0000-4000-8000-000000000402|false|false|0', 'D-806: ... to the target');
 select is(tests.evs(9), 'assigned:in_progress>in_progress', 'D-810: ... with one assigned event');
 select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 10, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000402') $$, '42501', null, 'T-12.4-11: support_tenant assigning is refused 42501');
@@ -1342,7 +1345,7 @@ select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'ad
 select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 14, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000411') $$, 'CS005', null, 'T-12.4-14: a member is not a valid assignee');
 select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 14, 'assign', 'open', null, null) $$, 'CS005', null, 'T-12.4-14: a null assignee is CS005');
 select is(tests.row(14), 'open|-|false|false|0', 'T-12.4-14: ... and the case did not move after five refusals');
-select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 11, 'assign', 'in_progress', null, '1e350000-0000-4000-8000-000000000401') $$, 'CS005', null, 'D-806: assigning to the current owner is CS005');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 11, 'assign', 'in_progress', '1e350000-0000-4000-8000-000000000401', '1e350000-0000-4000-8000-000000000401') $$, 'CS005', null, 'D-806: assigning to the current owner is CS005');
 select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 15, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000403') $$, 'D-806: an admin may assign a case to themself');
 select is(tests.row(15), 'in_progress|1e350000-0000-4000-8000-000000000403|false|false|0', 'D-806: ... and becomes its owner');
 select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 12, 'assign', 'resolved', null, '1e350000-0000-4000-8000-000000000402') $$, 'CS003', null, 'EP-025: assign from resolved is CS003');
@@ -1436,6 +1439,35 @@ select ok(has_function_privilege('authenticated', 'app.chat_case_act(uuid,text,t
   and not has_function_privilege('anon', 'app.chat_case_signal(uuid,uuid,uuid)', 'execute')
   and not has_function_privilege('authenticated', 'app.chat_case_signal(uuid,uuid,uuid)', 'execute'),
   'D-845/CASE-18: the grants survived the redefinition; the signal helper has no lane grant at all');
+
+
+-- ── 10b. assign carries the expected owner ─────────────────────────────────────────────────────
+-- Plan 22 (gap closure WR-04; CASE-08, CASE-09; D-806, D-842, D-845; T-12.4-97, T-12.4-98, T-12.4-100, T-12.4-101). The assign
+-- branch of `app.chat_case_act` refuses, under the row lock and BEFORE the assignee check, an in-progress case whose owner is not
+-- the one the caller saw (or none was sent): CS002, nothing written. An open case has no owner, so a stray one is ignored.
+select tests.mkcase(33, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(34, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(35, 'open', null, 0);
+select tests.mkcase(36, 'open', null, 0);
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 33, 'assign', 'in_progress', '1e350000-0000-4000-8000-000000000403', '1e350000-0000-4000-8000-000000000402') $$, 'CS002', null, 'WR-04: an assign of an in-progress case carrying the WRONG expected owner (the admins own id) is CS002');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 33, 'assign', 'in_progress', null, '1e350000-0000-4000-8000-000000000402') $$, 'CS002', null, 'WR-04: ... and carrying NO expected owner is CS002');
+select is(tests.row(33), 'in_progress|1e350000-0000-4000-8000-000000000401|false|false|0', 'WR-04: ... and the owner did not move');
+select is(tests.evs(33), '', 'WR-04: ... and the history gained nothing');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 34, 'assign', 'in_progress', null, '1e350000-0000-4000-8000-000000000401') $$, 'CS002', null, 'CASE-09 ordering: an assign to the CURRENT owner without the expected owner is CS002 (the stale answer wins)');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 34, 'assign', 'in_progress', '1e350000-0000-4000-8000-000000000401', '1e350000-0000-4000-8000-000000000401') $$, 'CS005', null, 'CASE-09 ordering: ... the same assign with the right owner is CS005 (the target check still runs)');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 33, 'assign', 'in_progress', '1e350000-0000-4000-8000-000000000401', '1e350000-0000-4000-8000-000000000402') $$, 'CASE-09 adjacency: the owner exactly equal to the current one is accepted');
+select is(tests.row(33), 'in_progress|1e350000-0000-4000-8000-000000000402|false|false|0', 'WR-04: ... and the case moved to the target');
+select is(tests.evs(33), 'assigned:in_progress>in_progress', 'WR-04: ... with exactly one assigned event');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 33, 'assign', 'in_progress', '1e350000-0000-4000-8000-000000000401', '1e350000-0000-4000-8000-000000000403') $$, 'CS002', null, 'T-12.4-97: a second stale admin (expected owner 401, now 402) is CS002');
+select is(tests.row(33), 'in_progress|1e350000-0000-4000-8000-000000000402|false|false|0', 'T-12.4-97: ... and the owner is still the first winners target');
+select is(tests.evs(33), 'assigned:in_progress>in_progress', 'T-12.4-97: ... and the history still has the single assigned event');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 35, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000402') $$, 'control: an assign from open with no expected owner still works');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 36, 'assign', 'open', '1e350000-0000-4000-8000-000000000401', '1e350000-0000-4000-8000-000000000402') $$, 'control: an open case ignores a stray expected owner, as take does');
+select ok(
+  (select p.prosecdef and p.proconfig::text = '{"search_path=\"\""}' from pg_proc p where p.oid = 'app.chat_case_act(uuid,text,text,uuid,uuid)'::regprocedure)
+  and has_function_privilege('authenticated', 'app.chat_case_act(uuid,text,text,uuid,uuid)', 'execute')
+  and not has_function_privilege('anon', 'app.chat_case_act(uuid,text,text,uuid,uuid)', 'execute'),
+  'T-12.4-98: the redefinition is still a definer with an empty search_path, execute for authenticated and none for anon');
 
 
 -- ── 11. edit and history ───────────────────────────────────────────────────────────────────────

@@ -2129,7 +2129,11 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       const named = (name: string) => calls.find((route) => route.name === name) as RouteCall;
       await run(named('PATCH'), { expectedState: 'open', priority: 'high' });
       await run(named('take'), { expectedState: 'open' });
-      await run(named('assign'), { expectedState: 'in_progress', assigneeUserId: assignee });
+      await run(named('assign'), {
+        expectedState: 'in_progress',
+        expectedOwnerId: idOf('admin@rede-demo.local'),
+        assigneeUserId: assignee,
+      });
       await run(named('resolve'), { expectedState: 'in_progress' });
       await run(named('reopen'), { expectedState: 'resolved' });
       await run(named('close'), { expectedState: 'open' });

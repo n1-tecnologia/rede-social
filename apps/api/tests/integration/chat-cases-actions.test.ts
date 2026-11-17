@@ -313,12 +313,53 @@ describe('case actions', () => {
     const again = await refusal(
       await act(tokens.demoAdmin, id, 'assign', {
         expectedState: 'in_progress',
+        expectedOwnerId: ids.demoSupport,
         assigneeUserId: ids.demoSupport,
       }),
     );
     expect([again.status, again.chat]).toEqual([400, 'assignee_invalid']);
     expect((await eventsOf(id)).length).toBe(eventsBefore + 1);
     expect(emitted()).toEqual([before[0], before[1] + 1]);
+  });
+
+  it('WR-04: assign on an in-progress case needs the owner the caller saw; a stale or ownerless call is case_stale and writes nothing, the right owner moves it once (D-806, D-842, T-12.4-97, T-12.4-101)', async () => {
+    const { tokens, ids } = await caseKit();
+    const { id } = await openCase('wr04-assign');
+    await caseOf(await act(tokens.demoSupport, id, 'take', { expectedState: 'open' }));
+    const target = await throwawayMember('wr04-target', 'support_tenant');
+    const before = emitted();
+    const eventsBefore = (await eventsOf(id)).length;
+    const signalsBefore = await countSignals();
+
+    for (const body of [
+      { expectedState: 'in_progress', assigneeUserId: target.id },
+      { expectedState: 'in_progress', expectedOwnerId: ids.demoAdmin, assigneeUserId: target.id },
+    ]) {
+      const res = await act(tokens.demoAdmin, id, 'assign', body);
+      const stale = await refusal(res);
+      expect([stale.status, stale.code, stale.chat]).toEqual([409, 'CONFLICT', 'case_stale']);
+      // The answer names no owner: the details carry the closed reason and nothing else.
+      expect(stale.details).toEqual({ chat: 'case_stale' });
+      expect(JSON.stringify(stale)).not.toContain(ids.demoSupport);
+    }
+    expect((await rowOf(id)).owner).toBe(ids.demoSupport);
+    expect((await eventsOf(id)).length).toBe(eventsBefore);
+    expect(emitted()).toEqual(before);
+    expect(await countSignals()).toBe(signalsBefore);
+
+    const moved = await caseOf(
+      await act(tokens.demoAdmin, id, 'assign', {
+        expectedState: 'in_progress',
+        expectedOwnerId: ids.demoSupport,
+        assigneeUserId: target.id,
+      }),
+    );
+    expect(moved.ownerUserId).toBe(target.id);
+    expect((await eventsOf(id)).filter((e) => e.kind === 'assigned')).toHaveLength(1);
+    expect(emitted()).toEqual([before[0], before[1] + 1]);
+    expect(
+      Object.keys(assignedEvents[assignedEvents.length - 1] as ChatCaseAssigned).sort(),
+    ).toEqual(['actorUserId', 'assigneeUserId', 'conversationId', 'tenantId']);
   });
 
   it('close: from open, in_progress and resolved, silent, and the team position moves to the last message (D-841, EP-026)', async () => {
@@ -577,6 +618,35 @@ describe('case races', () => {
     const loser = results.find((res) => res.status === 409) as Response;
     expect((await refusal(loser)).chat).toBe('case_stale');
     expect((await eventsOf(id)).filter((e) => e.kind === 'taken')).toHaveLength(1);
+  });
+
+  it('WR-04: two admins assigning the same in-progress case, each carrying the owner they saw, end with one winner and one case_stale (CASE-09, T-12.4-97)', async () => {
+    const { tokens, ids } = await caseKit();
+    const { id } = await openCase('race-assign');
+    await caseOf(await act(tokens.demoSupport, id, 'take', { expectedState: 'open' }));
+    const secondAdmin = await throwawayMember('race-admin', 'admin_tenant');
+    const targetA = await throwawayMember('race-target-a', 'support_tenant');
+    const targetB = await throwawayMember('race-target-b', 'support_tenant');
+    const before = emitted();
+    const eventsBefore = (await eventsOf(id)).filter((e) => e.kind === 'assigned').length;
+    const body = (assigneeUserId: string) => ({
+      expectedState: 'in_progress',
+      expectedOwnerId: ids.demoSupport,
+      assigneeUserId,
+    });
+    const results = await Promise.all([
+      act(tokens.demoAdmin, id, 'assign', body(targetA.id)),
+      act(secondAdmin.token, id, 'assign', body(targetB.id)),
+    ]);
+    expect(results.map((res) => res.status).sort()).toEqual([200, 409]);
+    const winnerIndex = results.findIndex((res) => res.status === 200);
+    const loser = results.find((res) => res.status === 409) as Response;
+    expect((await refusal(loser)).chat).toBe('case_stale');
+    expect((await rowOf(id)).owner).toBe([targetA.id, targetB.id][winnerIndex]);
+    expect((await eventsOf(id)).filter((e) => e.kind === 'assigned')).toHaveLength(
+      eventsBefore + 1,
+    );
+    expect(emitted()).toEqual([before[0], before[1] + 1]);
   });
 
   it('a close racing a resolve gives one winner and one 409 (T-12.4-38)', async () => {
@@ -855,6 +925,7 @@ describe('case isolation', () => {
       (
         await act(tokens.demoAdmin, id, 'assign', {
           expectedState: 'in_progress',
+          expectedOwnerId: ids.demoSupport,
           assigneeUserId: ids.demoMember,
         })
       ).status,
@@ -891,6 +962,7 @@ describe('case isolation', () => {
     const cs005 = await refusal(
       await act(tokens.demoAdmin, id, 'assign', {
         expectedState: 'in_progress',
+        expectedOwnerId: ids.demoSupport,
         assigneeUserId: ids.demoMember,
       }),
     );

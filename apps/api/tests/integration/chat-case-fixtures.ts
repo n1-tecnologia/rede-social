@@ -91,7 +91,7 @@ const THROWAWAY_PASSWORD = 'Segredo123';
 /** A fresh live `member` (or staff) of the demo tenant with no conversation, signed in. */
 export async function throwawayMember(
   label: string,
-  role: 'member' | 'support_tenant' = 'member',
+  role: 'member' | 'support_tenant' | 'admin_tenant' = 'member',
 ): Promise<{ id: string; token: string }> {
   const { ids } = await caseKit();
   const email = `case-${label}-${Date.now()}@rede-demo.local`;
