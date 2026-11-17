@@ -10,8 +10,22 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cursorAfterOwnSend, cursorAfterPage, isReplayedSignal } from '@/lib/chat-cursor';
-import { type ChatDayKeys, type ChatMessageView, type ChatViewer, chatRuns } from '@/lib/chat-view';
-import { type ReplyToConversationResult, sendSupportMessageAction } from './actions';
+import {
+  type ChatDayKeys,
+  type ChatMessageView,
+  type ChatViewer,
+  caseStateView,
+  caseTitle,
+  chatRuns,
+  type MemberCaseHeaderView,
+} from '@/lib/chat-view';
+import {
+  type ReplyToConversationResult,
+  type SendSupportMessageResult,
+  sendSupportMessageAction,
+} from './actions';
+import { CaseBar, CaseOpenedRow } from './CaseBar';
+import { CaseOpener, type CaseOpenerValue } from './CaseOpener';
 
 /**
  * The member's support thread pane (UI-D-261, D-240, CHAT-04) [designed]: the scroller and the
@@ -48,6 +62,14 @@ import { type ReplyToConversationResult, sendSupportMessageAction } from './acti
  * notice as its inline error, the same sentence is toasted, and `router.refresh()` re-renders the page,
  * which then passes the notice and swaps the composer out.
  *
+ * **Cases (12.4-12, D-803, D-812, UI-D-818 to UI-D-820):** the member's pane holds the finished header
+ * of the case it shows (`initialCase`, `null` when there is no active one). With no case the scroller
+ * draws the opener (category chips and the optional subject) under the greeting, and the composer's
+ * send reads "Abrir chamado"; the first send carries the chosen category and subject, and the answer
+ * swaps the opener for the case bar with the real number (read from the server's answer) and, on this
+ * client only, the one-time confirmation row. Every later message is a plain reply: the opener never
+ * returns for one. The pane computes no case state: it only draws what the server answered.
+ *
  * Every string comes from the `chat` catalog; every time and day label is server-formatted
  * (`chat-view.ts`), and this component never reads the clock (UI-D-14).
  */
@@ -71,6 +93,13 @@ export interface ThreadPaneProps {
   readOnlyNotice?: string | null;
   /** 07-10: the notices a reply racing a block or a departure toasts (the 409 answers). */
   raceNotices?: { member_blocked: string; member_removed: string };
+  /**
+   * 12.4-12 (UI-D-818): the finished header of the member's case, `null` when they have no active one
+   * (the opener shows). Only the member's pane reads it.
+   */
+  initialCase?: MemberCaseHeaderView | null;
+  /** 12.4-12 (UI-D-818): the member ever opened a case, so the slim bar can offer "Meus chamados". */
+  hasAnyCase?: boolean;
 }
 
 interface MessagesAnswer {
@@ -122,7 +151,7 @@ function SupportGreeting({
   return (
     <div
       data-chat-greeting
-      className="flex min-h-full flex-col items-center justify-center gap-3 px-8 py-12 text-center"
+      className="flex flex-1 flex-col items-center justify-center gap-3 px-8 py-12 text-center"
     >
       {logoUrl ? (
         <TenantLogo logoUrl={logoUrl} displayName={tenantName} size="home" hideOnError />
@@ -159,6 +188,8 @@ export function ThreadPane({
   onSendAction,
   readOnlyNotice = null,
   raceNotices,
+  initialCase = null,
+  hasAnyCase = false,
 }: ThreadPaneProps) {
   const t = useTranslations('chat');
   const router = useRouter();
@@ -171,6 +202,12 @@ export function ThreadPane({
   const [hasOlder, setHasOlder] = useState(initialHasOlder);
   const [olderState, setOlderState] = useState<'idle' | 'loading' | 'error'>('idle');
   const [newCount, setNewCount] = useState(0);
+  /** 12.4-12: the member's case as the server last described it; `null` while there is none. */
+  const [caseView, setCaseView] = useState<MemberCaseHeaderView | null>(initialCase);
+  /** The case number to confirm on THIS client after its first send (A-UI-16); never set by a reload. */
+  const [openedNumber, setOpenedNumber] = useState<number | null>(null);
+  /** The two values the opener holds for the first send (controlled, W17). */
+  const [opening, setOpening] = useState<CaseOpenerValue>({ category: 'other' });
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const intentRef = useRef<ScrollIntent | null>({ kind: 'bottom' });
@@ -327,6 +364,8 @@ export function ThreadPane({
     pendingIdRef.current += 1;
     const tempId = `pending-${pendingIdRef.current}`;
     const staff = viewer === 'staff';
+    // The first message of a member with no case is the one that opens it, carrying the chosen pair.
+    const opensCase = viewer === 'member' && !caseView && conversationRef.current === null;
     const optimistic: ChatMessageView = {
       id: tempId,
       seq: 0,
@@ -342,10 +381,16 @@ export function ThreadPane({
     intentRef.current = { kind: 'bottom' };
     setViews((current) => [...current, optimistic]);
 
-    let result: ReplyToConversationResult | null = null;
+    let result: ReplyToConversationResult | SendSupportMessageResult | null = null;
     try {
       const id = conversationRef.current;
       if (onSendAction) result = id ? await onSendAction(id, body) : null;
+      else if (opensCase)
+        result = await sendSupportMessageAction(
+          body,
+          opening.category,
+          opening.subject?.trim() || undefined,
+        );
       else result = await sendSupportMessageAction(body);
     } catch {
       result = null;
@@ -368,6 +413,7 @@ export function ThreadPane({
       return false;
     }
     const { view, conversationId: created } = result;
+    const sentCase = 'case' in result ? result.case : undefined;
     if (!conversationRef.current) {
       conversationRef.current = created;
       setConversationId(created);
@@ -380,6 +426,22 @@ export function ThreadPane({
     setViews((current) => mergeViews(current, [view], [tempId]));
     setNewCount(0);
     if (next.catchUp) void catchUp();
+    if (sentCase && viewer === 'member') {
+      if (sentCase.opened) {
+        // The swap: the opener leaves and the bar arrives with the server's number. Row 2 starts as what
+        // the member wrote and becomes the server's finished label as soon as the header is read.
+        setCaseView({
+          viewer: 'member',
+          id: sentCase.id,
+          number: sentCase.number,
+          title: caseTitle(t, sentCase.number),
+          state: caseStateView(sentCase.state, t),
+          subject: opening.subject?.trim() || body,
+          subjectLine: '',
+        });
+        setOpenedNumber(sentCase.number);
+      }
+    }
     return true;
   };
 
@@ -416,8 +478,20 @@ export function ThreadPane({
     );
   }
 
+  // The opener: only a member with no case at all (no conversation yet), never for staff or a reply.
+  const showOpener =
+    viewer === 'member' && !caseView && conversationId === null && readOnlyNotice === null;
+  const opener = showOpener ? (
+    <CaseOpener category={opening.category} subject={opening.subject} onChange={setOpening} />
+  ) : null;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {viewer === 'member' ? (
+        <div className="shrink-0">
+          <CaseBar header={caseView} hasAnyCase={hasAnyCase} />
+        </div>
+      ) : null}
       <div
         ref={scrollerRef}
         data-chat-scroller
@@ -426,6 +500,8 @@ export function ThreadPane({
         }}
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
       >
+        {openedNumber !== null && caseView ? <CaseOpenedRow number={openedNumber} /> : null}
+
         {hasOlder && conversationId ? (
           <div className="flex min-h-11 flex-col items-center justify-center gap-1 px-4 pt-3">
             {olderState === 'error' ? (
@@ -446,14 +522,20 @@ export function ThreadPane({
         ) : null}
 
         {views.length === 0 && viewer === 'member' ? (
-          <SupportGreeting
-            logoUrl={logoUrl}
-            tenantName={tenantName}
-            title={t('member.empty.title', { tenant: tenantName })}
-            body={t('member.empty.body')}
-          />
+          <div className="flex min-h-full flex-col">
+            <SupportGreeting
+              logoUrl={logoUrl}
+              tenantName={tenantName}
+              title={t('member.empty.title', { tenant: tenantName })}
+              body={t('member.empty.body')}
+            />
+            {opener}
+          </div>
         ) : (
-          <MessageList label={t('thread.label')} items={items} />
+          <>
+            <MessageList label={t('thread.label')} items={items} />
+            {opener}
+          </>
         )}
       </div>
 
@@ -477,8 +559,8 @@ export function ThreadPane({
         ) : (
           <ChatComposer
             label={t('composer.label')}
-            placeholder={t('composer.placeholder')}
-            sendLabel={t('composer.send')}
+            placeholder={showOpener ? t('composer.placeholderNew') : t('composer.placeholder')}
+            sendLabel={showOpener ? t('composer.sendNew') : t('composer.send')}
             // pt-BR grouping ("1.800") to match the catalog's literal "2.000".
             counterTemplate={(count) =>
               t('composer.counter', { count: count.toLocaleString('pt-BR') })

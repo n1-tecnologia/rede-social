@@ -8,7 +8,12 @@ import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { getSupportThread } from '@/lib/chat';
-import { chatMessageView, tenantDayKeys } from '@/lib/chat-view';
+import {
+  type CaseHeaderView,
+  caseHeaderView,
+  chatMessageView,
+  tenantDayKeys,
+} from '@/lib/chat-view';
 import { ThreadPane } from './ThreadPane';
 
 /**
@@ -23,6 +28,12 @@ import { ThreadPane } from './ThreadPane';
  * - a caller without `chat.support.contact` (the chat module is off for the tenant, D-40) gets the
  *   not-found screen too;
  * - everyone else is a member and gets the thread.
+ *
+ * **Cases (12.4-12, D-803, D-812):** the thread answer carries the member's ACTIVE case (`null` when the
+ * last one was `Fechado` or they never wrote) and whether they ever had one. With no active case the pane
+ * draws the opener (category chips and the optional subject), with one it draws the case bar; the member's
+ * closed cases live at `/suporte/{id}` and in "Meus chamados". The header is finished here by
+ * `caseHeaderView` for the MEMBER, so no priority, owner or history can reach the client.
  *
  * **The GET creates nothing** (lazy creation): before the first message `GET /v1/chat/support` answers
  * no conversation and the pane shows the greeting; the first send creates it. Nothing is marked read
@@ -61,6 +72,9 @@ export default async function SupportPage() {
   );
   const tenantName = bootstrap.tenant.displayName;
   const { logoUrl } = resolveBranding(bootstrap.tenant.branding);
+  const header: CaseHeaderView | null = thread?.case
+    ? caseHeaderView(thread.case, { viewer: 'member', t })
+    : null;
 
   return (
     <div
@@ -84,6 +98,8 @@ export default async function SupportPage() {
         initialHasOlder={thread?.hasOlder ?? false}
         initialKeys={keys}
         initialError={thread === null}
+        initialCase={header?.viewer === 'member' ? header : null}
+        hasAnyCase={thread?.hasAnyCase ?? false}
       />
     </div>
   );
