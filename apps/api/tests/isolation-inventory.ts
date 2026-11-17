@@ -309,7 +309,11 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/chat/conversations/:conversationId/messages': { case: 'phase 7 sweep' },
   'GET /v1/chat/conversations/:conversationId': { case: 'phase 7 sweep' },
   'POST /v1/chat/conversations/:conversationId/read': { case: 'phase 7 sweep' },
-  'GET /v1/chat/inbox': { case: 'phase 7 sweep' },
+  // 12.4-07: the inbox with its tabs and filters, the staff roster and the case history; one case proves the three
+  // (each negative beside its positive control, a member refused on the roster and the history, the wrong host).
+  'GET /v1/chat/inbox': { case: 'chat staff cases' },
+  'GET /v1/chat/staff': { case: 'chat staff cases' },
+  'GET /v1/chat/conversations/:conversationId/case/history': { case: 'chat staff cases' },
   // ── /v1/store (08.2) ────────────────────────────────────────────────────────────────────────
   // 12.3-11 (NOVF-05, NOVF-11): the store front read; the category slug on create and edit is proved in
   // the same case beside it (a rede-demo slug from a rede-lab admin is a 400, never a link).

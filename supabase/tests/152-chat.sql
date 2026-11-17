@@ -630,6 +630,10 @@ do $$
 declare
   v_plan text;
 begin
+  -- A table this small is cheaper to scan than to walk by index whenever the heap has just been vacuumed, which made
+  -- the by-name proof depend on autovacuum timing (the `EXPLAIN`-by-name sensitivity of pgTAP 120 and 232). Sequential
+  -- scans are priced out for the two probes, so what is asserted is WHICH index serves each tab, not whether a scan won.
+  set local enable_seqscan = off;
   -- The OPEN tab: the literal predicate `state in ('open','in_progress')` restates the partial index predicate.
   execute $q$
     explain (format json)
@@ -678,8 +682,8 @@ select matches(
   'fact 7: the open-tab inbox page is served by chat_conversations_open_inbox_idx, BY NAME'
 );
 select ok(
-  (select plan from chat_plans where name = 'inbox_open') not like '%Seq Scan%',
-  'fact 7: …and the open tab is not a sequential scan'
+  (select plan from chat_plans where name = 'inbox_open') not like '%chat_conversations_inbox_idx%',
+  'fact 7: …and the open tab does not fall back to the whole-support inbox index'
 );
 select matches(
   (select plan from chat_plans where name = 'inbox_closed'),
@@ -687,8 +691,8 @@ select matches(
   'fact 7: the closed-tab inbox page is served by chat_conversations_inbox_idx, BY NAME'
 );
 select ok(
-  (select plan from chat_plans where name = 'inbox_closed') not like '%Seq Scan%',
-  'fact 7: …and the closed tab is not a sequential scan'
+  (select plan from chat_plans where name = 'inbox_closed') not like '%chat_conversations_open_inbox_idx%',
+  'fact 7: …and the closed tab never reads the open-tab partial index'
 );
 
 select * from finish();

@@ -857,7 +857,7 @@ export async function listInbox(ctx: RequestContext, query: InboxQuery): Promise
     tx.execute<InboxDbRow>(sql`
       select c.id,
              to_char(c.last_message_at at time zone 'utc', ${ISO_MICROSECONDS}) as last_message_at,
-             (c.last_message_side = 'member' and c.last_seq > c.staff_last_read_seq) as awaiting,
+             coalesce(c.last_message_side = 'member' and c.last_seq > c.staff_last_read_seq, false) as awaiting,
              ${memberIdentity},
              lm.seq::int as lm_seq,
              lm.body as lm_body,

@@ -1804,6 +1804,211 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("chat staff cases: tenant B's staff lists none of tenant A's cases, roster or history under any tab or filter, each negative beside its positive control, and a member reads neither the roster nor a history (12.4-07, CASE-23)", async () => {
+    // The team's side of a support case: `GET /v1/chat/inbox` (every tab and filter), `GET /v1/chat/staff` and
+    // `GET /v1/chat/conversations/{id}/case/history`. rede-lab has `chat` OFF in the seed, so it is turned on here and
+    // restored in `finally`.
+    const labOpen = '0b150000-0000-4000-8000-000000000001';
+    const labClosed = '0b150000-0000-4000-8000-000000000002';
+    const [labUser] = await adminSql<{ id: string }[]>`
+      select id::text as id from auth.users where email = 'member@rede-lab.local'`;
+    const labUserId = labUser?.id ?? '';
+    const staffIds = await adminSql<{ email: string; id: string }[]>`
+      select email, id::text as id from auth.users
+       where email in ('admin@rede-demo.local', 'support@rede-demo.local', 'admin@rede-lab.local')`;
+    const idOf = (email: string) => staffIds.find((row) => row.email === email)?.id ?? '';
+    const [labFlag] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+    const asHost = (token: string, host: string, path: string, init: RequestInit = {}) =>
+      api.request(path, {
+        ...init,
+        headers: {
+          authorization: `Bearer ${token}`,
+          [TENANT_HOST_HEADER]: host,
+          ...((init.headers as Record<string, string> | undefined) ?? {}),
+        },
+      });
+    /** Every conversation id of one inbox view, walked with `limit=1` so the keyset is part of the proof. */
+    const inboxIds = async (token: string, host: string, query: string) => {
+      const found: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 200; page += 1) {
+        const qs = new URLSearchParams(query);
+        qs.set('limit', '1');
+        if (cursor) qs.set('cursor', cursor);
+        const res = await asHost(token, host, `/v1/chat/inbox?${qs.toString()}`);
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          items: { conversationId: string }[];
+          nextCursor: string | null;
+        };
+        found.push(...body.items.map((item) => item.conversationId));
+        cursor = body.nextCursor;
+        if (!cursor) return found;
+      }
+      throw new Error('inbox walk did not end');
+    };
+    const expectBare404 = async (res: Response) => {
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error).not.toHaveProperty('details');
+    };
+    let demoOpen = '';
+    let demoClosed = '';
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'chat', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(tenantIds.lab);
+
+      // The lab member's two cases (one active, one closed); the lab inbox then has rows of its own.
+      for (const id of [labClosed, labOpen]) {
+        await adminSql`
+          insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+          values (${id}::uuid, ${tenantIds.lab}::uuid, 'support', ${labUserId}::uuid)`;
+        await adminSql`
+          insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+          values (${id}::uuid, ${tenantIds.lab}::uuid, ${labUserId}::uuid, 'member')`;
+        await adminSql`
+          insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+          values (${tenantIds.lab}::uuid, ${id}::uuid, ${labUserId}::uuid, 'member', 'Oi, laboratório.')`;
+        if (id === labClosed) {
+          await adminSql`
+            update public.chat_conversations
+               set state = 'closed', closed_at = now(), staff_last_read_seq = last_seq
+             where id = ${labClosed}::uuid`;
+        }
+      }
+      // The demo member's two cases, written through the API (one closed after the fact).
+      const send = async (token: string) => {
+        const res = await asHost(token, HOSTS.demo, '/v1/chat/support/messages', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ body: 'Oi, preciso de ajuda com meu cadastro.' }),
+        });
+        expect(res.status).toBe(201);
+        return ((await res.json()) as { conversationId: string }).conversationId;
+      };
+      const demoOwner = await throwawayMember(
+        tenantIds.demo,
+        `staffiso-open-${RUN}@rede-demo.local`,
+      );
+      const demoOther = await throwawayMember(
+        tenantIds.demo,
+        `staffiso-closed-${RUN}@rede-demo.local`,
+      );
+      demoOpen = await send(demoOwner);
+      demoClosed = await send(demoOther);
+      await adminSql`
+        update public.chat_conversations
+           set state = 'closed', closed_at = now(), staff_last_read_seq = last_seq
+         where id = ${demoClosed}::uuid`;
+
+      // Positive controls: each team lists its own cases under the matching tab, on its own host.
+      expect(await inboxIds(tokens.demoAdmin, HOSTS.demo, '')).toContain(demoOpen);
+      expect(await inboxIds(tokens.demoAdmin, HOSTS.demo, 'tab=closed')).toContain(demoClosed);
+      expect(await inboxIds(tokens.labAdmin, HOSTS.lab, '')).toContain(labOpen);
+      expect(await inboxIds(tokens.labAdmin, HOSTS.lab, 'tab=closed')).toContain(labClosed);
+
+      // Negatives: under every tab and every filter, neither team lists a row of the other tenant.
+      const views = [
+        '',
+        'tab=open',
+        'tab=resolved',
+        'tab=closed',
+        'owner=none',
+        'owner=me',
+        'priority=normal',
+        'awaiting=1',
+        'tab=closed&owner=none&priority=normal',
+      ];
+      for (const view of views) {
+        const lab = await inboxIds(tokens.labAdmin, HOSTS.lab, view);
+        const demo = await inboxIds(tokens.demoAdmin, HOSTS.demo, view);
+        expect(lab, `lab ${view}`).not.toContain(demoOpen);
+        expect(lab, `lab ${view}`).not.toContain(demoClosed);
+        expect(demo, `demo ${view}`).not.toContain(labOpen);
+        expect(demo, `demo ${view}`).not.toContain(labClosed);
+      }
+
+      // The roster: each team lists its own staff and never the other's.
+      const roster = async (token: string, host: string) => {
+        const res = await asHost(token, host, '/v1/chat/staff');
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { items: { userId: string }[] }).items.map(
+          (item) => item.userId,
+        );
+      };
+      const demoRoster = await roster(tokens.demoAdmin, HOSTS.demo);
+      const labRoster = await roster(tokens.labAdmin, HOSTS.lab);
+      expect(demoRoster).toEqual(
+        expect.arrayContaining([idOf('admin@rede-demo.local'), idOf('support@rede-demo.local')]),
+      );
+      expect(labRoster).toContain(idOf('admin@rede-lab.local'));
+      expect(demoRoster).not.toContain(idOf('admin@rede-lab.local'));
+      expect(labRoster).not.toContain(idOf('admin@rede-demo.local'));
+      expect(labRoster).not.toContain(idOf('support@rede-demo.local'));
+
+      // The history: each team reads its own case; the other tenant's id is a bare 404.
+      const history = (token: string, host: string, id: string) =>
+        asHost(token, host, `/v1/chat/conversations/${id}/case/history`);
+      const demoHistory = await history(tokens.demoAdmin, HOSTS.demo, demoOpen);
+      expect(demoHistory.status).toBe(200);
+      expect(
+        ((await demoHistory.json()) as { events: { kind: string }[] }).events.map((e) => e.kind),
+      ).toContain('opened');
+      expect((await history(tokens.labAdmin, HOSTS.lab, labOpen)).status).toBe(200);
+      await expectBare404(await history(tokens.labAdmin, HOSTS.lab, demoOpen));
+      await expectBare404(await history(tokens.labAdmin, HOSTS.lab, demoClosed));
+      await expectBare404(await history(tokens.demoAdmin, HOSTS.demo, labOpen));
+      await expectBare404(await history(tokens.demoAdmin, HOSTS.demo, labClosed));
+
+      // A member reads neither the roster nor a history, not even of their own case (T-12.4-31).
+      for (const [token, host, own] of [
+        [demoOwner, HOSTS.demo, demoOpen],
+        [tokens.labMember, HOSTS.lab, labOpen],
+      ] as const) {
+        const refusedRoster = await asHost(token, host, '/v1/chat/staff');
+        expect(refusedRoster.status).toBe(403);
+        expect(await code(refusedRoster)).toBe('FORBIDDEN');
+        const refusedHistory = await history(token, host, own);
+        expect(refusedHistory.status).toBe(403);
+        expect(await code(refusedHistory)).toBe('FORBIDDEN');
+      }
+
+      // A demo session on the lab's registered host is refused before any read (D-23).
+      for (const path of [
+        '/v1/chat/inbox',
+        '/v1/chat/inbox?tab=closed',
+        '/v1/chat/staff',
+        `/v1/chat/conversations/${demoOpen}/case/history`,
+      ]) {
+        const refused = await asHost(tokens.demoAdmin, HOSTS.lab, path);
+        expect(refused.status).toBe(403);
+        expect(await code(refused)).toBe('TENANT_HOST_MISMATCH');
+      }
+    } finally {
+      await adminSql`
+        delete from public.chat_conversations where id in (${labClosed}::uuid, ${labOpen}::uuid)`;
+      for (const id of [demoOpen, demoClosed]) {
+        if (id) await adminSql`delete from public.chat_conversations where id = ${id}::uuid`;
+      }
+      if (labFlag) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${labFlag.enabled}
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+      }
+      moduleFlags.invalidate(tenantIds.lab);
+    }
+  });
+
   it('phase 7 sweep: every Phase 7 route answers a demo session about its own tenant only, each block beside its positive control (07-11, TENANT-05)', async () => {
     // The route inventory this case closes (07-11). "b10/b11/b12" = already covered by that case;
     // "sweep" = asserted below. Every negative sits beside a demo positive control in this test, and

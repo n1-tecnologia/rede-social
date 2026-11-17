@@ -111,7 +111,7 @@ describe('case staff inbox', () => {
 async function walk(token: string, query: string, limit = 50): Promise<InboxRow[]> {
   const rows: InboxRow[] = [];
   let cursor: string | null = null;
-  for (let page = 0; page < 40; page += 1) {
+  for (let page = 0; page < 200; page += 1) {
     const qs = new URLSearchParams(query);
     qs.set('limit', String(limit));
     if (cursor) qs.set('cursor', cursor);
@@ -581,5 +581,169 @@ describe('case staff roster', () => {
     expect(res.body.error.code).toBe('FORBIDDEN');
     expect(staffRosterSchema.parse({ items: [] })).toEqual({ items: [] });
     expect(() => staffRosterSchema.parse({ items: [{ userId: 'x', name: 'y' }] })).toThrow();
+  });
+});
+
+describe('case staff edges', () => {
+  const order = (rows: readonly InboxRow[]) => rows.map((row) => row.conversationId);
+
+  it('EP-050 adjacency: two cases at the same instant are ordered by id descending and a limit=1 walk visits both once in every tab', async () => {
+    const { tokens } = await caseKit();
+    const a = await throwawayMember('ep050-a');
+    const b = await throwawayMember('ep050-b');
+    const sa = await send(a.token, { body: 'Empate A' });
+    const sb = await send(b.token, { body: 'Empate B' });
+    const pair = [sa.conversationId, sb.conversationId];
+    const expected = [...pair].sort().reverse();
+    const tie = new Date('2026-11-01T12:00:00.123456Z');
+    const tieAll = () => adminSql`
+      update public.chat_conversations set last_message_at = ${tie}
+       where id in (${sa.conversationId}::uuid, ${sb.conversationId}::uuid)`;
+    const mine = new Set(pair);
+    const check = async (tab: string) => {
+      await tieAll();
+      const stepped = await walk(tokens.demoSupport, `tab=${tab}`, 1);
+      const seen = order(stepped);
+      expect(new Set(seen).size, `${tab}: no row repeats`).toBe(seen.length);
+      expect(
+        seen.filter((id) => mine.has(id)),
+        `${tab}: both visited, id descending`,
+      ).toEqual(expected);
+      // The same order as one big page.
+      const whole = await walk(tokens.demoSupport, `tab=${tab}`, 50);
+      expect(order(whole)).toEqual(seen);
+    };
+    await check('open');
+    for (const id of pair) await setCase(id, { state: 'resolved' });
+    await check('resolved');
+    for (const id of pair) await closeAsAdmin(id);
+    await check('closed');
+  });
+
+  it('EP-051 empty: a tab with no case, an owner with no case and an unknown owner answer an empty page; a malformed owner degrades to all owners', async () => {
+    const { tokens, ids } = await caseKit();
+    await sweepCases();
+    const member = await throwawayMember('ep051');
+    const sent = await send(member.token, { body: 'Só um caso' });
+    const empty = { items: [], nextCursor: null };
+    for (const tab of ['resolved', 'closed']) {
+      expect(await inbox(tokens.demoSupport, `?tab=${tab}`)).toEqual(empty);
+    }
+    // An owner who owns nothing, and a well-formed uuid that names nobody.
+    expect(await inbox(tokens.demoSupport, `?owner=${ids.demoAdmin}`)).toEqual(empty);
+    expect(await inbox(tokens.demoSupport, `?owner=${crypto.randomUUID()}`)).toEqual(empty);
+    // The admin owns nothing (the seeded thread was taken by the support lane when staff first answered it).
+    expect(await inbox(tokens.demoAdmin, '?owner=me')).toEqual(empty);
+    // A malformed owner is the same as no owner at all.
+    const everyone = await inbox(tokens.demoSupport, '');
+    expect(order(everyone.items)).toContain(sent.conversationId);
+    for (const bad of ['not-a-uuid', '123', 'me%20', 'ME', '%00']) {
+      expect(order((await inbox(tokens.demoSupport, `?owner=${bad}`)).items)).toEqual(
+        order(everyone.items),
+      );
+    }
+  });
+
+  it('EP-052 encoding: tab, priority and owner compare exact lowercase literals, so Open and HIGH degrade to the default', async () => {
+    const { tokens, ids } = await caseKit();
+    const a = await throwawayMember('ep052-a');
+    const b = await throwawayMember('ep052-b');
+    const c = await throwawayMember('ep052-c');
+    const sa = await send(a.token, { body: 'Normal' });
+    const sb = await send(b.token, { body: 'Alta' });
+    const sc = await send(c.token, { body: 'Fechado' });
+    await setCase(sb.conversationId, {
+      state: 'in_progress',
+      owner: ids.demoSupport,
+      priority: 'high',
+    });
+    await closeAsAdmin(sc.conversationId);
+    const mine = new Set([sa.conversationId, sb.conversationId, sc.conversationId]);
+    const only = async (query: string) =>
+      idsOf((await walk(tokens.demoSupport, query)) as InboxRow[], mine);
+    const open = await only('');
+    expect(new Set(open)).toEqual(new Set([sa.conversationId, sb.conversationId]));
+    for (const tab of ['Open', 'OPEN', ' open', 'open ', 'closed%20', 'CLOSED', 'Resolved']) {
+      expect(await only(`tab=${tab}`), `tab=${tab} is the default tab`).toEqual(open);
+    }
+    expect(await only('tab=closed')).toEqual([sc.conversationId]);
+    // `priority=HIGH` is not `high`: it degrades to no priority filter, so the normal case is still listed.
+    for (const priority of ['HIGH', 'High', 'urgent', '']) {
+      expect(await only(`priority=${priority}`), `priority=${priority}`).toEqual(open);
+    }
+    expect(await only('priority=high')).toEqual([sb.conversationId]);
+    // `owner=ME` and `owner=NONE` are not the literals: no owner filter.
+    for (const owner of ['ME', 'None', 'NONE']) {
+      expect(await only(`owner=${owner}`), `owner=${owner}`).toEqual(open);
+    }
+    expect(await only('owner=me')).toEqual([sb.conversationId]);
+    expect(await only('owner=none')).toEqual([sa.conversationId]);
+  });
+
+  it('EP-053 ordering: every tab sorts by latest activity, the filters never change the order and a case with no message sorts first and is walked past', async () => {
+    const { tokens, ids } = await caseKit();
+    const x = await throwawayMember('ep053-x');
+    const y = await throwawayMember('ep053-y');
+    const z = await throwawayMember('ep053-z');
+    const empty = await throwawayMember('ep053-empty');
+    const sx = await send(x.token, { body: 'Mais antigo' });
+    const sy = await send(y.token, { body: 'Do meio' });
+    const sz = await send(z.token, { body: 'Mais novo' });
+    // A case that nobody wrote in yet: the admin lane creates it (the API creates a case with its first message).
+    const [noMessage] = await adminSql<{ id: string }[]>`
+      insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+      values (${ids.demo}::uuid, 'support', ${empty.id}::uuid)
+      returning id::text as id`;
+    const noMessageId = noMessage?.id ?? '';
+    await adminSql`
+      update public.chat_conversations set last_message_at = '2026-11-02T10:00:00Z' where id = ${sx.conversationId}::uuid`;
+    await adminSql`
+      update public.chat_conversations set last_message_at = '2026-11-02T11:00:00Z' where id = ${sy.conversationId}::uuid`;
+    await adminSql`
+      update public.chat_conversations set last_message_at = '2026-11-02T12:00:00Z' where id = ${sz.conversationId}::uuid`;
+    await setCase(sy.conversationId, {
+      state: 'in_progress',
+      owner: ids.demoAdmin,
+      priority: 'high',
+    });
+    const mine = new Set([sx.conversationId, sy.conversationId, sz.conversationId, noMessageId]);
+
+    // The default tab: the case with no message first, then newest to oldest.
+    const whole = await walk(tokens.demoSupport, '', 50);
+    expect(idsOf(whole, mine)).toEqual([
+      noMessageId,
+      sz.conversationId,
+      sy.conversationId,
+      sx.conversationId,
+    ]);
+    const bare = whole.find((row) => row.conversationId === noMessageId);
+    expect(bare).toMatchObject({ lastMessage: null, lastMessageAt: null, awaiting: false });
+    // A limit=1 walk continues past it, each row once, in the very same order.
+    const stepped = await walk(tokens.demoSupport, '', 1);
+    expect(order(stepped)).toEqual(order(whole));
+    expect(new Set(order(stepped)).size).toBe(stepped.length);
+
+    // Filters restrict the page and never reorder it.
+    for (const filter of ['owner=none', 'priority=normal', 'awaiting=1', 'owner=none&awaiting=1']) {
+      const filtered = await walk(tokens.demoSupport, filter, 1);
+      const keep = new Set(order(filtered));
+      expect(order(filtered), filter).toEqual(order(whole).filter((id) => keep.has(id)));
+    }
+
+    // The resolved and closed tabs keep the same rule.
+    for (const [tab, move] of [
+      ['resolved', (id: string) => setCase(id, { state: 'resolved' })],
+      ['closed', (id: string) => closeAsAdmin(id)],
+    ] as const) {
+      for (const id of [sx.conversationId, sz.conversationId, noMessageId]) await move(id);
+      const tabWhole = await walk(tokens.demoSupport, `tab=${tab}`, 50);
+      expect(idsOf(tabWhole, mine), tab).toEqual([
+        noMessageId,
+        sz.conversationId,
+        sx.conversationId,
+      ]);
+      const tabStepped = await walk(tokens.demoSupport, `tab=${tab}`, 1);
+      expect(order(tabStepped), tab).toEqual(order(tabWhole));
+    }
   });
 });
