@@ -2044,19 +2044,19 @@ Plans:
 **Goal:** A member's message to the tenant's support opens a case (a "chamado") for the team, who take it, answer it, resolve it and close it. Today the support chat is one conversation per member with no status, no owner and no closing, on purpose (D-221 and D-225 of Phase 7); this phase reverses that decision formally, adds the database, the API and the screens, and reuses the conversation, the messages, Realtime and the push to the support staff that already exist.
 **Scope**: Post-MVP, additive to the support chat. Chosen by Igor on 2026-11-16 as the next delivery of the "Cronograma Social e App" (its "Chamados no suporte" section), ahead of Phase 11 and the buyer-permissions delivery; the cronograma had it after both. Nothing else in the chat changes for a member who never writes to support.
 **Depends on:** Phase 07 (the support chat, Realtime, notifications and Web Push to the staff), Phase 08.7 (the owner's "Visão do dono" counters). Runs before Phase 13, which opens the web's screens inside the native app.
-**Requirements**: TBD (written in `/gsd-discuss-phase 12.4`; none exist for cases today)
-**Success Criteria** (provisional, from the cronograma; `/gsd-discuss-phase 12.4` settles them and fixes the three open decisions below):
+**Requirements**: CASE-01..CASE-29
+**Success Criteria** (from the cronograma, settled in `/gsd-discuss-phase 12.4` on 2026-11-16; decisions D-800..D-815 and D-836..D-845 in `12.4-CONTEXT.md`):
 
   1. A member who writes to support gets a case with a number and a visible status; the team sees every case of the tenant in an inbox with tabs by status.
   2. `support_tenant` and `admin_tenant` take a case, assign it, answer it, resolve it, close it and reopen it, and the case's own history records who did each step and when; a member and a user of another tenant can do none of it.
   3. The support conversations that already exist become cases with the right status, and the messages, Realtime and push to the staff keep working as they do today.
-  4. The staff is notified of a new case, a case assigned to them and a reopened case; the member's notice on resolve or close follows the decision of discuss-phase.
+  4. The staff is notified of a new case, a case assigned to them and a reopened case; the member is told, with a push and a bell row, only when the case is resolved (closing is silent).
   5. The "em aberto" and "aguardando resposta" counters and the owner's panel read the case status.
   6. Tenant isolation holds: a staff member of one tenant never sees, assigns or closes a case of another (cross-tenant negative tests in pgTAP and the API).
 
 **UI hint**: yes. The team's inbox with status tabs and the case actions, and the member's case number, status and (if several) list with "novo chamado"; the design prototype already carries protocol, category and priority screens to read first.
 
-Open decisions (for `/gsd-discuss-phase 12.4`): (1) one case per member that reopens in the same place (about 10 to 12 plans) or several cases per member, a new one after each close, the helpdesk default (about 15 to 18); the cronograma assumes the middle, about 14; (2) the states (open, in progress, resolved, closed), who may assign, whether the member can reopen, whether the member is notified on resolve or close; (3) the fields beyond the number: protocol, category and priority as in the prototype, or only status and owner.
+Decided in `/gsd-discuss-phase 12.4` (2026-11-16): (1) a new case after each close, one active at a time (about 15 to 18 plans); (2) four states Aberto, Em atendimento, Resolvido and Fechado, any staff takes and only `admin_tenant` assigns, the team closes or a 7-day sweep closes a Resolvido case, the member is told only on Resolvido; (3) subject, a fixed category list and a priority set by the staff, no attachments. The UI contract and the approved sketch 023 are `12.4-UI-SPEC.md` and `.planning/sketches/023-phase-12.4-designed-screens/`.
 
 **Plans:** 0 plans
 
