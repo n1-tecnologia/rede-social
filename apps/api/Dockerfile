@@ -46,6 +46,17 @@ ENV NODE_ENV=production \
     MIGRATIONS_DIR=/app/migrations
 COPY --from=builder --chown=node:node /app /app
 COPY --from=pruner --chown=node:node /repo/migrations-out /app/migrations
+# D-863 (12.5): voice recordings are normalized by the worker's derive job, which spawns ffmpeg and ffprobe. They are
+# a SYSTEM dependency (the signed Debian repository, approved by the owner on 2026-11-17), not an npm package. This is
+# the one image of the api, worker and migrate roles (D-18, D-544), so the binaries land in all three. Installed as
+# root, BEFORE `USER node`; the apt lists go in the same layer; the build log prints the installed versions. apt is not
+# version-pinned on purpose (the Debian security channel moves the patch version): the version is recorded in the plan
+# summary instead.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && ffmpeg -version | head -n 1 \
+    && ffprobe -version | head -n 1
 USER node
 EXPOSE 8080
 # Cloud Run sends SIGTERM; src/main.ts drains the server itself, so no init shim is needed.
