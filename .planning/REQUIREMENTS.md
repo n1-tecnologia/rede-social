@@ -411,8 +411,8 @@ Phase 10.2 lets a paid event carry an optional registration-opening date: before
 
 Phase 12.4 turns the member's one support thread into a numbered case with a state, an owner, a subject, a category and a priority: the team takes, answers, resolves and closes it, the member sees its number and state and a list of past cases, the existing conversations become cases, and the owner's Atendimento panel reads per case (D-800..D-815, UI-D-816..UI-D-835). `kind = 'direct'` and `'group'` conversations are not touched.
 
-- [ ] **CASE-01**: A support conversation is a case: `chat_conversations` of kind `support` gains a number, a state, an owner, a category, a priority and the resolve and close instants, all added expand-only; `direct` and `group` rows keep every case column null; a per-tenant counter table and an append-only case-events table are added, each with RLS and a tenant-first index *(D-800, D-810, D-804)*
-- [ ] **CASE-02**: The case number is sequential per tenant starting at 1, assigned by the database only to rows that exist (a skipped `on conflict do nothing` insert consumes none), gapless under rollback, distinct under 20 concurrent opens in one tenant, shown as `#N` and never used as a lookup key *(D-804, UI-D-816)*
+- [x] **CASE-01**: A support conversation is a case: `chat_conversations` of kind `support` gains a number, a state, an owner, a category, a priority and the resolve and close instants, all added expand-only; `direct` and `group` rows keep every case column null; a per-tenant counter table and an append-only case-events table are added, each with RLS and a tenant-first index *(D-800, D-810, D-804)*
+- [x] **CASE-02**: The case number is sequential per tenant starting at 1, assigned by the database only to rows that exist (a skipped `on conflict do nothing` insert consumes none), gapless under rollback, distinct under 20 concurrent opens in one tenant, shown as `#N` and never used as a lookup key *(D-804, UI-D-816)*
 - [ ] **CASE-03**: A member has at most one active case: a partial unique index on (tenant, member) where the kind is support and the state is not closed replaces the one-per-member index; 20 concurrent first messages create exactly one case, and a message after `Fechado` opens a new case with a new number while the old one stays as history *(D-801, D-802)*
 - [ ] **CASE-04**: A case is `Aberto`, `Em atendimento`, `Resolvido` or `Fechado` (stored as `open`, `in_progress`, `resolved`, `closed`); CHECK constraints make a case with no owner `Aberto`, an owned open case `Em atendimento`, and tie the resolve and close instants to their states *(D-805, D-806)*
 - [ ] **CASE-05**: The database enforces the transition table (take, assign, resolve, close, reopen, edit, and the three automatic moves); an illegal move, a stale expected state and any message on a `Fechado` case are refused with stable codes, for every writer *(D-805, D-801, UI-D-817, UI-D-827)*
@@ -435,7 +435,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [ ] **CASE-22**: The owner's Atendimento counts per case: awaiting active cases, first response per case, cases opened per week, cases answered per staff member (names only), and "Atendimentos por assunto" by category over 30 days (counts only); the overview alert and the member detail line read the same rules; the builder payload version is 9 and an older snapshot still parses *(D-813, D-815, UI-D-831, EP-43)*
 - [ ] **CASE-23**: Every new or changed table, column, policy, definer, trigger, route, signal, notification source and sweep carries a cross-tenant negative with a positive control (pgTAP and integration); staff of tenant A can never read, take, assign, edit, resolve or close a case of tenant B, and a member never reads another member's case, number or history *(D-810, TICK-21 extended)*
 - [ ] **CASE-24**: Every new schema is `.strict()`; the new refusal codes (`case_stale`, `case_closed`, `transition_not_allowed`, `assignee_invalid`, `subject_too_long`, `case_nothing_to_edit`) join the closed `CHAT_ISSUES` list and are pinned by a contract test; `chat.support.assign` is published with the other chat permissions; the module README lists the new events, permission and sweep function *(D-806, MOD-05)*
-- [ ] **CASE-25**: Direct and group conversations keep every rule they have today: no number, state, counter row, event or sweep ever touches them, proved by a test that inserts one beside a case *(D-800)*
+- [x] **CASE-25**: Direct and group conversations keep every rule they have today: no number, state, counter row, event or sweep ever touches them, proved by a test that inserts one beside a case *(D-800)*
 - [ ] **CASE-26**: The release is expand-only and ordered (migrations on every tenant database, then web, then API and worker from a rebuilt image); the one allowed destructive statement is the replacement of the one-per-member index; the previous API revision's failing window is named in `docs/DEPLOY.md` and the ledger *(D-814, D-802)*
 - [ ] **CASE-27**: Every user-visible string is pt-BR in the host catalogs or the chat server copy file, the words "ticket", "protocolo", "SLA", "atendente" and (on a member screen) "prioridade" appear nowhere, and `scripts/check-ui-literals.sh` passes *(UI-D-816, UI-D-834)*
 - [ ] **CASE-28**: The first real walk of a case on a phone against a homolog or production tenant (open, answer, take, resolve with the bell and a real push, reopen by reply, close, open a new case) is proved by the owner and recorded in the ledger *(D-801..D-808)*
@@ -1099,8 +1099,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OPEN-25 | Phase 10.2 | Complete |
 | OPEN-26 | Phase 10.2 | Pending |
 | OPEN-27 | Phase 10.2 | Pending |
-| CASE-01 | Phase 12.4 | Pending |
-| CASE-02 | Phase 12.4 | Pending |
+| CASE-01 | Phase 12.4 | Complete |
+| CASE-02 | Phase 12.4 | Complete |
 | CASE-03 | Phase 12.4 | Pending |
 | CASE-04 | Phase 12.4 | Pending |
 | CASE-05 | Phase 12.4 | Pending |
@@ -1123,7 +1123,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-22 | Phase 12.4 | Pending |
 | CASE-23 | Phase 12.4 | Pending |
 | CASE-24 | Phase 12.4 | Pending |
-| CASE-25 | Phase 12.4 | Pending |
+| CASE-25 | Phase 12.4 | Complete |
 | CASE-26 | Phase 12.4 | Pending |
 | CASE-27 | Phase 12.4 | Pending |
 | CASE-28 | Phase 12.4 | Pending |

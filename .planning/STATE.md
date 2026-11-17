@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "10.2"
-current_phase_name: Abertura das inscrições do evento com contagem regressiva
-current_plan: 1
-status: human_needed
-stopped_at: "Phase 10.2 executed 2026-11-14: 16/16 plans, review fixed, verification human_needed (UAT 8 groups, ledger P1..P18 are Igor's); phase not marked complete; pushed to origin/master 2026-11-16 (run 43866055430 stopped at checks on two 10.2 tests, fixed by quick 261116-hj0, second push pending deploy)"
-last_updated: "2026-11-16T22:44:40.238Z"
-last_activity: 2026-11-16
-last_activity_desc: Phase 10.2 execution started
-state_head: 11a329f7fefaaae88e6e12c83f00fe54dcda92f5
+current_phase: "12.4"
+current_phase_name: Abertura de chamado no suporte
+current_plan: 2
+status: executing
+stopped_at: Completed 12.4-01-PLAN.md
+last_updated: "2026-11-17T08:33:22.727Z"
+last_activity: 2026-11-17
+last_activity_desc: Phase 12.4 execution started
+state_head: dfe46a8e03cde435a34858885b279b85fb9df395
 progress:
   total_phases: 34
   completed_phases: 0
-  total_plans: 451
-  completed_plans: 423
+  total_plans: 471
+  completed_plans: 424
   percent: 0
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 10.2 — Abertura das inscrições do evento com contagem regressiva
+**Current focus:** Phase 12.4 — Abertura de chamado no suporte
 
 ## Current Position
 
-Phase: 10.2 (Abertura das inscrições do evento com contagem regressiva) — EXECUTING
-Current Plan: 1
-Total Plans in Phase: 16
-Plan: 1 of 16
-Status: Executing Phase 10.2
-Last activity: 2026-11-16 - Completed quick task 261116-hj0: Fix the two Phase 10.2 tests that failed in CI run 43866055430
+Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
+Current Plan: 2
+Total Plans in Phase: 20
+Plan: 2 of 20
+Status: Ready to execute
+Last activity: 2026-11-17 — Phase 12.4 execution started
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -372,6 +372,7 @@ Progress: [███████████████████░] 160/162
 | Phase 10.1 P13 | 12min | 3 tasks | 25 files |
 | Phase 10.1 P14 | 14 min | 3 tasks | 15 files |
 | Phase 10.1 P15 | 34min | 3 tasks | 6 files |
+| Phase 12.4 P01 | 12 min | 4 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -1152,6 +1153,7 @@ Recent decisions affecting current work:
 - [Phase 10.1]: 10.1-12: the paid zone's polite live region is sticky; it holds the shipped zone after the webhook swap so the confirmation is announced; a cancelled or ended paid event draws none — A region that unmounts with the content it should announce is silent; an empty wrapper would add a gap to the card body
 - [Phase 10.1]: 10.1-15: the Phase 10.1 release order is migrations, web, then API and worker together (the web reads every new key as optional; the API needs the migrated columns) — Written in docs/DEPLOY.md under the Order subsection with its reason; it is the reverse of the 08.x to 12.x releases
 - [Phase 10.1]: 10.1-15: the paid-event spec drains the notification fan-out backlog and waits for the page's Realtime join before sending the tracer delivery — Cold runs lost the swap to 58 integration-suite fan-out jobs and to a join that had not happened; the product was not at fault
+- [Phase 12.4]: 12.4-01: counter table has all lane privileges revoked (42501), not only no policy; coherence CHECKs follow RESEARCH Q1 (closing clears resolved_at) — Defense in depth for T-12.4-02; plan 02 and later actions must clear resolved_at on close
 
 ### Pending Todos
 
@@ -1286,6 +1288,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-14T13:16:30.228Z
-Stopped at: Phase 10.2 executed 2026-11-14: 16/16 plans, review fixed, verification human_needed (UAT 8 groups, ledger P1..P18 are Igor's); phase not marked complete; pushed to origin/master 2026-11-16 (run 43866055430 stopped at checks on two 10.2 tests, fixed by quick 261116-hj0, second push pending deploy)
-Resume file: .planning/phases/10.2-abertura-das-inscricoes-do-evento-com-contagem-regressiva/10.2-UAT.md
+Last session: 2026-11-17T08:33:22.413Z
+Stopped at: Completed 12.4-01-PLAN.md
+Resume file: None
