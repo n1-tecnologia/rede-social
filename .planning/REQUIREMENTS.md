@@ -418,11 +418,11 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **CASE-05**: The database enforces the transition table (take, assign, resolve, close, reopen, edit, and the three automatic moves); an illegal move, a stale expected state and any message on a `Fechado` case are refused with stable codes, for every writer *(D-805, D-801, UI-D-817, UI-D-827)*
 - [x] **CASE-06**: A member message on a `Resolvido` case moves it to `Aberto` in the same case, clears the owner, records a `reopened` event and notifies the team; a member message on a `Fechado` case never touches it and opens a new case, including when the close races the message *(D-805, D-809, A-UI-9)*
 - [x] **CASE-07**: Any `chat.support` holder may reply to any case; a reply to an unowned `Aberto` case takes it for the replier (`Em atendimento`) in the same transaction, a reply to an owned case or to a `Resolvido` case changes neither owner nor state *(D-806, A-UI-1, UI-D-828)*
-- [ ] **CASE-08**: Any staff member takes a case for themselves (a take-over of another person's case needs the expected owner); only the `chat.support.assign` holder (`admin_tenant`) assigns, only to a live staff member of the same tenant; the permission is declared in the chat manifest and re-enforced by the database role literal, pinned by the drift test *(D-806, UI-D-826)*
+- [x] **CASE-08**: Any staff member takes a case for themselves (a take-over of another person's case needs the expected owner); only the `chat.support.assign` holder (`admin_tenant`) assigns, only to a live staff member of the same tenant; the permission is declared in the chat manifest and re-enforced by the database role literal, pinned by the drift test *(D-806, UI-D-826)*
 - [x] **CASE-09**: The team resolves from `Aberto` or `Em atendimento`, closes from any state, and reopens `Resolvido` only (to `Aberto` with no owner, the member not told); resolve and close mark the case read for the team; every action carries the state the screen showed and a stale action answers `409 case_stale` with the case unchanged *(D-805, D-807, UI-D-827, UI-D-830)*
-- [ ] **CASE-10**: The member sets the category (five fixed codes, `Outro` default) and an optional subject (80 code points) only on the message that opens the case; the priority is born `Normal` and unreachable to the member; staff edit category, subject and priority of a case that is not `Fechado`; unknown or forbidden keys are `400` and write nothing *(D-811, D-812)*
+- [x] **CASE-10**: The member sets the category (five fixed codes, `Outro` default) and an optional subject (80 code points) only on the message that opens the case; the priority is born `Normal` and unreachable to the member; staff edit category, subject and priority of a case that is not `Fechado`; unknown or forbidden keys are `400` and write nothing *(D-811, D-812)*
 - [x] **CASE-11**: A case without a typed subject shows the start of its first message, one line cut on a word at 80 characters with `…` only when it cut; a migrated case has no stored subject and shows the same fallback *(D-812, D-814, UI-D-819)*
-- [ ] **CASE-12**: Every step (opened, taken, assigned, resolved, closed, reopened, a field changed) is an append-only, tenant-scoped row with actor, instant and states; the automatic close has no actor; no lane can update or delete it; only staff read it; a member never does *(D-810, UI-D-829, UI-D-835)*
+- [x] **CASE-12**: Every step (opened, taken, assigned, resolved, closed, reopened, a field changed) is an append-only, tenant-scoped row with actor, instant and states; the automatic close has no actor; no lane can update or delete it; only staff read it; a member never does *(D-810, UI-D-829, UI-D-835)*
 - [x] **CASE-13**: A case that stayed `Resolvido` for 7 days (fixed in code) is closed by the hourly worker sweep, idempotently, skipping a row a member message is changing, with a history row with no actor and a live signal, never a notice, for every tenant of the project and only through its own tenant's rows *(D-807, D-808)*
 - [ ] **CASE-14**: The member's thread read answers the active case (null when none, which shows the opener) and whether any case exists; "Meus chamados" answers the current case and the closed ones newest first, 20 per page by keyset, own cases only; a closed case opens read-only and a foreign id is the bare 404 *(D-803, UI-D-818, UI-D-821)*
 - [x] **CASE-15**: The first-message route returns the case (id, number, whether it opened or reopened it) as optional keys; every existing response shape of the chat routes is unchanged and every new key is `.optional()` *(D-812, UI-D-820)*
@@ -437,7 +437,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **CASE-24**: Every new schema is `.strict()`; the new refusal codes (`case_stale`, `case_closed`, `transition_not_allowed`, `assignee_invalid`, `subject_too_long`, `case_nothing_to_edit`) join the closed `CHAT_ISSUES` list and are pinned by a contract test; `chat.support.assign` is published with the other chat permissions; the module README lists the new events, permission and sweep function *(D-806, MOD-05)*
 - [x] **CASE-25**: Direct and group conversations keep every rule they have today: no number, state, counter row, event or sweep ever touches them, proved by a test that inserts one beside a case *(D-800)*
 - [ ] **CASE-26**: The release is expand-only and ordered (migrations on every tenant database, then web, then API and worker from a rebuilt image); the one allowed destructive statement is the replacement of the one-per-member index; the previous API revision's failing window is named in `docs/DEPLOY.md` and the ledger *(D-814, D-802)*
-- [ ] **CASE-27**: Every user-visible string is pt-BR in the host catalogs or the chat server copy file, the words "ticket", "protocolo", "SLA", "atendente" and (on a member screen) "prioridade" appear nowhere, and `scripts/check-ui-literals.sh` passes *(UI-D-816, UI-D-834)*
+- [x] **CASE-27**: Every user-visible string is pt-BR in the host catalogs or the chat server copy file, the words "ticket", "protocolo", "SLA", "atendente" and (on a member screen) "prioridade" appear nowhere, and `scripts/check-ui-literals.sh` passes *(UI-D-816, UI-D-834)*
 - [ ] **CASE-28**: The first real walk of a case on a phone against a homolog or production tenant (open, answer, take, resolve with the bell and a real push, reopen by reply, close, open a new case) is proved by the owner and recorded in the ledger *(D-801..D-808)*
 - [ ] **CASE-29**: After the migration reaches a hosted project the owner reads the per-state counts, the number range per tenant and the release-day experience of a member with a migrated case, and records them in the ledger; the 7-day close is observed on a case whose `resolved_at` is set back by hand on homolog *(D-814, D-807)*
 
@@ -1106,11 +1106,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-05 | Phase 12.4 | Complete |
 | CASE-06 | Phase 12.4 | Complete |
 | CASE-07 | Phase 12.4 | Complete |
-| CASE-08 | Phase 12.4 | Pending |
+| CASE-08 | Phase 12.4 | Complete |
 | CASE-09 | Phase 12.4 | Complete |
-| CASE-10 | Phase 12.4 | Pending |
+| CASE-10 | Phase 12.4 | Complete |
 | CASE-11 | Phase 12.4 | Complete |
-| CASE-12 | Phase 12.4 | Pending |
+| CASE-12 | Phase 12.4 | Complete |
 | CASE-13 | Phase 12.4 | Complete |
 | CASE-14 | Phase 12.4 | Pending |
 | CASE-15 | Phase 12.4 | Complete |
@@ -1125,7 +1125,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-24 | Phase 12.4 | Complete |
 | CASE-25 | Phase 12.4 | Complete |
 | CASE-26 | Phase 12.4 | Pending |
-| CASE-27 | Phase 12.4 | Pending |
+| CASE-27 | Phase 12.4 | Complete |
 | CASE-28 | Phase 12.4 | Pending |
 | CASE-29 | Phase 12.4 | Pending |
 | DBT-01 | Phase 09.2 (plans 02, 14) | Complete |

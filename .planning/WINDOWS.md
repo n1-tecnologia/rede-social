@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 87
+open_count: 86
 waived_count: 0
-fixed_count: 62
+fixed_count: 63
 total_count: 149
-last_updated: 2026-11-17T12:00:44.425Z
+last_updated: 2026-11-17T12:17:12.347Z
 ---
 
 # Broken Windows Ledger
@@ -163,7 +163,7 @@ last_updated: 2026-11-17T12:00:44.425Z
 | 146 | 10.1 | unrun-verify | apps/web/app/(app)/eventos/[eventId]/participantes/ParticipantsList.tsx |  | Participantes against a live API is unproven: a manual release from Pagamentos shows the row as Pago, a courtesy release then removal round-trips, and the sheet search/holders reads on a real tenant; unit tests cover the draw only (plan 10.1-14) | open |  | 2026-11-13T12:28:00.371Z |  |
 | 147 | 10.1 | unrun-verify | .planning/phases/10.1-rede-social-ingresso-pago-do-evento-pela-kiwify/10.1-MANUAL-PROOFS.md |  | TICK-24: the first real sale of a real gateway product and its real refund are unproven (ledger row P1); every sale so far used the fake adapter | open |  | 2026-11-13T12:59:08.684Z |  |
 | 148 | 10.1 | unrun-verify | .planning/phases/10.1-rede-social-ingresso-pago-do-evento-pela-kiwify/10.1-MANUAL-PROOFS.md |  | UI-04: the paid-event screens (form section, buy zone, confirmed block, doors, Participantes, Pagamentos rows) were not walked on a real phone at 320 and 390 px in both themes under a tenant brand (ledger row P2) | open |  | 2026-11-13T12:59:08.764Z |  |
-| 149 | 12.4 | stub | apps/web/app/(app)/suporte/ThreadPane.tsx |  | 12.4-15: the staff rows 'Atribuir a…', 'Editar…' and 'Ver detalhes…' only set data-staff-sheet; the sheets are plan 12.4-19's | open |  | 2026-11-17T12:00:44.425Z |  |
+| 149 | 12.4 | stub | apps/web/app/(app)/suporte/ThreadPane.tsx |  | 12.4-15: the staff rows 'Atribuir a…', 'Editar…' and 'Ver detalhes…' only set data-staff-sheet; the sheets are plan 12.4-19's | fixed |  | 2026-11-17T12:00:44.425Z | 2026-11-17T12:17:12.347Z |
 
 ````json
 [
@@ -1950,10 +1950,10 @@ last_updated: 2026-11-17T12:00:44.425Z
     "file": "apps/web/app/(app)/suporte/ThreadPane.tsx",
     "line": null,
     "description": "12.4-15: the staff rows 'Atribuir a…', 'Editar…' and 'Ver detalhes…' only set data-staff-sheet; the sheets are plan 12.4-19's",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-11-17T12:00:44.425Z",
-    "resolved_at": null
+    "resolved_at": "2026-11-17T12:17:12.347Z"
   }
 ]
 ````
