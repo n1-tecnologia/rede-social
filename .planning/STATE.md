@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 7
+current_plan: 8
 status: executing
-stopped_at: Completed 12.4-10-PLAN.md
-last_updated: "2026-11-17T09:35:36.265Z"
+stopped_at: Completed 12.4-06-PLAN.md
+last_updated: "2026-11-17T09:49:06.143Z"
 last_activity: 2026-11-17
 last_activity_desc: Phase 12.4 execution started
-state_head: d502643f0592bb2e90385e90e57d2f7c02128727
+state_head: e77683e82223a570827fa4b910c618d967377300
 progress:
   total_phases: 34
   completed_phases: 0
   total_plans: 471
-  completed_plans: 429
+  completed_plans: 430
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
-Current Plan: 7
+Current Plan: 8
 Total Plans in Phase: 20
-Plan: 7 of 20
+Plan: 8 of 20
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.4 execution started
 
@@ -378,6 +378,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12.4 P04 | 8min | 3 tasks | 8 files |
 | Phase 12.4 P05 | 6 min | 3 tasks | 7 files |
 | Phase 12.4 P10 | 14 min | 3 tasks | 20 files |
+| Phase 12.4 P06 | 25 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -1165,6 +1166,7 @@ Recent decisions affecting current work:
 - [Phase 12.4]: 12.4-05: a case is identified by its conversation id; the member case schema is a separate strict shape with no priority, owner or history
 - [Phase 12.4]: 12.4-05: chat.case_resolved and chat.case_assigned are declared on the EventMap but named in plain prose in the chat README until the routes emit them (README drift test)
 - [Phase 12.4]: 12.4-10: the second custom migration (dashboard_cases_first_response) holds the final app.dashboard_area_support; builder payload version 9 covers both files
+- [Phase 12.4]: 12.4-06: opened comes from returning id of the creating insert and reopened from the pre-insert state, never both — category and subject are written only by the creating insert so a racing device applies none
 
 ### Pending Todos
 
@@ -1299,6 +1301,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-17T09:35:35.947Z
-Stopped at: Completed 12.4-10-PLAN.md
+Last session: 2026-11-17T09:49:05.826Z
+Stopped at: Completed 12.4-06-PLAN.md
 Resume file: None

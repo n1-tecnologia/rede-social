@@ -29,3 +29,9 @@ Run 1 (`turbo typecheck test --continue --concurrency=4`, load 1.9): 1 failed of
 | `apps/api/tests/integration/dashboard-owner-members.test.ts` | "gate on: B and C leave every active-member figure by exactly the cut members, A stays, the other areas do not move" (line 591) | `after.others` differs from `baseline.others` in the CONTENT area only (`reactivated` 0 to 1 and more, a `new` band 4 to 0); no support key differs | Seed and time drift on the local stack (members of rede-lab whose reactivation association changes once the payments gate cuts members, dates now a month past the seed). Content area is untouched by 12.4-10; fails when the file runs alone as well. Not chased. |
 
 The other eight dashboard integration files (135 tests) and the whole pgTAP suite pass apart from the three known failures listed above (120 test 37, 154 test 65, 232 test 56).
+
+## Found by 12.4-06 (2026-11-17)
+
+| File | Test | Symptom | Likely cause |
+|------|------|---------|--------------|
+| `apps/api/tests/integration/isolation.test.ts` | "b3. stories ..." (`expected 0 to be greater than 0`), "b8. seen state ..." (`seeded labStory: expected '' not to be ''`), "phase 10 sweep: member stories and highlights ..." | Three story cases fail when the whole file runs | Seed drift on the local stack: all 11 rows of `public.stories` are older than the 24-hour window (`published_at > now() - interval '24 hours'` matches 0 rows), so the cases that need a live seeded story find none. Untouched by 12.4-06; every chat case of the file (b12, `chat cases`, `phase 7 sweep`) and the inventory unit test pass. Not chased. |
