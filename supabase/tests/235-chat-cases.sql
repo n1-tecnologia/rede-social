@@ -35,8 +35,14 @@ begin;
 -- 8. CHECK COHERENCE (plan 02, CASE-04, EP-016): every illegal combination refused 23514 with the coherence constraint
 --    name, and every CHECK of the table VALID.
 --
+-- 9. TAKE, END TO END (plan 03, CASE-05, CASE-18, CASE-23; D-806, D-810, D-845): the first staff definer, its taken event,
+--    the three ids-only chat.case signals, the member lane and foreign-tenant refusals.
+--
+-- 10. THE ACTION MATRIX (plan 03, CASE-05, CASE-08, CASE-09, CASE-12; D-805, D-806, D-842): every legal pair and every
+--    adjacent illegal pair of app.chat_case_act, stale and serial actions, assignee validity, the assign role guard.
+--
 -- Fixture ids use the `1e350000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(187);
+select plan(297);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-case-a', 'Chamado A', '1e350000-0000-4000-8000-000000000001');
@@ -1190,6 +1196,237 @@ select ok(not has_function_privilege('anon', 'app.chat_case_act(uuid,text,text,u
   'D-845: anon cannot execute app.chat_case_act');
 select ok(not has_function_privilege('public', 'app.chat_case_act(uuid,text,text,uuid,uuid)', 'execute'),
   'D-845: public cannot execute app.chat_case_act');
+
+
+-- ── 10. the action matrix ──────────────────────────────────────────────────────────────────────
+-- Plan 03 (CASE-05, CASE-08, CASE-09, CASE-12; D-805, D-806, D-842, D-845; EP-017..EP-020, EP-024..EP-027, EP-037, EP-038;
+-- T-12.4-11, T-12.4-13, T-12.4-14, T-12.4-16). Every legal pair and every adjacent illegal pair of `app.chat_case_act`,
+-- asserted by the final row, the history and the SQLSTATE (never a message). Cases are numbered 1..N by the helper
+-- `tests.mkcase`: its own member, born open, then moved to the starting state with every column the coherence CHECK reads.
+-- A helper reads the history compactly: `kind:from>to` joined by commas, oldest first by (created_at, id), `opened` left out.
+create or replace function tests.cid(p_n integer) returns uuid language sql immutable strict as $$
+  select ('1e350000-0000-4000-8000-00000000' || lpad(to_hex(1536 + p_n), 4, '0'))::uuid
+$$;
+create or replace function tests.uid(p_n integer) returns uuid language sql immutable strict as $$
+  select ('1e350000-0000-4000-8000-00000000' || lpad(to_hex(1792 + p_n), 4, '0'))::uuid
+$$;
+create or replace function tests.mkcase(p_n integer, p_state text, p_owner uuid default null, p_last_seq integer default 0)
+returns void language plpgsql as $$
+begin
+  perform tests.auth_user('cm' || p_n || '@case-h.local', tests.uid(p_n));
+  perform tests.member('1e350000-0000-4000-8000-000000000007', tests.uid(p_n));
+  insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+  values (tests.cid(p_n), '1e350000-0000-4000-8000-000000000007', 'support', tests.uid(p_n));
+  update public.chat_conversations
+     set state = p_state,
+         owner_user_id = p_owner,
+         resolved_at = case when p_state = 'resolved' then now() end,
+         closed_at = case when p_state = 'closed' then now() end,
+         last_seq = p_last_seq
+   where id = tests.cid(p_n);
+end
+$$;
+create or replace function tests.evs(p_n integer) returns text language sql stable as $$
+  select coalesce(string_agg(e.kind || ':' || coalesce(e.from_state, '-') || '>' || coalesce(e.to_state, '-'), ',' order by e.created_at, e.id), '')
+    from public.chat_case_events e
+   where e.conversation_id = tests.cid(p_n) and e.kind <> 'opened'
+$$;
+create or replace function tests.act(p_staff uuid, p_role text, p_n integer, p_action text, p_expected text,
+                                     p_exp_owner uuid default null, p_target uuid default null)
+returns jsonb language plpgsql as $$
+declare
+  v_id uuid := tests.cid(p_n);
+  v jsonb;
+begin
+  perform tests.as_tenant('1e350000-0000-4000-8000-000000000007', p_staff, p_role);
+  begin
+    v := app.chat_case_act(v_id, p_action, p_expected, p_exp_owner, p_target);
+  exception when others then
+    reset role;
+    raise;
+  end;
+  reset role;
+  return v;
+end
+$$;
+create or replace function tests.row(p_n integer) returns text language sql stable as $$
+  select c.state || '|' || coalesce(c.owner_user_id::text, '-') || '|' || (c.resolved_at is not null)::text
+         || '|' || (c.closed_at is not null)::text || '|' || c.staff_last_read_seq::text
+    from public.chat_conversations c where c.id = tests.cid(p_n)
+$$;
+
+-- extra staff: a blocked one and a removed one, both still carrying a support_tenant claim in a stale token
+select tests.auth_user('s3@case-h.local', '1e350000-0000-4000-8000-000000000404');
+select tests.auth_user('s4@case-h.local', '1e350000-0000-4000-8000-000000000405');
+select tests.member('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000404', 'support_tenant');
+select tests.member('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000405', 'support_tenant');
+update public.memberships set blocked_at = now() where tenant_id = '1e350000-0000-4000-8000-000000000007' and user_id = '1e350000-0000-4000-8000-000000000404';
+update public.memberships set deleted_at = now() where tenant_id = '1e350000-0000-4000-8000-000000000007' and user_id = '1e350000-0000-4000-8000-000000000405';
+
+-- fixtures (case number: starting state, owner)
+select tests.mkcase(1, 'open', null, 0);
+select tests.mkcase(2, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(3, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(4, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(5, 'open', null, 0);
+select tests.mkcase(6, 'resolved', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(7, 'closed', null, 0);
+select tests.mkcase(8, 'open', null, 0);
+select tests.mkcase(9, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(10, 'open', null, 0);
+select tests.mkcase(11, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(12, 'resolved', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(13, 'closed', null, 0);
+select tests.mkcase(14, 'open', null, 0);
+select tests.mkcase(15, 'open', null, 0);
+select tests.mkcase(16, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(17, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(18, 'open', null, 5);
+select tests.mkcase(19, 'in_progress', '1e350000-0000-4000-8000-000000000401', 7);
+select tests.mkcase(20, 'resolved', '1e350000-0000-4000-8000-000000000401', 9);
+select tests.mkcase(21, 'open', null, 0);
+select tests.mkcase(22, 'in_progress', '1e350000-0000-4000-8000-000000000402', 0);
+select tests.mkcase(23, 'resolved', null, 0);
+select tests.mkcase(24, 'closed', null, 0);
+select tests.mkcase(25, 'open', null, 0);
+select tests.mkcase(26, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(27, 'open', null, 0);
+select tests.mkcase(28, 'open', null, 0);
+select tests.mkcase(29, 'open', null, 0);
+select tests.mkcase(30, 'open', null, 0);
+select tests.mkcase(31, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(32, 'open', null, 0);
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e350000-0000-4000-8000-0000000006ff', '1e350000-0000-4000-8000-000000000007', 'direct', '1e350000-0000-4000-8000-000000000411');
+
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000402', 'support_tenant', 1, 'take', 'open', null, null) $$, 'D-806: take from open');
+select is(tests.row(1), 'in_progress|1e350000-0000-4000-8000-000000000402|false|false|0', 'D-806: take from open makes the actor the owner');
+select is(tests.evs(1), 'taken:open>in_progress', 'D-810: ... with one taken event');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000402', 'support_tenant', 2, 'take', 'in_progress', '1e350000-0000-4000-8000-000000000401', null) $$, 'D-842: take-over with the expected owner');
+select is(tests.row(2), 'in_progress|1e350000-0000-4000-8000-000000000402|false|false|0', 'D-842: a take-over moves the owner to the actor and keeps the state');
+select is(tests.evs(2), 'taken:in_progress>in_progress', 'D-842: ... and writes one taken event');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000402', 'support_tenant', 3, 'take', 'in_progress', null, null) $$, 'CS002', null, 'D-842: a take-over without the expected owner is CS002');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000402', 'support_tenant', 3, 'take', 'in_progress', '1e350000-0000-4000-8000-000000000402', null) $$, 'CS002', null, 'D-842: a take-over with the WRONG expected owner is CS002');
+select is(tests.row(3), 'in_progress|1e350000-0000-4000-8000-000000000401|false|false|0', 'D-842: ... and the owner did not move');
+select is(tests.evs(3), '', 'D-842: ... and the history gained nothing');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 4, 'take', 'in_progress', '1e350000-0000-4000-8000-000000000401', null) $$, 'CS003', null, 'EP-037: taking a case the actor already owns is CS003');
+select is(tests.evs(4), '', 'EP-037: ... with no event');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 5, 'take', 'open', null, null) $$, 'EP-037: the first take works');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 5, 'take', 'in_progress', '1e350000-0000-4000-8000-000000000401', null) $$, 'CS003', null, 'EP-037: the same take twice is CS003');
+select is(tests.evs(5), 'taken:open>in_progress', 'EP-037: ... and there is one taken event');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 6, 'take', 'resolved', null, null) $$, 'CS003', null, 'EP-025: take from resolved is CS003');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 7, 'take', 'closed', null, null) $$, 'CS003', null, 'EP-025: take from closed is CS003');
+select is(tests.row(6), 'resolved|1e350000-0000-4000-8000-000000000401|true|false|0', 'EP-025: ... the resolved case did not move');
+select is(tests.row(7), 'closed|-|false|true|0', 'EP-025: ... the closed case did not move');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 8, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000402') $$, 'D-806: an admin assigns an open case to a live staff member');
+select is(tests.row(8), 'in_progress|1e350000-0000-4000-8000-000000000402|false|false|0', 'D-806: assign from open makes the target the owner');
+select results_eq($$ select kind, actor_user_id::text, target_user_id::text, from_state, to_state from public.chat_case_events where conversation_id = tests.cid(8) and kind = 'assigned' $$, $$ values ('assigned'::text, '1e350000-0000-4000-8000-000000000403'::text, '1e350000-0000-4000-8000-000000000402'::text, 'open'::text, 'in_progress'::text) $$, 'D-810: the assigned event carries the actor, the target and both states');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 9, 'assign', 'in_progress', null, '1e350000-0000-4000-8000-000000000402') $$, 'D-806: assign from in_progress moves the owner');
+select is(tests.row(9), 'in_progress|1e350000-0000-4000-8000-000000000402|false|false|0', 'D-806: ... to the target');
+select is(tests.evs(9), 'assigned:in_progress>in_progress', 'D-810: ... with one assigned event');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 10, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000402') $$, '42501', null, 'T-12.4-11: support_tenant assigning is refused 42501');
+select is(tests.row(10), 'open|-|false|false|0', 'T-12.4-11: ... and nothing moved');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 10, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000402') $$, 'T-12.4-11: positive control, admin_tenant assigns the same case');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 14, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000404') $$, 'CS005', null, 'T-12.4-14: a blocked staff member is not a valid assignee');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 14, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000405') $$, 'CS005', null, 'T-12.4-14: a removed staff member is not a valid assignee');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 14, 'assign', 'open', null, '1e350000-0000-4000-8000-0000000000b3') $$, 'CS005', null, 'T-12.4-14: another tenants staff is not a valid assignee');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 14, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000411') $$, 'CS005', null, 'T-12.4-14: a member is not a valid assignee');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 14, 'assign', 'open', null, null) $$, 'CS005', null, 'T-12.4-14: a null assignee is CS005');
+select is(tests.row(14), 'open|-|false|false|0', 'T-12.4-14: ... and the case did not move after five refusals');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 11, 'assign', 'in_progress', null, '1e350000-0000-4000-8000-000000000401') $$, 'CS005', null, 'D-806: assigning to the current owner is CS005');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 15, 'assign', 'open', null, '1e350000-0000-4000-8000-000000000403') $$, 'D-806: an admin may assign a case to themself');
+select is(tests.row(15), 'in_progress|1e350000-0000-4000-8000-000000000403|false|false|0', 'D-806: ... and becomes its owner');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 12, 'assign', 'resolved', null, '1e350000-0000-4000-8000-000000000402') $$, 'CS003', null, 'EP-025: assign from resolved is CS003');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 13, 'assign', 'closed', null, '1e350000-0000-4000-8000-000000000402') $$, 'CS003', null, 'EP-025: assign from closed is CS003');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000402', 'support_tenant', 16, 'resolve', 'in_progress', null, null) $$, 'D-842: any staff member resolves a case owned by another');
+select is(tests.row(16), 'resolved|1e350000-0000-4000-8000-000000000401|true|false|0', 'D-805: resolve sets resolved_at and keeps the owner');
+select is(tests.evs(16), 'resolved:in_progress>resolved', 'D-810: ... with one resolved event');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 21, 'resolve', 'open', null, null) $$, 'D-805: resolve from open');
+select is(tests.row(21), 'resolved|-|true|false|0', 'D-805/EP-026: resolve of an open case with zero messages leaves staff_last_read_seq at 0');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 18, 'resolve', 'open', null, null) $$, 'D-805: resolve a case that has messages');
+select is(tests.row(18), 'resolved|-|true|false|5', 'D-805: resolve sets staff_last_read_seq to last_seq');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 20, 'resolve', 'resolved', null, null) $$, 'CS003', null, 'EP-025: resolve from resolved is CS003');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 7, 'resolve', 'closed', null, null) $$, 'CS003', null, 'EP-025: resolve from closed is CS003');
+select is(tests.row(20), 'resolved|1e350000-0000-4000-8000-000000000401|true|false|0', 'EP-025: ... the resolved case did not move');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000402', 'support_tenant', 17, 'close', 'in_progress', null, null) $$, 'D-842: any staff member closes a case owned by another');
+select is(tests.row(17), 'closed|1e350000-0000-4000-8000-000000000401|false|true|0', 'D-805: close sets closed_at and keeps the owner');
+select is(tests.evs(17), 'closed:in_progress>closed', 'D-810: ... with one closed event');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 19, 'close', 'in_progress', null, null) $$, 'D-805: close a case that has messages');
+select is(tests.row(19), 'closed|1e350000-0000-4000-8000-000000000401|false|true|7', 'D-805: close sets staff_last_read_seq to last_seq');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 22, 'close', 'in_progress', null, null) $$, 'D-805: close from in_progress');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 23, 'close', 'resolved', null, null) $$, 'D-805: close from resolved');
+select is(tests.row(23), 'closed|-|false|true|0', 'D-805: closing a resolved case clears resolved_at');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 25, 'close', 'open', null, null) $$, 'D-805: close from open');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 24, 'close', 'closed', null, null) $$, 'CS003', null, 'EP-025: close from closed is CS003');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 20, 'reopen', 'resolved', null, null) $$, 'D-805: reopen from resolved');
+select is(tests.row(20), 'open|-|false|false|0', 'D-805: reopen clears the owner and resolved_at');
+select is(tests.evs(20), 'reopened:resolved>open', 'D-810: ... with one reopened event');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 8, 'reopen', 'in_progress', null, null) $$, 'CS003', null, 'EP-025: reopen from in_progress is CS003');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 26, 'reopen', 'in_progress', null, null) $$, 'CS003', null, 'EP-025: reopen from in_progress is CS003 (a second case)');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 27, 'reopen', 'open', null, null) $$, 'CS003', null, 'EP-025: reopen from open is CS003');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 24, 'reopen', 'closed', null, null) $$, 'CS003', null, 'EP-025: reopen from closed is CS003');
+select is(tests.row(24), 'closed|-|false|true|0', 'EP-025: ... the closed case stays closed');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 28, 'resolve', 'open', null, null) $$, 'EP-027: resolve ...');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000402', 'support_tenant', 28, 'close', 'resolved', null, null) $$, 'EP-027: ... then close');
+select is(tests.evs(28), 'resolved:open>resolved,closed:resolved>closed', 'EP-027: the events read resolved then closed, oldest first by (created_at, id)');
+select is(tests.row(28), 'closed|-|false|true|0', 'EP-027: the close cleared resolved_at, so the coherence CHECK held at each step');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 29, 'take', 'in_progress', null, null) $$, 'CS002', null, 'EP-017: an action one state off is CS002');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 29, 'resolve', 'closed', null, null) $$, 'CS002', null, 'EP-017: ... in either direction');
+select is(tests.row(29), 'open|-|false|false|0', 'EP-017: ... and the row did not move');
+select is(tests.evs(29), '', 'EP-017: ... and the history gained nothing');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 30, 'take', 'open', null, null) $$, 'EP-038: the first of two takers wins');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000402', 'support_tenant', 30, 'take', 'open', null, null) $$, 'CS002', null, 'EP-038: the second taker sees the first ones state and gets CS002');
+select is(tests.evs(30), 'taken:open>in_progress', 'EP-038: exactly one taken event');
+select is(tests.row(30), 'in_progress|1e350000-0000-4000-8000-000000000401|false|false|0', 'EP-038: ... and the winner owns the case');
+select lives_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 31, 'resolve', 'in_progress', null, null) $$, 'EP-020: the first of two actions applies');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000402', 'support_tenant', 31, 'close', 'in_progress', null, null) $$, 'CS002', null, 'EP-020: the loser, expecting the old state, answers CS002');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000402', 'support_tenant', 31, 'resolve', 'resolved', null, null) $$, 'CS003', null, 'EP-020: a loser that re-read the state answers CS003, never both apply');
+select is(tests.evs(31), 'resolved:in_progress>resolved', 'EP-020: one history row');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 32, 'Take', 'open', null, null) $$, '22023', null, 'EP-019: a capitalised action is 22023');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 32, ' take', 'open', null, null) $$, '22023', null, 'EP-019: a padded action is 22023');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 32, 'take ', 'open', null, null) $$, '22023', null, 'EP-019: a trailing-space action is 22023');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 32, 'ｔａｋｅ', 'open', null, null) $$, '22023', null, 'EP-019: a full-width spelling is 22023 (no normalisation)');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 32, '', 'open', null, null) $$, '22023', null, 'EP-018: an empty action is 22023');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 32, null, 'open', null, null) $$, '22023', null, 'EP-018: a null action is 22023');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 32, 'cancel', 'open', null, null) $$, '22023', null, 'D-845: an unknown action is 22023');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 32, 'take', null, null, null) $$, '22023', null, 'EP-018: a null expected state is 22023');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 32, 'take', '', null, null) $$, '22023', null, 'EP-018: an empty expected state is 22023');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 32, 'take', 'Open', null, null) $$, '22023', null, 'EP-019: a capitalised expected state is 22023');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 32, 'take', 'archived', null, null) $$, '22023', null, 'EP-019: an unknown expected state is 22023');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', null, 'take', 'open') $$, '22023', null, 'EP-018: a null conversation id is 22023');
+select is(tests.row(32), 'open|-|false|false|0', 'EP-018/EP-019: ... and the eleven refusals moved nothing');
+select is(tests.evs(32), '', 'EP-018/EP-019: ... and wrote no event');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 99, 'take', 'open', null, null) $$, 'CS001', null, 'D-845: a conversation that does not exist is CS001');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'support_tenant', 255, 'take', 'open') $$, 'CS001', null, 'D-845: a DIRECT conversation is CS001 (not a support case)');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000404', 'support_tenant', 32, 'take', 'open', null, null) $$, '42501', null, 'T-12.4-11: a blocked staff member with a stale claim is refused 42501');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000405', 'support_tenant', 32, 'take', 'open', null, null) $$, '42501', null, 'T-12.4-11: a removed staff member with a stale claim is refused 42501');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000411', 'member', 32, 'take', 'open', null, null) $$, '42501', null, 'CASE-23: a member lane is refused 42501');
+select throws_ok($$ select tests.act('1e350000-0000-4000-8000-000000000401', 'admin_tenant', 32, 'take', 'open', null, null) $$, '42501', null, 'T-12.4-11: a claim no live membership backs (support member claiming admin) is 42501');
+select throws_ok($$ select tests.as_tenant_without_claims(); select app.chat_case_act(tests.cid(32), 'take', 'open', null, null) $$, '42501', null, 'D-845: a lane with no claims is refused 42501');
+reset role;
+select is(tests.row(32), 'open|-|false|false|0', 'T-12.4-11: ... and the case is still as born');
+
+-- the signals of an action (CASE-18): three per applied action, none for a refused one
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$ select count(*)::int from realtime.messages where event = 'chat.case' and payload->>'conversationId' = tests.cid(28)::text $$,
+  ARRAY[6], 'CASE-18: two applied actions (resolve, close) on one case published six chat.case signals, three each'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$ select count(*)::int from realtime.messages where event = 'chat.case' and payload->>'conversationId' = tests.cid(29)::text $$,
+  ARRAY[0], 'EP-017: a stale or refused action published nothing'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select is((select count(*)::int from public.chat_messages where conversation_id = tests.cid(28)), 0,
+  'T-12.4-16: an action wrote no message');
+
+select ok(
+  pg_get_functiondef('app.chat_case_act(uuid,text,text,uuid,uuid)'::regprocedure) like '%tenant_role() = ''admin_tenant''%'
+  and pg_get_functiondef('app.chat_case_act(uuid,text,text,uuid,uuid)'::regprocedure) like '%case_assignee_invalid%',
+  'T-12.4-11: the FINAL definition of app.chat_case_act carries the admin_tenant assign guard and the assignee refusal');
+select ok(has_function_privilege('authenticated', 'app.chat_case_act(uuid,text,text,uuid,uuid)', 'execute')
+  and not has_function_privilege('anon', 'app.chat_case_act(uuid,text,text,uuid,uuid)', 'execute')
+  and not has_function_privilege('anon', 'app.chat_case_signal(uuid,uuid,uuid)', 'execute')
+  and not has_function_privilege('authenticated', 'app.chat_case_signal(uuid,uuid,uuid)', 'execute'),
+  'D-845/CASE-18: the grants survived the redefinition; the signal helper has no lane grant at all');
 
 select * from finish();
 rollback;
