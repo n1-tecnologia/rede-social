@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 8
+current_plan: 9
 status: executing
-stopped_at: Completed 12.4-07-PLAN.md
-last_updated: "2026-11-17T10:15:46.348Z"
+stopped_at: Completed 12.4-16-PLAN.md
+last_updated: "2026-11-17T10:22:02.117Z"
 last_activity: 2026-11-17
 last_activity_desc: Phase 12.4 execution started
-state_head: 0f2a74d7a2df98f9001b1887e9d960e5932a5d46
+state_head: d0d9a0ebb0eb0d4aa3f11bc37d0992f60ea5cdf7
 progress:
   total_phases: 34
   completed_phases: 0
   total_plans: 471
-  completed_plans: 432
+  completed_plans: 433
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
-Current Plan: 8
+Current Plan: 9
 Total Plans in Phase: 20
-Plan: 8 of 20
+Plan: 9 of 20
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.4 execution started
 
@@ -381,6 +381,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12.4 P06 | 25 min | 3 tasks | 9 files |
 | Phase 12.4 P11 | 8 min | 3 tasks | 6 files |
 | Phase 12.4 P07 | 13 min | 3 tasks | 9 files |
+| Phase 12.4 P16 | 6 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -1171,6 +1172,7 @@ Recent decisions affecting current work:
 - [Phase 12.4]: 12.4-06: opened comes from returning id of the creating insert and reopened from the pre-insert state, never both — category and subject are written only by the creating insert so a racing device applies none
 - [Phase 12.4]: 12.4-11: case view functions take the translator first; caseEventSentence takes optional byMember and actorGone hints because history rows cannot tell a member reopen or a departed actor from the defaults
 - [Phase 12.4]: 12.4-07: inbox tab statements are complete literal predicates (open restates state in open,in_progress for the partial index); a no-message thread carries the cursor literal none so a limit=1 walk continues past it — EP-053 and CASE-17
+- [Phase 12.4]: 12.4-16: owner's category card takes counts only; old not-measured snapshot keeps the Em breve block; queue card links to /suporte?aguardando=1, overview KPI stays on /suporte — UI-D-831, D-813, D-815, INSIGHT-21
 
 ### Pending Todos
 
@@ -1305,6 +1307,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-17T10:15:46.032Z
-Stopped at: Completed 12.4-07-PLAN.md
+Last session: 2026-11-17T10:22:01.794Z
+Stopped at: Completed 12.4-16-PLAN.md
 Resume file: None

@@ -35,3 +35,9 @@ The other eight dashboard integration files (135 tests) and the whole pgTAP suit
 | File | Test | Symptom | Likely cause |
 |------|------|---------|--------------|
 | `apps/api/tests/integration/isolation.test.ts` | "b3. stories ..." (`expected 0 to be greater than 0`), "b8. seen state ..." (`seeded labStory: expected '' not to be ''`), "phase 10 sweep: member stories and highlights ..." | Three story cases fail when the whole file runs | Seed drift on the local stack: all 11 rows of `public.stories` are older than the 24-hour window (`published_at > now() - interval '24 hours'` matches 0 rows), so the cases that need a live seeded story find none. Untouched by 12.4-06; every chat case of the file (b12, `chat cases`, `phase 7 sweep`) and the inventory unit test pass. Not chased. |
+
+## Found by 12.4-16 (2026-11-17)
+
+| File | Check | Symptom | Likely cause |
+|------|-------|---------|--------------|
+| `apps/web/lib/chat-view.test.ts` (line 11) | `pnpm boundaries` | "import `../../../packages/modules/chat/server/first-name` leaves the package" (1 issue in 2534 files) | Plan 12.4-11 (6f5244ff) imports the server `firstNameOf` by relative path to pin parity with the web copy. Not touched by 12.4-16; the plan 16 files add no import across packages. Fix belongs to 12.4-11's file (test the parity through the module's published contract, or move the parity pin to the chat module's own tests). |

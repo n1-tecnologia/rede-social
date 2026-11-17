@@ -432,7 +432,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [ ] **CASE-19**: Resolving a case writes one bell row "Seu chamado #N foi resolvido" and sends a push to the member, with facts `{ caseId, number }` only; closing notifies nobody; a case reopened before the worker ran notifies nobody; the kind has a renderer, a catalog entry and a link to the case *(D-808, UI-D-822)*
 - [ ] **CASE-20**: The team is pushed (no bell row) for a new case, a case reopened by the member, a case assigned to them, and a member message (owner only when the case has a live owner, every live staff member otherwise), each with its pt-BR copy cut on a word at 100 characters and one device tag per case *(D-809, UI-D-822)*
 - [x] **CASE-21**: Every existing support conversation becomes the case of its member keeping its id, messages and participant rows, numbered per tenant by first-message date (ties by id), `Aberto` when the last message is the member's and unread by the team and `Fechado` otherwise, category `Outro`, priority `Normal`, no subject, with the counter set to the tenant maximum; the e2e seed conversation stays a valid case; the backfill is re-runnable *(D-814)*
-- [ ] **CASE-22**: The owner's Atendimento counts per case: awaiting active cases, first response per case, cases opened per week, cases answered per staff member (names only), and "Atendimentos por assunto" by category over 30 days (counts only); the overview alert and the member detail line read the same rules; the builder payload version is 9 and an older snapshot still parses *(D-813, D-815, UI-D-831, EP-43)*
+- [x] **CASE-22**: The owner's Atendimento counts per case: awaiting active cases, first response per case, cases opened per week, cases answered per staff member (names only), and "Atendimentos por assunto" by category over 30 days (counts only); the overview alert and the member detail line read the same rules; the builder payload version is 9 and an older snapshot still parses *(D-813, D-815, UI-D-831, EP-43)*
 - [ ] **CASE-23**: Every new or changed table, column, policy, definer, trigger, route, signal, notification source and sweep carries a cross-tenant negative with a positive control (pgTAP and integration); staff of tenant A can never read, take, assign, edit, resolve or close a case of tenant B, and a member never reads another member's case, number or history *(D-810, TICK-21 extended)*
 - [ ] **CASE-24**: Every new schema is `.strict()`; the new refusal codes (`case_stale`, `case_closed`, `transition_not_allowed`, `assignee_invalid`, `subject_too_long`, `case_nothing_to_edit`) join the closed `CHAT_ISSUES` list and are pinned by a contract test; `chat.support.assign` is published with the other chat permissions; the module README lists the new events, permission and sweep function *(D-806, MOD-05)*
 - [x] **CASE-25**: Direct and group conversations keep every rule they have today: no number, state, counter row, event or sweep ever touches them, proved by a test that inserts one beside a case *(D-800)*
@@ -1120,7 +1120,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-19 | Phase 12.4 | Pending |
 | CASE-20 | Phase 12.4 | Pending |
 | CASE-21 | Phase 12.4 | Complete |
-| CASE-22 | Phase 12.4 | Pending |
+| CASE-22 | Phase 12.4 | Complete |
 | CASE-23 | Phase 12.4 | Pending |
 | CASE-24 | Phase 12.4 | Pending |
 | CASE-25 | Phase 12.4 | Complete |
