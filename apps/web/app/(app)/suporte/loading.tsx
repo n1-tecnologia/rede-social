@@ -3,8 +3,9 @@ import { Send } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 
 /**
- * `/suporte` loading (UI-D-265, UI E09/loading): the thread's own fixed-height column with the header
- * bar, 4 alternating bubble skeletons (60% / 40%, the other side then the own side) and the composer
+ * `/suporte` loading (UI-D-265, UI-D-832, UI E09/loading, M10): the thread's own fixed-height column with
+ * the header bar, the case-bar skeleton row (12.4-12, the member's new bar geometry: the title, the pill
+ * and the link on row 1, the subject on row 2), 4 alternating bubble skeletons (60% / 40%, the other side then the own side) and the composer
  * rendered and DISABLED, so the swap to the thread does not move the field under the member's thumb.
  *
  * The composer is redrawn in `ChatComposer`'s geometry rather than rendered: it is a client component
@@ -27,6 +28,17 @@ export default async function SupportLoading() {
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-bg/95 px-2 py-2">
         <Skeleton variant="circle" className="h-11 w-11" />
         <Skeleton variant="text" width={140} className="h-4" />
+      </div>
+      <div
+        data-case-bar-loading
+        className="shrink-0 border-b border-border bg-bg-secondary px-4 py-2"
+      >
+        <div className="flex min-h-11 items-center gap-2">
+          <Skeleton variant="text" width={96} className="h-4" />
+          <Skeleton variant="rect" width={72} className="h-5 rounded-full" />
+          <Skeleton variant="text" width={88} className="ml-auto h-4" />
+        </div>
+        <Skeleton variant="text" width="60%" className="h-3" />
       </div>
       <div className="flex min-h-0 flex-1 flex-col justify-end gap-2 px-4 py-4">
         {BUBBLES.map((bubble) => (

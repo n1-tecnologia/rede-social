@@ -6,7 +6,8 @@ import { getTranslations } from 'next-intl/server';
  * `/suporte/[conversationId]` loading (UI-D-265, UI E12/loading): the staff thread's own fixed-height
  * column, drawn in the right pane of the split from `lg` (the inbox list beside it never blanks) and
  * as the whole screen below `lg`. The header bar holds the back control, the 32px avatar and the name
- * bar (the real header is server-rendered with the member's name and avatar a beat later), then 4
+ * bar (the real header is server-rendered with the member's name and avatar a beat later), the case-bar
+ * skeleton row (12.4-12, UI-D-832; shared by the staff thread and the member's own case), then 4
  * alternating bubble skeletons (60% / 40%) and the composer drawn DISABLED, so the swap to the thread
  * does not move the field.
  *
@@ -32,6 +33,17 @@ export default async function StaffThreadLoading() {
         <Skeleton variant="circle" className="h-11 w-11" />
         <Skeleton variant="circle" className="h-8 w-8" />
         <Skeleton variant="text" width={140} className="h-4" />
+      </div>
+      <div
+        data-case-bar-loading
+        className="shrink-0 border-b border-border bg-bg-secondary px-4 py-2"
+      >
+        <div className="flex min-h-11 items-center gap-2">
+          <Skeleton variant="text" width={96} className="h-4" />
+          <Skeleton variant="rect" width={72} className="h-5 rounded-full" />
+          <Skeleton variant="text" width={88} className="ml-auto h-4" />
+        </div>
+        <Skeleton variant="text" width="60%" className="h-3" />
       </div>
       <div className="flex min-h-0 flex-1 flex-col justify-end gap-2 px-4 py-4">
         {BUBBLES.map((bubble) => (

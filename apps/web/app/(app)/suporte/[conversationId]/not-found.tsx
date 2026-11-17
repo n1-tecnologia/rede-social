@@ -5,16 +5,19 @@ import { getBootstrap } from '@/lib/bootstrap';
 import { getHostTenant, tenantDisplayName } from '@/lib/tenant-host';
 
 /**
- * "Conversa não encontrada": the ONE screen every miss on `/suporte/[conversationId]` lands on (D-23,
- * T-07-66, T-07-67), cloned from the events not-found.
+ * "Chamado não encontrado" (12.4-12, D-800: a case is the unit now; the words are the catalog's
+ * `notFound.*`): the ONE screen every miss on `/suporte/[conversationId]` lands on (D-23, T-07-66,
+ * T-07-67, T-12.4-56), cloned from the events not-found. It is SHARED by the staff and the member readers
+ * of the route, so its call to action goes to `/suporte`, which is the inbox for the team and the active
+ * case or the opener (with the link to "Meus chamados") for a member.
  *
  * Five different causes reach this one rendering, and a later reader must not "improve" any of them
  * into a distinguishable message:
- *   1. a member (no `chat.support`) probing a staff URL;
+ *   1. a user holding neither `chat.support` nor `chat.support.contact` probing the URL;
  *   2. a malformed id (refused before any request);
  *   3. an id that matches no conversation;
  *   4. a conversation of ANOTHER tenant (RLS never returns it, so the API cannot tell it from 3);
- *   5. another member's thread seen by a member (the participant policy, the same bare 404).
+ *   5. another member's case seen by a member (the participant policy, the same bare 404).
  * Any difference would be an existence oracle over an enumerable uuid space.
  *
  * It takes no props and reads no param: a component that cannot see the id cannot echo it. It names
