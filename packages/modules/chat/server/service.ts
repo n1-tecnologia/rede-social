@@ -505,6 +505,11 @@ export async function replyToConversation(
     if (bodyCheckViolated(error)) {
       throw new ApiError(400, 'VALIDATION_FAILED', { chat: 'body_required' });
     }
+    // 12.4 (CASE-07, UI-D-828): the message trigger refuses a message to a CLOSED case with CS004. A blocked or removed
+    // member was already answered above (those win over closed), and the refused insert rolled the transaction back.
+    if (sqlstateOf(error) === 'CS004') {
+      throw new ApiError(409, 'CONFLICT', { chat: 'case_closed' });
+    }
     throw error;
   }
 
