@@ -1,12 +1,13 @@
 'use client';
 
 import { Button, IconButton, StatusPill } from '@rede-social/ui';
-import { CircleCheck, CircleDot, Ellipsis, Info, Lock, UserCheck } from 'lucide-react';
+import { Ellipsis, Info, Lock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState } from 'react';
-import type { CaseStateGlyph, StaffCaseHeaderView } from '@/lib/chat-view';
+import type { StaffCaseHeaderView } from '@/lib/chat-view';
 import { CaseActionSheet, type StaffSheetKind } from './CaseActionSheet';
 import { CaseDialogs } from './CaseDialogs';
+import { CASE_STATE_GLYPHS } from './caseStateGlyphs';
 import { type CaseActionKind, useCaseActions } from './useCaseActions';
 
 /**
@@ -29,13 +30,6 @@ import { type CaseActionKind, useCaseActions } from './useCaseActions';
  * The strips of the thread's footer (the reply-takes hint and the read-only closed strip) are exported here
  * for the pane. Every word is the `chat` catalog's.
  */
-
-const GLYPHS: Record<CaseStateGlyph, typeof CircleDot> = {
-  CircleDot,
-  UserCheck,
-  CircleCheck,
-  Lock,
-};
 
 interface Primary {
   kind: CaseActionKind;
@@ -158,7 +152,7 @@ export function StaffCaseBar({
   });
 
   const primary = primaryOf(header);
-  const Glyph = GLYPHS[header.state.glyph];
+  const Glyph = CASE_STATE_GLYPHS[header.state.glyph];
   const busy = pending !== null;
 
   const closeDialog = () => {

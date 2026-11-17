@@ -563,6 +563,41 @@ describe('the edit sheet is mounted from the menu (12.4-19, key link onOpenSheet
   });
 });
 
+describe('the details sheet is mounted from the bar and the menu (12.4-19, UI-D-829, T-12.4-91)', () => {
+  it("a tap on the bar's row 1 mounts the details sheet and reads the history once", async () => {
+    renderPane({ initialStaffCase: mine(), timeZone: 'America/Sao_Paulo' });
+    expect(historyCalls()).toBe(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Ver detalhes do chamado #42' }));
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Chamado #42' })).toBeTruthy());
+    await waitFor(() => expect(historyCalls()).toBe(1));
+    // Dados: the case's own facts, the opening instant in the tenant clock.
+    expect(screen.getByText('Carla Souza')).toBeTruthy();
+    expect(screen.getByText('Hoje · 11:02')).toBeTruthy();
+  });
+
+  it('the menu row "Ver detalhes e histórico" mounts it as well, also on a closed case', async () => {
+    renderPane({ initialStaffCase: staffHeader('closed') });
+    fireEvent.click(screen.getByRole('button', { name: 'Mais ações' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Ver detalhes e histórico' }),
+    );
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Chamado #42' })).toBeTruthy());
+    await waitFor(() => expect(historyCalls()).toBe(1));
+  });
+
+  it('closing the details sheet and opening it again reads the history again', async () => {
+    renderPane({ initialStaffCase: mine() });
+    const open = () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Ver detalhes do chamado #42' }));
+    open();
+    await waitFor(() => expect(historyCalls()).toBe(1));
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Chamado #42' }), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Chamado #42' })).toBeNull());
+    open();
+    await waitFor(() => expect(historyCalls()).toBe(2));
+  });
+});
+
 describe('a member viewer never renders the team surfaces (checker W10, T-12.4-72)', () => {
   const staffShapedAsMember = (): MemberCaseHeaderView =>
     staffHeader('open', {
@@ -593,6 +628,25 @@ describe('a member viewer never renders the team surfaces (checker W10, T-12.4-7
     expect(historyCalls()).toBe(0);
     expect(screen.queryByRole('button', { name: 'Mais ações' })).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('mounts none of the three sheets and calls neither the roster nor the history, whatever it is handed (T-12.4-91)', async () => {
+    renderPane({
+      viewer: 'member',
+      onSendAction: undefined,
+      initialCase: staffShapedAsMember(),
+      initialStaffCase: mine(),
+      hasAnyCase: true,
+    });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('radiogroup')).toBeNull();
+    expect(screen.queryByLabelText('Assunto')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Histórico' })).toBeNull();
+    await fire(REALTIME_EVENTS.chatCase);
+    await act(async () => {});
+    expect(staffCalls()).toBe(0);
+    expect(historyCalls()).toBe(0);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/case/history'))).toBe(false);
   });
 
   it('a staff-shaped answer to a member re-read is ignored', async () => {

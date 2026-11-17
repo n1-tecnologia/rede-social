@@ -351,3 +351,151 @@ describe('tracer: the team takes an unowned case from the bar (UI-D-826, UI-D-82
     );
   });
 });
+
+describe('the polite live region (UI-D-833, A-12.4-LIVE; UC M09)', () => {
+  const live = () => document.querySelector('[data-case-live]') as HTMLElement;
+
+  function renderLive(initial: StaffCaseHeaderView) {
+    const tree = (header: StaffCaseHeaderView, openSheet: StaffSheetKind | null = null) => (
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <StaffCaseBar
+          conversationId={CONVERSATION_ID}
+          header={header}
+          onHeader={vi.fn()}
+          onRefresh={vi.fn()}
+          onOpenSheet={vi.fn()}
+          openSheet={openSheet}
+        />
+      </NextIntlClientProvider>
+    );
+    const utils = render(tree(initial));
+    return { ...utils, tree };
+  }
+
+  const owned = (state: CaseState, over: Partial<StaffCaseHeaderView> = {}) =>
+    staffHeader(state, {
+      ownerUserId: OWNER_ID,
+      ownerName: 'Carla Souza',
+      meta: 'Pagamento · Normal · Com Carla',
+      ...over,
+    });
+
+  it('is ONE persistent, visually hidden, polite region and never an assertive one', () => {
+    renderLive(OPEN);
+    expect(document.querySelectorAll('[aria-live]')).toHaveLength(1);
+    expect(live().getAttribute('aria-live')).toBe('polite');
+    expect(live().className).toContain('sr-only');
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('speaks nothing on the first render, whatever the case state', () => {
+    renderLive(owned('in_progress'));
+    expect(live().textContent).toBe('');
+  });
+
+  it('speaks "assumido por {name}" when the owner changes to a named person while the page is open', () => {
+    const { rerender, tree } = renderLive(OPEN);
+    rerender(tree(owned('in_progress')));
+    expect(live().textContent).toBe('Chamado #42 assumido por Carla Souza.');
+  });
+
+  it('speaks it again when another person takes the case over', () => {
+    const { rerender, tree } = renderLive(owned('in_progress'));
+    rerender(
+      tree(
+        owned('in_progress', {
+          ownerUserId: '55555555-5555-4555-8555-555555555555',
+          ownerName: 'Ana',
+        }),
+      ),
+    );
+    expect(live().textContent).toBe('Chamado #42 assumido por Ana.');
+  });
+
+  it('speaks "resolvido por {name}" and "fechado por {name}" on those state changes', () => {
+    const { rerender, tree } = renderLive(owned('in_progress'));
+    rerender(tree(owned('resolved', { actions: ['reopen', 'close', 'edit'] })));
+    expect(live().textContent).toBe('Chamado #42 resolvido por Carla Souza.');
+    rerender(tree(owned('closed', { actions: [] })));
+    expect(live().textContent).toBe('Chamado #42 fechado por Carla Souza.');
+  });
+
+  it('skips the sentence when the case has no owner (a reopen, a close of an unowned case)', () => {
+    const { rerender, tree } = renderLive(
+      owned('resolved', { actions: ['reopen', 'close', 'edit'] }),
+    );
+    rerender(
+      tree(staffHeader('open', { actions: ['take', 'assign', 'resolve', 'close', 'edit'] })),
+    );
+    expect(live().textContent).toBe('');
+    rerender(tree(staffHeader('closed', { actions: [] })));
+    expect(live().textContent).toBe('');
+  });
+
+  it('stays quiet for a re-read that changes nothing and for a header of another case', () => {
+    const { rerender, tree } = renderLive(owned('in_progress'));
+    rerender(tree({ ...owned('in_progress') }));
+    expect(live().textContent).toBe('');
+    rerender(tree(owned('resolved', { id: '99999999-9999-4999-8999-999999999999', actions: [] })));
+    expect(live().textContent).toBe('');
+  });
+
+  it('never moves the focus', () => {
+    const { rerender, tree } = renderLive(OPEN);
+    const detailsButton = screen.getByRole('button', { name: 'Ver detalhes do chamado #42' });
+    detailsButton.focus();
+    rerender(tree(owned('in_progress')));
+    expect(document.activeElement).toBe(detailsButton);
+  });
+});
+
+describe('focus after a sheet the pane mounted closes (UI-D-833)', () => {
+  function renderPaneLike() {
+    function Pane() {
+      const [open, setOpen] = useState<StaffSheetKind | null>(null);
+      return (
+        <NextIntlClientProvider locale="pt-BR" messages={messages}>
+          <StaffCaseBar
+            conversationId={CONVERSATION_ID}
+            header={MINE}
+            onHeader={vi.fn()}
+            onRefresh={vi.fn()}
+            onOpenSheet={setOpen}
+            openSheet={open}
+          />
+          <button type="button" onClick={() => setOpen(null)}>
+            fechar folha
+          </button>
+        </NextIntlClientProvider>
+      );
+    }
+    render(<Pane />);
+  }
+
+  it('goes back to "Mais ações" when a menu row opened the sheet', async () => {
+    renderPaneLike();
+    fireEvent.click(screen.getByRole('button', { name: 'Mais ações' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Atribuir a…' }),
+    );
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.click(screen.getByRole('button', { name: 'fechar folha' }));
+    (document.activeElement as HTMLElement | null)?.blur();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Mais ações' })),
+    );
+  });
+
+  it('goes back to the details button when the bar itself opened the sheet', async () => {
+    renderPaneLike();
+    fireEvent.click(screen.getByRole('button', { name: 'Ver detalhes do chamado #42' }));
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.click(screen.getByRole('button', { name: 'fechar folha' }));
+    (document.activeElement as HTMLElement | null)?.blur();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole('button', { name: 'Ver detalhes do chamado #42' }),
+      ),
+    );
+  });
+});

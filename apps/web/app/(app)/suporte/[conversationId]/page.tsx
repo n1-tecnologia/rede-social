@@ -164,6 +164,7 @@ export default async function StaffThreadPage({
         readOnlyNotice={readOnlyNotice}
         raceNotices={{ member_blocked: blockedNotice, member_removed: removedNotice }}
         initialStaffCase={staffCase}
+        timeZone={timeZone}
       />
     </div>
   );

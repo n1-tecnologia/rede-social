@@ -33,6 +33,7 @@ import {
 } from './actions';
 import type { StaffSheetKind } from './CaseActionSheet';
 import { CaseBar, CaseOpenedRow, ClosedStrip, ResolvedStrip } from './CaseBar';
+import { CaseDetailsSheet } from './CaseDetailsSheet';
 import { CaseOpener, type CaseOpenerValue } from './CaseOpener';
 import { EditCaseSheet } from './EditCaseSheet';
 import { StaffCaseBar, StaffClosedStrip, StaffTakeHint } from './StaffCaseBar';
@@ -127,6 +128,11 @@ export interface ThreadPaneProps {
    * staff pane reads it; a member pane ignores it.
    */
   initialStaffCase?: StaffCaseHeaderView | null;
+  /**
+   * 12.4-19 (UI-D-829): the tenant's IANA time zone, for the details sheet's "Aberto em". Without it the
+   * sheet reads the device's own zone (it only ever draws after a tap, so there is no hydration to match).
+   */
+  timeZone?: string;
 }
 
 interface MessagesAnswer {
@@ -324,6 +330,7 @@ export function ThreadPane({
   initialCase = null,
   hasAnyCase = false,
   initialStaffCase = null,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
 }: ThreadPaneProps) {
   const t = useTranslations('chat');
   const router = useRouter();
@@ -725,6 +732,14 @@ export function ThreadPane({
               onStale={() => void refreshCase()}
             />
           ) : null}
+          <CaseDetailsSheet
+            open={openSheet === 'details'}
+            onClose={closeSheet}
+            conversationId={conversationId}
+            header={staffCase}
+            keys={keys}
+            timeZone={timeZone}
+          />
           {staffCase.actions.includes('edit') ? (
             <EditCaseSheet
               open={openSheet === 'edit'}
