@@ -314,6 +314,14 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/chat/inbox': { case: 'chat staff cases' },
   'GET /v1/chat/staff': { case: 'chat staff cases' },
   'GET /v1/chat/conversations/:conversationId/case/history': { case: 'chat staff cases' },
+  // 12.4-08: the team's write API (take, resolve, close, reopen, assign, the edit); one case proves the six, tenant B's staff on
+  // tenant A's valid id against a random uuid (identical bare 404), beside the positive control on the same id.
+  'POST /v1/chat/conversations/:conversationId/case/take': { case: 'chat case actions' },
+  'POST /v1/chat/conversations/:conversationId/case/resolve': { case: 'chat case actions' },
+  'POST /v1/chat/conversations/:conversationId/case/close': { case: 'chat case actions' },
+  'POST /v1/chat/conversations/:conversationId/case/reopen': { case: 'chat case actions' },
+  'POST /v1/chat/conversations/:conversationId/case/assign': { case: 'chat case actions' },
+  'PATCH /v1/chat/conversations/:conversationId/case': { case: 'chat case actions' },
   // ── /v1/store (08.2) ────────────────────────────────────────────────────────────────────────
   // 12.3-11 (NOVF-05, NOVF-11): the store front read; the category slug on create and edit is proved in
   // the same case beside it (a rede-demo slug from a rede-lab admin is a 400, never a link).

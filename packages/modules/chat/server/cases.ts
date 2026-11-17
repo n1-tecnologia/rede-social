@@ -1,14 +1,22 @@
 import { cutOnWord } from '@rede-social/contracts/text';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { emit } from '@rede-social/core/server/events/bus';
 import { ApiError } from '@rede-social/core/server/http/api-error';
+import { moduleLogger } from '@rede-social/core/server/logging';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
+import { permissionsForRequest } from '@rede-social/core/server/rbac/permissions';
+import { sqlstateOf } from '@rede-social/core/server/safety/sqlstate';
 import { sql } from 'drizzle-orm';
 import {
   CASE_ACTIVE_STATES,
+  type CaseActionInput,
+  type CaseAssignInput,
   type CaseCard,
+  type CaseEditInput,
   type CaseEvent,
   type CaseHistory,
+  type CaseResult,
   CHAT_CASE_ACTIONS,
   CHAT_EARLIER_CASES_MAX,
   CHAT_PERMISSIONS,
@@ -26,6 +34,8 @@ import {
   type StaffCase,
   type StaffRoster,
 } from '../contracts/index';
+
+const log = moduleLogger('module-chat');
 
 /**
  * The member's side of a support case (Phase 12.4, plan 06): the subject label rule, the member-shaped case read
@@ -525,4 +535,165 @@ export async function getStaffRoster(ctx: RequestContext): Promise<StaffRoster> 
        order by name asc, ms.user_id asc`),
   );
   return { items: rows.map((row) => ({ userId: row.user_id, name: row.name })) };
+}
+
+/* ── Phase 12.4, plan 08: the team's write API ───────────────────────────────────────────────────── */
+
+/** The constraint name a Postgres error carries, walked down the `cause` chain like `sqlstateOf`. */
+function constraintOf(error: unknown): string | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    const name = (current as { constraint_name?: unknown }).constraint_name;
+    if (typeof name === 'string') return name;
+    current = current.cause;
+  }
+  return null;
+}
+
+/**
+ * The ONE mapping of every SQLSTATE the two case definers (and the message trigger) raise, to a closed API answer
+ * (CASE-24, EP-078, T-12.4-39), modelled on `mapReportError`. The mapping is exact and one-to-one: `CS001` (an unknown,
+ * foreign or non-support case: the same for all of them, so the route is no existence oracle) is the bare 404;
+ * `CS002` (the case is no longer in the state, or with the owner, the caller saw) `409 case_stale`; `CS003` (the pair is
+ * not in the transition table, or the case is closed) `409 transition_not_allowed`; `CS004` (a message to a closed case)
+ * `409 case_closed`; `CS005` (an assignee who is not a live staff member, or already the owner) `400 assignee_invalid`;
+ * `42501` (not live staff, or a support lane assigning) `403 FORBIDDEN`; `22023` (an argument the definer refuses)
+ * `400 VALIDATION_FAILED`; and the subject CHECK (`23514` on `chat_conversations_subject_chk`) `400 subject_too_long`.
+ * The answer is built from the closed vocabulary only: no SQLSTATE, message or constraint text of the input is echoed.
+ * Anything else, including every other CHECK, is returned untouched for the generic 500.
+ */
+export function mapCaseError(error: unknown): unknown {
+  if (error instanceof ApiError) return error;
+  switch (sqlstateOf(error)) {
+    case 'CS001':
+      return new ApiError(404, 'NOT_FOUND');
+    case 'CS002':
+      return new ApiError(409, 'CONFLICT', { chat: 'case_stale' });
+    case 'CS003':
+      return new ApiError(409, 'CONFLICT', { chat: 'transition_not_allowed' });
+    case 'CS004':
+      return new ApiError(409, 'CONFLICT', { chat: 'case_closed' });
+    case 'CS005':
+      return new ApiError(400, 'VALIDATION_FAILED', { chat: 'assignee_invalid' });
+    case '42501':
+      return new ApiError(403, 'FORBIDDEN');
+    case '22023':
+      return new ApiError(400, 'VALIDATION_FAILED');
+    case '23514':
+      return constraintOf(error) === 'chat_conversations_subject_chk'
+        ? new ApiError(400, 'VALIDATION_FAILED', { chat: 'subject_too_long' })
+        : error;
+    default:
+      return error;
+  }
+}
+
+/** The actions the definer `app.chat_case_act` runs; the order is the one of the transition table. */
+export type CaseActionName = 'take' | 'assign' | 'resolve' | 'close' | 'reopen';
+
+/**
+ * Runs ONE case action through `app.chat_case_act` (D-845, CASE-05): the route sends the intent and the state the
+ * caller saw, the DATABASE decides (state, owner, history row and signal in one locked transaction) and this service
+ * never computes a transition. The answer re-reads the case fresh with its `actions[]` for this viewer.
+ *
+ * The domain event is queued AFTER the transaction returned (the bus drops it when the request fails): a resolve emits
+ * the ids-only `chat.case_resolved` and an assign the ids-only `chat.case_assigned` (D-808, D-841); take, close and
+ * reopen emit nothing, so closing is silent for the member and the team's own buttons send the team no push. A refused
+ * or rolled-back action throws before any emit.
+ */
+export async function runCaseAction(
+  ctx: RequestContext,
+  conversationId: string,
+  action: CaseActionName,
+  input: CaseActionInput | CaseAssignInput,
+): Promise<CaseResult> {
+  const permissions = await permissionsForRequest(ctx);
+  const assigneeUserId =
+    action === 'assign' ? ((input as CaseAssignInput).assigneeUserId ?? null) : null;
+  let fresh: StaffCase;
+  try {
+    fresh = await withTenantTx(ctx, async (tx) => {
+      await tx.execute(sql`
+        select app.chat_case_act(
+          ${conversationId}::uuid,
+          ${action}::text,
+          ${input.expectedState}::text,
+          ${input.expectedOwnerId ?? null}::uuid,
+          ${assigneeUserId}::uuid
+        )`);
+      const read = await staffCaseOf(tx, ctx, conversationId, permissions);
+      // The definer just moved this row under its own lock; a miss here is a server fault, never a client one.
+      if (!read) throw new ApiError(500, 'INTERNAL');
+      return read;
+    });
+  } catch (error) {
+    throw mapCaseError(error);
+  }
+
+  if (action === 'resolve' && fresh.resolvedAt !== null) {
+    emit(ctx, 'chat.case_resolved', {
+      tenantId: ctx.tenantId,
+      conversationId,
+      resolvedAt: fresh.resolvedAt,
+    });
+  }
+  if (action === 'assign' && assigneeUserId !== null) {
+    emit(ctx, 'chat.case_assigned', {
+      tenantId: ctx.tenantId,
+      conversationId,
+      assigneeUserId,
+      actorUserId: ctx.userId,
+    });
+  }
+  // Ids and the closed vocabulary only: never a subject, a name or a body.
+  log.info(
+    {
+      event: 'chat.case_action',
+      tenantId: ctx.tenantId,
+      conversationId,
+      action,
+      state: fresh.state,
+    },
+    'chat case action',
+  );
+  return { case: fresh };
+}
+
+/**
+ * Runs the edit through `app.chat_case_edit` (D-812, CASE-10): the category, the subject and the priority of a case that
+ * is not closed. `subject: null` blanks it (the definer's `p_blank_subject`), an absent key leaves the field alone. The
+ * edit never changes the state or the owner and emits nothing. The answer is the fresh case with its `actions[]`.
+ */
+export async function runCaseEdit(
+  ctx: RequestContext,
+  conversationId: string,
+  input: CaseEditInput,
+): Promise<CaseResult> {
+  const permissions = await permissionsForRequest(ctx);
+  const blankSubject = input.subject === null;
+  const subject = typeof input.subject === 'string' ? input.subject : null;
+  let fresh: StaffCase;
+  try {
+    fresh = await withTenantTx(ctx, async (tx) => {
+      await tx.execute(sql`
+        select app.chat_case_edit(
+          ${conversationId}::uuid,
+          ${input.expectedState}::text,
+          ${input.category ?? null}::text,
+          ${subject}::text,
+          ${blankSubject}::boolean,
+          ${input.priority ?? null}::text
+        )`);
+      const read = await staffCaseOf(tx, ctx, conversationId, permissions);
+      if (!read) throw new ApiError(500, 'INTERNAL');
+      return read;
+    });
+  } catch (error) {
+    throw mapCaseError(error);
+  }
+  log.info(
+    { event: 'chat.case_edit', tenantId: ctx.tenantId, conversationId, state: fresh.state },
+    'chat case edit',
+  );
+  return { case: fresh };
 }

@@ -6,7 +6,11 @@ import { requireModule } from '@rede-social/core/server/modules/require-module';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 import {
   CHAT_ISSUE_SET,
+  caseActionInputSchema,
+  caseAssignInputSchema,
+  caseEditInputSchema,
   caseHistorySchema,
+  caseResultSchema,
   conversationDetailSchema,
   inboxPageSchema,
   inboxQuerySchema,
@@ -21,7 +25,7 @@ import {
   supportSendInputSchema,
   supportThreadSchema,
 } from '../contracts/index';
-import { getCaseHistory, getMyCases, getStaffRoster } from './cases';
+import { getCaseHistory, getMyCases, getStaffRoster, runCaseAction, runCaseEdit } from './cases';
 import {
   getConversation,
   getSupportThread,
@@ -258,6 +262,137 @@ const staffRoute = createRoute({
   },
 });
 
+/* ── Phase 12.4, plan 08: the team's write API (D-845, CASE-05, CASE-10, CASE-24) ─────────────────── */
+
+/**
+ * Every case route calls a security definer and the DATABASE decides (D-845): no route computes a transition, writes a
+ * state, an owner or a priority, or accepts a case number. The refusals come from one mapper, `mapCaseError`.
+ */
+const caseActionRequest = {
+  params: conversationParamSchema,
+  body: { required: true, content: { 'application/json': { schema: caseActionInputSchema } } },
+} as const;
+
+const caseAssignRequest = {
+  params: conversationParamSchema,
+  body: { required: true, content: { 'application/json': { schema: caseAssignInputSchema } } },
+} as const;
+
+const caseEditRequest = {
+  params: conversationParamSchema,
+  body: { required: true, content: { 'application/json': { schema: caseEditInputSchema } } },
+} as const;
+
+const caseActionResponses = {
+  400: {
+    description:
+      '`VALIDATION_FAILED`: a malformed id, a key outside `expectedState` and `expectedOwnerId` (a forged state or owner) or an `expectedState` outside the four states. Nothing is written.',
+  },
+  403: {
+    description: '`FORBIDDEN` without the route permission or without a live staff membership.',
+  },
+  404: {
+    description:
+      'One bare `NOT_FOUND` for an unknown case, another tenant’s and a non-support conversation: identical on purpose, so no route is an existence oracle.',
+  },
+  409: {
+    description:
+      '`CONFLICT` with `details.chat`: `case_stale` when the case is no longer in the state (or with the owner) the caller saw, `transition_not_allowed` when the action does not apply to that state. Nothing is written and nothing is emitted.',
+  },
+} as const;
+
+const caseOk = (description: string) =>
+  ({
+    description,
+    content: { 'application/json': { schema: caseResultSchema } },
+  }) as const;
+
+const takeRoute = createRoute({
+  method: 'post',
+  path: '/conversations/{conversationId}/case/take',
+  middleware: [requirePermission('chat.support')] as const,
+  request: caseActionRequest,
+  responses: {
+    200: caseOk(
+      'D-805, D-842: the caller takes an open case, or takes over an in-progress case of another person when `expectedOwnerId` names the owner they saw. Answers the fresh case with its `actions[]`. Nothing is emitted.',
+    ),
+    ...caseActionResponses,
+  },
+});
+
+const resolveRoute = createRoute({
+  method: 'post',
+  path: '/conversations/{conversationId}/case/resolve',
+  middleware: [requirePermission('chat.support')] as const,
+  request: caseActionRequest,
+  responses: {
+    200: caseOk(
+      'D-805, D-842: any staff member resolves an open or in-progress case, whoever owns it. Answers the fresh case and emits the ids-only `chat.case_resolved` after the commit (the member’s resolved notice, D-808).',
+    ),
+    ...caseActionResponses,
+  },
+});
+
+const closeRoute = createRoute({
+  method: 'post',
+  path: '/conversations/{conversationId}/case/close',
+  middleware: [requirePermission('chat.support')] as const,
+  request: caseActionRequest,
+  responses: {
+    200: caseOk(
+      'D-805, D-841: any staff member closes an open, in-progress or resolved case. Silent: nothing is emitted and the member is told nothing.',
+    ),
+    ...caseActionResponses,
+  },
+});
+
+const reopenRoute = createRoute({
+  method: 'post',
+  path: '/conversations/{conversationId}/case/reopen',
+  middleware: [requirePermission('chat.support')] as const,
+  request: caseActionRequest,
+  responses: {
+    200: caseOk(
+      'D-805, D-841: the team reopens a RESOLVED case (the owner is cleared). A closed case is never reopened. Silent: nothing is emitted.',
+    ),
+    ...caseActionResponses,
+  },
+});
+
+const assignRoute = createRoute({
+  method: 'post',
+  path: '/conversations/{conversationId}/case/assign',
+  middleware: [requirePermission('chat.support.assign')] as const,
+  request: caseAssignRequest,
+  responses: {
+    200: caseOk(
+      'D-806: a holder of `chat.support.assign` (`admin_tenant` only) hands an open or in-progress case to a live staff member who is not already its owner. Answers the fresh case and emits the ids-only `chat.case_assigned` after the commit (the assignee’s notice, D-809).',
+    ),
+    ...caseActionResponses,
+    400: {
+      description:
+        '`VALIDATION_FAILED`: a malformed body, or `details.chat = assignee_invalid` when the target is not a live staff member of this tenant or is already the owner.',
+    },
+  },
+});
+
+const editRoute = createRoute({
+  method: 'patch',
+  path: '/conversations/{conversationId}/case',
+  middleware: [requirePermission('chat.support')] as const,
+  request: caseEditRequest,
+  responses: {
+    200: caseOk(
+      'D-812, CASE-10: the team corrects the category, the subject (`null` blanks it) or the priority of a case that is not closed, one history row per changed field. Answers the fresh case. Nothing is emitted.',
+    ),
+    ...caseActionResponses,
+    400: {
+      description:
+        '`VALIDATION_FAILED`: a key outside the four allowed (`state`, an owner, a number), `details.chat = case_nothing_to_edit` for a body with no field and `subject_too_long` above 80 code points. Nothing is written.',
+    },
+  },
+});
+
 /** A 204 that no cache may keep: read positions are the caller's own state. */
 const noContent = () =>
   new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
@@ -303,4 +438,65 @@ export const chatRoutes = chat
   .openapi(historyRoute, async (c) =>
     c.json(await getCaseHistory(c.get('ctx'), c.req.valid('param').conversationId), 200),
   )
-  .openapi(staffRoute, async (c) => c.json(await getStaffRoster(c.get('ctx')), 200));
+  .openapi(staffRoute, async (c) => c.json(await getStaffRoster(c.get('ctx')), 200))
+  .openapi(takeRoute, async (c) =>
+    c.json(
+      await runCaseAction(
+        c.get('ctx'),
+        c.req.valid('param').conversationId,
+        'take',
+        c.req.valid('json'),
+      ),
+      200,
+    ),
+  )
+  .openapi(resolveRoute, async (c) =>
+    c.json(
+      await runCaseAction(
+        c.get('ctx'),
+        c.req.valid('param').conversationId,
+        'resolve',
+        c.req.valid('json'),
+      ),
+      200,
+    ),
+  )
+  .openapi(closeRoute, async (c) =>
+    c.json(
+      await runCaseAction(
+        c.get('ctx'),
+        c.req.valid('param').conversationId,
+        'close',
+        c.req.valid('json'),
+      ),
+      200,
+    ),
+  )
+  .openapi(reopenRoute, async (c) =>
+    c.json(
+      await runCaseAction(
+        c.get('ctx'),
+        c.req.valid('param').conversationId,
+        'reopen',
+        c.req.valid('json'),
+      ),
+      200,
+    ),
+  )
+  .openapi(assignRoute, async (c) =>
+    c.json(
+      await runCaseAction(
+        c.get('ctx'),
+        c.req.valid('param').conversationId,
+        'assign',
+        c.req.valid('json'),
+      ),
+      200,
+    ),
+  )
+  .openapi(editRoute, async (c) =>
+    c.json(
+      await runCaseEdit(c.get('ctx'), c.req.valid('param').conversationId, c.req.valid('json')),
+      200,
+    ),
+  );

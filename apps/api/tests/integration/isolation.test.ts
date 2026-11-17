@@ -2009,6 +2009,148 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("chat case actions: tenant B's staff and admin get the same bare 404 on tenant A's VALID case id as on a random uuid on every case write route and the history, nothing is written, and tenant A's own admin acts on the same id (12.4-08, CASE-23, T-12.4-37)", async () => {
+    // The team's write API of a support case: take, resolve, close, reopen, assign, the edit and (for the 404 shape) the
+    // history. rede-lab has `chat` OFF in the seed, so it is turned on here and restored in `finally`.
+    const [flag] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+    const staffIds = await adminSql<{ email: string; id: string }[]>`
+      select email, id::text as id from auth.users
+       where email in ('admin@rede-demo.local', 'support@rede-demo.local')`;
+    const idOf = (email: string) => staffIds.find((row) => row.email === email)?.id ?? '';
+    const asHost = (token: string, host: string, path: string, init: RequestInit = {}) =>
+      api.request(path, {
+        ...init,
+        headers: {
+          authorization: `Bearer ${token}`,
+          [TENANT_HOST_HEADER]: host,
+          ...(init.body ? { 'content-type': 'application/json' } : {}),
+          ...((init.headers as Record<string, string> | undefined) ?? {}),
+        },
+      });
+    /** The refusal without its per-request id, so two refusals compare byte for byte. */
+    const shapeOf = async (res: Response) => {
+      const body = (await res.json()) as Envelope & { error: { requestId?: string } };
+      const { requestId: _requestId, ...error } = body.error;
+      return { status: res.status, error };
+    };
+    type RouteCall = { name: string; path: (id: string) => string; method: string; body: unknown };
+    const assignee = idOf('support@rede-demo.local');
+    const calls: RouteCall[] = [
+      ...(['take', 'resolve', 'close', 'reopen'] as const).map((action) => ({
+        name: action,
+        path: (id: string) => `/v1/chat/conversations/${id}/case/${action}`,
+        method: 'POST',
+        body: { expectedState: 'open' },
+      })),
+      {
+        name: 'assign',
+        path: (id) => `/v1/chat/conversations/${id}/case/assign`,
+        method: 'POST',
+        body: { expectedState: 'open', assigneeUserId: assignee },
+      },
+      {
+        name: 'PATCH',
+        path: (id) => `/v1/chat/conversations/${id}/case`,
+        method: 'PATCH',
+        body: { expectedState: 'open', priority: 'high' },
+      },
+    ];
+    const call = (token: string, host: string, route: RouteCall, id: string) =>
+      asHost(token, host, route.path(id), {
+        method: route.method,
+        body: JSON.stringify(route.body),
+      });
+    const labSupport = await signInAs('support@rede-lab.local', SEED_PASSWORD);
+    let demoCase = '';
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'chat', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(tenantIds.lab);
+
+      const owner = await throwawayMember(tenantIds.demo, `caseact-${RUN}@rede-demo.local`);
+      const sent = await asHost(owner, HOSTS.demo, '/v1/chat/support/messages', {
+        method: 'POST',
+        body: JSON.stringify({ body: 'Oi, preciso de ajuda com meu cadastro.' }),
+      });
+      expect(sent.status).toBe(201);
+      demoCase = ((await sent.json()) as { conversationId: string }).conversationId;
+      const snapshot = async () => {
+        const [row] = await adminSql<{ state: string; owner: string | null; events: number }[]>`
+          select c.state, c.owner_user_id::text as owner,
+                 (select count(*)::int from public.chat_case_events e where e.conversation_id = c.id) as events
+            from public.chat_conversations c where c.id = ${demoCase}::uuid`;
+        return row;
+      };
+      const before = await snapshot();
+      expect(before).toMatchObject({ state: 'open', owner: null, events: 1 });
+
+      // Negatives: the lab admin and the lab support lane ask every route about the demo case and about a random uuid,
+      // and the two answers are identical (the assign route is the admin's: the support lane is refused by permission).
+      for (const [lane, token] of [
+        ['admin', tokens.labAdmin],
+        ['support', labSupport],
+      ] as const) {
+        for (const route of calls) {
+          if (route.name === 'assign' && lane === 'support') continue;
+          const foreign = await shapeOf(await call(token, HOSTS.lab, route, demoCase));
+          const unknown = await shapeOf(await call(token, HOSTS.lab, route, crypto.randomUUID()));
+          expect(foreign, `${lane} ${route.name}`).toEqual(unknown);
+          expect(foreign.status, `${lane} ${route.name}`).toBe(404);
+          expect(foreign.error.code).toBe('NOT_FOUND');
+          expect(foreign.error).not.toHaveProperty('details');
+        }
+        const history = await shapeOf(
+          await asHost(token, HOSTS.lab, `/v1/chat/conversations/${demoCase}/case/history`),
+        );
+        expect(history.status).toBe(404);
+      }
+      expect(await snapshot()).toEqual(before);
+
+      // A demo session on the lab's registered host is refused before any lookup (D-23).
+      for (const route of calls) {
+        const refused = await call(tokens.demoAdmin, HOSTS.lab, route, demoCase);
+        expect(refused.status, route.name).toBe(403);
+        expect(await code(refused)).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(await snapshot()).toEqual(before);
+
+      // Positive controls: the demo admin runs every route on the SAME id on the demo host.
+      const run = async (route: RouteCall, body: unknown) => {
+        const res = await asHost(tokens.demoAdmin, HOSTS.demo, route.path(demoCase), {
+          method: route.method,
+          body: JSON.stringify(body),
+        });
+        expect(res.status, route.name).toBe(200);
+      };
+      const named = (name: string) => calls.find((route) => route.name === name) as RouteCall;
+      await run(named('PATCH'), { expectedState: 'open', priority: 'high' });
+      await run(named('take'), { expectedState: 'open' });
+      await run(named('assign'), { expectedState: 'in_progress', assigneeUserId: assignee });
+      await run(named('resolve'), { expectedState: 'in_progress' });
+      await run(named('reopen'), { expectedState: 'resolved' });
+      await run(named('close'), { expectedState: 'open' });
+      expect((await snapshot())?.state).toBe('closed');
+    } finally {
+      if (demoCase) {
+        await adminSql`delete from public.chat_conversations where id = ${demoCase}::uuid`;
+      }
+      if (flag) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${flag.enabled}
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+      }
+      moduleFlags.invalidate(tenantIds.lab);
+    }
+  });
+
   it('phase 7 sweep: every Phase 7 route answers a demo session about its own tenant only, each block beside its positive control (07-11, TENANT-05)', async () => {
     // The route inventory this case closes (07-11). "b10/b11/b12" = already covered by that case;
     // "sweep" = asserted below. Every negative sits beside a demo positive control in this test, and

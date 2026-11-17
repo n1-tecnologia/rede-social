@@ -7,7 +7,10 @@ export {
   getCaseHistory,
   getMyCases,
   getStaffRoster,
+  mapCaseError,
   memberCaseOf,
+  runCaseAction,
+  runCaseEdit,
   staffCaseOf,
   subjectLabelOf,
 } from './cases';

@@ -43,17 +43,18 @@ All three come from this manifest, so turning chat off revokes them.
 
 Main server names (`./server`): `chatRoutes`, `sendSupportMessage`, `replyToConversation`,
 `getSupportThread`, `getConversation`, `getMyCases`, `memberCaseOf`, `staffCaseOf`, `actionsFor`,
-`getCaseHistory`, `getStaffRoster`, `subjectLabelOf`, `listMessages`, `listInbox`, `markConversationRead`, `isStaff`, `chatCounters`,
+`getCaseHistory`, `getStaffRoster`, `runCaseAction`, `runCaseEdit`, `mapCaseError`, `subjectLabelOf`, `listMessages`, `listInbox`, `markConversationRead`, `isStaff`, `chatCounters`,
 `chatNotificationSources`.
 
 ## Events emitted
 
 - `chat.message_sent`: `tenantId`, `conversationId`, `messageId`, `seq`, `authorUserId`,
   `authorSide`. Never the body.
-- Declared on the kernel event map for the case notices, ids only and never any text (they are
-  emitted by the case routes that follow in this phase): chat.case_resolved (`tenantId`,
-  `conversationId`, `resolvedAt`) and chat.case_assigned (`tenantId`, `conversationId`,
-  `assigneeUserId`, `actorUserId`).
+- `chat.case_resolved`: `tenantId`, `conversationId`, `resolvedAt`. Emitted by the resolve route
+  after the commit; ids and an instant only, never a subject, a name or a body. Take, close,
+  reopen and edit emit nothing.
+- `chat.case_assigned`: `tenantId`, `conversationId`, `assigneeUserId`, `actorUserId`. Emitted by
+  the assign route after the commit; ids only.
 - Realtime signal (not a bus event): the ids-only Broadcast signal named chat.case, published by the
   case definers and by the auto-close sweep on the conversation, the support inbox and the member's
   own topic. Its payload is the conversation id (plus the injected message id), never a title,
