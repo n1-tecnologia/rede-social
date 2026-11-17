@@ -132,6 +132,44 @@ export function voiceDeletedText(t: Translator): string {
   return t('voice.deleted');
 }
 
+/**
+ * What a list preview is made of (D-860, D-868): ordinary `text`, a `voice` recording (the screen draws the
+ * microphone glyph for this kind only) or a recording that is gone (`voiceDeleted`: the words alone, no glyph).
+ */
+export type PreviewKind = 'text' | 'voice' | 'voiceDeleted';
+
+/**
+ * The finished words of a last message and their kind. A deleted recording wins over its stored length (no
+ * duration is ever shown for it); a text message keeps its one-line text exactly as before.
+ */
+function previewParts(
+  message: { preview: string; voiceSeconds?: number; voiceDeleted?: true },
+  t: Translator,
+): { text: string; kind: PreviewKind } {
+  if (message.voiceDeleted) return { text: voiceDeletedText(t), kind: 'voiceDeleted' };
+  if (message.voiceSeconds !== undefined) {
+    return { text: voicePreviewText(message.voiceSeconds, t), kind: 'voice' };
+  }
+  return { text: oneLine(message.preview), kind: 'text' };
+}
+
+/** The playback speeds, in cycle order (D-854). The speed resets per player and is never stored. */
+const PLAYBACK_RATES: readonly number[] = [1, 1.5, 2];
+const PLAYBACK_RATE_KEYS = ['voice.rate.one', 'voice.rate.oneHalf', 'voice.rate.two'] as const;
+
+/** D-854: 1 to 1.5 to 2 and back to 1; any other value (unknown, NaN, absent) restarts at 1. */
+export function nextPlaybackRate(rate: number | undefined): number {
+  const index = rate === undefined ? -1 : PLAYBACK_RATES.indexOf(rate);
+  if (index === -1) return 1;
+  return PLAYBACK_RATES[(index + 1) % PLAYBACK_RATES.length] ?? 1;
+}
+
+/** D-854: the catalog label of a speed, "1x", "1,5x" (decimal comma, A-UI-12) or "2x"; an unknown speed reads "1x". */
+export function playbackRateLabel(rate: number, t: Translator): string {
+  const index = PLAYBACK_RATES.indexOf(rate);
+  return t(PLAYBACK_RATE_KEYS[index === -1 ? 0 : index] ?? PLAYBACK_RATE_KEYS[0]);
+}
+
 const DAY_MS = 86_400_000;
 const RUN_GAP_MS = 5 * 60_000;
 
@@ -306,6 +344,11 @@ export interface InboxRowView {
   name: string;
   avatar: string | null;
   preview: string;
+  /**
+   * 12.5 (D-860): what the preview is made of, so the screen draws the microphone glyph for `voice` only.
+   * Optional in the type, ALWAYS assigned by `inboxRowView`.
+   */
+  previewKind?: PreviewKind;
   time: string;
   /**
    * The API's own UTC microsecond instant of the last message (`null` for a case with none), kept ONLY as the
@@ -350,13 +393,15 @@ export function inboxRowView(
   const name = removed ? t('removed.name') : (row.member.displayName ?? t('removed.name'));
   const message = row.lastMessage;
   let preview = '';
+  let previewKind: PreviewKind = 'text';
   if (message) {
-    const text = oneLine(message.preview);
+    const parts = previewParts(message, t);
     const firstName = message.authorFirstName ?? '';
+    previewKind = parts.kind;
     preview =
       message.side === 'staff' && firstName
-        ? t('inbox.teamPreview', { firstName, preview: text })
-        : text;
+        ? t('inbox.teamPreview', { firstName, preview: parts.text })
+        : parts.text;
   }
   return {
     conversationId: row.conversationId,
@@ -364,6 +409,7 @@ export function inboxRowView(
     name,
     avatar: removed ? null : avatarUrlFor(row.member.avatarAssetId),
     preview,
+    previewKind,
     time: row.lastMessageAt
       ? inboxTime(row.lastMessageAt, keys, timeZone, { yesterday: t('day.yesterday') })
       : '',
@@ -755,6 +801,8 @@ export interface CaseCardView {
   hasSubject: boolean;
   /** One line with its "Você: " or "Equipe: " prefix; empty when the case has no message. */
   preview: string;
+  /** 12.5 (D-860): what the preview is made of (the microphone glyph is for `voice`). Always assigned. */
+  previewKind?: PreviewKind;
   category: string;
   time: string;
   /** A closed case is not faded: the card keeps its contrast and only the pill and subject tone change. */
@@ -770,7 +818,7 @@ export function caseCardView(
   { timeZone, keys, t }: { timeZone: string; keys: ChatDayKeys; t: Translator },
 ): CaseCardView {
   const message = card.lastMessage;
-  const text = message ? oneLine(message.preview) : '';
+  const parts = message ? previewParts(message, t) : null;
   return {
     id: card.id,
     href: `/suporte/${card.id}`,
@@ -779,9 +827,13 @@ export function caseCardView(
     state: caseStateView(card.state, t),
     subject: card.subjectLabel,
     hasSubject: card.subject !== null && card.subject.trim() !== '',
-    preview: message
-      ? t(message.side === 'member' ? 'mine.previewOwn' : 'mine.previewTeam', { text })
-      : '',
+    preview:
+      message && parts
+        ? t(message.side === 'member' ? 'mine.previewOwn' : 'mine.previewTeam', {
+            text: parts.text,
+          })
+        : '',
+    previewKind: parts?.kind ?? 'text',
     category: caseCategoryLabel(card.category, t),
     time: inboxTime(card.lastMessageAt ?? card.openedAt, keys, timeZone, {
       yesterday: t('day.yesterday'),

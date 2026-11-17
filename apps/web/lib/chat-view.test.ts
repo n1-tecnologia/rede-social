@@ -26,6 +26,8 @@ import {
   formatVoiceDuration,
   inboxRowView,
   inboxTime,
+  nextPlaybackRate,
+  playbackRateLabel,
   reconcileInboxPage,
   spokenVoiceDuration,
   tenantDayKeys,
@@ -724,6 +726,7 @@ describe('12.4-11 — caseCardView, the "Meus chamados" card (UI-D-821)', () => 
       subject: 'Cobrança duplicada',
       hasSubject: true,
       preview: 'Você: Obrigada!',
+      previewKind: 'text',
       category: 'Eventos',
       time: '22:10',
       closed: false,
@@ -1071,5 +1074,101 @@ describe('12.5-10 voice view functions — duration labels, spoken phrase and th
     expect(Object.keys(view).sort()).toEqual(
       ['authorKey', 'body', 'createdAtMs', 'dayKey', 'id', 'label', 'seq', 'side', 'time'].sort(),
     );
+  });
+});
+
+describe('12.5-10 voice previews and rates (D-860, D-868, D-854)', () => {
+  const keys = tenantDayKeys(at('2026-10-01T01:30:00Z'), SP);
+  const voiceMessage = (side: 'member' | 'staff', extra: Record<string, unknown> = {}) => ({
+    seq: 4,
+    preview: '',
+    side,
+    authorFirstName: side === 'staff' ? 'Ana' : null,
+    ...extra,
+  });
+  const inbox = (lastMessage: InboxRow['lastMessage']) =>
+    inboxRowView(inboxRow({ lastMessage }), { timeZone: SP, keys, t });
+
+  it('1. an inbox voice preview carries the shipped prefixes and the kind the glyph reads', () => {
+    const team = inbox(voiceMessage('staff', { voiceSeconds: 42 }));
+    expect(team).toMatchObject({ preview: 'Ana: Mensagem de voz · 0:42', previewKind: 'voice' });
+    const member = inbox(voiceMessage('member', { voiceSeconds: 42 }));
+    expect(member).toMatchObject({ preview: 'Mensagem de voz · 0:42', previewKind: 'voice' });
+    const gone = inbox(voiceMessage('staff', { voiceSeconds: 42, authorFirstName: '' }));
+    expect(gone.preview).toBe('Mensagem de voz · 0:42');
+  });
+
+  it('2. a deleted recording previews with no duration, the team prefix still applies', () => {
+    const member = inbox(voiceMessage('member', { voiceDeleted: true }));
+    expect(member).toMatchObject({
+      preview: 'Mensagem de voz apagada',
+      previewKind: 'voiceDeleted',
+    });
+    const team = inbox(voiceMessage('staff', { voiceSeconds: 42, voiceDeleted: true }));
+    expect(team).toMatchObject({
+      preview: 'Ana: Mensagem de voz apagada',
+      previewKind: 'voiceDeleted',
+    });
+  });
+
+  it('3. a text row is unchanged and has the text kind; a row with no message has the text kind and no words', () => {
+    const text = inbox({ seq: 3, preview: 'Oi', side: 'member', authorFirstName: null });
+    expect(text).toMatchObject({ preview: 'Oi', previewKind: 'text' });
+    const none = inboxRowView(inboxRow({ lastMessage: null, lastMessageAt: null }), {
+      timeZone: SP,
+      keys,
+      t,
+    });
+    expect(none).toMatchObject({ preview: '', previewKind: 'text' });
+  });
+
+  it('4. the card previews "Você: " and "Equipe: " with the voice words, and the deleted variant', () => {
+    const base = memberCase({ state: 'open', category: 'events' });
+    const card = (lastMessage: CaseCard['lastMessage']): CaseCard => ({
+      ...base,
+      lastMessage,
+      lastMessageAt: '2026-10-01T01:10:00Z',
+    });
+    const own = caseCardView(card({ preview: '', side: 'member', voiceSeconds: 42 }), {
+      timeZone: SP,
+      keys,
+      t,
+    });
+    expect(own).toMatchObject({ preview: 'Você: Mensagem de voz · 0:42', previewKind: 'voice' });
+    const team = caseCardView(card({ preview: '', side: 'staff', voiceSeconds: 42 }), {
+      timeZone: SP,
+      keys,
+      t,
+    });
+    expect(team.preview).toBe('Equipe: Mensagem de voz · 0:42');
+    const gone = caseCardView(card({ preview: '', side: 'member', voiceDeleted: true }), {
+      timeZone: SP,
+      keys,
+      t,
+    });
+    expect(gone).toMatchObject({
+      preview: 'Você: Mensagem de voz apagada',
+      previewKind: 'voiceDeleted',
+    });
+    const text = caseCardView(card({ preview: 'Oi', side: 'member' }), { timeZone: SP, keys, t });
+    expect(text.previewKind).toBe('text');
+    const empty = caseCardView(card(null), { timeZone: SP, keys, t });
+    expect(empty).toMatchObject({ preview: '', previewKind: 'text' });
+  });
+
+  it('5. the speed cycle is 1, 1.5, 2, 1 and any unknown value restarts at 1', () => {
+    expect(nextPlaybackRate(1)).toBe(1.5);
+    expect(nextPlaybackRate(1.5)).toBe(2);
+    expect(nextPlaybackRate(2)).toBe(1);
+    expect(nextPlaybackRate(0.75)).toBe(1);
+    expect(nextPlaybackRate(Number.NaN)).toBe(1);
+    expect(nextPlaybackRate(undefined)).toBe(1);
+  });
+
+  it('6. the speed labels use the pt-BR decimal comma', () => {
+    expect(playbackRateLabel(1, t)).toBe('1x');
+    expect(playbackRateLabel(1.5, t)).toBe('1,5x');
+    expect(playbackRateLabel(2, t)).toBe('2x');
+    expect(playbackRateLabel(0.75, t)).toBe('1x');
   });
 });
