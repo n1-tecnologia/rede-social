@@ -765,8 +765,9 @@ describe('notificationRowView — 12.4-13 the resolved-case notice (D-808, UI-D-
   });
 
   it('a missing or non-numeric number degrades without throwing and keeps the glyph row', () => {
-    for (const facts of [{ caseId: CASE }, { caseId: CASE, number: 'x' }] as const) {
-      const row = resolved({ ...facts });
+    const cases: NotificationRow['facts'][] = [{ caseId: CASE }, { caseId: CASE, number: 'x' }];
+    for (const facts of cases) {
+      const row = resolved(facts);
       expect(row?.glyph).toBe('CircleCheck');
       expect(markup(row?.sentence)).toContain('foi resolvido.');
     }
