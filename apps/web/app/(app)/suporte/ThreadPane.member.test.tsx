@@ -356,6 +356,119 @@ describe('the reply that reopens (UI-D-820d)', () => {
   });
 });
 
+describe('a send that lands in a NEW case (WR-02, D-801)', () => {
+  const NEW_ID = '44444444-4444-4444-8444-444444444444';
+  const OLD_URL = `/api/chat/conversations/${CASE_ID}`;
+  const NEW_URL = `/api/chat/conversations/${NEW_ID}`;
+  const newHeader = {
+    viewer: 'member',
+    header: {
+      ...header('open'),
+      id: NEW_ID,
+      number: 43,
+      title: 'Chamado #43',
+      subjectLine: '#43 · Novo assunto',
+    },
+  };
+  const sentToNew = {
+    ok: true as const,
+    conversationId: NEW_ID,
+    view: ownView(1, 'Mensagem do novo chamado', '55555555-5555-4555-8555-555555555555'),
+    case: { id: NEW_ID, number: 43, state: 'open' as const, opened: true, reopened: false },
+  };
+  let oldHeader: () => Promise<Response> | Response;
+
+  beforeEach(() => {
+    oldHeader = () => Response.json(answer('closed'));
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes('/messages?')) {
+        return Response.json({
+          items: [],
+          hasMore: false,
+          todayKey: '2026-11-17',
+          yesterdayKey: '2026-11-16',
+        });
+      }
+      if (u.endsWith('/read')) return new Response(null, { status: 204 });
+      if (u === NEW_URL) return Response.json(newHeader);
+      if (u === OLD_URL) return oldHeader();
+      return new Response(null, { status: 404 });
+    });
+  });
+
+  const send = (text: string) => {
+    fireEvent.change(screen.getByLabelText('Mensagem'), { target: { value: text } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar mensagem' }));
+  };
+
+  it('adopts the new conversation: topic, bar, thread, no closed strip, reads go to the new case', async () => {
+    mocks.send.mockResolvedValue(sentToNew);
+    renderPane({ initialCase: header('in_progress') });
+    expect(screen.getByText('Oi, preciso de ajuda')).toBeTruthy();
+    fetchMock.mockClear();
+
+    send('Mensagem do novo chamado');
+    await waitFor(() => expect(screen.getByText('Chamado #43')).toBeTruthy());
+
+    expect(realtime().topic).toBe(convTopic(TENANT_ID, NEW_ID));
+    await waitFor(() => expect(screen.getByText('Aberto')).toBeTruthy());
+    expect(screen.getByLabelText('Mensagem')).toBeTruthy();
+    expect(document.querySelector('[data-case-closed]')).toBeNull();
+    expect(screen.queryByText('Oi, preciso de ajuda')).toBeNull();
+    expect(screen.getByText('Mensagem do novo chamado')).toBeTruthy();
+
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls).toContain(NEW_URL);
+    expect(urls).not.toContain(OLD_URL);
+
+    // The cursor was reset for the new case: the next live message asks after seq 1 of the NEW conversation.
+    fetchMock.mockClear();
+    await fire(REALTIME_EVENTS.chatMessage, { seq: 2 });
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => String(url) === `/api/chat/conversations/${NEW_ID}/messages?afterSeq=1`,
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('control: a send answered for the SAME conversation keeps the earlier messages and the topic', async () => {
+    mocks.send.mockResolvedValue({
+      ok: true as const,
+      conversationId: CASE_ID,
+      view: ownView(2, 'Segunda mensagem', '66666666-6666-4666-8666-666666666666'),
+      case: { id: CASE_ID, number: 42, state: 'open' as const, opened: false, reopened: false },
+    });
+    renderPane();
+    send('Segunda mensagem');
+    await waitFor(() => expect(screen.getByText('Segunda mensagem')).toBeTruthy());
+    expect(screen.getByText('Oi, preciso de ajuda')).toBeTruthy();
+    expect(realtime().topic).toBe(convTopic(TENANT_ID, CASE_ID));
+  });
+
+  it('a header read in flight for the old conversation is discarded: the closed strip never appears', async () => {
+    const gates: Array<(response: Response) => void> = [];
+    oldHeader = () => new Promise<Response>((resolve) => gates.push(resolve));
+    mocks.send.mockResolvedValue(sentToNew);
+    renderPane({ initialCase: header('in_progress') });
+
+    await fire(REALTIME_EVENTS.chatCase);
+    await waitFor(() => expect(gates).toHaveLength(1));
+
+    send('Mensagem do novo chamado');
+    await waitFor(() => expect(screen.getByText('Chamado #43')).toBeTruthy());
+    await act(async () => {
+      gates[0]?.(Response.json(answer('closed')));
+    });
+    await act(async () => {});
+    expect(document.querySelector('[data-case-closed]')).toBeNull();
+    expect(screen.getByText('Chamado #43')).toBeTruthy();
+    expect(screen.getByLabelText('Mensagem')).toBeTruthy();
+  });
+});
+
 describe('the staff pane never draws the member bar', () => {
   it('re-reads the header for the team (12.4-15) but a member-shaped answer draws no bar', async () => {
     renderPane({ viewer: 'staff', initialCase: null, hasAnyCase: false });

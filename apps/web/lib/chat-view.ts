@@ -723,6 +723,7 @@ export function caseCardView(
 export interface MyCasesPageView {
   current: CaseCardView | null;
   items: CaseCardView[];
+  /** The member's CLOSED cases (the one in `current` is not counted): the "Anteriores" count. */
   total: number;
   nextCursor: string | null;
 }

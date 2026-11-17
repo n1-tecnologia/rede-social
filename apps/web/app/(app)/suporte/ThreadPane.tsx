@@ -452,6 +452,8 @@ export function ThreadPane({
           const id = conversationRef.current;
           if (!id) return;
           const answer = await fetchPage(id, `afterSeq=${cursorRef.current}`);
+          // The pane moved to another case while the page was on its way (WR-02): it is not this one's.
+          if (conversationRef.current !== id) break;
           if (!answer) break;
           setKeys({ todayKey: answer.todayKey, yesterdayKey: answer.yesterdayKey });
           cursorRef.current = cursorAfterPage(
@@ -496,9 +498,18 @@ export function ThreadPane({
         if (!id) break;
         if (viewer === 'staff') {
           const header = await fetchStaffCaseHeader(id);
+          if (conversationRef.current !== id) {
+            state.again = true;
+            continue;
+          }
           if (header) setStaffCase(header);
         } else {
           const header = await fetchCaseHeader(id);
+          // WR-02: a send moved the pane to a new case while this read ran; read the new one instead.
+          if (conversationRef.current !== id) {
+            state.again = true;
+            continue;
+          }
           if (header) setCaseView(header);
         }
       } while (state.again);
@@ -615,16 +626,32 @@ export function ThreadPane({
     }
     const { view, conversationId: created } = result;
     const sentCase = 'case' in result ? result.case : undefined;
+    // WR-02 (D-801): the API retried after the case was closed and opened a NEW one. The pane adopts the
+    // conversation the send answered (the id comes from the server action's own answer, never from input):
+    // topic, message list, catch-up cursor, read mark and older-page flag are the new case's. Only the member
+    // pane switches; a staff pane's conversation never changes under it.
+    const switched =
+      viewer === 'member' &&
+      conversationRef.current !== null &&
+      created !== conversationRef.current;
     if (!conversationRef.current) {
       conversationRef.current = created;
       setConversationId(created);
+    } else if (switched) {
+      conversationRef.current = created;
+      setConversationId(created);
+      cursorRef.current = 0;
+      readSeqRef.current = 0;
+      setHasOlder(false);
+      setOlderState('idle');
+      setOpenedNumber(null);
     }
     intentRef.current = { kind: 'bottom' };
     // C-CR-01: the own seq moves the cursor only when nothing can be missing before it; past a gap
     // (the other side wrote meanwhile and its signal has not landed yet) the catch-up fills it.
     const next = cursorAfterOwnSend(cursorRef.current, view.seq);
     cursorRef.current = next.cursor;
-    setViews((current) => mergeViews(current, [view], [tempId]));
+    setViews((current) => (switched ? [view] : mergeViews(current, [view], [tempId])));
     setNewCount(0);
     if (next.catchUp) void catchUp();
     // A team reply may take an unowned case: the server decides, the bar re-reads (UI-D-828a).
@@ -643,6 +670,17 @@ export function ThreadPane({
           subjectLine: '',
         });
         setOpenedNumber(sentCase.number);
+      } else if (switched) {
+        // A send that landed in another, already existing case: its bar from the answer until the re-read.
+        setCaseView({
+          viewer: 'member',
+          id: sentCase.id,
+          number: sentCase.number,
+          title: caseTitle(t, sentCase.number),
+          state: caseStateView(sentCase.state, t),
+          subject: '',
+          subjectLine: '',
+        });
       } else {
         // The server's own word on the state after this send (a reply may reopen a resolved case).
         setCaseView((current) =>

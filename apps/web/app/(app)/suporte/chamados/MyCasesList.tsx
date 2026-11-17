@@ -46,7 +46,8 @@ function Section({
 /**
  * The member's "Meus chamados" list (CASE-14, UI-D-821, UI-D-832, D-803) [designed]: "Chamado atual"
  * (only when there is an active case, at most one) and "Anteriores" (only when there is a closed one,
- * newest first), each headed by the shipped `SectionTitle` with its count at the right.
+ * newest first), each headed by the shipped `SectionTitle` with its count at the right. The "Anteriores"
+ * count is the answer's `total`, which counts the member's CLOSED cases only (never the current one).
  *
  * - **Paging:** `InfiniteScroll` by keyset through `loadMoreMyCasesAction(cursor)`; the answer's `items`
  *   are APPENDED (a card already on screen is not repeated) and its `current` and `total` are ignored, so a
@@ -158,7 +159,9 @@ export function MyCasesList({ initial }: MyCasesListProps) {
     );
   }
 
-  const previousCount = Math.max(total - (current ? 1 : 0), items.length);
+  // `total` is the API's CLOSED count (the current case is not in it): no subtraction (WR-03, D-803). The
+  // loaded count only guards an API that sent less than what is already on screen.
+  const previousCount = Math.max(total, items.length);
 
   return (
     <PullToRefresh onRefresh={refresh}>

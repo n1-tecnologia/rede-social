@@ -327,7 +327,8 @@ export type MyCasesQuery = z.infer<typeof myCasesQuerySchema>;
 
 /**
  * "Meus chamados": `current` is the active case (null when none), `items` the closed ones newest first, `total`
- * counts every case of the member, `nextCursor` is opaque.
+ * counts the closed cases of the member (the one the card "Chamado atual" shows is not in it), `nextCursor` is
+ * opaque.
  */
 export const myCasesPageSchema = z
   .object({

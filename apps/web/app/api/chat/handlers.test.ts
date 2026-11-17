@@ -324,7 +324,8 @@ describe('GET /api/chat/support/cases (the whole finished page, checker W11)', (
   const page = () => ({
     current: card(3, 'in_progress'),
     items: [card(2, 'closed'), card(1, 'closed')],
-    total: 3,
+    // The closed count only: the current case is not in it (D-803, WR-03).
+    total: 2,
     nextCursor: 'c-next',
   });
 
@@ -342,7 +343,7 @@ describe('GET /api/chat/support/cases (the whole finished page, checker W11)', (
       total: number;
       nextCursor: string | null;
     };
-    expect(body.total).toBe(3);
+    expect(body.total).toBe(2);
     expect(body.nextCursor).toBe('c-next');
     expect(body.current).toMatchObject({
       number: 3,
@@ -365,7 +366,7 @@ describe('GET /api/chat/support/cases (the whole finished page, checker W11)', (
     expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe('/v1/chat/support/cases?cursor=abc');
     const body = (await res.json()) as { current: unknown; total: number };
     expect(body.current).not.toBeNull();
-    expect(body.total).toBe(3);
+    expect(body.total).toBe(2);
   });
 
   it('an over-long cursor is 400 with zero API calls', async () => {

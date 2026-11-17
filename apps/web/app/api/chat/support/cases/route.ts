@@ -9,8 +9,8 @@ import { createClient } from '@/lib/supabase/server';
 /**
  * `GET /api/chat/support/cases?cursor=` (12.4-20, D-803, UI-D-821): the member's "Meus chamados" page,
  * finished. It is the pull-to-refresh and the realtime refetch of the list: with NO cursor it answers
- * the whole first page, `{ current, items, total, nextCursor }`, so the refresh replaces "Chamado atual",
- * the list and the section counts; a cursor answers the next page in the same shape (the API sends
+ * the whole first page, `{ current, items, total, nextCursor }` (`total` counts the member's closed cases,
+ * not the current one), so the refresh replaces "Chamado atual", the list and the section counts; a cursor answers the next page in the same shape (the API sends
  * `current` and `total` on every page). Load-more through a user scroll is `loadMoreMyCasesAction`.
  *
  * Gates, each refusal costing ZERO API calls: `sameOriginGet` (403), a verified session (401) and a

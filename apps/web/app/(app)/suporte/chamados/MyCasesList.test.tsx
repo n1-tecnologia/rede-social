@@ -134,9 +134,9 @@ describe('MyCasesList sections (UC M12, M13)', () => {
     expect(cardNumbers()).toHaveLength(2);
   });
 
-  it('both: "Chamado atual" then "Anteriores", the past count excluding the current one', () => {
+  it('both: "Chamado atual" then "Anteriores", the past count being the closed total', () => {
     render(
-      <MyCasesList initial={page({ current: active(), items: [card(), card()], total: 3 })} />,
+      <MyCasesList initial={page({ current: active(), items: [card(), card()], total: 2 })} />,
     );
     expect(titles()).toEqual(['Chamado atual1', 'Anteriores2']);
   });
@@ -183,7 +183,7 @@ describe('MyCasesList paging (UC M13 overflow, M15)', () => {
       }),
     });
     render(
-      <MyCasesList initial={page({ current, items: [card()], total: 3, nextCursor: 'c1' })} />,
+      <MyCasesList initial={page({ current, items: [card()], total: 2, nextCursor: 'c1' })} />,
     );
     fireEvent.click(screen.getByTestId('load-more'));
     await waitFor(() => expect(cardNumbers()).toHaveLength(3));
@@ -216,6 +216,50 @@ describe('MyCasesList paging (UC M13 overflow, M15)', () => {
   });
 });
 
+describe('the Anteriores count is the closed total (WR-03)', () => {
+  const closedCards = (count: number) => Array.from({ length: count }, () => card());
+
+  it('a current case, 20 of 25 closed ones loaded: "Anteriores" reads 25, with no subtraction', () => {
+    render(
+      <MyCasesList
+        initial={page({
+          current: active(),
+          items: closedCards(20),
+          total: 25,
+          nextCursor: 'c1',
+        })}
+      />,
+    );
+    expect(titles()).toEqual(['Chamado atual1', 'Anteriores25']);
+  });
+
+  it('exactly 20 closed with no more pages reads 20', () => {
+    render(
+      <MyCasesList
+        initial={page({ current: active(), items: closedCards(20), total: 20, nextCursor: null })}
+      />,
+    );
+    expect(titles()).toEqual(['Chamado atual1', 'Anteriores20']);
+  });
+
+  it('a current case and no closed one draws no "Anteriores" section', () => {
+    render(<MyCasesList initial={page({ current: active(), total: 0 })} />);
+    expect(titles()).toEqual(['Chamado atual1']);
+    expect(screen.queryByText('Anteriores')).toBeNull();
+  });
+
+  it("a pull-to-refresh replaces the number with the answer's total", async () => {
+    action.mockResolvedValue({
+      ok: true,
+      ...page({ current: active(), items: closedCards(2), total: 7, nextCursor: 'c9' }),
+    });
+    render(<MyCasesList initial={page({ items: closedCards(1), total: 1 })} />);
+    expect(titles()).toEqual(['Anteriores1']);
+    fireEvent.click(screen.getByTestId('pull'));
+    await waitFor(() => expect(titles()).toEqual(['Chamado atual1', 'Anteriores7']));
+  });
+});
+
 describe('MyCasesList refresh (W11)', () => {
   it('asks for page 1 with a null cursor and REPLACES the current case, the list and the counts', async () => {
     const stale = card({ subject: 'VELHO' });
@@ -224,7 +268,7 @@ describe('MyCasesList refresh (W11)', () => {
       ...page({
         current: active({ subject: 'NOVO ATUAL' }),
         items: [card({ subject: 'NOVO PASSADO' })],
-        total: 2,
+        total: 1,
         nextCursor: null,
       }),
     });

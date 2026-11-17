@@ -342,7 +342,8 @@ describe('loadMoreMyCasesAction (checker W11)', () => {
   const page = (over: Record<string, unknown> = {}) => ({
     current: card(3, 'in_progress'),
     items: [card(2, 'closed')],
-    total: 3,
+    // The closed count only: the current case is not in it (D-803, WR-03).
+    total: 1,
     nextCursor: 'next',
     ...over,
   });
@@ -355,7 +356,7 @@ describe('loadMoreMyCasesAction (checker W11)', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.current).toMatchObject({ number: 3, title: 'Chamado #3', preview: 'Você: Oi' });
-    expect(result.total).toBe(3);
+    expect(result.total).toBe(1);
     expect(result.items).toHaveLength(1);
     expect(result.nextCursor).toBe('next');
   });
@@ -367,7 +368,7 @@ describe('loadMoreMyCasesAction (checker W11)', () => {
     const result = await loadMoreMyCasesAction('next');
 
     expect(calledPath()).toBe('/v1/chat/support/cases?cursor=next');
-    expect(result).toMatchObject({ ok: true, total: 3, nextCursor: null });
+    expect(result).toMatchObject({ ok: true, total: 1, nextCursor: null });
     if (result.ok) {
       expect(result.current).not.toBeNull();
       expect(result.items.map((item) => item.number)).toEqual([1]);
