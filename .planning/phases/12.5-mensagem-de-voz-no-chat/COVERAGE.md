@@ -1,0 +1,1 @@
+No external API integration: the phase adds two routes to the project's own Hono API and the browser's own MediaRecorder and audio element, and installs ffmpeg as a local system binary of the one Docker image (approved by Igor, D-863); it consumes no third-party service.

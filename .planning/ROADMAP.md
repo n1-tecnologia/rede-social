@@ -2141,9 +2141,9 @@ Plans:
 **Scope**: Post-MVP, additive to the chat. Requested by Igor on 2026-11-17 and settled the same day: everyone who can write in a chat can send a voice message (member and staff alike); a recording lasts at most 5 minutes; it works in every chat, so the support chat today and the direct and group conversations as soon as Phase 11 builds them (the composer, the message model and the bubble are shared, so Phase 11 inherits audio and must not plan it again). A chat with no audio sent behaves exactly as before.
 **Depends on:** Phase 07 (the chat, Realtime, notifications and Web Push), Phase 12.4 (the case-aware previews, push copy and composer it touches), the kernel media pipeline (`media_assets`, signed uploads, the private `media` bucket). Runs before Phase 11 and Phase 13.
 **Requirements**: VOICE-01..VOICE-37
-**Success Criteria** (draft from the 2026-11-17 request, to be settled in `/gsd-discuss-phase 12.5`):
+**Success Criteria** (settled in `/gsd-discuss-phase 12.5` and the UI contract of 2026-11-17):
 
-  1. In a chat, the sender taps the microphone, records, listens to the take, discards it or sends it; a recording stops by itself at 5 minutes; a sender who refuses the microphone permission gets a plain message and the text composer keeps working.
+  1. In a chat, the sender taps the microphone, records, and sends with one more tap or discards with the trash (there is no listen-before-send step); a recording stops by itself at 5 minutes and the sender then chooses to send or discard; a sender who refuses the microphone permission gets a plain message and the text composer keeps working.
   2. The other side sees a voice message in the conversation with a player (play, pause, progress, duration) and hears it, on Chromium, Firefox and Safari (the recorder's formats differ: webm on the first two, mp4 on Safari).
   3. A voice message is visible only to the people in that conversation: another member of the tenant who knows the media id cannot open it, and no user of another tenant can.
   4. Wherever a message shows its text as a preview (inbox row, "Meus chamados" card, case subject fallback, push body), a voice message reads "Mensagem de voz"; a closed case, a blocked or removed member and the existing refusal codes behave as they do for text.
@@ -2151,11 +2151,73 @@ Plans:
 
 **UI hint**: yes. The composer's microphone and recording states and the bubble's player are drawn before they are built; the native shell's microphone permission text (`packages/contracts/src/native.ts`, today worded for video sound only) changes with it, for Phase 13 to ship.
 
-**Plans:** 0 plans
+**Plans:** 0/18 plans executed (planned 2026-11-17: 18 plans in 14 waves; the database, kernel, API, gate, sweep, previews and view-function plans (01 to 11) run before the sketch gate and are not gated; plan 12 stops until Igor approves sketch 024; plans 13 to 17 are the web plans and carry the approval precondition; plan 04 stops at the D-865 decision checkpoint; plan 18 holds the release, the ledger and the exit gate)
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 12.5 to break down)
+**Wave 1**
+
+- [ ] 12.5-01-PLAN.md — Media foundation: the `audio` kind, the `voice` purpose, the widened CHECKs, the bucket allow-list and the audio fixtures
+- [ ] 12.5-03-PLAN.md — ffmpeg in the one image and in CI (the approval recorded, the cost measured)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 12.5-02-PLAN.md — Kernel audio pipeline: signatures, start permission, complete, ffmpeg normalization in the worker and the Range probe
+- [ ] 12.5-04-PLAN.md — Message model: nullable body, asset reference, stored duration, exactly-one CHECK, unique index and INSERT policy (D-865 one-way checkpoint, pgTAP 236)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 12.5-05-PLAN.md — Chat contracts and the member voice send (the backend tracer, idempotent per take)
+- [ ] 12.5-07-PLAN.md — The read gate `app.chat_asset_hidden`, the delete refusal and the admin list exclusion
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 12.5-06-PLAN.md — The staff voice reply route (one refusal order, take-on-reply, README)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 12.5-08-PLAN.md — The orphan sweep, the account-deletion step (D-868) and the tombstone purge
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 12.5-09-PLAN.md — Previews in SQL, push copy and the case subject fallback
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 12.5-10-PLAN.md — Web view functions, the `voice` catalog and the native microphone text
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 12.5-11-PLAN.md — Web server actions, the upload-and-send orchestration and the service worker rule
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 12.5-12-PLAN.md — Sketch gate: a blocking-human checkpoint for sketch 024 (draws nothing, only Igor writes the approval)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 12.5-13-PLAN.md — Recorder hook and the composer voice states (gated on sketch 024)
+- [ ] 12.5-16-PLAN.md — Inbox row and "Meus chamados" previews on screen (gated)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
+- [ ] 12.5-14-PLAN.md — Bubble player, the one-at-a-time controller and the bubble variants (gated)
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
+- [ ] 12.5-15-PLAN.md — Thread host: optimistic bubble, tap-order queue, failures, case flows and strips (gated)
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
+- [ ] 12.5-17-PLAN.md — End-to-end spec `chat-voice.spec.ts`, written and listed, never run (gated)
+
+**Wave 14** *(blocked on Wave 13 completion)*
+
+- [ ] 12.5-18-PLAN.md — Release notes in `docs/DEPLOY.md`, the owner ledger `12.5-MANUAL-PROOFS.md`, the README note and the phase exit gate
+
+**Cross-cutting constraints:**
+
+- Precondition for every task (D-33, D-365, D-417): `grep -q '^approved: true' .planning/sketches/024-phase-12.5-designed-screens/README.md` succeeds; if it does not, the executor stops and reports that the sketch gate is pending; the guard is the first clause of each task's verify command; the README's review-outcome corrections (recorded by plan 12) are binding
 
 ### Phase 13: App nativo iOS e Android por tenant (white-label)
 
@@ -2280,7 +2342,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 12.4. Abertura de chamado no suporte (INSERTED) | 22/22 | In Progress|  |
-| 12.5. Mensagem de voz no chat (INSERTED) | 0/TBD | Not started | - |
+| 12.5. Mensagem de voz no chat (INSERTED) | 0/18 | Planned | - |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |
 
 ---
