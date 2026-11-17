@@ -156,7 +156,9 @@ allowed_mime_types = ["image/png", "image/svg+xml", "image/webp", "image/jpeg", 
 #
 # The allow-list is exactly the union of `MEDIA_LIMITS` in @rede-social/contracts/media — jpeg/png/webp
 # (images), pdf and the four office mimes of `ATTACHMENT_MIMES` (files, 08.3-03 / D-410: xlsx, xls,
-# pptx, ppt) and mp4/quicktime (video). Video is here for 03-06's `VIDEO_PROVIDER=fake`,
+# pptx, ppt), mp4/quicktime (video) and, since 12.5-01 (D-864, VOICE-13), the three chat voice
+# recording containers of `VOICE_MIMES` (audio/webm, audio/mp4, audio/ogg).
+# Video is here for 03-06's `VIDEO_PROVIDER=fake`,
 # which is what every non-production environment runs: it mints its direct-upload target in THIS
 # bucket under the asset's own prefix rather than accepting bytes at a dev-only API route, which
 # would put a body parser in the API and contradict MEDIA-01. With `VIDEO_PROVIDER=mux` the streaming
@@ -179,6 +181,9 @@ allowed_mime_types = [
   "application/vnd.ms-powerpoint",
   "video/mp4",
   "video/quicktime",
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg",
 ]
 
 # Allow connections via S3 compatible clients

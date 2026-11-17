@@ -50,7 +50,9 @@ select ok(
 -- rather than at a dev-only byte-accepting API route (that route would contradict MEDIA-01). With
 -- `VIDEO_PROVIDER=mux` the vendor owns the object and they are unused. 08.3-03 (D-410, COURSE-07)
 -- adds the four office mimes of `ATTACHMENT_MIMES` — xlsx, xls, pptx, ppt — for lesson materials
--- (`*_media_bucket_office.sql` hosted, config.toml locally). Pinned as a SET, so neither a silent
+-- (`*_media_bucket_office.sql` hosted, config.toml locally). 12.5-01 (D-864, VOICE-13) adds the
+-- three voice recording mimes, audio/webm, audio/mp4 and audio/ogg (`*_media_bucket_audio.sql`
+-- hosted, config.toml locally). Pinned as a SET, so neither a silent
 -- widening nor a silent narrowing can pass.
 select results_eq(
   $$ select array(select unnest(allowed_mime_types) from storage.buckets where id = 'media' order by 1) $$,
@@ -60,8 +62,9 @@ select results_eq(
        'application/vnd.ms-powerpoint',
        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+       'audio/mp4','audio/ogg','audio/webm',
        'image/jpeg','image/png','image/webp','video/mp4','video/quicktime']) $$,
-  'MEDIA-01/MEDIA-03/COURSE-07: the media bucket allow-list is exactly the contract union — images, pdf, the four office mimes and the two video mimes, no vector'
+  'MEDIA-01/MEDIA-03/COURSE-07/VOICE-13: the media bucket allow-list is exactly the contract union — images, pdf, the four office mimes, the two video mimes and the three voice mimes, no vector'
 );
 
 select is(
