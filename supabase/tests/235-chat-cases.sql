@@ -44,8 +44,14 @@ begin;
 -- 11. EDIT AND HISTORY (plan 03, CASE-10, CASE-12; D-810, D-811, D-812, D-845; EP-034..EP-036): app.chat_case_edit, one
 --    edited row per changed field, no-op edits, the closed refusal, the value bounds, the lanes and the signals.
 --
+-- 12. THE SWEEP, END TO END (plan 04, CASE-13, CASE-12, CASE-18, CASE-23; D-807, D-844, D-810; T-12.4-17..20): the hourly
+--    sweeper's `app.chat_cases_auto_close` closes a case resolved 7 days ago, silently, with a history row that has no actor.
+--
+-- 13. THE SWEEP AT ITS EDGES (plan 04, EP-039..EP-042): the exact boundary, the batch clamps, the oldest-first order with the id
+--    tiebreak, two tenants in one call, the states it never touches, the lanes and the 5000 ceiling.
+--
 -- Fixture ids use the `1e350000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(354);
+select plan(398);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-case-a', 'Chamado A', '1e350000-0000-4000-8000-000000000001');
@@ -1599,6 +1605,158 @@ select ok(has_function_privilege('service_role', 'app.chat_cases_auto_close(int)
 select ok((select p.prosecdef and p.proconfig @> array['search_path=""']
              from pg_proc p where p.oid = 'app.chat_cases_auto_close(int)'::regprocedure),
   'D-844: the sweep is a security definer with search_path pinned to ""');
+
+-- ── 13. the sweep at its edges ────────────────────────────────────────────────────────────────
+-- Plan 04 (CASE-13, CASE-12, CASE-23; D-807, D-844; EP-039..EP-042; T-12.4-17..20). Sequence, because every call of the
+-- sweep acts on EVERY old resolved case of the database: idempotency and silence, the exact 7-day boundary, the batch
+-- clamps, the oldest-first order with the id tiebreak, two tenants in one call, the states the sweep must never touch, the
+-- lanes, and last the 5000 ceiling (the unique active-case index is dropped for it; this file rolls back).
+select set_config('tests.n_events0', (select count(*)::text from public.chat_case_events), true);
+select set_config('tests.n_notif0', (select count(*)::text from public.notifications where tenant_id in ('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000008')), true);
+select set_config('tests.n_signals0', (select count(*)::text from realtime.messages where event = 'chat.case'), true);
+
+-- idempotent: the case of section 12 is closed, so a second run finds nothing and writes nothing
+select is(app.chat_cases_auto_close(500), 0, 'EP-040/D-807: with no resolved case old enough the sweep returns 0');
+select is((select count(*)::text from public.chat_case_events), current_setting('tests.n_events0'),
+  'D-807: ... and writes no event');
+select is(tests.evs(61), 'closed:resolved>closed', 'D-807: the case closed by the first run has still exactly one closed event');
+select case when current_setting('tests.now_partition') <> '' then is(
+  (select count(*)::text from realtime.messages where event = 'chat.case'), current_setting('tests.n_signals0'),
+  'EP-040: ... and publishes nothing'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+
+-- EP-039: the exact boundary, on the transaction clock (the comparison is less-than-or-equal)
+select tests.mkcase(71, 'resolved', null, 0);
+select tests.mkcase(72, 'resolved', null, 0);
+update public.chat_conversations set resolved_at = now() - interval '7 days' where id = tests.cid(71);
+update public.chat_conversations set resolved_at = now() - interval '7 days' + interval '1 minute' where id = tests.cid(72);
+select is(app.chat_cases_auto_close(500), 1, 'EP-039: a case resolved exactly 7 days ago is closed, one resolved 7 days minus a minute ago is not: the call returns 1');
+select is(tests.row(71), 'closed|-|false|true|0', 'EP-039: resolved exactly 7 days ago: closed');
+select is(tests.row(72), 'resolved|-|true|false|0', 'EP-039: resolved 7 days minus 1 minute ago: left');
+select is(tests.evs(71), 'closed:resolved>closed', 'EP-039: the boundary case has its closed event');
+select is(tests.evs(72), '', 'EP-039: the case left has none');
+
+-- EP-040: the batch clamps. A null, zero and negative batch each clamp to 1 and take the OLDEST case
+select tests.mkcase(73, 'resolved', null, 0);
+select tests.mkcase(74, 'resolved', null, 0);
+select tests.mkcase(75, 'resolved', null, 0);
+update public.chat_conversations set resolved_at = now() - interval '10 days' where id = tests.cid(73);
+update public.chat_conversations set resolved_at = now() - interval '9 days' where id = tests.cid(74);
+update public.chat_conversations set resolved_at = now() - interval '8 days' where id = tests.cid(75);
+select is(app.chat_cases_auto_close(null), 1, 'EP-040: a null batch clamps to 1');
+select is(tests.row(73) || '/' || tests.row(74) || '/' || tests.row(75), 'closed|-|false|true|0/resolved|-|true|false|0/resolved|-|true|false|0',
+  'EP-040: ... and took the oldest of the three');
+select is(app.chat_cases_auto_close(0), 1, 'EP-040: a zero batch clamps to 1');
+select is(tests.row(74), 'closed|-|false|true|0', 'EP-040: ... and took the next oldest');
+select is(app.chat_cases_auto_close(-5), 1, 'EP-040: a negative batch clamps to 1');
+select is(tests.row(75), 'closed|-|false|true|0', 'EP-040: ... and took the last');
+select is(tests.evs(73) || '/' || tests.evs(74) || '/' || tests.evs(75), 'closed:resolved>closed/closed:resolved>closed/closed:resolved>closed',
+  'EP-040: each clamped call wrote exactly one closed event for the one case it took');
+
+-- EP-042 (and EP-041): a batch of 1 over a backlog takes the oldest resolved_at first, the id breaking a tie
+select tests.mkcase(76, 'resolved', null, 0);
+select tests.mkcase(77, 'resolved', null, 0);
+select tests.mkcase(78, 'resolved', null, 0);
+update public.chat_conversations set resolved_at = now() - interval '12 days' where id = tests.cid(76);
+update public.chat_conversations set resolved_at = now() - interval '11 days' where id in (tests.cid(77), tests.cid(78));
+select is(app.chat_cases_auto_close(1), 1, 'EP-042: a batch of 1 closes one case');
+select is(tests.row(76) || '/' || tests.row(77) || '/' || tests.row(78), 'closed|-|false|true|0/resolved|-|true|false|0/resolved|-|true|false|0',
+  'EP-042: ... the one resolved longest ago');
+select is(app.chat_cases_auto_close(1), 1, 'EP-042: the next call takes the rest, one at a time');
+select is(tests.row(77) || '/' || tests.row(78), 'closed|-|false|true|0/resolved|-|true|false|0',
+  'EP-042: two cases with the same resolved_at: the smaller conversation id first');
+select is(app.chat_cases_auto_close(1), 1, 'EP-042: the third call closes the last');
+select is(tests.row(78), 'closed|-|false|true|0', 'EP-042: ... the larger id');
+select is(pg_typeof(app.chat_cases_auto_close(1))::text, 'integer', 'EP-041: the result is an integer');
+select ok(pg_get_functiondef('app.chat_cases_auto_close(int)'::regprocedure) !~* '(collate|lower\(|upper\(|normalize|ilike|unaccent)',
+  'EP-041: nothing in the function compares text under a collation or normalisation rule');
+select ok(pg_get_functiondef('app.chat_cases_auto_close(int)'::regprocedure) like '%c.state = ''resolved''%'
+  and pg_get_functiondef('app.chat_cases_auto_close(int)'::regprocedure) like '%kind = ''support''%',
+  'EP-041: the state and the kind are exact lowercase literals');
+select ok(pg_get_functiondef('app.chat_cases_auto_close(int)'::regprocedure) like '%least(coalesce(p_batch, 1), 5000)%',
+  'EP-040: the ceiling of 5000 is in the source');
+
+-- two tenants in one call, each closed under its own tenant id (positive control) and nothing crosses (negative)
+select tests.tenant('pgtap-case-i', 'Chamado I', '1e350000-0000-4000-8000-000000000008');
+select tests.auth_user('x1@case-i.local', '1e350000-0000-4000-8000-0000000000b9');
+select tests.auth_user('s1@case-i.local', '1e350000-0000-4000-8000-0000000007c1');
+select tests.member('1e350000-0000-4000-8000-000000000008', '1e350000-0000-4000-8000-0000000000b9');
+select tests.member('1e350000-0000-4000-8000-000000000008', '1e350000-0000-4000-8000-0000000007c1', 'support_tenant');
+select tests.mkcase(79, 'resolved', null, 0);
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values (tests.cid(80), '1e350000-0000-4000-8000-000000000008', 'support', '1e350000-0000-4000-8000-0000000000b9');
+update public.chat_conversations set state = 'resolved', resolved_at = now() - interval '9 days' where id = tests.cid(80);
+update public.chat_conversations set resolved_at = now() - interval '9 days' where id = tests.cid(79);
+select is(app.chat_cases_auto_close(500), 2, 'CASE-23: one call closes a case of tenant H and a case of tenant I');
+select results_eq(
+  $$ select e.tenant_id::text, c.tenant_id::text, e.actor_user_id is null
+       from public.chat_case_events e join public.chat_conversations c on c.id = e.conversation_id
+      where e.conversation_id in (tests.cid(79), tests.cid(80)) and e.kind = 'closed'
+      order by e.tenant_id::text $$,
+  $$ values ('1e350000-0000-4000-8000-000000000007'::text, '1e350000-0000-4000-8000-000000000007'::text, true), ('1e350000-0000-4000-8000-000000000008'::text, '1e350000-0000-4000-8000-000000000008'::text, true) $$,
+  'T-12.4-17: each closed event sits in the tenant of its own case (positive control)');
+select tests.as_tenant('1e350000-0000-4000-8000-000000000008', '1e350000-0000-4000-8000-0000000007c1', 'support_tenant');
+select is((select count(*)::int from public.chat_case_events where kind = 'closed' and tenant_id = '1e350000-0000-4000-8000-000000000007'::uuid), 0,
+  'T-12.4-17: tenant I staff reads none of tenant H''s close events (negative control)');
+select is((select count(*)::int from public.chat_case_events where kind = 'closed' and conversation_id = tests.cid(80)), 1,
+  'T-12.4-17: ... and reads its own');
+reset role;
+
+-- the states and kinds the sweep must never touch, each with an old timestamp
+select tests.mkcase(81, 'open', null, 0);
+select tests.mkcase(82, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(83, 'closed', null, 0);
+update public.chat_conversations set created_at = now() - interval '40 days' where id in (tests.cid(81), tests.cid(82), tests.cid(83));
+update public.chat_conversations set closed_at = now() - interval '30 days' where id = tests.cid(83);
+select tests.auth_user('dm@case-h.local', '1e350000-0000-4000-8000-0000000007a1');
+select tests.member('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-0000000007a1');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id, created_at)
+values (tests.cid(90), '1e350000-0000-4000-8000-000000000007', 'direct', '1e350000-0000-4000-8000-0000000007a1', now() - interval '40 days');
+select is(app.chat_cases_auto_close(500), 0, 'D-807: an open, an in_progress and a closed case and a direct conversation, all old, are never closed');
+select is(tests.row(81) || '/' || tests.row(82) || '/' || tests.row(83),
+  'open|-|false|false|0/in_progress|1e350000-0000-4000-8000-000000000401|false|false|0/closed|-|false|true|0',
+  'D-807: ... and their rows are as they were');
+select is((select count(*)::int from public.chat_case_events where conversation_id in (tests.cid(81), tests.cid(82), tests.cid(83), tests.cid(90)) and kind = 'closed'), 0,
+  'D-807: ... with no closed event');
+select is((select state from public.chat_conversations where id = tests.cid(90)), null,
+  'CASE-25: the direct conversation has no state and the sweep left it so');
+
+-- silent: no notification row, no push job, no notification code in the function
+select is((select count(*)::text from public.notifications where tenant_id in ('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000008')), current_setting('tests.n_notif0'),
+  'D-808/T-12.4-20: the sweeps of this file wrote no notification row');
+select ok(pg_get_functiondef('app.chat_cases_auto_close(int)'::regprocedure) !~* '(notification|pgboss|push)',
+  'D-808/T-12.4-20: nothing in the function can notify, queue a job or send a push');
+select is((select count(*)::int from public.chat_case_events where kind = 'closed' and actor_user_id is not null
+                and conversation_id in (select tests.cid(n) from generate_series(61, 80) n)), 0,
+  'D-810: no closed event the sweep wrote carries an actor');
+
+-- the lanes: execution refused for every tenant lane, allowed for the admin lane
+select tests.as_tenant('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000403', 'admin_tenant');
+select throws_ok($$ select app.chat_cases_auto_close(500) $$, '42501', null, 'T-12.4-18: a tenant admin lane cannot execute the sweep');
+reset role;
+select tests.as_tenant('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-000000000411', 'member');
+select throws_ok($$ select app.chat_cases_auto_close(500) $$, '42501', null, 'T-12.4-18: a member lane cannot execute the sweep');
+reset role;
+set local role anon;
+select throws_ok($$ select app.chat_cases_auto_close(500) $$, '42501', null, 'T-12.4-18: anon cannot execute the sweep');
+reset role;
+select tests.as_service();
+select lives_ok($$ select app.chat_cases_auto_close(500) $$, 'D-844: the admin lane (service_role) executes it');
+reset role;
+
+-- the 5000 ceiling, functionally: 5002 resolved cases of one member (the unique active-case index dropped, rolled back
+-- with the file), a batch of 6000 closes 5000 and the next call the other 2
+select tests.auth_user('bulk@case-h.local', '1e350000-0000-4000-8000-0000000007b1');
+select tests.member('1e350000-0000-4000-8000-000000000007', '1e350000-0000-4000-8000-0000000007b1');
+drop index public.chat_conversations_one_active_case_per_member;
+insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+select '1e350000-0000-4000-8000-000000000007', 'support', '1e350000-0000-4000-8000-0000000007b1' from generate_series(1, 5002);
+update public.chat_conversations set state = 'resolved', resolved_at = now() - interval '20 days'
+ where created_by_user_id = '1e350000-0000-4000-8000-0000000007b1';
+select is(app.chat_cases_auto_close(6000), 5000, 'EP-040: a batch of 6000 clamps to 5000');
+select is((select count(*)::int from public.chat_conversations where created_by_user_id = '1e350000-0000-4000-8000-0000000007b1' and state = 'resolved'), 2,
+  'EP-040: ... and 2 cases are left for the next call');
+select is(app.chat_cases_auto_close(6000), 2, 'EP-042: the next call takes the remaining 2');
 
 select * from finish();
 rollback;
