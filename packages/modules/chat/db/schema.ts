@@ -1,4 +1,4 @@
-import { tenants, users } from '@rede-social/core/db/schema';
+import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
 import {
   bigint,
@@ -8,6 +8,7 @@ import {
   pgPolicy,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -49,6 +50,14 @@ import { authenticatedRole } from 'drizzle-orm/supabase';
  *    and counts CODE POINTS (`[...body].length`), and the body CHECK is
  *    `char_length(btrim(body, E' \t\n\r')) between 1 and 2000`, which also counts code points. An
  *    all-newline body is refused by both, and 2,000 code points of emoji are accepted by both.
+ *    Phase 12.5 (D-846, D-865): a message is PLAIN TEXT OR ONE RECORDING, never both and never a
+ *    caption. `body` is nullable now; the body CHECK keeps its name (the service maps it to
+ *    `body_required`) and reads "null or 1..2000"; `chat_messages_content_chk` states the exactly-one
+ *    rule (a text row has a body and neither asset nor seconds; a recording row has no body, an asset
+ *    and 1..300 `voice_seconds`). A recording is used once (`chat_messages_tenant_media_asset_uq`) and
+ *    the insert policy accepts it only when the asset is the author's own, ready, `audio`/`voice`
+ *    asset of the tenant with the same duration. Append-only is unchanged: no UPDATE or DELETE policy
+ *    and no lane grant exists for a recording either (D-859), and the two chat triggers read no body.
  * 7. **Participant/staff-aware policies replace the tenant-wide isolation policy** (planning
  *    decision 2, the D-217 `event_secrets` precedent): support threads are the first data private
  *    between two members of the SAME tenant, so a dropped participant predicate in the API must
@@ -295,8 +304,15 @@ export const chatMessages = pgTable(
     authorUserId: uuid('author_user_id')
       .notNull()
       .references(() => users.id),
-    /** Plain text, stored trimmed with its inner line breaks as sent (fact 6). */
-    body: text().notNull(),
+    /**
+     * Plain text, stored trimmed with its inner line breaks as sent (fact 6). NULL on a voice
+     * message (D-846): text or one recording, never both.
+     */
+    body: text(),
+    /** 12.5 (D-846): the recording of a voice message (a media asset of kind `audio`, purpose `voice`). */
+    mediaAssetId: uuid('media_asset_id').references(() => mediaAssets.id),
+    /** 12.5 (D-846): the recording's length in whole seconds, 1..300, equal to the asset's duration. */
+    voiceSeconds: smallint('voice_seconds'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     /** Soft delete: moderation keeps the row and the sequence intact. */
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -311,9 +327,18 @@ export const chatMessages = pgTable(
       t.seq.desc(),
     ),
     check('chat_messages_author_side_chk', sql`${t.authorSide} in ('member','staff')`),
+    uniqueIndex('chat_messages_tenant_media_asset_uq')
+      .on(t.tenantId, t.mediaAssetId)
+      .where(sql`${t.mediaAssetId} is not null`),
+    // SAME NAME as before 12.5: the service keys on it (`bodyCheckViolated`), so it only relaxes to
+    // "null or 1..2000"; the exactly-one rule lives in `chat_messages_content_chk`.
     check(
       'chat_messages_body_chk',
-      sql`char_length(btrim(${t.body}, E' \\t\\n\\r')) between 1 and 2000`,
+      sql`${t.body} is null or char_length(btrim(${t.body}, E' \\t\\n\\r')) between 1 and 2000`,
+    ),
+    check(
+      'chat_messages_content_chk',
+      sql`(${t.body} is not null and ${t.mediaAssetId} is null and ${t.voiceSeconds} is null) or (${t.body} is null and ${t.mediaAssetId} is not null and ${t.voiceSeconds} between 1 and 300)`,
     ),
     // Fact 7: a message is visible exactly when its conversation is (the conversation policy
     // decides). Chat is APPEND-ONLY for a lane (07 review A-WR-01 / B-WR-04): it inserts as itself,
@@ -327,7 +352,7 @@ export const chatMessages = pgTable(
     pgPolicy('chat_messages_insert', {
       for: 'insert',
       to: authenticatedRole,
-      withCheck: sql`tenant_id = app.tenant_id() and author_user_id = app.user_id() and ((author_side = 'staff' and ${STAFF_ROLE} and exists (select 1 from public.chat_conversations c where c.id = chat_messages.conversation_id and c.kind = 'support')) or (author_side = 'member' and exists (select 1 from public.chat_participants p where p.conversation_id = chat_messages.conversation_id and p.tenant_id = app.tenant_id() and p.user_id = app.user_id())))`,
+      withCheck: sql`tenant_id = app.tenant_id() and author_user_id = app.user_id() and ((author_side = 'staff' and ${STAFF_ROLE} and exists (select 1 from public.chat_conversations c where c.id = chat_messages.conversation_id and c.kind = 'support')) or (author_side = 'member' and exists (select 1 from public.chat_participants p where p.conversation_id = chat_messages.conversation_id and p.tenant_id = app.tenant_id() and p.user_id = app.user_id()))) and (media_asset_id is null or exists (select 1 from public.media_assets a where a.id = chat_messages.media_asset_id and a.tenant_id = app.tenant_id() and a.owner_user_id = app.user_id() and a.kind = 'audio' and a.purpose = 'voice' and a.status = 'ready' and a.deleted_at is null and a.duration_seconds = chat_messages.voice_seconds))`,
     }),
   ],
 ).enableRLS();
