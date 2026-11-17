@@ -23,6 +23,10 @@ export const ROUTE_HANDLER_INVENTORY: Record<string, RouteHandlerEntry> = {
   // classified by the route it forwards to rather than as a host-scoped asset.
   '(app)/eventos/[eventId]/agenda.ics/route.ts': { proxies: 'GET /v1/events/:eventId' },
   '(app)/eventos/[eventId]/entrar/route.ts': { proxies: 'POST /v1/events/:eventId/enter' },
+  // 12.4-20: the case header of either side of the thread (staff or member shape, finished strings).
+  'api/chat/conversations/[conversationId]/route.ts': {
+    proxies: 'GET /v1/chat/conversations/:conversationId',
+  },
   'api/chat/conversations/[conversationId]/messages/route.ts': {
     proxies: 'GET /v1/chat/conversations/:conversationId/messages',
   },

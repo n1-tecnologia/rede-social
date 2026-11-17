@@ -1,13 +1,29 @@
 import {
+  type CaseActionInput,
+  type CaseAssignInput,
+  type CaseEditInput,
+  type CaseHistory,
+  type CaseResult,
+  CHAT_CASE_PRIORITIES,
+  CHAT_INBOX_TABS,
+  type ChatCaseCategory,
+  type ChatCasePriority,
+  type ChatInboxTab,
   type ConversationDetail,
+  caseHistorySchema,
+  caseResultSchema,
   conversationDetailSchema,
   type InboxPage,
   inboxPageSchema,
   type MessagePage,
+  type MyCasesPage,
   messagePageSchema,
+  myCasesPageSchema,
   type SendResult,
+  type StaffRoster,
   type SupportThread,
   sendResultSchema,
+  staffRosterSchema,
   supportThreadSchema,
 } from '@rede-social/module-chat/contracts';
 import { redirect } from 'next/navigation';
@@ -122,23 +138,97 @@ export async function markConversationRead(conversationId: string, seq: number):
  * `POST /v1/chat/support/messages { body }` (CHAT-02): the member's message, creating the
  * conversation lazily on the first one. Throws `ApiClientError` on a non-2xx.
  */
-export async function sendSupportMessage(body: string): Promise<SendResult> {
+export async function sendSupportMessage(
+  body: string,
+  opening: { category?: ChatCaseCategory; subject?: string } = {},
+): Promise<SendResult> {
+  // 12.4 (D-811): the category and the subject ride only when the member chose them, so a plain
+  // message still goes out as the shipped `{ body }`. The API writes them only when the message opens
+  // a case; on a later message they are ignored.
+  const payload: Record<string, string> = { body };
+  if (opening.category !== undefined) payload.category = opening.category;
+  if (opening.subject !== undefined) payload.subject = opening.subject;
   const res = await apiFetch('/v1/chat/support/messages', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ body }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw await apiError(res);
   return sendResultSchema.parse(await res.json());
 }
 
 /**
- * `GET /v1/chat/inbox?cursor=` (CHAT-03, 07-10): one keyset page of the staff inbox, latest activity
- * first. `cursor: null` is page 1. Throws `ApiClientError` on a non-2xx (403 without `chat.support`).
+ * The inbox filters in the API's own vocabulary (12.4, D-805): `tab` open, resolved or closed, `owner`
+ * me, none or a uuid, `priority` low, normal or high, `awaiting` the "so quem espera" toggle. Every key
+ * is optional: an absent one is the API's default.
  */
-export async function fetchInbox({ cursor }: { cursor: string | null }): Promise<InboxPage> {
-  const query = cursor ? `?${new URLSearchParams({ cursor }).toString()}` : '';
-  const res = await apiFetch(`/v1/chat/inbox${query}`);
+export interface InboxFilters {
+  tab?: ChatInboxTab;
+  owner?: string;
+  priority?: ChatCasePriority;
+  awaiting?: boolean;
+}
+
+const FILTER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * UNTRUSTED filter values (a query string or a server-action argument) as the closed {@link InboxFilters}:
+ * a value outside its enum is DROPPED (never forwarded, never defaulted here), so the API only ever sees
+ * what it documents. Pure; the ONE validator the inbox handler and the load-more action share.
+ */
+export function parseInboxFilters(raw: {
+  tab?: unknown;
+  owner?: unknown;
+  priority?: unknown;
+  awaiting?: unknown;
+}): InboxFilters {
+  const filters: InboxFilters = {};
+  if (typeof raw.tab === 'string' && (CHAT_INBOX_TABS as readonly string[]).includes(raw.tab)) {
+    filters.tab = raw.tab as ChatInboxTab;
+  }
+  if (typeof raw.owner === 'string') {
+    if (raw.owner === 'me' || raw.owner === 'none') filters.owner = raw.owner;
+    else if (FILTER_UUID_RE.test(raw.owner)) filters.owner = raw.owner.toLowerCase();
+  }
+  if (
+    typeof raw.priority === 'string' &&
+    (CHAT_CASE_PRIORITIES as readonly string[]).includes(raw.priority)
+  ) {
+    filters.priority = raw.priority as ChatCasePriority;
+  }
+  if (
+    raw.awaiting === true ||
+    raw.awaiting === '1' ||
+    raw.awaiting === 'true' ||
+    raw.awaiting === 1
+  ) {
+    filters.awaiting = true;
+  }
+  return filters;
+}
+
+/**
+ * `GET /v1/chat/inbox?cursor=&tab=&owner=&priority=&awaiting=` (CHAT-03, 07-10; filters 12.4): one
+ * keyset page of the staff inbox, latest activity first. `cursor: null` is page 1. The filters are
+ * re-validated here ({@link parseInboxFilters}) so a caller cannot forward an unknown value. Throws
+ * `ApiClientError` on a non-2xx (403 without `chat.support`).
+ */
+export async function fetchInbox({
+  cursor,
+  filters = {},
+}: {
+  cursor: string | null;
+  filters?: InboxFilters;
+}): Promise<InboxPage> {
+  const safe = parseInboxFilters(filters);
+  const search = new URLSearchParams();
+  if (cursor) search.set('cursor', cursor);
+  if (safe.tab) search.set('tab', safe.tab);
+  if (safe.owner) search.set('owner', safe.owner);
+  if (safe.priority) search.set('priority', safe.priority);
+  if (safe.awaiting) search.set('awaiting', '1');
+  const query = search.toString();
+  const res = await apiFetch(`/v1/chat/inbox${query ? `?${query}` : ''}`);
   if (!res.ok) throw await apiError(res);
   return inboxPageSchema.parse(await res.json());
 }
@@ -221,4 +311,74 @@ export async function replyToConversation(
   );
   if (!res.ok) throw await apiError(res);
   return sendResultSchema.parse(await res.json());
+}
+
+/**
+ * `GET /v1/chat/conversations/{id}` read as the case header (12.4, D-805): the staff or the member shape
+ * the API chose for the caller, `case` included when the conversation is a case. The same route as
+ * {@link fetchConversation}; the name says what the BFF header handler reads it for. Throws
+ * `ApiClientError` on a non-2xx.
+ */
+export async function fetchCaseHeader(conversationId: string): Promise<ConversationDetail> {
+  return fetchConversation(conversationId);
+}
+
+/** `GET /v1/chat/support/cases?cursor=` (CASE-14): the member's own cases. `cursor: null` is page 1. */
+export async function fetchMyCases({ cursor }: { cursor: string | null }): Promise<MyCasesPage> {
+  const query = cursor ? `?${new URLSearchParams({ cursor }).toString()}` : '';
+  const res = await apiFetch(`/v1/chat/support/cases${query}`);
+  if (!res.ok) throw await apiError(res);
+  return myCasesPageSchema.parse(await res.json());
+}
+
+/** `GET /v1/chat/conversations/{id}/case/history` (CASE-12, staff only). Throws `ApiClientError`. */
+export async function fetchCaseHistory(conversationId: string): Promise<CaseHistory> {
+  const res = await apiFetch(
+    `/v1/chat/conversations/${encodeURIComponent(conversationId)}/case/history`,
+  );
+  if (!res.ok) throw await apiError(res);
+  return caseHistorySchema.parse(await res.json());
+}
+
+/** `GET /v1/chat/staff` (CASE-16): the live team, names only. Throws `ApiClientError`. */
+export async function fetchStaffRoster(): Promise<StaffRoster> {
+  const res = await apiFetch('/v1/chat/staff');
+  if (!res.ok) throw await apiError(res);
+  return staffRosterSchema.parse(await res.json());
+}
+
+/** The five transitions a case action route carries (the sixth case action, `edit`, is a PATCH). */
+export type CaseTransition = 'take' | 'assign' | 'resolve' | 'close' | 'reopen';
+
+/**
+ * `POST /v1/chat/conversations/{id}/case/{action}` (D-805, D-806): ONE intent plus the state (and owner)
+ * the screen showed; the SERVER decides whether the transition is legal. A 409 carries `details.chat`
+ * `case_stale`, `transition_not_allowed` or `case_closed`. Throws `ApiClientError` on a non-2xx.
+ */
+export async function runCaseAction(
+  conversationId: string,
+  action: CaseTransition,
+  input: CaseActionInput | CaseAssignInput,
+): Promise<CaseResult> {
+  const res = await apiFetch(
+    `/v1/chat/conversations/${encodeURIComponent(conversationId)}/case/${action}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!res.ok) throw await apiError(res);
+  return caseResultSchema.parse(await res.json());
+}
+
+/** `PATCH /v1/chat/conversations/{id}/case` (D-812): only the fields that changed. Throws `ApiClientError`. */
+export async function editCase(conversationId: string, input: CaseEditInput): Promise<CaseResult> {
+  const res = await apiFetch(`/v1/chat/conversations/${encodeURIComponent(conversationId)}/case`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await apiError(res);
+  return caseResultSchema.parse(await res.json());
 }
