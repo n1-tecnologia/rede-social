@@ -8,7 +8,6 @@ import type {
 } from '@rede-social/module-chat/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
-import { firstNameOf as serverFirstNameOf } from '../../../packages/modules/chat/server/first-name';
 import { loadMessages } from '../i18n/messages';
 import {
   type ChatMessageView,
@@ -739,28 +738,33 @@ describe('12.4-11 — caseCardView, the "Meus chamados" card (UI-D-821)', () => 
   });
 });
 
-describe('12.4-11 — firstNameOf agrees with the server helper (D-222)', () => {
-  const NAMES: (string | null | undefined)[] = [
-    'Carla Rocha',
-    'Ana Carolina Albuquerque de Vasconcellos',
-    '  Íris   Muñoz ',
-    'Bruno\tLima',
-    'Sofia\nD’Ávila',
-    'Carla',
-    "D'Ávila",
-    '',
-    '   \n ',
-    null,
-    undefined,
-    'Zoë\u00A0Lima',
-    '\u3000Yuki Tanaka',
+// The server helper `firstNameOf` lives in packages/modules/chat/server/first-name.ts and the web
+// cannot import it (boundaries: apps/web stays inside its package). The two twins agree through
+// ONE golden table: this test and packages/modules/chat/tests/first-name.test.ts assert the same
+// input to output pairs.
+describe('12.4-11 — firstNameOf agrees with the server helper through a shared golden table (D-222)', () => {
+  const GOLDEN: [string | null | undefined, string][] = [
+    ['Carla Rocha', 'Carla'],
+    ['Ana Carolina Albuquerque de Vasconcellos', 'Ana'],
+    ['  Íris   Muñoz ', 'Íris'],
+    ['Bruno\tLima', 'Bruno'],
+    ['Sofia\nD’Ávila', 'Sofia'],
+    ['Carla', 'Carla'],
+    ["D'Ávila", "D'Ávila"],
+    ['', ''],
+    ['   \n ', ''],
+    [null, ''],
+    [undefined, ''],
+    ['Zoë\u00A0Lima', 'Zoë'],
+    ['\u3000Yuki Tanaka', 'Yuki'],
   ];
 
-  it.each(NAMES.map((name) => [JSON.stringify(name), name]))('%s', (_label, name) => {
-    expect(firstNameOf(name as string | null | undefined)).toBe(
-      serverFirstNameOf(name as string | null | undefined),
-    );
-  });
+  it.each(GOLDEN.map(([name, first]) => [JSON.stringify(name), name, first] as const))(
+    '%s',
+    (_label, name, first) => {
+      expect(firstNameOf(name)).toBe(first);
+    },
+  );
 });
 
 describe('12.4-11 — the inbox row gains the case facts as finished strings (UI-D-824)', () => {

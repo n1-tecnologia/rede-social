@@ -11,6 +11,12 @@ describe('firstNameOf', () => {
     expect(firstNameOf('Sofia\nD’Ávila')).toBe('Sofia');
   });
 
+  // The same golden pairs as apps/web/lib/chat-view.test.ts (the web twin cannot import this file).
+  it('splits on a no-break space and trims an ideographic space', () => {
+    expect(firstNameOf('Zoë\u00A0Lima')).toBe('Zoë');
+    expect(firstNameOf('\u3000Yuki Tanaka')).toBe('Yuki');
+  });
+
   it('keeps a single-token name whole', () => {
     expect(firstNameOf('Carla')).toBe('Carla');
     expect(firstNameOf("D'Ávila")).toBe("D'Ávila");
