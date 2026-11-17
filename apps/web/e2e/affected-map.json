@@ -310,6 +310,7 @@
         "notifications.spec.ts",
         "push.spec.ts",
         "phase7-smoke.spec.ts",
+        "chat-cases.spec.ts",
         "shell.spec.ts",
         "csp.spec.ts",
         "courses-member-area.spec.ts"
@@ -323,6 +324,7 @@
         "notifications.spec.ts",
         "push.spec.ts",
         "phase7-smoke.spec.ts",
+        "chat-cases.spec.ts",
         "shell.spec.ts",
         "csp.spec.ts",
         "courses-member-area.spec.ts"
@@ -342,20 +344,32 @@
     },
     {
       "id": "chat",
-      "why": "Support chat (inbox, thread, BFF routes, cursors); the chat spec drives it, phase7 and notifications read its unread signals.",
+      "why": "Support chat (inbox, thread, BFF routes, cursors); the chat spec drives it, chat-cases walks a case from the opener to the next one, phase7 and notifications read its unread signals.",
       "globs": [
         "packages/modules/chat/**",
         "apps/web/app/(app)/suporte/**",
         "apps/web/app/api/chat/**",
         "apps/web/lib/chat*"
       ],
-      "specs": ["chat.spec.ts", "phase7-smoke.spec.ts", "notifications.spec.ts", "csp.spec.ts"]
+      "specs": [
+        "chat.spec.ts",
+        "chat-cases.spec.ts",
+        "phase7-smoke.spec.ts",
+        "notifications.spec.ts",
+        "csp.spec.ts"
+      ]
     },
     {
       "id": "catalog-chat",
       "why": "Every spec that imports messages/pt-BR/chat.json asserts on its strings, together with the chat specs.",
       "globs": ["apps/web/messages/pt-BR/chat.json"],
-      "specs": ["chat.spec.ts", "phase7-smoke.spec.ts", "notifications.spec.ts", "csp.spec.ts"]
+      "specs": [
+        "chat.spec.ts",
+        "chat-cases.spec.ts",
+        "phase7-smoke.spec.ts",
+        "notifications.spec.ts",
+        "csp.spec.ts"
+      ]
     },
     {
       "id": "admin-members",
