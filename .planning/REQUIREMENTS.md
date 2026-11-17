@@ -436,7 +436,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **CASE-23**: Every new or changed table, column, policy, definer, trigger, route, signal, notification source and sweep carries a cross-tenant negative with a positive control (pgTAP and integration); staff of tenant A can never read, take, assign, edit, resolve or close a case of tenant B, and a member never reads another member's case, number or history *(D-810, TICK-21 extended)*
 - [x] **CASE-24**: Every new schema is `.strict()`; the new refusal codes (`case_stale`, `case_closed`, `transition_not_allowed`, `assignee_invalid`, `subject_too_long`, `case_nothing_to_edit`) join the closed `CHAT_ISSUES` list and are pinned by a contract test; `chat.support.assign` is published with the other chat permissions; the module README lists the new events, permission and sweep function *(D-806, MOD-05)*
 - [x] **CASE-25**: Direct and group conversations keep every rule they have today: no number, state, counter row, event or sweep ever touches them, proved by a test that inserts one beside a case *(D-800)*
-- [ ] **CASE-26**: The release is expand-only and ordered (migrations on every tenant database, then web, then API and worker from a rebuilt image); the one allowed destructive statement is the replacement of the one-per-member index; the previous API revision's failing window is named in `docs/DEPLOY.md` and the ledger *(D-814, D-802)*
+- [x] **CASE-26**: The release is expand-only and ordered (migrations on every tenant database, then web, then API and worker from a rebuilt image); the one allowed destructive statement is the replacement of the one-per-member index; the previous API revision's failing window is named in `docs/DEPLOY.md` and the ledger *(D-814, D-802)*
 - [x] **CASE-27**: Every user-visible string is pt-BR in the host catalogs or the chat server copy file, the words "ticket", "protocolo", "SLA", "atendente" and (on a member screen) "prioridade" appear nowhere, and `scripts/check-ui-literals.sh` passes *(UI-D-816, UI-D-834)*
 - [ ] **CASE-28**: The first real walk of a case on a phone against a homolog or production tenant (open, answer, take, resolve with the bell and a real push, reopen by reply, close, open a new case) is proved by the owner and recorded in the ledger *(D-801..D-808)*
 - [ ] **CASE-29**: After the migration reaches a hosted project the owner reads the per-state counts, the number range per tenant and the release-day experience of a member with a migrated case, and records them in the ledger; the 7-day close is observed on a case whose `resolved_at` is set back by hand on homolog *(D-814, D-807)*
@@ -1124,7 +1124,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-23 | Phase 12.4 | Complete |
 | CASE-24 | Phase 12.4 | Complete |
 | CASE-25 | Phase 12.4 | Complete |
-| CASE-26 | Phase 12.4 | Pending |
+| CASE-26 | Phase 12.4 | Complete |
 | CASE-27 | Phase 12.4 | Complete |
 | CASE-28 | Phase 12.4 | Pending |
 | CASE-29 | Phase 12.4 | Pending |

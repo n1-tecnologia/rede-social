@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 18
+current_plan: 19
 status: executing
-stopped_at: Completed 12.4-17-PLAN.md
-last_updated: "2026-11-17T12:36:19.996Z"
+stopped_at: Completed 12.4-18-PLAN.md
+last_updated: "2026-11-17T12:51:46.275Z"
 last_activity: 2026-11-17
 last_activity_desc: Phase 12.4 execution started
-state_head: 2ab244401ce4e0f72b5bb8216c33068dcdd4d81b
+state_head: 6e2e9e51036adac27e96e0436f60c438964fe8da
 progress:
   total_phases: 34
   completed_phases: 0
   total_plans: 471
-  completed_plans: 442
+  completed_plans: 443
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
-Current Plan: 18
+Current Plan: 19
 Total Plans in Phase: 20
-Plan: 18 of 20
+Plan: 19 of 20
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.4 execution started
 
@@ -391,6 +391,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12.4 P15 | 11 min | 3 tasks | 12 files |
 | Phase 12.4 P19 | 12min | 3 tasks | 16 files |
 | Phase 12.4 P17 | 55 min | 3 tasks | 7 files |
+| Phase 12.4 P18 | 11 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -1192,6 +1193,7 @@ Recent decisions affecting current work:
 - [Phase 12.4]: 12.4-15: stale, closed and not_allowed refusals toast the stale sentence and re-read; a take sends the stored owner id; the closed strip is drawn by the pane from live state with the blocked or removed notice winning
 - [Phase 12.4]: 12.4-19: the sheets' facts (category, priority, typed subject, opening instant) ride on the staff header view; each sheet captures the case state when it opens and sends that as the expected state
 - [Phase 12.4]: 12.4-17: the scroll check asserts an anchored message and scrollTop moving by the bar delta (the shipped hook's contract), not scrollTop unchanged
+- [Phase 12.4]: 12.4-18: release notes follow the migrations (the pre-activation window is benign, the 42P10 window is the failing one); CASE-28 and CASE-29 stay open as owner proofs; Nyquist flags left false because guard:lanes is red on four 07/08 test statements
 
 ### Pending Todos
 
@@ -1327,6 +1329,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-17T12:36:19.649Z
-Stopped at: Completed 12.4-17-PLAN.md
+Last session: 2026-11-17T12:51:45.932Z
+Stopped at: Completed 12.4-18-PLAN.md
 Resume file: None
