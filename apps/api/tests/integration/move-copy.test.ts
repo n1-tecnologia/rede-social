@@ -327,8 +327,15 @@ describe('the tracer: a seeded tenant is copied into a bootstrapped second datab
     // tenant_domains and tenant_modules. Each new tenant table moves the pin (12.1-12: 52 to 55, the
     // `profile_form_steps` table of Phase 12.1 plus `member_blocks` and `content_reports` of the reports and
     // blocks work, which had left this number behind; 12.2-12: 55 to 56, the `profile_form_branches` table;
-    // 12.3: 56 to 58, store_categories and store_front).
-    expect(plan.tables.length).toBe(58);
+    // 12.3: 56 to 58, store_categories and store_front; 12.4-01: 58 to 60, `chat_case_counters` and
+    // `chat_case_events`, which carry `tenant_id` and so ride the copy with user triggers silenced: the counter
+    // row travels with the tenant and no case number is ever reassigned).
+    expect(plan.tables.length).toBe(60);
+    expect(plan.tables.map((t) => t.name)).toContain('chat_case_counters');
+    expect(plan.tables.map((t) => t.name)).toContain('chat_case_events');
+    expect(plan.order.indexOf('chat_conversations')).toBeLessThan(
+      plan.order.indexOf('chat_case_events'),
+    );
     expect(plan.tables.map((t) => t.name)).toContain('profile_form_steps');
     expect(plan.tables.map((t) => t.name)).toContain('profile_form_branches');
     expect(plan.tables.map((t) => t.name)).toContain('store_categories');
