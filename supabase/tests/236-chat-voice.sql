@@ -7,8 +7,27 @@ begin;
 --    member lane, with its gapless seq; it reopens a resolved case, a staff voice message takes an unowned open case,
 --    and any voice message on a closed case is refused with SQLSTATE CS004.
 --
+-- 2. CONTENT CHECKS (plan 04 task 3, VOICE-01; D-846, T-12.5-11): text, recording, both, neither, whitespace, 2000 and
+--    2001 characters, 0/1/300/301 seconds, a recording with no asset and a text row with seconds, each refused 23514
+--    with the right constraint name, for the table owner (so no policy stands in the way).
+--
+-- 3. THE POLICY MATRIX (VOICE-03; D-858, T-12.5-10): the own ready asset with an equal duration is accepted; another
+--    member's, a pending, a processing, a failed, a soft-deleted, a video, a wrong-purpose, a wrong-duration, an unset-
+--    duration and another tenant's asset are each refused 42501; the staff lane accepts a staff-owned asset and refuses
+--    a member-owned one.
+--
+-- 4. SINGLE USE (VOICE-02; D-865): the same take sent twice is refused 23505 on `chat_messages_tenant_media_asset_uq`,
+--    across two conversations too; the foreign key refuses an unknown asset id 23503.
+--
+-- 5. UNCHANGED, DIRECT AND GROUP (VOICE-04, VOICE-06; D-847, D-859): the previous text insert shape still works, no
+--    lane updates or deletes a voice row, a direct and a group conversation take a recording and number it without a
+--    case, and the two chat triggers read no body.
+--
+-- 6. CROSS-TENANT (VOICE-34; T-12.5-10): tenant B cannot back a message with tenant A's asset nor read A's voice rows,
+--    and the same shape from tenant A is accepted beside it (the positive control).
+--
 -- Fixture ids use the `1e360000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(9);
+select plan(61);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-voice-a', 'Voz A', '1e360000-0000-4000-8000-000000000001');
@@ -119,6 +138,305 @@ select throws_ok(
      values ('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c4', '1e360000-0000-4000-8000-0000000000a3', 'staff',
              null, '1e360000-0000-4000-8000-0000000000e6', 7) $$,
   'CS004', 'case_closed', 'VOICE-05/D-861: a staff voice message on a closed case is refused with SQLSTATE CS004');
+reset role;
+
+-- ── sections 2 to 6: the shared fixture ────────────────────────────────────────────────────────
+-- A helper that inserts ONE recording message as the CURRENT role (so the policy decides), and a second tenant.
+create function tests.vmsg(p_tenant uuid, p_conv uuid, p_user uuid, p_side text, p_asset uuid, p_secs int)
+returns void language sql as $$
+  insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body, media_asset_id, voice_seconds)
+  values (p_tenant, p_conv, p_user, p_side, null, p_asset, p_secs)
+$$;
+
+select tests.tenant('pgtap-voice-b', 'Voz B', '1e360000-0000-4000-8000-000000000002');
+select tests.auth_user('m1@voice-b.local', '1e360000-0000-4000-8000-0000000000b1');
+select tests.member('1e360000-0000-4000-8000-000000000002', '1e360000-0000-4000-8000-0000000000b1');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e360000-0000-4000-8000-0000000000c9', '1e360000-0000-4000-8000-000000000002', 'support', '1e360000-0000-4000-8000-0000000000b1');
+insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+values ('1e360000-0000-4000-8000-0000000000c9', '1e360000-0000-4000-8000-000000000002', '1e360000-0000-4000-8000-0000000000b1', 'member');
+
+-- Assets, written as the table owner. f01..f03 and the g/h/i/j ranges are described where they are used.
+-- f01 (never consumed) is the asset of every refused shape in section 2; f02 and f03 are consumed by the two accepted ones.
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds) values
+  ('1e360000-0000-4000-8000-000000000f01', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7),
+  ('1e360000-0000-4000-8000-000000000f02', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 1),
+  ('1e360000-0000-4000-8000-000000000f03', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 300);
+
+-- ── 2. content CHECKs (VOICE-01, T-12.5-11) ────────────────────────────────────────────────────
+-- As the table owner, on c1 (open), the author being member 1. The body CHECK is named for the text cases and the
+-- content CHECK for the shape cases; WITH CHECK (RLS) runs first for a lane, so a lane would hide which CHECK refused.
+select lives_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', 'oi') $$,
+  'VOICE-01: a text row (a body, no asset, no seconds) is accepted');
+select lives_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000f02', 1) $$,
+  'VOICE-01: a recording of 1 second is accepted');
+select lives_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000f03', 300) $$,
+  'VOICE-01: a recording of 300 seconds is accepted');
+select lives_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', repeat('x', 2000)) $$,
+  'VOICE-01: a body of 2000 characters is accepted');
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body, media_asset_id, voice_seconds)
+     values ('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', 'oi', '1e360000-0000-4000-8000-000000000f01', 7) $$,
+  '23514', 'new row for relation "chat_messages" violates check constraint "chat_messages_content_chk"',
+  'VOICE-01: a text AND a recording (no caption) is refused 23514 by chat_messages_content_chk');
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side)
+     values ('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member') $$,
+  '23514', 'new row for relation "chat_messages" violates check constraint "chat_messages_content_chk"',
+  'VOICE-01: neither text nor recording is refused 23514 by chat_messages_content_chk');
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', E' \t\n\r ') $$,
+  '23514', 'new row for relation "chat_messages" violates check constraint "chat_messages_body_chk"',
+  'VOICE-01: a body of only whitespace is refused 23514 by chat_messages_body_chk');
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', repeat('x', 2001)) $$,
+  '23514', 'new row for relation "chat_messages" violates check constraint "chat_messages_body_chk"',
+  'VOICE-01: a body of 2001 characters is refused 23514 by chat_messages_body_chk');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000f01', 0) $$,
+  '23514', 'new row for relation "chat_messages" violates check constraint "chat_messages_content_chk"',
+  'VOICE-01: a recording of 0 seconds is refused 23514 by chat_messages_content_chk');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000f01', 301) $$,
+  '23514', 'new row for relation "chat_messages" violates check constraint "chat_messages_content_chk"',
+  'VOICE-01: a recording of 301 seconds is refused 23514 by chat_messages_content_chk');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', null, 7) $$,
+  '23514', 'new row for relation "chat_messages" violates check constraint "chat_messages_content_chk"',
+  'VOICE-01: seconds without an asset is refused 23514 by chat_messages_content_chk');
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body, voice_seconds)
+     values ('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', 'oi', 7) $$,
+  '23514', 'new row for relation "chat_messages" violates check constraint "chat_messages_content_chk"',
+  'VOICE-01: a text row carrying seconds is refused 23514 by chat_messages_content_chk');
+select is(
+  (select count(*)::int from pg_constraint
+    where conrelid = 'public.chat_messages'::regclass
+      and conname in ('chat_messages_body_chk', 'chat_messages_content_chk') and convalidated),
+  2, 'T-12.5-11: both CHECKs are validated (the body CHECK keeps its shipped name)');
+
+-- ── 3. the policy matrix (VOICE-03, T-12.5-10) ─────────────────────────────────────────────────
+-- Assets: g01 is member 1's own ready 7 s recording (accepted); the rest are refused for one reason each.
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds, deleted_at) values
+  ('1e360000-0000-4000-8000-000000000a01', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, null),
+  ('1e360000-0000-4000-8000-000000000a02', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, null),
+  ('1e360000-0000-4000-8000-000000000a03', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'pending', 'audio/mp4', 8000, 7, null),
+  ('1e360000-0000-4000-8000-000000000a04', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'processing', 'audio/mp4', 8000, 7, null),
+  ('1e360000-0000-4000-8000-000000000a05', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'failed', 'audio/mp4', 8000, 7, null),
+  ('1e360000-0000-4000-8000-000000000a06', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, now()),
+  ('1e360000-0000-4000-8000-000000000a07', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'video', 'voice', 'ready', 'video/mp4', 8000, 7, null),
+  ('1e360000-0000-4000-8000-000000000a08', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'attachment', 'ready', 'audio/mp4', 8000, 7, null),
+  ('1e360000-0000-4000-8000-000000000a09', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'image', 'avatar', 'ready', 'image/png', 8000, 7, null),
+  ('1e360000-0000-4000-8000-000000000a0a', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, null),
+  ('1e360000-0000-4000-8000-000000000a0b', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, null, null),
+  ('1e360000-0000-4000-8000-000000000a0c', '1e360000-0000-4000-8000-000000000002', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, null),
+  ('1e360000-0000-4000-8000-000000000a0d', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a3', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, null),
+  ('1e360000-0000-4000-8000-000000000a0e', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, null);
+
+select tests.as_tenant('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1');
+select lives_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a01', 7) $$,
+  'VOICE-03: the own, ready, audio/voice asset of an equal duration is accepted (positive control)');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a02', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: another member''s ready asset is refused 42501');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a03', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: a pending asset is refused 42501');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a04', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: a processing asset is refused 42501');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a05', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: a failed asset is refused 42501');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a06', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: a soft-deleted asset is refused 42501');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a07', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: a video asset is refused 42501');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a08', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: an audio asset of another purpose is refused 42501');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a09', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: an image/avatar asset is refused 42501');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a0a', 8) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: a duration that differs by one second is refused 42501');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a0b', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: an asset with no stored duration is refused 42501');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a0c', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: an asset of another tenant (owned by the same user) is refused 42501');
+reset role;
+
+select tests.as_tenant('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a3', 'support_tenant');
+select lives_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c3', '1e360000-0000-4000-8000-0000000000a3', 'staff', '1e360000-0000-4000-8000-000000000a0d', 7) $$,
+  'VOICE-03: the staff lane accepts a staff-owned ready asset on a support conversation');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c3', '1e360000-0000-4000-8000-0000000000a3', 'staff', '1e360000-0000-4000-8000-000000000a0e', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: the staff lane refuses an asset a MEMBER owns');
+reset role;
+
+-- ── 4. single use (VOICE-02, D-865) ────────────────────────────────────────────────────────────
+-- a01 was sent above on c1. Sending it again on c1 or on another conversation of the tenant collides on the index.
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e360000-0000-4000-8000-0000000000d1', '1e360000-0000-4000-8000-000000000001', 'direct', '1e360000-0000-4000-8000-0000000000a1');
+insert into public.chat_participants (conversation_id, tenant_id, user_id, role) values
+  ('1e360000-0000-4000-8000-0000000000d1', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'member'),
+  ('1e360000-0000-4000-8000-0000000000d1', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'member');
+select tests.as_tenant('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a01', 7) $$,
+  '23505', 'duplicate key value violates unique constraint "chat_messages_tenant_media_asset_uq"',
+  'VOICE-02: the same take sent again in the same conversation is refused 23505 on chat_messages_tenant_media_asset_uq');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000d1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a01', 7) $$,
+  '23505', 'duplicate key value violates unique constraint "chat_messages_tenant_media_asset_uq"',
+  'VOICE-02: ... and in another conversation of the tenant');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000bad', 7) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'T-12.5-10: an unknown asset id is refused by the policy for a lane');
+reset role;
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000bad', 7) $$,
+  '23503', 'insert or update on table "chat_messages" violates foreign key constraint "chat_messages_media_asset_id_media_assets_id_fk"',
+  'VOICE-02: the foreign key refuses an unknown asset id 23503 (the table owner, no policy)');
+select is(
+  (select confdeltype::text from pg_constraint where conname = 'chat_messages_media_asset_id_media_assets_id_fk'),
+  'a', 'D-846: the foreign key to media_assets is NO ACTION');
+
+-- ── 5. unchanged, direct and group (VOICE-04, VOICE-06, D-847, D-859) ──────────────────────────
+-- The previous text insert shape, as the member lane and as the staff lane.
+select tests.as_tenant('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1');
+select lives_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', 'texto como antes') $$,
+  'VOICE-04: the previous text insert shape is still accepted for the member lane');
+reset role;
+select tests.as_tenant('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a3', 'support_tenant');
+select lives_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c3', '1e360000-0000-4000-8000-0000000000a3', 'staff', 'resposta como antes') $$,
+  'VOICE-04: ... and for the staff lane');
+reset role;
+
+-- D-859: no lane edits or deletes a voice row. The lane has no UPDATE or DELETE privilege at all.
+select ok(
+  not has_table_privilege('authenticated', 'public.chat_messages', 'update')
+  and not has_table_privilege('authenticated', 'public.chat_messages', 'delete'),
+  'D-859: the authenticated role holds no UPDATE or DELETE on chat_messages (so no lane can edit or delete a recording)');
+select tests.as_tenant('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1');
+select throws_ok(
+  $$ update public.chat_messages set deleted_at = now() where media_asset_id = '1e360000-0000-4000-8000-000000000a01' $$,
+  '42501', 'permission denied for table chat_messages', 'D-859: the member lane cannot update a voice row');
+select throws_ok(
+  $$ delete from public.chat_messages where media_asset_id = '1e360000-0000-4000-8000-000000000a01' $$,
+  '42501', 'permission denied for table chat_messages', 'D-859: the member lane cannot delete a voice row');
+reset role;
+select tests.as_tenant('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a3', 'support_tenant');
+select throws_ok(
+  $$ update public.chat_messages set deleted_at = now() where media_asset_id = '1e360000-0000-4000-8000-000000000a01' $$,
+  '42501', 'permission denied for table chat_messages', 'D-859: the staff lane cannot update a voice row');
+select throws_ok(
+  $$ delete from public.chat_messages where media_asset_id = '1e360000-0000-4000-8000-000000000a01' $$,
+  '42501', 'permission denied for table chat_messages', 'D-859: the staff lane cannot delete a voice row');
+reset role;
+select is(
+  (select count(*)::int from pg_policy where polrelid = 'public.chat_messages'::regclass and polcmd in ('w', 'd')),
+  0, 'D-859: chat_messages has no UPDATE and no DELETE policy');
+
+-- D-847, VOICE-06: a direct and a group conversation take a recording. They are never numbered and have no case.
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e360000-0000-4000-8000-0000000000d2', '1e360000-0000-4000-8000-000000000001', 'group', '1e360000-0000-4000-8000-0000000000a2');
+insert into public.chat_participants (conversation_id, tenant_id, user_id, role) values
+  ('1e360000-0000-4000-8000-0000000000d2', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'member'),
+  ('1e360000-0000-4000-8000-0000000000d2', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'member'),
+  ('1e360000-0000-4000-8000-0000000000d2', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a4', 'member');
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds) values
+  ('1e360000-0000-4000-8000-000000000b01', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 12),
+  ('1e360000-0000-4000-8000-000000000b02', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 30);
+select tests.as_tenant('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1');
+select lives_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000d1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000b01', 12) $$,
+  'VOICE-06: a participant sends a recording into a direct conversation');
+reset role;
+select tests.as_tenant('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2');
+select lives_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000d2', '1e360000-0000-4000-8000-0000000000a2', 'member', '1e360000-0000-4000-8000-000000000b02', 30) $$,
+  'VOICE-06: a participant sends a recording into a group conversation');
+reset role;
+select results_eq(
+  $$ select c.kind, m.seq, m.voice_seconds::int from public.chat_messages m join public.chat_conversations c on c.id = m.conversation_id
+      where m.conversation_id in ('1e360000-0000-4000-8000-0000000000d1', '1e360000-0000-4000-8000-0000000000d2') order by c.kind $$,
+  $$ values ('direct'::text, 1::bigint, 12), ('group'::text, 1::bigint, 30) $$,
+  'VOICE-06: both are numbered by the same seq trigger, from 1');
+select results_eq(
+  $$ select case_number, state, owner_user_id::text from public.chat_conversations
+      where id in ('1e360000-0000-4000-8000-0000000000d1', '1e360000-0000-4000-8000-0000000000d2') $$,
+  $$ values (null::int, null::text, null::text), (null::int, null::text, null::text) $$,
+  'D-847/VOICE-06: a recording gives a direct or a group conversation no case number, state or owner');
+select is(
+  (select count(*)::int from public.chat_case_events where conversation_id in ('1e360000-0000-4000-8000-0000000000d1', '1e360000-0000-4000-8000-0000000000d2')),
+  0, 'VOICE-06: ... and writes no case event');
+
+-- D-861: neither chat trigger function reads a message body.
+select is(
+  (select count(*)::int from pg_trigger t join pg_proc p on p.oid = t.tgfoid
+    where t.tgrelid = 'public.chat_messages'::regclass and not t.tgisinternal and p.prosrc ~* 'body'),
+  0, 'D-861: no trigger function of chat_messages mentions body');
+select is(
+  (select count(*)::int from pg_trigger t where t.tgrelid = 'public.chat_messages'::regclass and not t.tgisinternal),
+  2, 'D-861: chat_messages carries exactly the two chat triggers (seq and signal)');
+
+-- ── 6. cross-tenant (VOICE-34, T-12.5-10) ──────────────────────────────────────────────────────
+-- Tenant A's member 1 owns a ready asset (x01) not yet sent; tenant B has its own member and asset (x02).
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds) values
+  ('1e360000-0000-4000-8000-000000000c01', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 9),
+  ('1e360000-0000-4000-8000-000000000c02', '1e360000-0000-4000-8000-000000000002', '1e360000-0000-4000-8000-0000000000b1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 9);
+select tests.as_tenant('1e360000-0000-4000-8000-000000000002', '1e360000-0000-4000-8000-0000000000b1');
+select throws_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000002', '1e360000-0000-4000-8000-0000000000c9', '1e360000-0000-4000-8000-0000000000b1', 'member', '1e360000-0000-4000-8000-000000000c01', 9) $$,
+  '42501', 'new row violates row-level security policy for table "chat_messages"',
+  'VOICE-34: tenant B cannot back a message with tenant A''s asset');
+select is(
+  (select count(*)::int from public.chat_messages where media_asset_id is not null),
+  0, 'VOICE-34: tenant B reads none of tenant A''s voice rows');
+select lives_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000002', '1e360000-0000-4000-8000-0000000000c9', '1e360000-0000-4000-8000-0000000000b1', 'member', '1e360000-0000-4000-8000-000000000c02', 9) $$,
+  'VOICE-34: tenant B''s own insert of the same shape with its own asset is accepted (positive control)');
+reset role;
+select tests.as_tenant('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1');
+select lives_ok(
+  $$ select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000c01', 9) $$,
+  'VOICE-34: tenant A''s own insert of the same shape is accepted (positive control)');
+select is(
+  (select count(*)::int from public.chat_messages where media_asset_id = '1e360000-0000-4000-8000-000000000c02'),
+  0, 'VOICE-34: tenant A reads none of tenant B''s voice rows');
 reset role;
 
 select * from finish();

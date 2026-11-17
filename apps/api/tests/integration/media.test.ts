@@ -174,12 +174,15 @@ async function cleanup(): Promise<void> {
     // the foreign key AND destroy the seeded strip the e2e measures.
     // 08.3-01 adds a THIRD referencing table: `course_lessons.video_asset_id` (nullable, no cascade),
     // so a lesson left by a sibling run would take the sweep down on its foreign key too.
+    // 12.5-04 adds a FOURTH: `chat_messages.media_asset_id` (nullable, no cascade), so a voice message a
+    // sibling run left behind is skipped for the same reason.
     await adminSql`
       delete from public.media_assets
        where tenant_id = ${tenantId}::uuid
          and id not in (select media_asset_id from public.feed_post_media)
          and id not in (select media_asset_id from public.stories)
-         and id not in (select video_asset_id from public.course_lessons where video_asset_id is not null)`;
+         and id not in (select video_asset_id from public.course_lessons where video_asset_id is not null)
+         and id not in (select media_asset_id from public.chat_messages where media_asset_id is not null)`;
   }
   const ids = [...new Set(createdAssetIds)];
   for (const id of ids) {
