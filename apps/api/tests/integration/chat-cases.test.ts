@@ -669,7 +669,10 @@ describe('case activation', () => {
     );
     expect(source).toMatch(/where kind = 'support' and state in \(\$\{ACTIVE_CASE_STATES\}\)/);
     expect(source).toContain('CASE_ACTIVE_STATES.map');
-    expect(source).not.toMatch(/'open'\s*,\s*'in_progress'/);
+    // The whole active list is never typed out a second time. The inbox's "open" tab (plan 07) spells
+    // the two-state list `('open','in_progress')` on purpose, to repeat the predicate of
+    // `chat_conversations_open_inbox_idx`; that is a different list and is allowed.
+    expect(source).not.toMatch(/'open'\s*,\s*'in_progress'\s*,\s*'resolved'/);
   });
 
   it('the same body sent twice writes two messages in ONE case: messages are not deduplicated (EP-014)', async () => {
