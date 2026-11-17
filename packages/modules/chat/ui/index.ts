@@ -30,6 +30,7 @@ export {
   useVoiceRecorder,
   VOICE_MAX_SECONDS_DEFAULT,
   VOICE_MIN_SECONDS_DEFAULT,
+  VOICE_RECORDER_INITIAL,
   VOICE_WARN_AT_SECONDS_DEFAULT,
   type VoiceProblem,
   type VoiceRecorderApi,
