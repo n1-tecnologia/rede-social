@@ -1,5 +1,4 @@
 import { REALTIME_EVENTS, topicSuffix } from '@rede-social/contracts/realtime';
-import { cutOnWord } from '@rede-social/contracts/text';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { emit } from '@rede-social/core/server/events/bus';
@@ -14,7 +13,6 @@ import {
   CASE_ACTIVE_STATES,
   CHAT_PAGE_SIZE,
   CHAT_PERMISSIONS,
-  CHAT_PREVIEW_GRAPHEMES,
   type ChatCaseCategory,
   type ChatCasePriority,
   type ChatCaseState,
@@ -37,6 +35,7 @@ import {
   activeMemberCase,
   firstMessageJoin,
   hasAnyCaseOf,
+  lastMessagePreview,
   memberCaseOf,
   ownerJoins,
   staffCaseOf,
@@ -1054,6 +1053,8 @@ type InboxDbRow = MemberIdentityRow & {
   awaiting: boolean;
   lm_seq: number | null;
   lm_body: string | null;
+  lm_voice_seconds: number | null;
+  lm_voice_gone: boolean | null;
   lm_side: ChatSide | null;
   lm_author_name: string | null;
   case_number: number | null;
@@ -1062,6 +1063,7 @@ type InboxDbRow = MemberIdentityRow & {
   case_category: ChatCaseCategory | null;
   case_priority: ChatCasePriority | null;
   first_body: string | null;
+  first_is_voice: boolean;
   owner_name: string | null;
   owner_is_viewer: boolean;
 };
@@ -1072,6 +1074,7 @@ const toInboxRow = (row: InboxDbRow): InboxRow => {
     state: row.case_state,
     subject: row.case_subject,
     first_body: row.first_body,
+    first_is_voice: row.first_is_voice,
     category: row.case_category,
     priority: row.case_priority,
     owner_name: row.owner_name,
@@ -1085,7 +1088,7 @@ const toInboxRow = (row: InboxDbRow): InboxRow => {
         ? null
         : {
             seq: Number(row.lm_seq),
-            preview: cutOnWord(row.lm_body ?? '', CHAT_PREVIEW_GRAPHEMES),
+            ...lastMessagePreview(row.lm_body, row.lm_voice_seconds, row.lm_voice_gone === true),
             side: row.lm_side,
             authorFirstName: row.lm_side === 'staff' ? firstNameOf(row.lm_author_name) : null,
           },
@@ -1152,6 +1155,8 @@ export async function listInbox(ctx: RequestContext, query: InboxQuery): Promise
              ${memberIdentity},
              lm.seq::int as lm_seq,
              lm.body as lm_body,
+             lm.voice_seconds::int as lm_voice_seconds,
+             lm.voice_gone as lm_voice_gone,
              lm.author_side as lm_side,
              lmp.display_name as lm_author_name,
              c.case_number::int as case_number,
@@ -1160,6 +1165,7 @@ export async function listInbox(ctx: RequestContext, query: InboxQuery): Promise
              c.category as case_category,
              c.priority as case_priority,
              fm.body as first_body,
+             fm.voice_seconds is not null as first_is_voice,
              omp.display_name as owner_name,
              (c.owner_user_id is not null and c.owner_user_id = ${ctx.userId}::uuid) as owner_is_viewer
         from chat_conversations c
@@ -1167,7 +1173,8 @@ export async function listInbox(ctx: RequestContext, query: InboxQuery): Promise
         ${ownerJoins}
         ${firstMessageJoin}
         left join lateral (
-          select m.seq, m.body, m.author_side, m.author_user_id
+          select m.seq, m.body, m.voice_seconds, m.author_side, m.author_user_id,
+                 ${voiceGoneSql('m')} as voice_gone
             from chat_messages m
            where m.tenant_id = c.tenant_id
              and m.conversation_id = c.id

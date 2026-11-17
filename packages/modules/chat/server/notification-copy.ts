@@ -14,6 +14,16 @@ import { cutOnWord } from '@rede-social/contracts/text';
  * older banner and re-alerts.
  */
 
+/**
+ * The two server-side words of a recording (Phase 12.5, D-860, D-861, D-868): the constant label a case opened by
+ * voice carries when no subject was typed (no duration: the label names the case, A-UI-1), and the words of a
+ * recording that is gone. SQL never builds them; the previews of the lists carry facts and the host builds the rest.
+ */
+export const CHAT_VOICE_COPY = {
+  label: 'Mensagem de voz',
+  deleted: 'Mensagem de voz apagada',
+} as const;
+
 /** A banner body is about one line on a lock screen (the feed's `PUSH_BODY_MAX`). */
 export const CHAT_PUSH_BODY_MAX = 100;
 

@@ -294,7 +294,8 @@ export const memberThreadMetaSchema = z
 /**
  * What every viewer of a case shares (fact 7). `id` is the conversation id (a case IS a support conversation);
  * `subject` is the typed one (null when the member typed none) and `subjectLabel` is the server's finished fallback
- * (the subject, else the start of the first message cut at `CHAT_SUBJECT_MAX`), so the UI never computes it.
+ * (the subject, else the constant label of a case opened by a recording (12.5, D-861), else the start of the first
+ * message cut at `CHAT_SUBJECT_MAX`), so the UI never computes it.
  */
 const caseSharedShape = {
   id: z.uuid(),
@@ -340,7 +341,17 @@ export const caseCardSchema = z
   .object({
     ...caseSharedShape,
     lastMessage: z
-      .object({ preview: z.string(), side: z.enum(CHAT_SIDES) })
+      .object({
+        preview: z.string(),
+        side: z.enum(CHAT_SIDES),
+        /**
+         * 12.5 (D-860, VOICE-28): ABSENT on a text preview. A recording has `preview: ''` and the stored length here;
+         * the host builds "Mensagem de voz · m:ss" from it through its catalog.
+         */
+        voiceSeconds: z.int().min(1).max(CHAT_VOICE_MAX_SECONDS).optional(),
+        /** 12.5 (D-868): `true` only when the recording is gone; the host reads "Mensagem de voz apagada". */
+        voiceDeleted: z.literal(true).optional(),
+      })
       .strict()
       .nullable(),
     lastMessageAt: z.string().nullable(),
@@ -639,6 +650,10 @@ export const inboxRowSchema = z
         preview: z.string(),
         side: z.enum(CHAT_SIDES),
         authorFirstName: z.string().nullable(),
+        /** 12.5 (D-860, VOICE-28): absent on text; the stored length of a recording (its `preview` is empty). */
+        voiceSeconds: z.int().min(1).max(CHAT_VOICE_MAX_SECONDS).optional(),
+        /** 12.5 (D-868): `true` only when the recording is gone. */
+        voiceDeleted: z.literal(true).optional(),
       })
       .strict()
       .nullable(),

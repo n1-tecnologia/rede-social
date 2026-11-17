@@ -34,6 +34,8 @@ import {
   type StaffCase,
   type StaffRoster,
 } from '../contracts/index';
+import { CHAT_VOICE_COPY } from './notification-copy';
+import { voiceGoneSql } from './voice-sql';
 
 const log = moduleLogger('module-chat');
 
@@ -60,11 +62,35 @@ const ACTIVE_STATES = sql.raw(CASE_ACTIVE_STATES.map((state) => `'${state}'`).jo
  * the ellipsis only when it cut. A case with neither is the empty string: the web owns the placeholder copy. The
  * typed subject is already at most `CHAT_SUBJECT_MAX` code points, so it is never cut, only put on one line.
  */
-export function subjectLabelOf(subject: string | null, firstBody: string | null): string {
+export function subjectLabelOf(
+  subject: string | null,
+  firstBody: string | null,
+  firstIsVoice: boolean,
+): string {
   const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
   const typed = subject === null ? '' : oneLine(subject);
   if (typed !== '') return typed;
+  // 12.5 (D-861, A-UI-1): a case opened by a recording is named by the constant label, with no duration.
+  if (firstIsVoice) return CHAT_VOICE_COPY.label;
   return cutOnWord(oneLine(firstBody ?? ''), CHAT_SUBJECT_MAX);
+}
+
+/**
+ * The `lastMessage` facts of a list row (12.5, D-860, D-868, VOICE-28). A text message is the cut body and NO voice key
+ * (byte-identical to the shipped answer); a recording is the empty preview plus the STORED length (and `voiceDeleted:
+ * true` only when its asset is gone), so the host builds the words through its catalog. The words are never built here.
+ */
+export function lastMessagePreview(
+  body: string | null,
+  voiceSeconds: number | null,
+  voiceGone: boolean,
+): { preview: string; voiceSeconds?: number; voiceDeleted?: true } {
+  if (voiceSeconds === null) return { preview: cutOnWord(body ?? '', CHAT_PREVIEW_GRAPHEMES) };
+  return {
+    preview: '',
+    voiceSeconds: Number(voiceSeconds),
+    ...(voiceGone ? { voiceDeleted: true as const } : {}),
+  };
 }
 
 type MemberCaseDbRow = {
@@ -75,6 +101,7 @@ type MemberCaseDbRow = {
   category: ChatCaseCategory;
   opened_at: string;
   first_body: string | null;
+  first_is_voice: boolean;
 };
 
 const toMemberCase = (row: MemberCaseDbRow): MemberCase => ({
@@ -82,7 +109,7 @@ const toMemberCase = (row: MemberCaseDbRow): MemberCase => ({
   number: Number(row.case_number),
   state: row.state,
   subject: row.subject,
-  subjectLabel: subjectLabelOf(row.subject, row.first_body),
+  subjectLabel: subjectLabelOf(row.subject, row.first_body, row.first_is_voice),
   category: row.category,
   openedAt: row.opened_at,
 });
@@ -90,7 +117,7 @@ const toMemberCase = (row: MemberCaseDbRow): MemberCase => ({
 /** The first (lowest `seq`) message of a case that is still visible: the fallback of the subject label. */
 export const firstMessageJoin = sql`
         left join lateral (
-          select m.body
+          select m.body, m.voice_seconds
             from chat_messages m
            where m.tenant_id = c.tenant_id
              and m.conversation_id = c.id
@@ -116,7 +143,8 @@ export async function memberCaseOf(
            c.subject,
            c.category,
            to_char(c.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as opened_at,
-           fm.body as first_body
+           fm.body as first_body,
+           fm.voice_seconds is not null as first_is_voice
       from chat_conversations c
       ${firstMessageJoin}
      where c.id = ${conversationId}::uuid
@@ -138,7 +166,8 @@ export async function activeMemberCase(tx: Tx, ctx: RequestContext): Promise<Mem
            c.subject,
            c.category,
            to_char(c.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as opened_at,
-           fm.body as first_body
+           fm.body as first_body,
+           fm.voice_seconds is not null as first_is_voice
       from chat_conversations c
       ${firstMessageJoin}
      where c.tenant_id = ${ctx.tenantId}::uuid
@@ -179,6 +208,8 @@ function decodeNumberCursor(raw: string | undefined): { n: number; id: string } 
 
 type CardDbRow = MemberCaseDbRow & {
   lm_body: string | null;
+  lm_voice_seconds: number | null;
+  lm_voice_gone: boolean | null;
   lm_side: ChatSide | null;
   last_message_at: string | null;
 };
@@ -188,7 +219,10 @@ const toCard = (row: CardDbRow): CaseCard => ({
   lastMessage:
     row.lm_side === null
       ? null
-      : { preview: cutOnWord(row.lm_body ?? '', CHAT_PREVIEW_GRAPHEMES), side: row.lm_side },
+      : {
+          ...lastMessagePreview(row.lm_body, row.lm_voice_seconds, row.lm_voice_gone === true),
+          side: row.lm_side,
+        },
   lastMessageAt: row.last_message_at,
 });
 
@@ -201,13 +235,16 @@ const cardColumns = sql`
            c.category,
            to_char(c.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as opened_at,
            fm.body as first_body,
+           fm.voice_seconds is not null as first_is_voice,
            lm.body as lm_body,
+           lm.voice_seconds::int as lm_voice_seconds,
+           lm.voice_gone as lm_voice_gone,
            lm.author_side as lm_side,
            to_char(c.last_message_at at time zone 'utc', ${ISO_MICROSECONDS}) as last_message_at`;
 
 const lastMessageJoin = sql`
         left join lateral (
-          select m.body, m.author_side
+          select m.body, m.voice_seconds, m.author_side, ${voiceGoneSql('m')} as voice_gone
             from chat_messages m
            where m.tenant_id = c.tenant_id
              and m.conversation_id = c.id
@@ -338,6 +375,7 @@ export function toInboxCase(row: {
   state: ChatCaseState | null;
   subject: string | null;
   first_body: string | null;
+  first_is_voice: boolean;
   category: ChatCaseCategory | null;
   priority: ChatCasePriority | null;
   owner_name: string | null;
@@ -347,7 +385,7 @@ export function toInboxCase(row: {
   return {
     number: Number(row.case_number),
     state: row.state,
-    subjectLabel: subjectLabelOf(row.subject, row.first_body),
+    subjectLabel: subjectLabelOf(row.subject, row.first_body, row.first_is_voice),
     category: row.category,
     priority: row.priority ?? 'normal',
     ownerName: row.owner_name,
@@ -377,7 +415,8 @@ export async function staffCaseOf(
            to_char(c.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as opened_at,
            to_char(c.resolved_at at time zone 'utc', ${ISO_MICROSECONDS}) as resolved_at,
            to_char(c.closed_at at time zone 'utc', ${ISO_MICROSECONDS}) as closed_at,
-           fm.body as first_body
+           fm.body as first_body,
+           fm.voice_seconds is not null as first_is_voice
       from chat_conversations c
       ${firstMessageJoin}
       ${ownerJoins}
@@ -435,6 +474,7 @@ type EarlierDbRow = {
   subject: string | null;
   opened_at: string;
   first_body: string | null;
+  first_is_voice: boolean;
 };
 
 /**
@@ -490,7 +530,8 @@ export async function getCaseHistory(
              c.state,
              c.subject,
              to_char(c.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as opened_at,
-             fm.body as first_body
+             fm.body as first_body,
+             fm.voice_seconds is not null as first_is_voice
         from chat_conversations c
         ${firstMessageJoin}
        where c.tenant_id = ${ctx.tenantId}::uuid
@@ -507,7 +548,7 @@ export async function getCaseHistory(
         id: row.id,
         number: Number(row.case_number),
         state: row.state,
-        subjectLabel: subjectLabelOf(row.subject, row.first_body),
+        subjectLabel: subjectLabelOf(row.subject, row.first_body, row.first_is_voice),
         openedAt: row.opened_at,
       })),
       hasMoreEarlier: earlier.length > CHAT_EARLIER_CASES_MAX,
