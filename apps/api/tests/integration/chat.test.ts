@@ -927,11 +927,17 @@ describe('chat suporte', () => {
         (job) => job.data.dedupeKey === `chat.member_message:${sentId}`,
       );
       expect(teamJobs).toHaveLength(1);
+      const [numbered] = await adminSql<{ n: number }[]>`
+        select case_number::int as n from public.chat_conversations
+         where id = ${thread.conversationId}::uuid`;
+      const caseNumber = numbered?.n ?? -1;
+      expect(caseNumber).toBeGreaterThan(0);
       expect(teamJobs[0]?.data.userIds).toContain(ids.demoSupport);
       expect(teamJobs[0]?.data.userIds).not.toContain(thread.id);
       expect(teamJobs[0]?.data.push).toMatchObject({
         title: 'tenant',
-        body: 'Nova mensagem de Pessoa push: Obrigado!',
+        // 12.4-09 (CASE-20): the banner names the case; the support user took it with the reply above, so it is theirs.
+        body: `Nova mensagem de Pessoa push no chamado #${caseNumber}: Obrigado!`,
         url: `/suporte/${thread.conversationId}`,
       });
 

@@ -106,7 +106,9 @@ grant lives in this manifest rather than in the kernel.
 - Jobs: none.
 - Sweep functions: `chat_cases_auto_close` (closes every support case left resolved for 7 days, hourly,
   admin lane, silent for the member; it writes a history row with no actor).
-- `counters`: `chatCounters` contributes `unreadConversations` to `bootstrap.counters`.
+- `counters`: `chatCounters` contributes `unreadConversations` to `bootstrap.counters`: for staff the active cases
+  (not closed) whose last message is the member's and unread by the team, for a member a dot when a case that is not
+  closed has an unread staff reply.
 
 ## Reuse
 

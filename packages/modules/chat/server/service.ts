@@ -926,12 +926,14 @@ export async function listInbox(ctx: RequestContext, query: InboxQuery): Promise
 }
 
 /**
- * The chat module's share of `bootstrap.counters` (D-237, D-238), inside the caller's tenant lane,
- * decided by the caller's composed PERMISSIONS (planning decision 4), never by a role literal:
- * - `chat.support` (staff): `count` = support threads awaiting the team, i.e. the latest message is
- *   the member's and the team's shared position is below it;
+ * The chat module's share of `bootstrap.counters` (D-237, D-238, D-840), inside the caller's tenant lane,
+ * decided by the caller's composed PERMISSIONS (planning decision 4), never by a role literal. "Active" means
+ * `state <> 'closed'` (D-840): a closed case never lights a badge or a dot, whatever is unread in it. Every
+ * comparison is of integer sequences and of the exact lowercase state literal, so nothing is normalised (EP-055):
+ * - `chat.support` (staff): `count` = ACTIVE support cases awaiting the team, i.e. the latest message is
+ *   the member's and the team's shared position is below it, whoever owns the case (D-238);
  * - `chat.support.contact` (member): `dot` = 1 exactly while the team wrote something past the
- *   member's own read position, else 0;
+ *   member's own read position in a case that is not closed, else 0;
  * - neither: nothing (the zeros stand).
  */
 export async function chatCounters(
@@ -945,6 +947,7 @@ export async function chatCounters(
         from chat_conversations c
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.kind = 'support'
+         and c.state <> 'closed'
          and c.last_message_side = 'member'
          and c.last_seq > c.staff_last_read_seq`);
     return { unreadConversations: Number(rows[0]?.awaiting ?? 0), conversationsBadge: 'count' };
@@ -961,6 +964,7 @@ export async function chatCounters(
          where c.tenant_id = ${ctx.tenantId}::uuid
            and c.kind = 'support'
            and c.created_by_user_id = ${ctx.userId}::uuid
+           and c.state <> 'closed'
            and c.last_staff_seq > p.last_read_seq
       ) as unread`);
     return { unreadConversations: rows[0]?.unread ? 1 : 0, conversationsBadge: 'dot' };

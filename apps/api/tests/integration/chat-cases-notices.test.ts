@@ -1,6 +1,10 @@
 import { createECDH, randomBytes, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import type { Counters } from '@rede-social/contracts';
+import { REALTIME_TOPIC_PATTERN } from '@rede-social/contracts/realtime';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type { SendResult } from '@rede-social/module-chat/contracts';
+import { fakePushOutbox, resetFakePushOutbox } from '@rede-social/module-notifications/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   caseKit,
@@ -16,6 +20,7 @@ import {
   HOSTS,
   pushSendJobsOf,
   runNotificationJobs,
+  runPushSendJobs,
   SEED_PASSWORD,
   signInAs,
 } from './setup';
@@ -510,5 +515,330 @@ describe('case team notices', () => {
       body: 'Ja estamos olhando',
       url: '/suporte',
     });
+  });
+});
+
+const countersOf = async (token: string): Promise<Counters> => {
+  const res = await request('/v1/me/counters', token);
+  expect(res.status).toBe(200);
+  return (await res.json()) as Counters;
+};
+
+/** The staff badge (`unreadConversations`) of one staff lane. */
+const staffCount = async (token: string): Promise<number> =>
+  (await countersOf(token)).unreadConversations;
+
+describe('case counters', () => {
+  beforeAll(async () => {
+    // Nothing else of the two seed tenants: the empty assertions below are absolute, every other one relative.
+    const { ids } = await caseKit();
+    await adminSql`
+      delete from public.chat_conversations where tenant_id in (${ids.demo}::uuid, ${ids.lab}::uuid)`;
+  });
+
+  afterAll(async () => {
+    await sweepCases();
+  });
+
+  it('EP-054 empty: with no case the staff count is 0 and the member dot is 0; a tenant with only closed cases counts 0 for both (D-840, CASE-17)', async () => {
+    const { tokens } = await caseKit();
+    expect(await staffCount(tokens.demoSupport)).toBe(0);
+    expect(await staffCount(tokens.demoAdmin)).toBe(0);
+    expect(await staffCount(tokens.demoMember)).toBe(0);
+    const fresh = await throwawayMember('empty-dot');
+    expect(await staffCount(fresh.token)).toBe(0);
+
+    // Only a closed case, with an unread member message AND an unread staff reply behind it.
+    const { conversationId: id } = await send(fresh.token, 'Quero cancelar tudo');
+    await reply(tokens.demoSupport, id, 'Posso ajudar com isso');
+    await send(fresh.token, 'E mais uma duvida');
+    expect(await staffCount(tokens.demoSupport)).toBe(1);
+    expect(
+      (await act(tokens.demoSupport, id, 'close', { expectedState: 'in_progress' })).status,
+    ).toBe(200);
+    expect(await staffCount(tokens.demoSupport)).toBe(0);
+    expect(await staffCount(tokens.demoAdmin)).toBe(0);
+    expect(await countersOf(fresh.token)).toMatchObject({
+      unreadConversations: 0,
+      conversationsBadge: 'dot',
+    });
+  });
+
+  it('the staff badge counts an active case the member wrote last, whoever owns it, and not a closed or resolved one (D-840, D-238)', async () => {
+    const { tokens } = await caseKit();
+    const base = await staffCount(tokens.demoSupport);
+    const member = await throwawayMember('badge');
+
+    // Unowned open case, member last: counted, for both staff lanes alike.
+    const first = await send(member.token, 'Preciso de ajuda');
+    expect(await staffCount(tokens.demoSupport)).toBe(base + 1);
+    expect(await staffCount(tokens.demoAdmin)).toBe(base + 1);
+
+    // The team answers (owner: support): read, so no longer counted.
+    await reply(tokens.demoSupport, first.conversationId);
+    expect(await staffCount(tokens.demoSupport)).toBe(base);
+
+    // The member writes again: counted again, and still counted for the admin who does not own it.
+    await send(member.token, 'Obrigado, mais uma coisa');
+    expect(await staffCount(tokens.demoSupport)).toBe(base + 1);
+    expect(await staffCount(tokens.demoAdmin)).toBe(base + 1);
+
+    // Closed with the member's message unread: not counted any more.
+    expect(
+      (
+        await act(tokens.demoSupport, first.conversationId, 'close', {
+          expectedState: 'in_progress',
+        })
+      ).status,
+    ).toBe(200);
+    expect(await staffCount(tokens.demoSupport)).toBe(base);
+
+    // Resolved (resolve marks the case read): not counted either, and a closed one stays out.
+    const other = await send(member.token, 'Outro assunto');
+    expect(await staffCount(tokens.demoSupport)).toBe(base + 1);
+    await reply(tokens.demoSupport, other.conversationId, 'Sem problemas');
+    expect(
+      (
+        await act(tokens.demoSupport, other.conversationId, 'resolve', {
+          expectedState: 'in_progress',
+        })
+      ).status,
+    ).toBe(200);
+    expect(await staffCount(tokens.demoSupport)).toBe(base);
+  });
+
+  it('the member dot counts only cases that are not closed: 1 for an active or resolved case with an unread staff reply, 0 once closed (D-840, CASE-17)', async () => {
+    const { tokens } = await caseKit();
+    const member = await throwawayMember('dot');
+    expect((await countersOf(member.token)).unreadConversations).toBe(0);
+    const { conversationId } = await send(member.token, 'Meu pedido nao chegou');
+    expect((await countersOf(member.token)).unreadConversations).toBe(0);
+
+    await reply(tokens.demoSupport, conversationId, 'Vamos verificar');
+    expect(await countersOf(member.token)).toMatchObject({
+      unreadConversations: 1,
+      conversationsBadge: 'dot',
+    });
+    expect(
+      (await act(tokens.demoSupport, conversationId, 'resolve', { expectedState: 'in_progress' }))
+        .status,
+    ).toBe(200);
+    expect((await countersOf(member.token)).unreadConversations).toBe(1);
+    expect(
+      (await act(tokens.demoSupport, conversationId, 'close', { expectedState: 'resolved' }))
+        .status,
+    ).toBe(200);
+    expect((await countersOf(member.token)).unreadConversations).toBe(0);
+
+    // A migrated closed case with an unread staff reply (admin lane, as the backfill leaves one) lights no dot.
+    const migrated = await throwawayMember('dot-migrated');
+    const created = await send(migrated.token, 'Pergunta antiga');
+    await reply(tokens.demoSupport, created.conversationId, 'Resposta antiga');
+    await adminSql`
+      update public.chat_conversations
+         set state = 'closed', closed_at = now(), owner_user_id = null
+       where id = ${created.conversationId}::uuid`;
+    expect(await countersOf(migrated.token)).toMatchObject({ unreadConversations: 0 });
+  });
+
+  it('EP-055 encoding: the counters read integer sequences and exact lowercase state literals only, nothing is normalised', () => {
+    const source = readFileSync(
+      new URL('../../../../packages/modules/chat/server/service.ts', import.meta.url),
+      'utf8',
+    );
+    const start = source.indexOf('export async function chatCounters');
+    expect(start).toBeGreaterThan(-1);
+    const body = source.slice(start);
+    expect(body).toContain("c.state <> 'closed'");
+    expect(body.match(/c\.state <> 'closed'/g)).toHaveLength(2);
+    expect(body).toContain('c.last_seq > c.staff_last_read_seq');
+    expect(body).toContain('c.last_staff_seq > p.last_read_seq');
+    for (const forbidden of ['lower(', 'upper(', 'ilike', 'normalize', 'unaccent', '::text']) {
+      expect(body, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('the push badge follows the counters: the member and the team each receive the sum of their own counters (D-840)', async () => {
+    const { tokens, ids } = await caseKit();
+    const member = await throwawayMember('badge-push');
+    const memberEndpoint = newEndpoint('badge-member');
+    await subscribeDevice(member.token, memberEndpoint);
+    const staffEndpoint = newEndpoint('badge-staff');
+    await subscribeDevice(tokens.demoSupport, staffEndpoint);
+    await closeWaitingJobs();
+    resetFakePushOutbox();
+
+    // The team's push for a new case: the badge counts that case.
+    const { conversationId } = await send(member.token, 'Chegou quebrado');
+    await runNotificationJobs(ids.demo);
+    await runPushSendJobs(ids.demo);
+    const toStaff = fakePushOutbox().find((sent) => sent.endpoint === staffEndpoint);
+    expect(toStaff).toBeDefined();
+    const staff = await countersOf(tokens.demoSupport);
+    expect(JSON.parse(toStaff?.payload ?? '{}').badge).toBe(
+      staff.unreadNotifications + staff.unreadConversations,
+    );
+    expect(staff.unreadConversations).toBeGreaterThanOrEqual(1);
+
+    // The member's resolved notice: one bell row plus the dot of the unread staff reply.
+    await reply(tokens.demoSupport, conversationId, 'Vamos trocar');
+    await closeWaitingJobs();
+    resetFakePushOutbox();
+    expect(
+      (await act(tokens.demoSupport, conversationId, 'resolve', { expectedState: 'in_progress' }))
+        .status,
+    ).toBe(200);
+    await runNotificationJobs(ids.demo);
+    await runPushSendJobs(ids.demo);
+    const toMember = fakePushOutbox().find((sent) => sent.endpoint === memberEndpoint);
+    expect(toMember).toBeDefined();
+    const counters = await countersOf(member.token);
+    expect(counters.unreadNotifications).toBe(1);
+    expect(counters.unreadConversations).toBe(1);
+    expect(JSON.parse(toMember?.payload ?? '{}').badge).toBe(2);
+  });
+});
+
+type SignalRow = { id: string; topic: string; event: string; payload: Record<string, unknown> };
+
+async function signalsSince(since: string, conversationId: string): Promise<SignalRow[]> {
+  return adminSql<SignalRow[]>`
+    select id::text as id, topic, event, payload
+      from realtime.messages
+     where inserted_at >= ${since}::timestamptz
+       and payload->>'conversationId' = ${conversationId}
+     order by inserted_at, id`;
+}
+
+async function dbNow(): Promise<string> {
+  const [row] = await adminSql<{ now: string }[]>`select clock_timestamp()::text as now`;
+  return row?.now ?? '';
+}
+
+describe('case signals', () => {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  it('CASE-18, EP-057, EP-058: every action publishes ids-only chat.case rows on the conversation, the support inbox and the member topic, with no subscriber needed', async () => {
+    const { tokens, ids } = await caseKit();
+    const member = await throwawayMember('signals');
+    const opened = await send(member.token, 'Texto secreto do membro');
+    const id = opened.conversationId;
+    await reply(tokens.demoSupport, id, 'Resposta secreta da equipe');
+    const since = await dbNow();
+
+    expect(
+      (await act(tokens.demoSupport, id, 'resolve', { expectedState: 'in_progress' })).status,
+    ).toBe(200);
+    const rows = (await signalsSince(since, id)).filter((row) => row.event === 'chat.case');
+    expect(rows.map((row) => row.topic).sort()).toEqual(
+      [
+        `tenant:${ids.demo}:conv:${id}`,
+        `tenant:${ids.demo}:support-inbox`,
+        `tenant:${ids.demo}:user:${member.id}`,
+      ].sort(),
+    );
+    for (const row of rows) {
+      expect(row.topic).toMatch(new RegExp(REALTIME_TOPIC_PATTERN));
+      expect(Object.keys(row.payload).sort()).toEqual(['conversationId', 'id']);
+      expect(row.payload.conversationId).toBe(id);
+      expect(String(row.payload.conversationId)).toMatch(UUID);
+      expect(String(row.payload.id)).toMatch(UUID);
+      // Ids only: nothing the member or the team wrote, no name, no subject.
+      const text = JSON.stringify(row.payload);
+      expect(text).not.toContain('secreto');
+      expect(text).not.toContain('Pessoa');
+    }
+  });
+
+  it('EP-056 adjacency: a message and a state change back to back publish both chat.message and chat.case, with distinct events and pinned keys', async () => {
+    const { tokens, ids } = await caseKit();
+    const member = await throwawayMember('adjacent');
+    const id = (await send(member.token, 'Ola')).conversationId;
+    const since = await dbNow();
+    expect((await reply(tokens.demoSupport, id, 'Oi')).status).toBe(201);
+    expect(
+      (await act(tokens.demoSupport, id, 'resolve', { expectedState: 'in_progress' })).status,
+    ).toBe(200);
+
+    const onConv = (await signalsSince(since, id)).filter(
+      (row) => row.topic === `tenant:${ids.demo}:conv:${id}`,
+    );
+    const events = onConv.map((row) => row.event);
+    expect(events).toContain('chat.message');
+    expect(events).toContain('chat.case');
+    expect(events.lastIndexOf('chat.case')).toBeGreaterThan(events.indexOf('chat.message'));
+    for (const row of onConv) {
+      const keys = Object.keys(row.payload).sort();
+      if (row.event === 'chat.message') expect(keys).toEqual(['conversationId', 'id', 'seq']);
+      if (row.event === 'chat.case') expect(keys).toEqual(['conversationId', 'id']);
+    }
+  });
+
+  it('EP-059 ordering: two sequential actions publish their signals in action order within each topic', async () => {
+    const { tokens, ids } = await caseKit();
+    const member = await throwawayMember('ordering');
+    const id = (await send(member.token, 'Ola de novo')).conversationId;
+    await reply(tokens.demoSupport, id, 'Oi');
+    const topics = [
+      `tenant:${ids.demo}:conv:${id}`,
+      `tenant:${ids.demo}:support-inbox`,
+      `tenant:${ids.demo}:user:${member.id}`,
+    ];
+    const caseRows = async (since: string) =>
+      (await signalsSince(since, id)).filter((row) => row.event === 'chat.case');
+
+    const since = await dbNow();
+    expect(
+      (await act(tokens.demoSupport, id, 'resolve', { expectedState: 'in_progress' })).status,
+    ).toBe(200);
+    const afterFirst = await caseRows(since);
+    expect(afterFirst).toHaveLength(3);
+    expect(
+      (await act(tokens.demoSupport, id, 'reopen', { expectedState: 'resolved' })).status,
+    ).toBe(200);
+    const afterSecond = await caseRows(since);
+    expect(afterSecond).toHaveLength(6);
+
+    const firstIds = new Set(afterFirst.map((row) => row.id));
+    for (const topic of topics) {
+      const onTopic = afterSecond.filter((row) => row.topic === topic);
+      expect(onTopic).toHaveLength(2);
+      // Insertion order: the first action's row precedes the second's (the web never relies on cross-kind order).
+      expect(firstIds.has(onTopic[0]?.id ?? '')).toBe(true);
+      expect(firstIds.has(onTopic[1]?.id ?? '')).toBe(false);
+    }
+  });
+});
+
+describe('case notices across tenants', () => {
+  it('CASE-23: a resolve in tenant A creates no notification for a tenant B user, and the worker lane reads only tenant A rows (positive control: the tenant A member gets the notice)', async () => {
+    const { tokens, ids } = await caseKit();
+    const lab = labStaff as { id: string };
+    const member = await throwawayMember('cross');
+    await subscribeDevice(member.token, newEndpoint('cross-member'));
+    const { conversationId } = await send(member.token, 'Ajuda por favor');
+    await reply(tokens.demoSupport, conversationId);
+    await closeWaitingJobs();
+    const labRows = await noticeCount(ids.lab);
+    const labJobs = (await pushSendJobsOf(ids.lab)).length;
+
+    expect(
+      (await act(tokens.demoSupport, conversationId, 'resolve', { expectedState: 'in_progress' }))
+        .status,
+    ).toBe(200);
+    // Fan-out of the demo event, then the lab's own queue (nothing was enqueued there).
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+    expect(await runNotificationJobs(ids.lab)).toBe(0);
+
+    expect(
+      (await noticeRows(ids.demo, 'chat.case_resolved')).filter((row) => row.user_id === member.id),
+    ).toHaveLength(1);
+    const [leak] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications
+       where kind = 'chat.case_resolved' and tenant_id <> ${ids.demo}::uuid`;
+    expect(leak?.n).toBe(0);
+    expect(await noticeCount(ids.lab)).toBe(labRows);
+    expect((await pushSendJobsOf(ids.lab)).length).toBe(labJobs);
+    expect(await pushJobsFor(ids.lab, lab.id)).toHaveLength(0);
   });
 });

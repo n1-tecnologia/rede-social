@@ -461,6 +461,66 @@ describe('realtime chat (live)', () => {
     const got = await waitForBroadcast(conv, REALTIME_EVENTS.chatMessage, 10_000);
     expect(got?.payload).toMatchObject({ conversationId: chat.conversationId, seq: 5 });
   });
+
+  it("6. 12.4 CASE-18: a case action reaches the member on conv: and user:, the team on support-inbox, ids only; another member and tenant B's staff join neither conv:, and the member still joins a closed case's conv:", async () => {
+    // Case 1 left `SECOND`'s thread in progress, owned by the support user. The action goes through the real route.
+    const supportToken = await signInAs(SUPPORT, SEED_PASSWORD);
+    const owner = await connectAs(SECOND);
+    const staff = await connectAs(SUPPORT);
+    const conv = await joinTopic(owner.client, convTopic(ids.demo, chat.conversationId));
+    const own = await joinTopic(owner.client, userTopic(ids.demo, ids.second));
+    const inbox = await joinTopic(staff.client, inboxTopic(ids.demo));
+    expect(conv.status).toBe('SUBSCRIBED');
+    expect(own.status).toBe('SUBSCRIBED');
+    expect(inbox.status).toBe('SUBSCRIBED');
+
+    // Refused beside those controls: another member of the same tenant, and the staff of tenant B.
+    const [otherMember, labStaff] = await Promise.all([
+      (async () =>
+        joinTopic((await connectAs(MEMBER)).client, convTopic(ids.demo, chat.conversationId)))(),
+      (async () =>
+        joinTopic(
+          (await connectAs(LAB_SUPPORT)).client,
+          convTopic(ids.demo, chat.conversationId),
+        ))(),
+    ]);
+    observed['chat 6 other member conv'] = otherMember.status;
+    observed['chat 6 lab staff conv'] = labStaff.status;
+    expectNotSubscribed(otherMember);
+    expectNotSubscribed(labStaff);
+
+    const resolve = await chatRequest(
+      `/v1/chat/conversations/${chat.conversationId}/case/resolve`,
+      supportToken,
+      { expectedState: 'in_progress' },
+    );
+    expect(resolve.status).toBe(200);
+    for (const joined of [conv, own, inbox]) {
+      const got = await waitForBroadcast(joined, REALTIME_EVENTS.chatCase, 10_000);
+      expect(got, `chat.case on ${joined.topic}`).not.toBeNull();
+      expect(Object.keys(got?.payload ?? {}).sort()).toEqual(['conversationId', 'id']);
+      expect(got?.payload.conversationId).toBe(chat.conversationId);
+    }
+
+    // Closing is a second signal, and the member keeps the right to read its own closed case's topic.
+    const close = await chatRequest(
+      `/v1/chat/conversations/${chat.conversationId}/case/close`,
+      supportToken,
+      { expectedState: 'resolved' },
+    );
+    expect(close.status).toBe(200);
+    const closed = await joinTopic(
+      (await connectAs(SECOND)).client,
+      convTopic(ids.demo, chat.conversationId),
+    );
+    observed['chat 6 own closed conv'] = closed.status;
+    expect(closed.status).toBe('SUBSCRIBED');
+
+    await sleep(1_500);
+    expect(otherMember.received).toEqual([]);
+    expect(labStaff.received).toEqual([]);
+    expect(conv.received.filter((m) => m.event === REALTIME_EVENTS.chatCase)).toHaveLength(2);
+  }, 60_000);
 });
 
 /* ── 08-10: the cross-tenant joins, every topic kind ─────────────────────────────────────────── */
