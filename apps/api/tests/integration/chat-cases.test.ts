@@ -5,6 +5,7 @@ import {
   highestNumber,
   post,
   removeThrowaways,
+  SEED_THREAD,
   sweepCases,
   throwawayMember,
 } from './chat-case-fixtures';
@@ -77,5 +78,74 @@ describe('case tracer', () => {
        where conversation_id = ${result.conversationId}::uuid
        order by created_at, id`;
     expect(events).toEqual([{ kind: 'opened', actor: member.id, to_state: 'open' }]);
+  });
+});
+
+describe('case numbering', () => {
+  it('two members opening in two committed transactions get consecutive numbers (EP-006)', async () => {
+    const { ids } = await caseKit();
+    const base = await highestNumber(ids.demo);
+    const first = await throwawayMember('number-a');
+    const second = await throwawayMember('number-b');
+
+    const a = await post('/v1/chat/support/messages', first.token, { body: 'Primeiro' });
+    const b = await post('/v1/chat/support/messages', second.token, { body: 'Segundo' });
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    const [one, two] = [(await a.json()) as SendResult, (await b.json()) as SendResult];
+
+    const rows = await adminSql<{ id: string; case_number: number }[]>`
+      select id::text as id, case_number
+        from public.chat_conversations
+       where id in (${one.conversationId}::uuid, ${two.conversationId}::uuid)`;
+    const numberOf = (id: string) => rows.find((r) => r.id === id)?.case_number;
+    expect(numberOf(one.conversationId)).toBe(base + 1);
+    expect(numberOf(two.conversationId)).toBe(base + 2);
+  });
+});
+
+describe('case legacy rows', () => {
+  it('a conversation whose case columns are all null still takes a member message and a staff reply', async () => {
+    const { ids, tokens } = await caseKit();
+    // The seeded demo thread, made legacy-shaped: every case column null and no history (what every
+    // conversation is between plan 01 and the plan 02 backfill). `sweepCases` restores it afterwards.
+    await adminSql`
+      update public.chat_conversations
+         set state = null, case_number = null, priority = null, category = null
+       where id = ${SEED_THREAD.id}::uuid`;
+    await adminSql`
+      delete from public.chat_case_events where conversation_id = ${SEED_THREAD.id}::uuid`;
+    const [before] = await adminSql<{ last_seq: number }[]>`
+      select last_seq::int as last_seq from public.chat_conversations
+       where id = ${SEED_THREAD.id}::uuid`;
+
+    const member = await post('/v1/chat/support/messages', tokens.demoMember, {
+      body: 'Mensagem em uma conversa antiga',
+    });
+    expect(member.status).toBe(201);
+    const sent = (await member.json()) as SendResult;
+    expect(sent.conversationId).toBe(SEED_THREAD.id);
+    expect(sent.message.seq).toBe((before?.last_seq ?? 0) + 1);
+
+    const staff = await post(
+      `/v1/chat/conversations/${SEED_THREAD.id}/messages`,
+      tokens.demoSupport,
+      {
+        body: 'Resposta em uma conversa antiga',
+      },
+    );
+    expect(staff.status).toBe(201);
+    const reply = (await staff.json()) as SendResult;
+    expect(reply.message.seq).toBe((before?.last_seq ?? 0) + 2);
+
+    const [row] = await adminSql<
+      { state: string | null; case_number: number | null; events: number }[]
+    >`
+      select c.state, c.case_number,
+             (select count(*)::int from public.chat_case_events e where e.conversation_id = c.id) as events
+        from public.chat_conversations c
+       where c.id = ${SEED_THREAD.id}::uuid`;
+    expect(row).toEqual({ state: null, case_number: null, events: 0 });
+    expect(ids.demo).not.toBe('');
   });
 });

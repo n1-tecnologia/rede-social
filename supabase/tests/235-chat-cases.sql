@@ -26,7 +26,7 @@ begin;
 --    message and a staff reply, moves its counters as before and writes no event.
 --
 -- Fixture ids use the `1e350000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(55);
+select plan(98);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-case-a', 'Chamado A', '1e350000-0000-4000-8000-000000000001');
@@ -351,6 +351,246 @@ select ok(
   and not has_table_privilege('authenticated', 'public.chat_case_events', 'delete')
   and not has_table_privilege('authenticated', 'public.chat_case_events', 'truncate'),
   'T-12.4-03: authenticated holds no UPDATE, DELETE or TRUNCATE privilege on chat_case_events');
+
+-- ── 3. numbering ───────────────────────────────────────────────────────────────────────────────
+-- A third, fresh tenant, so the numbers below are exact: it has no counter row and no event yet.
+select tests.tenant('pgtap-case-c', 'Chamado C', '1e350000-0000-4000-8000-000000000003');
+select tests.auth_user('e1@case-c.local', '1e350000-0000-4000-8000-0000000000e1');
+select tests.member('1e350000-0000-4000-8000-000000000003', '1e350000-0000-4000-8000-0000000000e1');
+select tests.auth_user('e2@case-c.local', '1e350000-0000-4000-8000-0000000000e2');
+select tests.member('1e350000-0000-4000-8000-000000000003', '1e350000-0000-4000-8000-0000000000e2');
+select tests.auth_user('e3@case-c.local', '1e350000-0000-4000-8000-0000000000e3');
+select tests.member('1e350000-0000-4000-8000-000000000003', '1e350000-0000-4000-8000-0000000000e3');
+select tests.auth_user('e4@case-c.local', '1e350000-0000-4000-8000-0000000000e4');
+select tests.member('1e350000-0000-4000-8000-000000000003', '1e350000-0000-4000-8000-0000000000e4');
+select tests.auth_user('e5@case-c.local', '1e350000-0000-4000-8000-0000000000e5');
+select tests.member('1e350000-0000-4000-8000-000000000003', '1e350000-0000-4000-8000-0000000000e5');
+select tests.auth_user('e6@case-c.local', '1e350000-0000-4000-8000-0000000000e6');
+select tests.member('1e350000-0000-4000-8000-000000000003', '1e350000-0000-4000-8000-0000000000e6');
+
+select is(
+  (select count(*)::int from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000003')
+  + (select count(*)::int from public.chat_case_events where tenant_id = '1e350000-0000-4000-8000-000000000003'),
+  0, 'EP-001/EP-003: a tenant with no support conversation has no counter row and no event row');
+select set_config('tests.a_counter', (select last_number::text from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000001'), true);
+
+-- EP-008: the same insert twice with `on conflict do nothing` (the shape of the shipped API) moves the counter ONCE.
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e350000-0000-4000-8000-0000000000c4', '1e350000-0000-4000-8000-000000000003', 'support', '1e350000-0000-4000-8000-0000000000e1')
+on conflict (tenant_id, created_by_user_id) where kind = 'support' do nothing;
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e350000-0000-4000-8000-0000000000c5', '1e350000-0000-4000-8000-000000000003', 'support', '1e350000-0000-4000-8000-0000000000e1')
+on conflict (tenant_id, created_by_user_id) where kind = 'support' do nothing;
+select is(
+  (select last_number from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000003'),
+  1, 'EP-008: a retried insert that conflicts burns no number (the counter moved once, by equality)');
+select is(
+  (select count(*)::int from public.chat_case_events where tenant_id = '1e350000-0000-4000-8000-000000000003' and kind = 'opened'),
+  1, 'EP-008: the skipped insert wrote no event either (one opened event)');
+select is(
+  (select case_number from public.chat_conversations where id = '1e350000-0000-4000-8000-0000000000c4'),
+  1, 'EP-001: the first number a tenant ever receives is exactly 1');
+
+-- EP-006: the second member of the tenant is 2; another tenant's counter did not move (the counter is per tenant).
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e350000-0000-4000-8000-0000000000c6', '1e350000-0000-4000-8000-000000000003', 'support', '1e350000-0000-4000-8000-0000000000e2');
+select is(
+  (select case_number from public.chat_conversations where id = '1e350000-0000-4000-8000-0000000000c6'),
+  2, 'EP-006: the next member of the tenant takes the next consecutive number');
+select is(
+  (select last_number from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000001')::text,
+  current_setting('tests.a_counter'),
+  'EP-006: the counter is per tenant: tenant A did not move while tenant C was numbered');
+
+-- T-12.4-04: a rolled-back insert leaves no gap and the next insert takes the same number.
+savepoint nogap;
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e350000-0000-4000-8000-0000000000c7', '1e350000-0000-4000-8000-000000000003', 'support', '1e350000-0000-4000-8000-0000000000e3');
+select is(
+  (select last_number from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000003'),
+  3, 'T-12.4-04: inside the savepoint the third case took 3');
+rollback to savepoint nogap;
+select is(
+  (select last_number from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000003'),
+  2, 'T-12.4-04: the rolled-back insert gave its number back (no gap)');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e350000-0000-4000-8000-0000000000c8', '1e350000-0000-4000-8000-000000000003', 'support', '1e350000-0000-4000-8000-0000000000e3');
+select is(
+  (select case_number from public.chat_conversations where id = '1e350000-0000-4000-8000-0000000000c8'),
+  3, 'T-12.4-04: the next committed insert takes the very number the rolled-back one had');
+
+-- EP-004: the history of one case reads in (created_at, id) order; two events of one instant keep the id order.
+insert into public.chat_case_events (id, tenant_id, conversation_id, kind, created_at) values
+  ('1e350000-0000-4000-8000-0000000000f2', '1e350000-0000-4000-8000-000000000003', '1e350000-0000-4000-8000-0000000000c4', 'edited', now() + interval '1 day'),
+  ('1e350000-0000-4000-8000-0000000000f1', '1e350000-0000-4000-8000-000000000003', '1e350000-0000-4000-8000-0000000000c4', 'taken',  now() + interval '1 day');
+select is(
+  (select array_agg(id::text order by created_at, id) from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-0000000000c4' and kind <> 'opened'),
+  array['1e350000-0000-4000-8000-0000000000f1', '1e350000-0000-4000-8000-0000000000f2'],
+  'EP-004: two events of one instant read in the stable id order');
+select ok(
+  (select pg_get_indexdef(i.indexrelid) like '%(tenant_id, conversation_id, created_at, id)%'
+     from pg_index i where i.indexrelid = 'public.chat_case_events_conv_idx'::regclass),
+  'EP-004: chat_case_events_conv_idx is on (tenant_id, conversation_id, created_at, id)');
+
+-- EP-005: 32-bit integers, no prefix or separator in the database.
+select col_type_is('public', 'chat_conversations', 'case_number', 'integer', 'EP-005: chat_conversations.case_number is a 32-bit integer');
+select col_type_is('public', 'chat_case_counters', 'last_number', 'integer', 'EP-005: chat_case_counters.last_number is a 32-bit integer');
+
+-- ── 4. directs, isolation and the shape ────────────────────────────────────────────────────────
+-- EP-084 (read before tenant C is given directs): tenant B holds no direct row, so its history is support-only.
+select is(
+  (select count(*)::int from public.chat_conversations where tenant_id = '1e350000-0000-4000-8000-000000000002' and kind <> 'support')
+  + (select count(*)::int from public.chat_case_events e join public.chat_conversations c on c.id = e.conversation_id
+      where e.tenant_id = '1e350000-0000-4000-8000-000000000002' and c.kind <> 'support'),
+  0, 'EP-084: in a tenant with no direct row the counter and event tables hold support rows only');
+
+-- EP-085, EP-083, EP-002: direct, support, direct, support in one transaction; only the supports are numbered.
+select set_config('tests.c_counter', (select last_number::text from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000003'), true);
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id) values ('1e350000-0000-4000-8000-0000000000d1', '1e350000-0000-4000-8000-000000000003', 'direct', '1e350000-0000-4000-8000-0000000000e4');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id) values ('1e350000-0000-4000-8000-0000000000d2', '1e350000-0000-4000-8000-000000000003', 'support', '1e350000-0000-4000-8000-0000000000e4');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id) values ('1e350000-0000-4000-8000-0000000000d3', '1e350000-0000-4000-8000-000000000003', 'direct', '1e350000-0000-4000-8000-0000000000e5');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id) values ('1e350000-0000-4000-8000-0000000000d4', '1e350000-0000-4000-8000-000000000003', 'support', '1e350000-0000-4000-8000-0000000000e5');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id) values ('1e350000-0000-4000-8000-0000000000d5', '1e350000-0000-4000-8000-000000000003', 'group', '1e350000-0000-4000-8000-0000000000e6');
+select results_eq(
+  $$ select c.id::text, c.state, c.case_number, c.priority, c.category from public.chat_conversations c
+      where c.id in ('1e350000-0000-4000-8000-0000000000d1', '1e350000-0000-4000-8000-0000000000d3', '1e350000-0000-4000-8000-0000000000d5') order by c.id $$,
+  $$ values ('1e350000-0000-4000-8000-0000000000d1'::text, null::text, null::int, null::text, null::text),
+            ('1e350000-0000-4000-8000-0000000000d3', null, null, null, null),
+            ('1e350000-0000-4000-8000-0000000000d5', null, null, null, null) $$,
+  'CASE-25/EP-002: a direct and a group row beside the support rows keep every case column null');
+select results_eq(
+  $$ select c.id::text, c.case_number - current_setting('tests.c_counter')::int from public.chat_conversations c
+      where c.id in ('1e350000-0000-4000-8000-0000000000d2', '1e350000-0000-4000-8000-0000000000d4') order by c.id $$,
+  $$ values ('1e350000-0000-4000-8000-0000000000d2'::text, 1), ('1e350000-0000-4000-8000-0000000000d4', 2) $$,
+  'EP-085: with the insert order direct, support, direct, support the supports are numbered consecutively in that order');
+select is(
+  (select last_number - current_setting('tests.c_counter')::int from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000003'),
+  2, 'EP-083: only the two support rows moved the counter (a direct by the same user as a support moved nothing)');
+select is(
+  (select count(*)::int from public.chat_case_events where conversation_id in ('1e350000-0000-4000-8000-0000000000d1', '1e350000-0000-4000-8000-0000000000d3', '1e350000-0000-4000-8000-0000000000d5')),
+  0, 'CASE-25: a direct or group conversation gets no event');
+
+-- EP-082: a direct row with every case column null is accepted at the maximum values of its other columns.
+select lives_ok(
+  $$ insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id, subject, last_seq, last_staff_seq, staff_last_read_seq, last_message_side, last_message_at)
+     values ('1e350000-0000-4000-8000-0000000000d6', '1e350000-0000-4000-8000-000000000003', 'direct', '1e350000-0000-4000-8000-0000000000e6', repeat('x', 1000), 9223372036854775807, 9223372036854775807, 9223372036854775807, 'member', now()) $$,
+  'EP-082: a direct row with null case columns and maximal other columns is accepted');
+
+-- EP-086: the comparisons are exact lowercase literals; a kind of "Support" never reaches the shape rules.
+select throws_ok(
+  $$ insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+     values ('1e350000-0000-4000-8000-000000000003', 'Support', '1e350000-0000-4000-8000-0000000000e6') $$,
+  '23514', 'new row for relation "chat_conversations" violates check constraint "chat_conversations_kind_chk"',
+  'EP-086: a conversation of kind Support is refused by the shipped kind CHECK, no case folding');
+
+-- CASE-23: another tenant reads nothing (positive control first).
+select tests.as_tenant('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000a3', 'support_tenant');
+select is(
+  (select count(*)::int from public.chat_conversations where id = '1e350000-0000-4000-8000-0000000000c2' and case_number is not null and state is not null),
+  1, 'CASE-23 positive control: tenant A''s staff reads the case columns of its own case');
+reset role;
+select tests.as_tenant('1e350000-0000-4000-8000-000000000002', '1e350000-0000-4000-8000-0000000000b3', 'support_tenant');
+select is(
+  (select count(*)::int from public.chat_conversations where id = '1e350000-0000-4000-8000-0000000000c2')
+  + (select count(*)::int from public.chat_case_events where tenant_id = '1e350000-0000-4000-8000-000000000001'),
+  0, 'CASE-23: tenant B''s staff reads no case column and no event of tenant A');
+reset role;
+select tests.as_tenant('1e350000-0000-4000-8000-000000000002', '1e350000-0000-4000-8000-0000000000b1');
+select is(
+  (select count(*)::int from public.chat_conversations where id = '1e350000-0000-4000-8000-0000000000c2'),
+  0, 'CASE-23: tenant B''s member reads no case column of tenant A');
+reset role;
+
+-- The counters are reachable by no lane at all: RLS on, ZERO policies, and no table privilege.
+select ok(
+  (select relrowsecurity from pg_class where oid = 'public.chat_case_counters'::regclass)
+  and (select count(*) from pg_policy where polrelid = 'public.chat_case_counters'::regclass) = 0,
+  'D-837: chat_case_counters has RLS on and ZERO policies');
+select ok(
+  not has_table_privilege('authenticated', 'public.chat_case_counters', 'select')
+  and not has_table_privilege('authenticated', 'public.chat_case_counters', 'insert')
+  and not has_table_privilege('authenticated', 'public.chat_case_counters', 'update')
+  and not has_table_privilege('authenticated', 'public.chat_case_counters', 'delete')
+  and not has_table_privilege('anon', 'public.chat_case_counters', 'select'),
+  'T-12.4-02: no lane holds any privilege on chat_case_counters');
+select tests.as_tenant('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000a3', 'support_tenant');
+select throws_ok(
+  $$ select last_number from public.chat_case_counters $$,
+  '42501', 'permission denied for table chat_case_counters',
+  'T-12.4-02: tenant A''s own staff lane cannot read the counter');
+reset role;
+select tests.as_tenant('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000d1');
+select throws_ok(
+  $$ update public.chat_case_counters set last_number = 0 $$,
+  '42501', 'permission denied for table chat_case_counters',
+  'T-12.4-04: a member lane cannot rewind the counter');
+reset role;
+
+-- T-12.4-03: a direct DML on the history from the staff lane changes nothing.
+select set_config('tests.events_before', (select count(*)::text from public.chat_case_events), true);
+select tests.as_tenant('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000a3', 'support_tenant');
+select throws_ok(
+  $$ insert into public.chat_case_events (tenant_id, conversation_id, kind) values ('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000c2', 'taken') $$,
+  '42501', 'new row violates row-level security policy for table "chat_case_events"',
+  'T-12.4-03: a staff lane cannot insert an event');
+select throws_ok(
+  $$ update public.chat_case_events set kind = 'closed' where conversation_id = '1e350000-0000-4000-8000-0000000000c2' $$,
+  '42501', 'permission denied for table chat_case_events',
+  'T-12.4-03: a staff lane cannot update an event');
+select throws_ok(
+  $$ delete from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-0000000000c2' $$,
+  '42501', 'permission denied for table chat_case_events',
+  'T-12.4-03: a staff lane cannot delete an event');
+reset role;
+select is(
+  (select count(*)::text from public.chat_case_events), current_setting('tests.events_before'),
+  'T-12.4-03: the history holds exactly the rows it held before the attempts');
+
+-- No lane may update any of the seven case columns (the grant file is untouched by this plan).
+select ok(not has_column_privilege('authenticated', 'public.chat_conversations', 'case_number', 'update'), 'D-836: authenticated cannot update case_number');
+select ok(not has_column_privilege('authenticated', 'public.chat_conversations', 'state', 'update'), 'D-836: authenticated cannot update state');
+select ok(not has_column_privilege('authenticated', 'public.chat_conversations', 'owner_user_id', 'update'), 'D-836: authenticated cannot update owner_user_id');
+select ok(not has_column_privilege('authenticated', 'public.chat_conversations', 'category', 'update'), 'D-836: authenticated cannot update category');
+select ok(not has_column_privilege('authenticated', 'public.chat_conversations', 'priority', 'update'), 'D-836: authenticated cannot update priority');
+select ok(not has_column_privilege('authenticated', 'public.chat_conversations', 'resolved_at', 'update'), 'D-836: authenticated cannot update resolved_at');
+select ok(not has_column_privilege('authenticated', 'public.chat_conversations', 'closed_at', 'update'), 'D-836: authenticated cannot update closed_at');
+
+-- ── 5. legacy rows ─────────────────────────────────────────────────────────────────────────────
+-- Plan 02 adds `chat_conversations_support_state_chk` (a support row has a state) after its backfill; this line keeps
+-- the section green after it (a no-op in this plan, rolled back with the file).
+alter table public.chat_conversations drop constraint if exists chat_conversations_support_state_chk;
+-- A legacy-shaped support conversation: inserted, then every case column nulled as the table owner (allowed by the
+-- legacy-safe CHECKs), THEN the messages go in, so the message trigger meets a legacy row.
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('1e350000-0000-4000-8000-0000000000c9', '1e350000-0000-4000-8000-000000000001', 'support', '1e350000-0000-4000-8000-0000000000d5');
+insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+values ('1e350000-0000-4000-8000-0000000000c9', '1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000d5', 'member');
+update public.chat_conversations
+   set state = null, case_number = null, priority = null, category = null
+ where id = '1e350000-0000-4000-8000-0000000000c9';
+select is(
+  (select count(*)::int from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-0000000000c9'),
+  1, 'B1: the legacy-shaped conversation holds the one opened event its insert wrote');
+select tests.as_tenant('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000d5');
+select lives_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000c9', '1e350000-0000-4000-8000-0000000000d5', 'member', 'Mensagem de uma conversa antiga') $$,
+  'B1: a member message on a legacy conversation (null state) is accepted');
+reset role;
+select tests.as_tenant('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000a3', 'support_tenant');
+select lives_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000c9', '1e350000-0000-4000-8000-0000000000a3', 'staff', 'Resposta da equipe') $$,
+  'B1: a staff reply on a legacy conversation is accepted');
+reset role;
+select results_eq(
+  $$ select last_seq::int, last_staff_seq::int, staff_last_read_seq::int, last_message_side, state, case_number
+       from public.chat_conversations where id = '1e350000-0000-4000-8000-0000000000c9' $$,
+  $$ values (2, 2, 2, 'staff'::text, null::text, null::int) $$,
+  'B1: the counters move as before, the state stays null and the case number stays null');
+select is(
+  (select count(*)::int from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-0000000000c9'),
+  1, 'B1: no new event row was written by the legacy messages');
 
 select * from finish();
 rollback;

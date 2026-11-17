@@ -34,6 +34,9 @@ select is_empty(
 --    09.1-05 adds `payment_integrations` (the sealed webhook token) and `payment_events` (the inbox): both
 --    admin-lane only, and 205 pins their policy count at ZERO and the revoke from anon and authenticated.
 --    `payment_products` is NOT on the list: it carries four `admin_tenant` policies.
+--    12.4-01 adds `chat_case_counters` (D-837): the per-tenant case counter is written only by the definer numbering
+--    trigger, so RLS is on with ZERO policies and the table privileges are revoked; 235 pins both. `chat_case_events`
+--    is NOT on the list: it carries one staff select policy.
 select is_empty(
   $$
     select c.relname
@@ -41,7 +44,7 @@ select is_empty(
       join pg_namespace n on n.oid = c.relnamespace
      where n.nspname = 'public'
        and c.relkind = 'r'
-       and c.relname not in ('tenant_invites', 'access_grants', 'payment_integrations', 'payment_events')
+       and c.relname not in ('tenant_invites', 'access_grants', 'payment_integrations', 'payment_events', 'chat_case_counters')
        and exists (
          select 1 from pg_attribute a
           where a.attrelid = c.oid and a.attname = 'tenant_id'
@@ -209,11 +212,17 @@ select is_empty(
         -- stopped being applied must not let those assertions pass vacuously. 205 pins everything else.
         ('payment_integrations'),
         ('payment_products'),
-        ('payment_events')
+        ('payment_events'),
+        -- Phase 12.4 (12.4-01, D-836, D-837). `chat_case_counters` carries `tenant_id`, RLS on and ZERO policies
+        -- (the numbering trigger is the only writer; 235 pins the posture and the revoked privileges) and is
+        -- exempted from assertion 2 above on purpose. `chat_case_events` carries the one staff select policy.
+        -- Both are listed so a migration that silently stopped being applied cannot let 1-3 pass vacuously.
+        ('chat_case_counters'),
+        ('chat_case_events')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-09.1 declare exists in public'
+  'every table Phases 1-12.4 declare exists in public'
 );
 
 select * from finish();
