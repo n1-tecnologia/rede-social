@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
+import { SOCIAL_MAX_VIDEO_SECONDS } from '@rede-social/module-social/contracts';
 import postgres from 'postgres';
 import communitiesMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import platformModulesSocial from '../messages/pt-BR/platformModules.social.json' with {
@@ -346,9 +347,11 @@ test.describe('09-12 - platform panel: the media limits sheet', () => {
     await page.getByRole('switch', { name: F_VIDEO }).click();
     await expect(numberField(page, F_SECONDS)).toHaveValue('60');
     await expect(numberField(page, F_VIDEO_MB)).toHaveValue('100');
-    await numberField(page, F_SECONDS).fill('999');
+    await numberField(page, F_SECONDS).fill(String(SOCIAL_MAX_VIDEO_SECONDS + 1));
     await saveLimits(page).click();
-    await expect(page.getByText('Informe um valor entre 1 e 300.')).toBeVisible();
+    await expect(
+      page.getByText(`Informe um valor entre 1 e ${SOCIAL_MAX_VIDEO_SECONDS}.`),
+    ).toBeVisible();
     await expect(limitsDialog(page)).toBeVisible();
     await numberField(page, F_SECONDS).fill('90');
     await numberField(page, F_VIDEO_MB).fill('200');

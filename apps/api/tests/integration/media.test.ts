@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { mediaAssetSchema } from '@rede-social/contracts/media';
+import { MEDIA_LIMITS, mediaAssetSchema } from '@rede-social/contracts/media';
 import { sqlClient } from '@rede-social/core/db';
 import { deriveIconSet } from '@rede-social/core/server/branding/icons';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
@@ -613,10 +613,12 @@ describe('08.3-03 (D-409, COURSE-12): the lesson ceiling is its own budget, and 
     expect(details?.media).toBe('too_large');
     expect(details?.maxBytes).toBe(cap);
 
-    // The post cap did not move with it.
-    const post = await startVideo('post', cap);
+    // The post purpose is judged against its own table entry: one byte past it is refused with
+    // the post cap, not the lesson's.
+    const postCap = MEDIA_LIMITS.video.post?.maxBytes ?? 0;
+    const post = await startVideo('post', postCap + 1);
     expect(post.status).toBe(413);
-    expect((await envelope(post)).details?.maxBytes).toBe(500 * 1024 * 1024);
+    expect((await envelope(post)).details?.maxBytes).toBe(postCap);
 
     // Video bytes live at the provider and are metered in minutes: the 4 GiB pending lesson above
     // must not have eaten the 800 MiB Storage budget the tenant's photos share.

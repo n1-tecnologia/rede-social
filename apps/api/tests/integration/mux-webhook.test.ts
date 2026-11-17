@@ -273,7 +273,7 @@ describe('tracer — an admin uploads a video, a signed webhook lands, and the j
     // The provider owns the object — there is no Storage token and no object name to hand back.
     expect(body.token).toBeNull();
     expect(body.path).toBeNull();
-    expect(body.maxBytes).toBe(500 * 1024 * 1024);
+    expect(body.maxBytes).toBe(MEDIA_LIMITS.video.post?.maxBytes);
 
     const row = await assetRow(assetId);
     expect(row?.status).toBe('pending');

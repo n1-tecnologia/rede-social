@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { MEDIA_LIMITS } from '@rede-social/contracts/media';
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import {
@@ -12,6 +13,10 @@ import type { VideoProviderEvent } from '@rede-social/core/server/media/video/ty
 import { normaliseProviderEvent } from '@rede-social/core/server/media/video/wire';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { FEED_MAX_CAPTION, type FeedPage, type FeedPost } from '@rede-social/module-feed/contracts';
+import {
+  SOCIAL_MAX_VIDEO_BYTES,
+  SOCIAL_MAX_VIDEO_SECONDS,
+} from '@rede-social/module-social/contracts';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -284,8 +289,8 @@ describe('09 tracer', () => {
       { media: { photoMaxBytes: -1 } },
       { media: { photoMaxBytes: '1048576' } },
       { media: { photosPerPost: 11 } },
-      { media: { video: { maxDurationSeconds: 301 } } },
-      { media: { video: { maxBytes: 500 * MIB + 1 } } },
+      { media: { video: { maxDurationSeconds: SOCIAL_MAX_VIDEO_SECONDS + 1 } } },
+      { media: { video: { maxBytes: SOCIAL_MAX_VIDEO_BYTES + 1 } } },
       { media: { unknown: 1 } },
       { other: 1 },
     ];
@@ -620,12 +625,12 @@ describe('09 video', () => {
     expect((await startVideo(tokens.labSupport)).status).toBe(403);
     expect(await countAssets(VIDEO_FILENAME)).toBe(before);
 
-    // The admin path is unchanged: no snapshot, the static 500 MiB cap.
+    // The admin path is unchanged: no snapshot, the static post cap.
     const admin = await startVideo(tokens.labAdmin);
     expect(admin.status).toBe(201);
     const adminBody = (await admin.json()) as { assetId: string; maxBytes: number };
     createdAssetIds.push(adminBody.assetId);
-    expect(adminBody.maxBytes).toBe(500 * MIB);
+    expect(adminBody.maxBytes).toBe(MEDIA_LIMITS.video.post?.maxBytes);
     expect((await assetFacts(adminBody.assetId))?.duration_cap_seconds).toBeNull();
   });
 
