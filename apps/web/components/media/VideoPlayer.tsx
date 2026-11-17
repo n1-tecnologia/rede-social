@@ -64,6 +64,12 @@ export interface VideoPlayerProps {
     durationSeconds: number,
     reason: VideoProgressReason,
   ) => void;
+  /**
+   * 2026-11-17: opt-in vendor bar for LONG videos (lessons, live replays, the media library
+   * preview). `false` (the default) keeps the 2026-10-20 no-bar rule for every short, autoplaying
+   * surface: the feed, Reels, stories, the composer and the lesson-form previews.
+   */
+  controls?: boolean;
 }
 
 /** Why `onProgress` fired: a playback tick, a pause, or the end of the video. */
@@ -88,6 +94,10 @@ const POSTER_PROBE_STEP_MS = 120;
 const POSTER_PROBE_TIMEOUT_MS = 3000;
 /** How much of the frame must be on screen before it plays by itself. */
 const IN_VIEW_RATIO = 0.5;
+/** The bar's back and forward buttons (and the arrow hotkeys) jump this many seconds. */
+const SEEK_STEP_SECONDS = 10;
+/** The speed menu: the vendor default has no slow rate, and a lesson needs 0.5 and 0.75. */
+const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
 function subscribeHidden(listener: () => void) {
   document.addEventListener('visibilitychange', listener);
@@ -115,6 +125,10 @@ function stopVendorClick(event: MouseEvent<HTMLDivElement>) {
  * outlives the session. A failed mint and a mid-session expiry both surface the GENERIC toast plus a
  * ghost "Tentar novamente" that mints a fresh one — a raw player error, a provider status or a token
  * fragment never reaches the screen (T-03-51).
+ *
+ * **Two modes (the `controls` prop).** The 2026-10-20 rule below (no bar) still holds for the feed,
+ * Reels, stories and every call site that does not pass `controls`; `controls` (2026-11-17) is the
+ * opt-in of the long videos, and a paragraph after the rule describes it.
  *
  * **No player bar (2026-10-20, the client's FRONT.pdf: no video of the app shows one).** The vendor's
  * controls and its error dialog are hidden (`--controls: none`, `--dialog: none`, no hotkeys), and
@@ -157,6 +171,7 @@ export function VideoPlayer({
   bleed = false,
   startTime,
   onProgress,
+  controls = false,
 }: VideoPlayerProps) {
   const t = useTranslations('media');
   const toast = useToast();
@@ -483,7 +498,13 @@ export function VideoPlayer({
           !bleed && 'rounded-xl',
         )}
       >
-        <div ref={frameRef} className="h-full w-full" onClickCapture={stopVendorClick}>
+        <div
+          ref={frameRef}
+          className="h-full w-full"
+          {...(controls
+            ? { role: 'group', 'aria-label': t('player.label') }
+            : { onClickCapture: stopVendorClick })}
+        >
           {tokens ? (
             <MuxPlayer
               key={mints}
@@ -496,24 +517,30 @@ export function VideoPlayer({
               streamType="on-demand"
               playsInline
               loop={onProgress ? undefined : true}
-              nohotkeys
               noMutedPref
               noVolumePref
               poster={poster}
               style={{
-                '--controls': 'none',
+                ...(controls ? {} : { '--controls': 'none' }),
                 '--dialog': 'none',
                 '--media-background-color': 'transparent',
                 height: '100%',
                 width: '100%',
               }}
+              {...(controls
+                ? {
+                    forwardSeekOffset: SEEK_STEP_SECONDS,
+                    backwardSeekOffset: SEEK_STEP_SECONDS,
+                    playbackRates: PLAYBACK_RATES,
+                  }
+                : { nohotkeys: true })}
               {...resumeAt}
               {...progressHandlers}
             />
           ) : null}
         </div>
 
-        {live ? (
+        {live && !controls ? (
           <button
             type="button"
             data-testid="video-player-toggle"
@@ -533,7 +560,7 @@ export function VideoPlayer({
           </button>
         ) : null}
 
-        {live ? (
+        {live && !controls ? (
           <IconButton
             icon={audible ? Volume2 : VolumeX}
             size={18}

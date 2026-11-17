@@ -32,7 +32,8 @@
       },
       "failed": "Não foi possível processar este vídeo.",
       "ready": "Vídeo pronto.",
-      "close": "Fechar"
+      "close": "Fechar",
+      "label": "Reprodutor de vídeo"
     },
     "feedVideo": {
       "play": "Reproduzir vídeo",

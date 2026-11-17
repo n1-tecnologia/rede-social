@@ -4,7 +4,7 @@ import type { MediaPlayback } from '@rede-social/contracts/media';
 import { ToastProvider } from '@rede-social/ui';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
-import type { ReactElement } from 'react';
+import type { ComponentProps, ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetVideoSound, videoSoundWanted } from './video-sound';
 
@@ -416,5 +416,103 @@ describe('VideoPlayer — errors', () => {
     expect(screen.getByTestId('video-failed')).toBeTruthy();
     expect(document.querySelector('mux-player')).toBeNull();
     expect(mintToken).not.toHaveBeenCalled();
+  });
+});
+
+/* ── controls mode (2026-11-17) ───────────────────────────────────────────────────────────── */
+
+const withControls = (extra: Partial<ComponentProps<typeof VideoPlayer>> = {}) => (
+  <VideoPlayer assetId="0e000000-0000-4000-8000-0000000000f1" status="ready" controls {...extra} />
+);
+
+describe('VideoPlayer — controls mode (2026-11-17)', () => {
+  it('hands the vendor the bar: no --controls, hotkeys on, 10 s seeks, the rate list, the opt-outs', async () => {
+    show(withControls());
+    await player();
+    const props = recorded.at(-1);
+    expect(props && 'nohotkeys' in props).toBe(false);
+    expect(props).toMatchObject({
+      forwardSeekOffset: 10,
+      backwardSeekOffset: 10,
+      noMutedPref: true,
+      noVolumePref: true,
+      playsInline: true,
+      streamType: 'on-demand',
+    });
+    const rates = props?.playbackRates as number[];
+    expect(rates).toContain(0.5);
+    expect(rates).toContain(2);
+    const style = props?.style as Record<string, string> | undefined;
+    expect(style && '--controls' in style).toBe(false);
+    expect(style?.['--dialog']).toBe('none');
+  });
+
+  it('the default mode carries none of the seek or rate props', async () => {
+    show(ready());
+    await player();
+    const props = recorded.at(-1);
+    expect(props && 'forwardSeekOffset' in props).toBe(false);
+    expect(props && 'backwardSeekOffset' in props).toBe(false);
+    expect(props && 'playbackRates' in props).toBe(false);
+  });
+
+  it('renders no cover button, badge or corner sound button, and the frame is a named group', async () => {
+    show(withControls());
+    await player();
+    const absent = () => {
+      expect(screen.queryByTestId('video-player-toggle')).toBeNull();
+      expect(screen.queryByTestId('video-player-badge')).toBeNull();
+      expect(screen.queryByTestId('video-player-sound')).toBeNull();
+    };
+    absent();
+    await scrollTo(1);
+    absent();
+    expect(screen.getByRole('group', { name: m('player.label') })).toBeTruthy();
+  });
+
+  it('a click on the vendor element reaches it (the bar and the gesture layer need it)', async () => {
+    show(withControls());
+    const element = await player();
+    const vendorClick = vi.fn();
+    element.addEventListener('click', vendorClick);
+    fireEvent.click(element);
+    expect(vendorClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('still plays by itself in view with sound, pauses on leaving, and waits under reduced motion', async () => {
+    show(withControls());
+    const element = await player();
+    await scrollTo(0.6);
+    expect(media.play).toHaveBeenCalledTimes(1);
+    expect(element.muted).toBe(false);
+    expect(element.paused).toBe(false);
+    await scrollTo(0);
+    expect(element.paused).toBe(true);
+    cleanup();
+    vi.clearAllMocks();
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) =>
+        ({
+          matches: query.includes('reduce'),
+          media: query,
+          addEventListener() {},
+          removeEventListener() {},
+        }) as unknown as MediaQueryList,
+    );
+    show(withControls());
+    await player();
+    await scrollTo(1);
+    expect(media.play).not.toHaveBeenCalled();
+  });
+
+  it('loop follows onProgress exactly as before', async () => {
+    show(withControls());
+    await player();
+    expect(recorded.at(-1)?.loop).toBe(true);
+    cleanup();
+    recorded.length = 0;
+    show(withControls({ onProgress: vi.fn() }));
+    await player();
+    expect(recorded.at(-1)?.loop).toBeUndefined();
   });
 });

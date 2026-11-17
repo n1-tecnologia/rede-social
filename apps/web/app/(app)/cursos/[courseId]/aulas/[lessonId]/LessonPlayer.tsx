@@ -24,6 +24,10 @@ import { useLessonSession } from './LessonSession';
  *    (or a `keepalive` fetch), because a server action is aborted on unload. The beacon carries only
  *    `{ lessonId, positionSeconds }`: it never completes a lesson by itself.
  *
+ * The member sees the vendor bar (`controls`: 10 s seek, speed, a time bar to drag): that is why the
+ * reporter ignores paused ticks (a seek while paused writes nothing) and why completion stays
+ * one-way on the server (going back after 90% never un-completes the lesson).
+ *
  * The SERVER decides completion and clamps the position to its own duration (R-Pitfall 10).
  */
 export interface LessonPlayerProps {
@@ -95,6 +99,7 @@ export function LessonPlayer({ lessonId, assetId, status, startTime, writes }: L
         assetId={assetId}
         status={status}
         bleed
+        controls
         startTime={startTime}
         onProgress={
           writes
