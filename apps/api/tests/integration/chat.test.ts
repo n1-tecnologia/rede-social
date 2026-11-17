@@ -200,7 +200,13 @@ describe('chat tracer', () => {
     await adminSql`delete from public.chat_conversations where id = ${SEED_THREAD.id}::uuid`;
     const before = await request('/v1/chat/support', tokens.demoMember);
     expect(before.status).toBe(200);
-    expect(await before.json()).toEqual({ conversation: null, messages: [], hasOlder: false });
+    expect(await before.json()).toEqual({
+      conversation: null,
+      messages: [],
+      hasOlder: false,
+      case: null,
+      hasAnyCase: false,
+    });
 
     // 1. The member writes to the team (201). The first message creates the conversation.
     const since = await dbNow();
@@ -507,6 +513,8 @@ describe('chat suporte', () => {
       conversation: null,
       messages: [],
       hasOlder: false,
+      case: null,
+      hasAnyCase: false,
     });
     expect(await conversationCount(member.id)).toBe(0);
   });
@@ -769,6 +777,7 @@ describe('chat suporte', () => {
       lastSeq: replySeq,
       lastReadSeq: 0,
       lastStaffSeq: replySeq,
+      case: expect.objectContaining({ state: expect.any(String), number: expect.any(Number) }),
     });
     const read = await post(`/v1/chat/conversations/${thread.conversationId}/read`, thread.token, {
       seq: replySeq,

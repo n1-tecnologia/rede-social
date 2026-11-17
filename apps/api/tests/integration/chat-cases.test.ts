@@ -57,8 +57,8 @@ describe('case tracer', () => {
     });
     expect(sent.status).toBe(201);
     const result = (await sent.json()) as SendResult;
-    // The shipped answer shape is unchanged: no `case` key yet.
-    expect(Object.keys(result).sort()).toEqual(['conversationId', 'message']);
+    // The shipped keys stay; the optional `case` is added by plan 06.
+    expect(Object.keys(result).sort()).toEqual(['case', 'conversationId', 'message']);
 
     const [row] = await adminSql<
       {
@@ -87,6 +87,89 @@ describe('case tracer', () => {
        where conversation_id = ${result.conversationId}::uuid
        order by created_at, id`;
     expect(events).toEqual([{ kind: 'opened', actor: member.id, to_state: 'open' }]);
+  });
+});
+
+describe('case first message', () => {
+  const conversationRows = (memberId: string) =>
+    adminSql<{ id: string }[]>`
+      select id::text as id from public.chat_conversations
+       where kind = 'support' and created_by_user_id = ${memberId}::uuid`;
+
+  it('tracer: a first message with a category and a subject opens a case the thread read returns (D-812, D-811, D-839, CASE-10, CASE-15)', async () => {
+    const { ids } = await caseKit();
+    const base = await highestNumber(ids.demo);
+    const member = await throwawayMember('first-fields');
+
+    const sent = await post('/v1/chat/support/messages', member.token, {
+      body: 'Fui cobrado duas vezes no cartão',
+      category: 'payment',
+      subject: 'Cobrança duplicada',
+    });
+    expect(sent.status).toBe(201);
+    const result = (await sent.json()) as SendResult;
+    // The shipped keys stay and the optional `case` is added.
+    expect(Object.keys(result).sort()).toEqual(['case', 'conversationId', 'message']);
+    expect(result.case).toEqual({
+      id: result.conversationId,
+      number: base + 1,
+      state: 'open',
+      opened: true,
+      reopened: false,
+    });
+
+    const read = await request('/v1/chat/support', member.token);
+    expect(read.status).toBe(200);
+    const thread = (await read.json()) as SupportThread;
+    expect(thread.conversation?.id).toBe(result.conversationId);
+    expect(thread.hasAnyCase).toBe(true);
+    expect(thread.case).toMatchObject({
+      id: result.conversationId,
+      number: base + 1,
+      state: 'open',
+      subject: 'Cobrança duplicada',
+      subjectLabel: 'Cobrança duplicada',
+      category: 'payment',
+    });
+    expect(thread.case).not.toHaveProperty('priority');
+    expect(thread.case).not.toHaveProperty('ownerUserId');
+
+    // A second message from the same member lands in the same case and ignores the new fields.
+    const again = await post('/v1/chat/support/messages', member.token, {
+      body: 'Mais uma informação',
+      category: 'account',
+      subject: 'Outro assunto',
+    });
+    expect(again.status).toBe(201);
+    const second = (await again.json()) as SendResult;
+    expect(second.conversationId).toBe(result.conversationId);
+    expect(second.case).toMatchObject({ number: base + 1, opened: false, reopened: false });
+    const [stored] = await adminSql<
+      { category: string; subject: string | null; priority: string }[]
+    >`
+      select category, subject, priority from public.chat_conversations
+       where id = ${result.conversationId}::uuid`;
+    expect(stored).toEqual({
+      category: 'payment',
+      subject: 'Cobrança duplicada',
+      priority: 'normal',
+    });
+  });
+
+  it('a body carrying priority, state or owner is a 400 and writes no conversation (D-812, T-12.4-25)', async () => {
+    const member = await throwawayMember('forged');
+    for (const forged of [{ priority: 'high' }, { state: 'closed' }, { owner: member.id }]) {
+      const refused = await post('/v1/chat/support/messages', member.token, {
+        body: 'Quero prioridade',
+        category: 'payment',
+        ...forged,
+      });
+      expect(refused.status).toBe(400);
+      expect(((await refused.json()) as { error: { code: string } }).error.code).toBe(
+        'VALIDATION_FAILED',
+      );
+    }
+    expect(await conversationRows(member.id)).toEqual([]);
   });
 });
 

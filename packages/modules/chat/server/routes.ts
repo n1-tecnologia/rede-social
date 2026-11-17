@@ -14,6 +14,7 @@ import {
   readInputSchema,
   sendMessageInputSchema,
   sendResultSchema,
+  supportSendInputSchema,
   supportThreadSchema,
 } from '../contracts/index';
 import {
@@ -74,9 +75,17 @@ const bodyRequest = {
   },
 } as const;
 
+/** The member's first message may carry the category and the subject of the case it opens (D-811, D-812). */
+const supportBodyRequest = {
+  body: {
+    required: true,
+    content: { 'application/json': { schema: supportSendInputSchema } },
+  },
+} as const;
+
 const bodyRefusal = {
   description:
-    '`VALIDATION_FAILED` with `details.chat`: `body_required` when the body is empty or only whitespace (spaces, tabs, line breaks) and `body_too_long` above 2,000 code points after trim. An unknown key is a plain `VALIDATION_FAILED`. Nothing is written.',
+    '`VALIDATION_FAILED` with `details.chat`: `body_required` when the body is empty or only whitespace (spaces, tabs, line breaks), `body_too_long` above 2,000 code points after trim and `subject_too_long` above 80 code points on the member route. An unknown key (a priority, a state, an owner) is a plain `VALIDATION_FAILED`. Nothing is written.',
 };
 
 const supportThreadRoute = createRoute({
@@ -97,11 +106,11 @@ const supportSendRoute = createRoute({
   method: 'post',
   path: '/support/messages',
   middleware: [requirePermission('chat.support.contact')] as const,
-  request: bodyRequest,
+  request: supportBodyRequest,
   responses: {
     201: {
       description:
-        "CHAT-02: the member writes to the team. The first message creates the member's one support conversation (D-220, D-221) in the same transaction; the database assigns the next gapless `seq` and publishes ids-only signals on the conversation and the support inbox.",
+        "CHAT-02: the member writes to the team. The first message creates the member's support case (D-220, D-802) in the same transaction, with the optional `category` and `subject` applied ONLY by that statement and ignored when the message goes to an existing active case (D-812); the priority is born normal and unreachable. The answer adds `case` with `opened` (this message created it) and `reopened` (it moved a resolved case back to open), never both. The database assigns the next gapless `seq` and publishes ids-only signals on the conversation and the support inbox.",
       content: { 'application/json': { schema: sendResultSchema } },
     },
     400: bodyRefusal,
@@ -157,7 +166,7 @@ const detailRoute = createRoute({
   responses: {
     200: {
       description:
-        "D-224: `viewer: 'staff'` answers the member behind the thread (membership id, display name, avatar, state `active` | `blocked` | `removed`) and the team's shared read position; `viewer: 'member'` answers the member's own position.",
+        "D-224: `viewer: 'staff'` answers the member behind the thread (membership id, display name, avatar, state `active` | `blocked` | `removed`) and the team's shared read position; `viewer: 'member'` answers the member's own position and, for ANY case of theirs (a closed one reads read-only), the member-shaped `case` (D-803, UI-D-835).",
       content: { 'application/json': { schema: conversationDetailSchema } },
     },
     404: { description: 'A bare `NOT_FOUND` for anyone who may not read the thread.' },
@@ -203,7 +212,7 @@ const noContent = () =>
 export const chatRoutes = chat
   .openapi(supportThreadRoute, async (c) => c.json(await getSupportThread(c.get('ctx')), 200))
   .openapi(supportSendRoute, async (c) =>
-    c.json(await sendSupportMessage(c.get('ctx'), c.req.valid('json').body), 201),
+    c.json(await sendSupportMessage(c.get('ctx'), c.req.valid('json')), 201),
   )
   .openapi(messagesRoute, async (c) =>
     c.json(

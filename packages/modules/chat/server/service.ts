@@ -15,6 +15,7 @@ import {
   CHAT_PAGE_SIZE,
   CHAT_PERMISSIONS,
   CHAT_PREVIEW_GRAPHEMES,
+  type ChatCaseState,
   type ChatSide,
   type ConversationDetail,
   type ConversationMember,
@@ -25,8 +26,10 @@ import {
   type MessageQuery,
   type MessageRow,
   type SendResult,
+  type SupportSendInput,
   type SupportThread,
 } from '../contracts/index';
+import { activeMemberCase, hasAnyCaseOf, memberCaseOf } from './cases';
 import { firstNameOf } from './first-name';
 
 const log = moduleLogger('module-chat');
@@ -225,10 +228,13 @@ async function insertMessage(
  */
 const ACTIVE_CASE_STATES = sql.raw(CASE_ACTIVE_STATES.map((state) => `'${state}'`).join(','));
 
-/** The member's ACTIVE case (open, in_progress or resolved), or null when every case they had is closed. */
-async function activeCaseOf(tx: Tx, ctx: RequestContext): Promise<string | null> {
-  const rows = await tx.execute<{ id: string }>(sql`
-    select c.id
+/** The member's ACTIVE case (open, in_progress or resolved) with its state, or null when every case they had is closed. */
+async function activeCaseOf(
+  tx: Tx,
+  ctx: RequestContext,
+): Promise<{ id: string; state: string } | null> {
+  const rows = await tx.execute<{ id: string; state: string }>(sql`
+    select c.id, c.state
       from chat_conversations c
      where c.tenant_id = ${ctx.tenantId}::uuid
        and c.kind = 'support'
@@ -236,33 +242,67 @@ async function activeCaseOf(tx: Tx, ctx: RequestContext): Promise<string | null>
        and c.state in (${ACTIVE_CASE_STATES})
      order by c.case_number desc nulls last
      limit 1`);
-  return rows[0]?.id ?? null;
+  return rows[0] ?? null;
+}
+
+/** The case a message just landed in, as the send answers it (number and state AFTER the message trigger ran). */
+async function caseOfSend(
+  tx: Tx,
+  ctx: RequestContext,
+  conversationId: string,
+): Promise<{ id: string; number: number; state: ChatCaseState }> {
+  const rows = await tx.execute<{ id: string; number: number; state: ChatCaseState }>(sql`
+    select c.id, c.case_number::int as number, c.state
+      from chat_conversations c
+     where c.id = ${conversationId}::uuid
+       and c.tenant_id = ${ctx.tenantId}::uuid`);
+  const row = rows[0];
+  if (!row) throw new ApiError(500, 'INTERNAL');
+  return { id: row.id, number: Number(row.number), state: row.state };
 }
 
 /** One attempt of the member's send, in ITS OWN transaction (a raised CS004 aborts the Postgres transaction). */
-async function sendSupportMessageOnce(ctx: RequestContext, body: string): Promise<SendResult> {
+async function sendSupportMessageOnce(
+  ctx: RequestContext,
+  input: SupportSendInput,
+): Promise<SendResult> {
   return withTenantTx(ctx, async (tx) => {
-    let conversationId = await activeCaseOf(tx, ctx);
+    const existing = await activeCaseOf(tx, ctx);
+    let conversationId = existing?.id ?? null;
+    let opened = false;
     if (!conversationId) {
-      await tx.execute(sql`
-        insert into chat_conversations (tenant_id, kind, created_by_user_id)
-        values (${ctx.tenantId}::uuid, 'support', ${ctx.userId}::uuid)
+      // The category and the subject are written ONLY by the statement that creates the case (D-812, EP-031): a
+      // conflicting insert applies none of them, so two devices racing never mix fields. The priority, the state and
+      // the owner are never sent from here: the defaults trigger makes the case born open, normal and unowned.
+      const created = await tx.execute<{ id: string }>(sql`
+        insert into chat_conversations (tenant_id, kind, created_by_user_id, category, subject)
+        values (${ctx.tenantId}::uuid, 'support', ${ctx.userId}::uuid,
+                ${input.category ?? 'other'}::text, ${input.subject ?? null}::text)
         on conflict (tenant_id, created_by_user_id)
-          where kind = 'support' and state in (${ACTIVE_CASE_STATES}) do nothing`);
-      conversationId = await activeCaseOf(tx, ctx);
+          where kind = 'support' and state in (${ACTIVE_CASE_STATES}) do nothing
+        returning id`);
+      opened = created.length > 0;
+      conversationId = created[0]?.id ?? (await activeCaseOf(tx, ctx))?.id ?? null;
     }
     if (!conversationId) throw new ApiError(500, 'INTERNAL');
+    // A message that goes to a RESOLVED case moves it back to open (the message trigger); never both flags.
+    const reopened = !opened && existing?.state === 'resolved';
     await tx.execute(sql`
       insert into chat_participants (conversation_id, tenant_id, user_id, role)
       values (${conversationId}::uuid, ${ctx.tenantId}::uuid, ${ctx.userId}::uuid, 'member')
       on conflict (conversation_id, user_id) do nothing`);
-    const message = await insertMessage(tx, ctx, conversationId, 'member', body);
-    return { conversationId, message };
+    const message = await insertMessage(tx, ctx, conversationId, 'member', input.body);
+    const landed = await caseOfSend(tx, ctx, conversationId);
+    return {
+      conversationId,
+      message,
+      case: { id: landed.id, number: landed.number, state: landed.state, opened, reopened },
+    };
   });
 }
 
 /**
- * `POST /v1/chat/support/messages` (CHAT-02, D-220, D-801, D-802): the member writes to the team.
+ * `POST /v1/chat/support/messages` (CHAT-02, D-220, D-801, D-802, D-811, D-812): the member writes to the team.
  *
  * The member's ACTIVE case (state open, in_progress or resolved) takes the message. With none, the case is
  * created LAZILY, here, on the first message: in ONE transaction it is inserted with `on conflict … do
@@ -280,11 +320,14 @@ async function sendSupportMessageOnce(ctx: RequestContext, body: string): Promis
  * The `chat.message_sent` event is queued AFTER the transaction returned (once, for the attempt that
  * committed), so a rolled-back send notifies nobody.
  */
-export async function sendSupportMessage(ctx: RequestContext, body: string): Promise<SendResult> {
+export async function sendSupportMessage(
+  ctx: RequestContext,
+  input: SupportSendInput,
+): Promise<SendResult> {
   let result: SendResult | undefined;
   for (let attempt = 0; attempt < 2 && !result; attempt += 1) {
     try {
-      result = await sendSupportMessageOnce(ctx, body);
+      result = await sendSupportMessageOnce(ctx, input);
     } catch (error) {
       if (bodyCheckViolated(error)) {
         throw new ApiError(400, 'VALIDATION_FAILED', { chat: 'body_required' });
@@ -322,9 +365,10 @@ export async function sendSupportMessage(ctx: RequestContext, body: string): Pro
 /**
  * `GET /v1/chat/support` (D-220, D-803): the member's ACTIVE case, READ-ONLY. When every case they had is
  * closed, or before the first message, there is none and the answer is
- * `{ conversation: null, messages: [], hasOlder: false }`; this GET never writes (the 06-06 prefetch rule),
- * so opening the screen never fills the staff inbox with an empty thread. Otherwise it answers the member's
- * read position and the latest page of that case.
+ * `{ conversation: null, messages: [], hasOlder: false, case: null, hasAnyCase }`; this GET never writes (the
+ * 06-06 prefetch rule), so opening the screen never fills the staff inbox with an empty thread. Otherwise it
+ * answers the member's read position, the latest page of that case and its member-shaped `case` (no priority,
+ * owner or history, UI-D-835).
  */
 export async function getSupportThread(ctx: RequestContext): Promise<SupportThread> {
   return withTenantTx(ctx, async (tx) => {
@@ -350,7 +394,15 @@ export async function getSupportThread(ctx: RequestContext): Promise<SupportThre
        order by c.case_number desc nulls last
        limit 1`);
     const conversation = rows[0];
-    if (!conversation) return { conversation: null, messages: [], hasOlder: false };
+    if (!conversation) {
+      return {
+        conversation: null,
+        messages: [],
+        hasOlder: false,
+        case: null,
+        hasAnyCase: await hasAnyCaseOf(tx, ctx),
+      };
+    }
     const page = await pageOf(tx, ctx, conversation.id, { before: LATEST }, CHAT_PAGE_SIZE);
     return {
       conversation: {
@@ -361,6 +413,8 @@ export async function getSupportThread(ctx: RequestContext): Promise<SupportThre
       },
       messages: page.items,
       hasOlder: page.hasMore,
+      case: await activeMemberCase(tx, ctx),
+      hasAnyCase: true,
     };
   });
 }
@@ -561,12 +615,15 @@ export async function getConversation(
          and c.tenant_id = ${ctx.tenantId}::uuid`);
     const row = rows[0];
     if (!row) throw new ApiError(404, 'NOT_FOUND');
+    // 12.4: the member-shaped case of ANY case of theirs, a closed one included (it reads read-only).
+    const memberCase = await memberCaseOf(tx, ctx, row.id);
     return {
       viewer: 'member',
       id: row.id,
       lastSeq: Number(row.last_seq),
       lastReadSeq: Number(row.last_read_seq),
       lastStaffSeq: Number(row.last_staff_seq),
+      ...(memberCase ? { case: memberCase } : {}),
     };
   });
 }
