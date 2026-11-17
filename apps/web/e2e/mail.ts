@@ -7,6 +7,8 @@
  * once by probing which endpoint answers, so the suite keeps working across CLI upgrades.
  */
 
+import type { Page } from '@playwright/test';
+
 const MAIL_URL = (process.env.PLAYWRIGHT_MAIL_URL ?? 'http://127.0.0.1:54324').replace(/\/$/, '');
 
 type Flavour = 'mailpit' | 'inbucket';
@@ -75,6 +77,18 @@ export async function waitForRecoveryMail(email: string, timeoutMs = 20_000): Pr
   throw new Error(
     `No recovery e-mail with an /auth/confirm link for ${email} within ${timeoutMs}ms`,
   );
+}
+
+/**
+ * Opens a mail link the way a member does: `GET /auth/confirm` is inert and hands the link to the
+ * `/auth/continuar` interstitial, and the one-time token is only consumed by that page's button
+ * (SafeLinks fix, quick 261117-kkx). Use it for any link that is VALID-SHAPED (token_hash plus an
+ * allowed type), including deliberately bogus tokens, but not for links that must fall straight to a
+ * fallback (no token_hash, unknown type): those never show the button.
+ */
+export async function followMailLink(page: Page, link: string): Promise<void> {
+  await page.goto(link);
+  await page.locator('form[action="/auth/confirm"] button[type="submit"]').click();
 }
 
 /**

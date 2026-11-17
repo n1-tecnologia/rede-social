@@ -3,7 +3,13 @@ import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
 import { allowEmail, closeAdmin } from './admin';
 import { hosts, isRemote, SEED_PASSWORD, signOut, users } from './fixtures';
-import { clearMailbox, latestMailMessage, mailCount, waitForSignupMail } from './mail';
+import {
+  clearMailbox,
+  followMailLink,
+  latestMailMessage,
+  mailCount,
+  waitForSignupMail,
+} from './mail';
 import { withGateOn } from './payments';
 
 /**
@@ -144,7 +150,13 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     expect(mail.link?.startsWith(`${hosts.demo}/auth/confirm`)).toBe(true);
     expect(mail.link).toContain('type=signup');
 
-    await page.goto(mail.link ?? '');
+    // A mail scanner (Microsoft SafeLinks) GETs the link first. It must not burn the token: it only
+    // sees the interstitial (quick 261117-kkx).
+    const scanned = await page.request.get(mail.link ?? '');
+    expect(scanned.status()).toBe(200);
+    expect(await scanned.text()).toContain('Confirmar e-mail');
+
+    await followMailLink(page, mail.link ?? '');
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
     // Início has no visible welcome block (2026-10-01): its one h1 is the screen-reader "Início",
     // and the tenant shows in the shell's home link (TopBar on the phone, rail on desktop), named
@@ -170,7 +182,7 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await page.getByRole('button', { name: 'Cadastrar' }).click();
     await expect(page).toHaveURL(/\/verifique-seu-email$/, { timeout: 30_000 });
     test.skip(isRemote, 'remote runs cannot read the Mailpit catcher');
-    await page.goto(await waitForSignupMail(email));
+    await followMailLink(page, await waitForSignupMail(email));
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
 
     await signOut(page);
@@ -278,7 +290,7 @@ test.describe('quick 261007-gbk — e-mail confirmation', () => {
     await expect(page).toHaveURL(/\/verifique-seu-email\?reenviado=1$/, { timeout: 30_000 });
     await expect(page.locator('p[role="status"]')).toHaveText(RESENT);
 
-    await page.goto(await waitForSignupMail(email));
+    await followMailLink(page, await waitForSignupMail(email));
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
   });
 
@@ -318,7 +330,10 @@ test.describe('quick 261007-gbk — e-mail confirmation', () => {
   test('11. a dead confirmation link lands on the verification screen and never leaves the app', async ({
     page,
   }) => {
-    await page.goto('/auth/confirm?token_hash=bogus&type=signup&next=https://evil.example');
+    await followMailLink(
+      page,
+      '/auth/confirm?token_hash=bogus&type=signup&next=https://evil.example',
+    );
     await expect(page).toHaveURL(/\/verifique-seu-email\?erro=link-invalido$/, {
       timeout: 30_000,
     });
@@ -351,7 +366,7 @@ test.describe('D-01/D-06/D-21 — generic and platform hosts', () => {
     const mail = await latestMailMessage(email);
     expect(mail.fromName).toBe('Rede Demo');
     expect(mail.link?.startsWith(`${hosts.generic}/auth/confirm`)).toBe(true);
-    await page.goto(mail.link ?? '');
+    await followMailLink(page, mail.link ?? '');
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
 
     // D-06: on a generic host the COOKIE carries the tenant across the round trip.

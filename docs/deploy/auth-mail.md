@@ -79,6 +79,11 @@ confirmation in the pilot"). D-04's detail-less 409 for an existing e-mail is un
 3. The hook renders the `signup` template; its CTA is
    `{origin}/auth/confirm?next=/inicio&token_hash=…&type=signup`. `/auth/confirm` exchanges the hash
    (`verifyOtp`), which confirms the e-mail and signs the person in, and lands on `/inicio`.
+   The mail link itself consumes nothing: it opens an interstitial (`/auth/continuar`), and only the
+   button's POST to `/auth/confirm` consumes the one-time token, because mail scanners (Microsoft
+   SafeLinks and others) GET every link before the member does and would otherwise burn it. The mail
+   templates and the GoTrue allow-list entries (`/auth/confirm**`) are unchanged. This holds for the
+   recovery and invite links too.
 4. The person is never auto-signed-in by the form. After submitting it lands on
    `/verifique-seu-email`; the address lives in the HttpOnly `pending_confirmation` cookie (one hour,
    never in a URL). A signup link that no longer exchanges lands on

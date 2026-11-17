@@ -14,7 +14,7 @@ import {
   profileNameForEmailIn,
 } from './admin';
 import { hosts, isRemote, SEED_PASSWORD } from './fixtures';
-import { latestMailMessage, waitForRecoveryMail } from './mail';
+import { followMailLink, latestMailMessage, waitForRecoveryMail } from './mail';
 import { throwawayOrigin } from './tenant-fixtures';
 import { continueFromData, continueFromPersonalization, fillTenantData } from './wizard';
 import { ensureWorker } from './worker';
@@ -280,7 +280,7 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     expect(link1).toMatch(/next=(\/|%2F)aceitar-convite/);
     expect(link1).toContain('type=invite');
 
-    await page.goto(link1);
+    await followMailLink(page, link1);
     await expect(page).toHaveURL(`${origin}/aceitar-convite`);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(
       `Você foi convidado(a) a administrar ${displayName}`,
@@ -306,7 +306,7 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     expect(await inviteStatusForEmail(adminEmail)).toBe('accepted');
 
     // The consumed link lands on the expired screen; the accepted admin is not bounced from /inicio.
-    await page.goto(link1);
+    await followMailLink(page, link1);
     await expectExpiredScreen(page, origin);
     await page.goto(`${origin}/inicio`);
     await expect(page).toHaveURL(`${origin}/inicio`);
@@ -355,10 +355,10 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     // A fresh context on the tenant origin (no platform cookies): old link expired, new link works.
     const tenant = await browser.newContext();
     const page2 = await tenant.newPage();
-    await page2.goto(link1);
+    await followMailLink(page2, link1);
     await expectExpiredScreen(page2, origin);
 
-    await page2.goto(link2);
+    await followMailLink(page2, link2);
     await expect(page2).toHaveURL(`${origin}/aceitar-convite`);
     const heading = page2.getByRole('heading', { level: 1 });
     await expect(heading).toHaveText(`Você foi convidado(a) a administrar ${displayName}`);
@@ -389,7 +389,7 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     expect(body.error.details?.reason).toBe('already_accepted');
 
     // The accepted link is consumed too.
-    await page2.goto(link2);
+    await followMailLink(page2, link2);
     await expectExpiredScreen(page2, origin);
 
     await panel.close();

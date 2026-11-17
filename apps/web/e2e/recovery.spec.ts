@@ -7,7 +7,13 @@ import {
   membershipForEmailIn,
 } from './admin';
 import { hosts, isRemote, signOut, withoutProfileNudge } from './fixtures';
-import { clearMailbox, expectNoRecoveryMail, latestMailMessage, waitForRecoveryMail } from './mail';
+import {
+  clearMailbox,
+  expectNoRecoveryMail,
+  followMailLink,
+  latestMailMessage,
+  waitForRecoveryMail,
+} from './mail';
 
 /**
  * AUTH-03 / D-10 password recovery on a phone viewport (`mobile-chromium`), end to end through the
@@ -96,7 +102,13 @@ test.describe('AUTH-03 — recuperação de senha', () => {
     // The origin is the tenant host the member used, not `site_url` (http://localhost:3000).
     expect(link.startsWith(`${hosts.demo}/auth/confirm`)).toBe(true);
 
-    await page.goto(link);
+    // A mail scanner (Microsoft SafeLinks) GETs the link before the member does. It must not burn
+    // the token: it only sees the interstitial (quick 261117-kkx).
+    const scanned = await page.request.get(link);
+    expect(scanned.status()).toBe(200);
+    expect(await scanned.text()).toContain('Escolher nova senha');
+
+    await followMailLink(page, link);
     await expect(page).toHaveURL(/\/redefinir-senha$/, { timeout: 30_000 });
 
     await page.locator('#password').fill(NEW_PASSWORD);
@@ -119,10 +131,22 @@ test.describe('AUTH-03 — recuperação de senha', () => {
   test('4. T-05-01: an external `next` never leaves the app, even with a bad token', async ({
     page,
   }) => {
-    await page.goto('/auth/confirm?token_hash=bogus&type=recovery&next=https://evil.example');
+    await followMailLink(
+      page,
+      '/auth/confirm?token_hash=bogus&type=recovery&next=https://evil.example',
+    );
     await expect(page).toHaveURL(/\/esqueci-senha\?erro=link-invalido$/);
     expect(page.url().startsWith(hosts.demo)).toBe(true);
     await expect(page.locator('p[role="alert"]')).toBeVisible();
+  });
+
+  test('4b. a recovery link with NO token falls straight to the fallback and shows no button', async ({
+    page,
+  }) => {
+    await page.goto('/auth/confirm?type=recovery&next=/redefinir-senha');
+    await expect(page).toHaveURL(/\/esqueci-senha\?erro=link-invalido$/);
+    await expect(page.locator('p[role="alert"]')).toBeVisible();
+    await expect(page.locator('form[action="/auth/confirm"] button[type="submit"]')).toHaveCount(0);
   });
 
   test('6. WR-09: a host this deployment does not serve as a tenant/platform gets NO e-mail', async ({
@@ -160,7 +184,7 @@ test.describe('AUTH-03 — recuperação de senha', () => {
     const hijacked = new URL(link);
     hijacked.searchParams.set('next', '//evil.example');
 
-    await page.goto(hijacked.toString());
+    await followMailLink(page, hijacked.toString());
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
     expect(page.url().startsWith(hosts.demo)).toBe(true);
   });
@@ -178,7 +202,7 @@ test.describe('AUTH-03 — recuperação de senha', () => {
     const hijacked = new URL(link);
     hijacked.searchParams.set('next', '/\\evil.example');
 
-    await page.goto(hijacked.toString());
+    await followMailLink(page, hijacked.toString());
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
     expect(page.url().startsWith(hosts.demo)).toBe(true);
   });
@@ -207,7 +231,7 @@ test.describe('AUTH-03 — recuperação de senha', () => {
     expect(new URL(link).origin).toBe(hosts.lab);
     expect(link.startsWith(`${hosts.lab}/auth/confirm`)).toBe(true);
 
-    await page.goto(link);
+    await followMailLink(page, link);
     await expect(page).toHaveURL(`${hosts.lab}/redefinir-senha`, { timeout: 30_000 });
     await expect(page.getByText(SHARED_PASSWORD_NOTICE)).toBeVisible();
 
@@ -239,7 +263,7 @@ test.describe('AUTH-03 — recuperação de senha', () => {
     await requestLink(page, email);
 
     const link = await waitForRecoveryMail(email);
-    await page.goto(link);
+    await followMailLink(page, link);
     await expect(page).toHaveURL(/\/redefinir-senha$/, { timeout: 30_000 });
     const notice = page.getByText(SHARED_PASSWORD_NOTICE);
     await expect(notice).toBeVisible();
