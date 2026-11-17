@@ -535,6 +535,40 @@ describe('WR-01 / T7: a row that left the tab leaves on the next refetch (UI-D-8
       await waitFor(() => expect(inboxUrls().length).toBe(1));
     }
   });
+
+  describe('WR-06: a page-1 refetch that lands while a load-more is in flight drops no row', () => {
+    it('a refetch during a load-more keeps the row between the fresh tail and the old cursor (WR-06)', async () => {
+      const [r1, r2, r3] = [view({ name: 'R1' }), view({ name: 'R2' }), view({ name: 'R3' })];
+      const [r4, r5] = [view({ name: 'R4' }), view({ name: 'R5' })];
+      const fresh = view({ name: 'NEW', lastMessageAt: '2026-09-30T18:00:00.000000Z' });
+      renderInbox({ initialItems: [r1, r2, r3], initialCursor: 'c1' });
+
+      // The load-more for 'c1' is held open: its page is not appended yet.
+      const gates: Array<(answer: unknown) => void> = [];
+      mocks.loadMore.mockImplementationOnce(() => new Promise((resolve) => gates.push(resolve)));
+      fireEvent.click(screen.getByTestId('load-more'));
+      await waitFor(() => expect(mocks.loadMore).toHaveBeenCalledTimes(1));
+      expect(mocks.loadMore.mock.calls[0]?.[0]).toBe('c1');
+
+      // A fresh page 1 lands in the meantime: [NEW, R1, R2], and R3 sits between its tail and the old cursor.
+      inboxAnswer = () => Response.json({ items: [fresh, r1, r2], nextCursor: 'cX' });
+      await signal();
+      await waitFor(() => expect(rowNames()).toContain('NEW'));
+
+      await act(async () => {
+        gates[0]?.({ ok: true, items: [r4, r5], nextCursor: 'c2' });
+      });
+      await waitFor(() => expect(rowNames()).toContain('R4'));
+      // The discriminating assertion: R3 is in neither the fresh page nor the late page, yet the server lists it.
+      expect(rowNames()).toEqual(['NEW', 'R1', 'R2', 'R3', 'R4', 'R5']);
+
+      // A pin that also holds before the fix: the late page always sets its own cursor.
+      mocks.loadMore.mockResolvedValueOnce({ ok: true, items: [], nextCursor: null });
+      fireEvent.click(screen.getByTestId('load-more'));
+      await waitFor(() => expect(mocks.loadMore).toHaveBeenCalledTimes(2));
+      expect(mocks.loadMore.mock.calls[1]?.[0]).toBe('c2');
+    });
+  });
 });
 
 describe('the five empty states, one per cause (UI-D-823, UI-D-832; UC S02)', () => {
