@@ -258,7 +258,7 @@ describe('the action sheet draws only what the server listed (UI-D-826, T-12.4-6
     expect(rows()).toEqual(['Ver detalhes e histórico']);
   });
 
-  it('"Fechar" carries the danger class, no row is disabled and there is no "Soltar"', () => {
+  it('"Fechar" carries the danger class, no row is disabled and nothing hands a case back (A-UI-10)', () => {
     renderBar(MINE);
     const dialog = openMenu();
     const close = within(dialog).getByRole('button', { name: 'Fechar' });
@@ -266,7 +266,17 @@ describe('the action sheet draws only what the server listed (UI-D-826, T-12.4-6
     for (const row of within(dialog).getAllByRole('button')) {
       expect((row as HTMLButtonElement).disabled).toBe(false);
     }
-    expect(within(dialog).queryByText(/Soltar/)).toBeNull();
+    expect(
+      within(dialog)
+        .getAllByRole('button')
+        .map((row) => row.textContent),
+    ).toEqual([
+      'Atribuir a…',
+      'Resolver',
+      'Fechar',
+      'Editar categoria, assunto e prioridade',
+      'Ver detalhes e histórico',
+    ]);
   });
 
   it.each([

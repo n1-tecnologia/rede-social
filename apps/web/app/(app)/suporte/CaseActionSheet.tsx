@@ -23,7 +23,7 @@ import type { CaseActionKind } from './useCaseActions';
  * sent for this viewer and this state, in the server's own order (T-12.4-69); a row that is not listed is NOT
  * rendered (never a disabled row with no reason), so "Atribuir a…" only exists for a viewer the server lets
  * assign and "Editar…" never on a closed case. "Ver detalhes e histórico" is always there, so a closed
- * case's menu holds that row alone. "Fechar" reads in the danger colour. There is no "Soltar".
+ * case's menu holds that row alone. "Fechar" reads in the danger colour. There is no row that hands a case back with no owner (A-UI-10).
  *
  * A row taps once and the sheet closes. Resolve, close, reopen and take go to the bar (`onAction`, which
  * asks first when the matrix says so); assign, edit and details are other sheets the thread pane mounts
