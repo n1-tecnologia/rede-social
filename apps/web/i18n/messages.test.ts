@@ -2051,17 +2051,18 @@ describe('07-09 — chat member thread strings and placeholders', () => {
     ).toBe(true);
   });
 
-  it('uses the product vocabulary: no ticket words, no connecting indicator (UI-D-265)', () => {
+  it('uses the product vocabulary: no ticket words, no connecting indicator (UI-D-265, reversed for "chamado" by D-800)', () => {
     const all = JSON.stringify(lookup('chat')).toLowerCase();
-    for (const word of ['ticket', 'chamado', 'protocolo', 'conectando', 'anexo'])
+    // 12.4 (D-800) names the support case "chamado": that one word left this list. The rest stay banned.
+    for (const word of ['ticket', 'protocolo', 'conectando', 'anexo'])
       expect(all).not.toContain(word);
   });
 });
 
 /**
  * 07-10 — the `chat` catalog, staff side (UI-SPEC Copywriting Contract, "Core contract" and "Support
- * chat"), verbatim, with every placeholder FORMATTED so a lost brace fails here. No status words: the
- * inbox has no Abertas / Resolvidas chips (D-221).
+ * chat"), verbatim, with every placeholder FORMATTED so a lost brace fails here. D-221 (no status words
+ * in the inbox) is reversed by D-800 for the support case: the four states and the tabs now exist.
  */
 describe('07-10 — chat staff inbox strings and placeholders', () => {
   const messages = loadMessages(catalogDir) as Record<string, unknown>;
@@ -2091,7 +2092,7 @@ describe('07-10 — chat staff inbox strings and placeholders', () => {
     expect(lookup(key)).toBe(expected);
   });
 
-  it('formats the team preview and keeps the inbox free of status words (D-221)', async () => {
+  it('formats the team preview; the status words D-221 banned now exist under their keys (D-800)', async () => {
     const { createTranslator } = await import('next-intl');
     const t = createTranslator({
       locale: 'pt-BR',
@@ -2101,9 +2102,14 @@ describe('07-10 — chat staff inbox strings and placeholders', () => {
     expect(t('inbox.teamPreview', { firstName: 'Carla', preview: 'Pronto!' })).toBe(
       'Carla: Pronto!',
     );
-    const all = JSON.stringify(lookup('chat')).toLowerCase();
-    for (const word of ['abertas', 'resolvidas', 'resolvido', 'atribu'])
-      expect(all).not.toContain(word);
+    // D-221 kept the status words out of the inbox; D-800 reverses it for the support case (D-805).
+    expect([
+      lookup('chat.state.open'),
+      lookup('chat.state.inProgress'),
+      lookup('chat.state.resolved'),
+      lookup('chat.state.closed'),
+      lookup('chat.action.assign'),
+    ]).toEqual(['Aberto', 'Em atendimento', 'Resolvido', 'Fechado', 'Atribuir a…']);
   });
 });
 

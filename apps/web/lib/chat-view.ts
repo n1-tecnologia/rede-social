@@ -1,5 +1,14 @@
 import { avatarUrlFor } from '@rede-social/contracts/profiles';
-import type { InboxRow, MessageRow } from '@rede-social/module-chat/contracts';
+import type {
+  ChatCaseAction,
+  ChatCaseCategory,
+  ChatCasePriority,
+  ChatCaseState,
+  InboxRow,
+  MemberCase,
+  MessageRow,
+  StaffCase,
+} from '@rede-social/module-chat/contracts';
 import type {
   InboxRowState,
   MessageBubbleLabel,
@@ -267,5 +276,184 @@ export function inboxRowView(
       : '',
     awaiting: row.awaiting,
     state: row.member.state,
+  };
+}
+
+/**
+ * ---------------------------------------------------------------------------------------------------
+ * Support cases (Phase 12.4, D-803, D-805, D-811, UI-D-816, UI-D-817, UI-D-834).
+ *
+ * The functions below are PURE and client-safe: they import only types, read no clock and decide no
+ * transition. A case state, its words, its tone and its glyph come out of ONE function
+ * (`caseStateView`), and the host hands the module UI finished strings (MOD-02). The server sends the
+ * finished `subjectLabel` and the `actions[]` the viewer may take; nothing here recomputes either.
+ * ---------------------------------------------------------------------------------------------------
+ */
+
+/** The tones of the shipped `StatusPill` a case state may use (UI-D-817). */
+export type CaseStateTone = 'warning' | 'brand' | 'success' | 'neutral';
+
+/** The lucide glyph NAMES of the four pills (the screen maps a name to the icon, MOD-02). */
+export type CaseStateGlyph = 'CircleDot' | 'UserCheck' | 'CircleCheck' | 'Lock';
+
+/** A case state as a pill draws it: the word, the tone and the glyph, finished. */
+export interface CaseStateView {
+  state: ChatCaseState;
+  label: string;
+  tone: CaseStateTone;
+  glyph: CaseStateGlyph;
+}
+
+const CASE_STATE_VIEW: Record<
+  ChatCaseState,
+  { key: string; tone: CaseStateTone; glyph: CaseStateGlyph }
+> = {
+  open: { key: 'state.open', tone: 'warning', glyph: 'CircleDot' },
+  in_progress: { key: 'state.inProgress', tone: 'brand', glyph: 'UserCheck' },
+  resolved: { key: 'state.resolved', tone: 'success', glyph: 'CircleCheck' },
+  closed: { key: 'state.closed', tone: 'neutral', glyph: 'Lock' },
+};
+
+/** UI-D-817: one state, its catalog word, its pill tone and its glyph. */
+export function caseStateView(state: ChatCaseState, t: Translator): CaseStateView {
+  const entry = CASE_STATE_VIEW[state];
+  return { state, label: t(entry.key), tone: entry.tone, glyph: entry.glyph };
+}
+
+const CASE_CATEGORY_KEY: Record<ChatCaseCategory, string> = {
+  check_in: 'category.checkIn',
+  events: 'category.events',
+  payment: 'category.payment',
+  account: 'category.account',
+  other: 'category.other',
+};
+
+/** The category word of the closed list (D-811). A value outside the list (never expected) reads as itself. */
+export function caseCategoryLabel(category: string, t: Translator): string {
+  const key = CASE_CATEGORY_KEY[category as ChatCaseCategory];
+  return key ? t(key) : category;
+}
+
+const CASE_PRIORITY_KEY: Record<ChatCasePriority, string> = {
+  low: 'priority.low',
+  normal: 'priority.normal',
+  high: 'priority.high',
+};
+
+/** The team's priority as a pill: `Alta` danger, `Baixa` neutral and `Normal` draws nothing (UI-D-824, A-UI-7). */
+export interface CasePriorityView {
+  priority: ChatCasePriority;
+  label: string;
+  tone: 'danger' | 'neutral';
+  /** False for `normal`: the inbox row draws no pill for it. */
+  pill: boolean;
+}
+
+/** UI-D-824: the priority word and whether the inbox row draws a pill for it. Team facts only. */
+export function casePriorityView(priority: ChatCasePriority, t: Translator): CasePriorityView {
+  return {
+    priority,
+    label: t(CASE_PRIORITY_KEY[priority]),
+    tone: priority === 'high' ? 'danger' : 'neutral',
+    pill: priority !== 'normal',
+  };
+}
+
+/** "Chamado #42": the number is a plain integer with no thousands separator (UI-D-816, A-UI-25). */
+export function caseTitle(t: Translator, number: number): string {
+  return t('case.title', { number: String(number) });
+}
+
+/** "#42 · {subject}": the row and header subject line; `subjectLabel` is the server's finished label. */
+export function caseSubjectLine(t: Translator, number: number, subjectLabel: string): string {
+  return t('inbox.rowSubject', { number: String(number), subject: oneLine(subjectLabel) });
+}
+
+/**
+ * The client-safe twin of the server helper `firstNameOf` (D-222): the first whitespace-separated token
+ * of a display name, `''` for a missing or blank one. A unit test compares both on one table of names.
+ */
+export function firstNameOf(displayName: string | null | undefined): string {
+  if (!displayName) return '';
+  const [first] = displayName.trim().split(/\s+/u);
+  return first ?? '';
+}
+
+/** What `caseMetaText` reads: the owner facts, and the priority when the staff bar (not the inbox row) draws it. */
+export interface CaseMetaFacts {
+  category: ChatCaseCategory;
+  /** Present: the staff bar's "{categoria} · {Prioridade} · Com ..."; absent: the inbox row's "{categoria} · Com ...". */
+  priority?: ChatCasePriority;
+  ownerName: string | null;
+  ownerIsViewer: boolean;
+}
+
+/**
+ * UI-D-824 and UI-D-825: "{categoria} · Com {primeiro nome}", "{categoria} · Sem responsável" or
+ * "{categoria} · Com você" (the inbox row), and the same with the priority written out after the category
+ * (the staff bar, always, `Normal` included). The owner is the viewer first, then a name, else nobody.
+ */
+export function caseMetaText(t: Translator, facts: CaseMetaFacts): string {
+  const group = facts.priority === undefined ? 'inbox.meta' : 'staffCase.meta';
+  const variant = facts.ownerIsViewer ? 'mine' : firstNameOf(facts.ownerName) ? 'owned' : 'unowned';
+  const values: Record<string, string> = {
+    category: caseCategoryLabel(facts.category, t),
+    name: firstNameOf(facts.ownerName),
+  };
+  if (facts.priority !== undefined) values.priority = t(CASE_PRIORITY_KEY[facts.priority]);
+  return t(`${group}.${variant}`, values);
+}
+
+/** The finished header of a case for the MEMBER: number, state and subject, nothing a member must not see. */
+export interface MemberCaseHeaderView {
+  viewer: 'member';
+  id: string;
+  number: number;
+  title: string;
+  state: CaseStateView;
+  /** The server's finished label: the typed subject, else the start of the first message. */
+  subject: string;
+  subjectLine: string;
+}
+
+/** The finished header of a case for the TEAM: the member's fields plus the meta text and the server's action list. */
+export interface StaffCaseHeaderView extends Omit<MemberCaseHeaderView, 'viewer'> {
+  viewer: 'staff';
+  meta: string;
+  /** What the server says this viewer may do, untouched (UI-D-826). */
+  actions: ChatCaseAction[];
+}
+
+export type CaseHeaderView = MemberCaseHeaderView | StaffCaseHeaderView;
+
+/**
+ * UI-D-818, UI-D-825, UI-D-835: the finished case header for `viewer`. The member header is built from
+ * NAMED fields only (T-12.4-50), so a priority, an owner or an action list that a payload wrongly carries
+ * never reaches it. The subject line is never omitted: `subjectLabel` is always a string.
+ */
+export function caseHeaderView(
+  kase: MemberCase | StaffCase,
+  { viewer, t }: { viewer: ChatViewer; t: Translator },
+): CaseHeaderView {
+  const shared = {
+    id: kase.id,
+    number: kase.number,
+    title: caseTitle(t, kase.number),
+    state: caseStateView(kase.state, t),
+    subject: kase.subjectLabel,
+    subjectLine: caseSubjectLine(t, kase.number, kase.subjectLabel),
+  };
+  if (viewer === 'member') return { viewer: 'member', ...shared };
+  const team = kase as StaffCase;
+  return {
+    viewer: 'staff',
+    ...shared,
+    meta: caseMetaText(t, {
+      category: team.category,
+      priority: team.priority,
+      ownerName: team.ownerName,
+      ownerIsViewer: team.ownerIsViewer,
+    }),
+    actions: [...team.actions],
   };
 }

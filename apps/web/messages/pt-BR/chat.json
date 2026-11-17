@@ -59,7 +59,8 @@
         "loadMore": "Não foi possível carregar mais conversas."
       },
       "teamPreview": "{firstName}: {preview}",
-      "awaitingSr": ", aguardando resposta"
+      "awaitingSr": ", aguardando resposta",
+      "rowSubject": "#{number} · {subject}"
     },
     "blocked": {
       "pill": "Bloqueado",
@@ -77,6 +78,44 @@
       "title": "Conversa não encontrada",
       "body": "Ela não existe ou não é de {tenant}.",
       "cta": "Ver conversas"
+    },
+    "state": {
+      "open": "Aberto",
+      "inProgress": "Em atendimento",
+      "resolved": "Resolvido",
+      "closed": "Fechado"
+    },
+    "category": {
+      "checkIn": "Check-in",
+      "events": "Eventos",
+      "payment": "Pagamento",
+      "account": "Conta",
+      "other": "Outro"
+    },
+    "priority": {
+      "low": "Baixa",
+      "normal": "Normal",
+      "high": "Alta"
+    },
+    "case": {
+      "title": "Chamado #{number}"
+    },
+    "staffCase": {
+      "meta": {
+        "owned": "{category} · {priority} · Com {name}",
+        "unowned": "{category} · {priority} · Sem responsável",
+        "mine": "{category} · {priority} · Com você"
+      }
+    },
+    "action": {
+      "more": "Mais ações",
+      "take": "Assumir",
+      "assign": "Atribuir a…",
+      "resolve": "Resolver",
+      "reopen": "Reabrir",
+      "close": "Fechar",
+      "edit": "Editar categoria, assunto e prioridade",
+      "details": "Ver detalhes e histórico"
     }
   }
 }

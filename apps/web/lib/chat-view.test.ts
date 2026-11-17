@@ -1,10 +1,18 @@
 import { fileURLToPath } from 'node:url';
-import type { InboxRow, MessageRow } from '@rede-social/module-chat/contracts';
+import type {
+  InboxRow,
+  MemberCase,
+  MessageRow,
+  StaffCase,
+} from '@rede-social/module-chat/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
 import {
   type ChatMessageView,
+  caseHeaderView,
+  caseStateView,
+  caseTitle,
   chatDayLabel,
   chatMessageView,
   chatRuns,
@@ -328,5 +336,152 @@ describe('inboxTime / inboxRowView — the staff inbox row (UI-D-262)', () => {
     );
     expect(empty.preview).toBe('');
     expect(empty.time).toBe('');
+  });
+});
+
+/**
+ * 12.4-11 tracer (UI-D-816, UI-D-817, UI-D-818, UI-D-835): one path through the view layer, from an API
+ * case to the finished header a screen draws, for a team member and for a member, over the REAL catalog.
+ */
+const CASE_ID = '1d000000-0000-4000-8000-0000000000c1';
+const OWNER_ID = '1d000000-0000-4000-8000-0000000000a1';
+
+function staffCase(overrides: Partial<StaffCase> = {}): StaffCase {
+  return {
+    id: CASE_ID,
+    number: 42,
+    state: 'in_progress',
+    subject: 'Cobrança duplicada',
+    subjectLabel: 'Cobrança duplicada',
+    category: 'payment',
+    openedAt: '2026-09-30T17:00:00.000000Z',
+    priority: 'normal',
+    ownerUserId: OWNER_ID,
+    ownerName: 'Carla Souza',
+    ownerIsViewer: false,
+    resolvedAt: null,
+    closedAt: null,
+    actions: ['take', 'resolve', 'close', 'edit'],
+    ...overrides,
+  };
+}
+
+function memberCase(overrides: Partial<MemberCase> = {}): MemberCase {
+  return {
+    id: CASE_ID,
+    number: 42,
+    state: 'in_progress',
+    subject: 'Cobrança duplicada',
+    subjectLabel: 'Cobrança duplicada',
+    category: 'payment',
+    openedAt: '2026-09-30T17:00:00.000000Z',
+    ...overrides,
+  };
+}
+
+describe('12.4-11 tracer — caseStateView, caseTitle and caseHeaderView', () => {
+  it('1. the four states map to their catalog label, tone and glyph (UI-D-817)', () => {
+    expect(caseStateView('open', t)).toEqual({
+      state: 'open',
+      label: 'Aberto',
+      tone: 'warning',
+      glyph: 'CircleDot',
+    });
+    expect(caseStateView('in_progress', t)).toEqual({
+      state: 'in_progress',
+      label: 'Em atendimento',
+      tone: 'brand',
+      glyph: 'UserCheck',
+    });
+    expect(caseStateView('resolved', t)).toEqual({
+      state: 'resolved',
+      label: 'Resolvido',
+      tone: 'success',
+      glyph: 'CircleCheck',
+    });
+    expect(caseStateView('closed', t)).toEqual({
+      state: 'closed',
+      label: 'Fechado',
+      tone: 'neutral',
+      glyph: 'Lock',
+    });
+  });
+
+  it('2. the case number is a plain integer: no thousands separator (A-UI-25)', () => {
+    expect(caseTitle(t, 1)).toBe('Chamado #1');
+    expect(caseTitle(t, 42)).toBe('Chamado #42');
+    expect(caseTitle(t, 1204)).toBe('Chamado #1204');
+  });
+
+  it('3. a staff answer for an in_progress case owned by someone else gives the finished header', () => {
+    const header = caseHeaderView(staffCase(), { viewer: 'staff', t });
+    expect(header).toMatchObject({
+      viewer: 'staff',
+      id: CASE_ID,
+      number: 42,
+      title: 'Chamado #42',
+      state: { label: 'Em atendimento', tone: 'brand', glyph: 'UserCheck' },
+      subject: 'Cobrança duplicada',
+      subjectLine: '#42 · Cobrança duplicada',
+      meta: 'Pagamento · Normal · Com Carla',
+    });
+    // The action list is the server's, in the server's order, untouched.
+    expect(header.viewer === 'staff' && header.actions).toEqual([
+      'take',
+      'resolve',
+      'close',
+      'edit',
+    ]);
+  });
+
+  it('4. the same case read by its owner says "Com você"; no owner says "Sem responsável"', () => {
+    const mine = caseHeaderView(staffCase({ ownerIsViewer: true }), { viewer: 'staff', t });
+    expect(mine.viewer === 'staff' && mine.meta).toBe('Pagamento · Normal · Com você');
+    const nobody = caseHeaderView(
+      staffCase({ state: 'open', ownerUserId: null, ownerName: null, priority: 'high' }),
+      { viewer: 'staff', t },
+    );
+    expect(nobody.viewer === 'staff' && nobody.meta).toBe('Pagamento · Alta · Sem responsável');
+  });
+
+  it('5. a member answer gives title, state and subject only (T-12.4-50)', () => {
+    const header = caseHeaderView(memberCase(), { viewer: 'member', t });
+    expect(header).toEqual({
+      viewer: 'member',
+      id: CASE_ID,
+      number: 42,
+      title: 'Chamado #42',
+      state: { state: 'in_progress', label: 'Em atendimento', tone: 'brand', glyph: 'UserCheck' },
+      subject: 'Cobrança duplicada',
+      subjectLine: '#42 · Cobrança duplicada',
+    });
+  });
+
+  it('6. a member-shaped input that wrongly carries staff facts never leaks them (T-12.4-50)', () => {
+    const hostile = {
+      ...memberCase(),
+      priority: 'high',
+      ownerName: 'Carla Souza',
+      ownerUserId: OWNER_ID,
+      ownerIsViewer: false,
+      actions: ['assign'],
+    } as unknown as MemberCase;
+    const header = caseHeaderView(hostile, { viewer: 'member', t });
+    expect(header).not.toHaveProperty('priority');
+    expect(header).not.toHaveProperty('ownerName');
+    expect(header).not.toHaveProperty('ownerUserId');
+    expect(header).not.toHaveProperty('actions');
+    expect(header).not.toHaveProperty('meta');
+    expect(JSON.stringify(header)).not.toContain('Carla');
+    expect(JSON.stringify(header)).not.toContain('Alta');
+  });
+
+  it('7. a case with no typed subject still has a subject line, from the server label (UI-D-818)', () => {
+    const header = caseHeaderView(
+      memberCase({ subject: null, subjectLabel: 'Não consigo entrar na minha conta desde ontem…' }),
+      { viewer: 'member', t },
+    );
+    expect(header.subject).toBe('Não consigo entrar na minha conta desde ontem…');
+    expect(header.subjectLine).toBe('#42 · Não consigo entrar na minha conta desde ontem…');
   });
 });
