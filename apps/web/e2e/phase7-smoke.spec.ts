@@ -104,7 +104,11 @@ const listPane = (page: Page) => page.locator('[data-support-list]');
 const thread = (page: Page) => page.locator('[data-chat-thread]').filter({ visible: true });
 const bubbles = (page: Page) => thread(page).locator('[data-chat-message]');
 const composerField = (page: Page) => page.getByRole('textbox', { name: C.composer.label });
-const sendButton = (page: Page) => page.getByRole('button', { name: C.composer.send });
+/** 12.4-12: "Abrir chamado" while the member has no case, "Enviar mensagem" once one exists and for the team. */
+const sendButton = (page: Page) =>
+  page.getByRole('button', {
+    name: new RegExp(`^(${C.composer.send}|${C.composer.sendNew})$`),
+  });
 
 const pushSwitch = (page: Page) =>
   page.locator('main').getByRole('switch', { name: N.push.switchLabel });

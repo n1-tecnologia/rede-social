@@ -67,7 +67,14 @@ const thread = (page: Page) => page.locator('[data-chat-thread]').filter({ visib
 const sendError = (page: Page) => page.locator('[data-chat-send-error][role="alert"]');
 const bubbles = (page: Page) => thread(page).locator('[data-chat-message]');
 const composerField = (page: Page) => page.getByRole('textbox', { name: C.composer.label });
-const sendButton = (page: Page) => page.getByRole('button', { name: C.composer.send });
+/**
+ * 12.4-12: the send button is named "Abrir chamado" while the member has no case (the greeting and the
+ * opener) and "Enviar mensagem" once a case exists and for the team, so either name is the one button.
+ */
+const sendButton = (page: Page) =>
+  page.getByRole('button', {
+    name: new RegExp(`^(${C.composer.send}|${C.composer.sendNew})$`),
+  });
 
 async function send(page: Page, text: string): Promise<void> {
   await composerField(page).fill(text);
@@ -525,8 +532,9 @@ test.describe('chat equipe', () => {
       SEED_SUPPORT_MESSAGES.memberSecond,
     );
     await expect(row.locator('[data-inbox-time]')).toHaveText(/^(\d{2}:\d{2}|Ontem|\d{2}\/\d{2})$/);
-    // D-221: one list, no status chips, no filters.
-    await expect(page.getByRole('tab')).toHaveCount(0);
+    // 12.4-14 (UI-D-823): one list under three state tabs, "Em aberto" selected on entry.
+    await expect(page.getByRole('tab')).toHaveCount(3);
+    await expect(page.getByRole('tab', { name: C.inbox.tab.open, selected: true })).toBeVisible();
 
     const read = page.waitForResponse((res) =>
       /\/api\/chat\/conversations\/[^/]+\/read$/.test(res.url()),

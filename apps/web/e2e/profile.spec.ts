@@ -1123,7 +1123,7 @@ test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
     }
   });
 
-  test('Atendimento on real data: the queue at the last update opens the support inbox, and subjects read Em breve', async ({
+  test('Atendimento on real data: the queue at the last update opens the awaiting view of the inbox, and subjects are a collapsible by category', async ({
     page,
   }) => {
     test.skip(isRemote, 'local stack only (the snapshot is built through the fixture connection)');
@@ -1139,25 +1139,28 @@ test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
       await expect(area.locator('[data-snapshot-freshness]')).toBeVisible();
       await expect(area.locator('[data-owner-area-state]')).toHaveCount(0);
 
-      // UI-D-480 / UI-D-476: the queue at the last update, its waiting card a link to /suporte.
+      // UI-D-480 / UI-D-476, 12.4-16 (UI-D-831): the queue at the last update, its waiting card a link to the
+      // inbox's awaiting view (`/suporte?aguardando=1`).
       const queue = area.locator('section', {
         has: page.getByRole('heading', { name: OWNER.queue.title, exact: true }),
       });
-      const waiting = queue.locator('a[href="/suporte"]');
+      const waiting = queue.locator('a[href="/suporte?aguardando=1"]');
       await expect(waiting).toHaveCount(1);
       await expect(waiting).toContainText(OWNER.queue.awaiting);
       await expect(waiting).toContainText(OWNER.queue.open);
       await expect(waiting.locator('[data-kpi-card] [data-countup]')).toHaveText('1');
 
-      // D-465: "Atendimentos por assunto" is an Em breve block, not a collapsible.
-      const subjects = area.locator('[data-coming-soon-block]', {
-        hasText: OWNER.subjects.title,
-      });
-      await expect(subjects).toContainText(REPORT.comingSoon.value);
-      await expect(area.locator('details', { hasText: OWNER.subjects.title })).toHaveCount(0);
+      // 12.4-16 (D-813, UI-D-831): "Atendimentos por assunto" is now a collapsible of the five case
+      // categories over 30 days (the snapshot is built at the current version here), no longer an "Em breve" block.
+      const subjects = area.locator('details', { hasText: OWNER.subjects.title });
+      await expect(subjects).toHaveCount(1);
+      await expect(subjects).toContainText(/\d+ chamados? em 30 dias/);
+      await expect(
+        area.locator('[data-coming-soon-block]', { hasText: OWNER.subjects.title }),
+      ).toHaveCount(0);
 
       await waiting.click();
-      await expect(page).toHaveURL(/\/suporte$/);
+      await expect(page).toHaveURL(/\/suporte\?aguardando=1$/);
     } finally {
       await closeChatAdmin();
     }
