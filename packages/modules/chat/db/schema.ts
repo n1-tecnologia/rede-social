@@ -4,6 +4,7 @@ import {
   bigint,
   check,
   index,
+  integer,
   pgPolicy,
   pgTable,
   primaryKey,
@@ -55,8 +56,21 @@ import { authenticatedRole } from 'drizzle-orm/supabase';
  *    `support_tenant`), the same one `app.realtime_topic_allowed` uses; an integration test pins it
  *    against the TypeScript `permissionsFor` (RESEARCH Pitfall 4). There is no recursion:
  *    participants never reference conversations, messages reference conversations.
- * 8. **D-221: there is no status column.** Each member has one ongoing thread forever
- *    (`chat_conversations_one_support_per_member`); nothing models open/resolved.
+ * 8. **D-221 is reversed by Phase 12.4 (D-800), in two steps.** Until the activation of plan 02 each
+ *    member still has one ongoing thread (`chat_conversations_one_support_per_member`); plan 02
+ *    REPLACES that index with the one-active-case-per-member index and backfills the state, it does not
+ *    add one beside it.
+ * 9. **The case is the conversation row (D-836, Phase 12.4 plan 01).** Seven NULLABLE, expand-only
+ *    columns (`case_number`, `state`, `owner_user_id`, `category`, `priority`, `resolved_at`,
+ *    `closed_at`) turn a `support` conversation into a numbered, stateful case; `direct` and `group`
+ *    rows keep all seven null (CASE-25). Nothing is dropped, renamed or made NOT NULL. Two tables carry
+ *    what a column cannot: `chat_case_counters` (one row per tenant, RLS on, NO policy: no lane reads or
+ *    writes it) and `chat_case_events` (the append-only history). A row is born open and numbered by two
+ *    triggers in `*_chat_cases_functions.sql`: a BEFORE INSERT one fills the defaults and an AFTER INSERT
+ *    one takes the number from the counter (AFTER, so a skipped `on conflict do nothing` burns nothing,
+ *    D-837). The number is a 32-bit integer; the 2147483647 ceiling per tenant is not guarded (EP-005).
+ *    The shape and coherence CHECKs are spelled so that a LEGACY support row (every case column null)
+ *    passes them; the "a support row has a state" half is plan 02's, added after the backfill.
  */
 
 /** Staff lanes, spelled once: the tenant role claim of either staff role. */
@@ -85,6 +99,23 @@ export const chatConversations = pgTable(
     staffLastReadSeq: bigint('staff_last_read_seq', { mode: 'number' }).notNull().default(0),
     /** Who wrote the latest message; null only before the first message. */
     lastMessageSide: text('last_message_side'),
+    /**
+     * D-836, D-804: the case number, sequential per tenant from 1 and unique with the tenant. Taken by
+     * `chat_conversations_number_trg` (AFTER INSERT) for a `support` row; null for `direct` and `group`.
+     */
+    caseNumber: integer('case_number'),
+    /** D-836: `open`, `in_progress`, `resolved` or `closed`; null only for non-support rows (and legacy rows until plan 02). */
+    state: text(),
+    /** D-836, D-806: the staff member who holds the case; null while it is `open`. */
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    /** D-811: `check_in`, `events`, `payment`, `account` or `other`. */
+    category: text(),
+    /** D-811: `low`, `normal` or `high`; only the staff change it. */
+    priority: text(),
+    /** D-805: set while the case is `resolved`. */
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    /** D-805: set once the case is `closed`. */
+    closedAt: timestamp('closed_at', { withTimezone: true }),
   },
   (t) => [
     // One support conversation per member per tenant (ROADMAP Phase 7 note, D-221).
@@ -230,6 +261,50 @@ export const chatMessages = pgTable(
     }),
   ],
 ).enableRLS();
+
+/**
+ * D-836, D-837: ONE row per tenant, holding the last case number handed out. RLS is on and there is NO
+ * policy, so no lane reads or writes it; only the definer trigger `chat_conversations_number_trg` does.
+ * The row appears at the tenant's first case (a tenant with no case has none). The move engine copies it
+ * with the tenant by catalogue (it carries `tenant_id`), with user triggers silenced, so no number is
+ * ever reassigned.
+ */
+export const chatCaseCounters = pgTable('chat_case_counters', {
+  tenantId: uuid('tenant_id')
+    .primaryKey()
+    .references(() => tenants.id),
+  lastNumber: integer('last_number').notNull().default(0),
+}).enableRLS();
+
+/**
+ * D-810: the append-only history of a case. Written only by definers and triggers (no write policy,
+ * `revoke update, delete, truncate` from `authenticated` in the constraints migration); read by staff
+ * only. `message_id` has NO foreign key on purpose: the message trigger of plan 02 writes the event
+ * BEFORE the message row exists. The conversation cascades (the shipped suites delete conversations
+ * directly) and the two users are set null (a deleted account must not erase the history).
+ */
+export const chatCaseEvents = pgTable('chat_case_events', {
+  id: uuid().primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  conversationId: uuid('conversation_id')
+    .notNull()
+    .references(() => chatConversations.id, { onDelete: 'cascade' }),
+  /** `opened`, `taken`, `assigned`, `resolved`, `closed`, `reopened` or `edited`. */
+  kind: text().notNull(),
+  actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+  targetUserId: uuid('target_user_id').references(() => users.id, { onDelete: 'set null' }),
+  fromState: text('from_state'),
+  toState: text('to_state'),
+  /** For `edited`: the field that changed. */
+  field: text(),
+  fromValue: text('from_value'),
+  toValue: text('to_value'),
+  /** The message that caused the event, when one did; no foreign key (see the docblock). */
+  messageId: uuid('message_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}).enableRLS();
 
 export type ChatConversation = typeof chatConversations.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;

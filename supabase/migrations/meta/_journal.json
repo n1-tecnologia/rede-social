@@ -1359,6 +1359,20 @@
       "when": 1794611657524,
       "tag": "20261113231417_event_opening_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 194,
+      "version": "7",
+      "when": 1794903828320,
+      "tag": "20261117082348_chat_cases",
+      "breakpoints": true
+    },
+    {
+      "idx": 195,
+      "version": "7",
+      "when": 1794903835498,
+      "tag": "20261117082355_chat_cases_functions",
+      "breakpoints": true
     }
   ]
 }
