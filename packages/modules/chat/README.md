@@ -120,3 +120,12 @@ host app must provide: a request id and a per-request logger, `flushEventsAfterH
 `.route('/v1/chat', chatRoutes)`. The routes carry their own `requireAuth`, `requireModule('chat')`
 and `requirePermission` chain. Push for new messages needs the notifications module's sink; the web
 side subscribes to the Realtime signals read-only.
+
+## Phase 11 compatibility
+
+Direct and group conversations keep every case column null: the number, the state, the owner, the category, the
+priority and both instants stay unset for them, and no case history row is written for them. A shape CHECK of
+`chat_conversations` allows each of those columns to be set only on a `support` row, so `state` is null for every
+non-support row. A Phase 11 plan that adds member-to-member chat must therefore leave `state` null for `direct` (and
+for `group`) and must not reuse the case states for a conversation lifecycle; the numbering and message triggers
+touch only `support` rows. The `kind` column and the support-only case policies are the contract.
