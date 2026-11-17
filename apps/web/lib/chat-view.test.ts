@@ -23,10 +23,14 @@ import {
   chatMessageView,
   chatRuns,
   firstNameOf,
+  formatVoiceDuration,
   inboxRowView,
   inboxTime,
   reconcileInboxPage,
+  spokenVoiceDuration,
   tenantDayKeys,
+  voiceDeletedText,
+  voicePreviewText,
 } from './chat-view';
 
 /**
@@ -960,5 +964,112 @@ describe('reconcileInboxPage (WR-01): what a fresh page 1 replaces', () => {
     reconcileInboxPage(current, fresh, { holdsOnlyPage1: true, hasMore: true });
     expect(JSON.stringify(current)).toBe(a);
     expect(JSON.stringify(fresh)).toBe(b);
+  });
+});
+
+describe('12.5-10 voice view functions — duration labels, spoken phrase and the voice message view (D-853, D-846)', () => {
+  const MEDIA = '5e000000-0000-4000-8000-000000000001';
+
+  it('1. formatVoiceDuration is m:ss with no leading zero on the minutes, clamped to 0..300 and rounded', () => {
+    const table: [number, string][] = [
+      [0, '0:00'],
+      [1, '0:01'],
+      [9, '0:09'],
+      [59, '0:59'],
+      [60, '1:00'],
+      [61, '1:01'],
+      [65, '1:05'],
+      [300, '5:00'],
+      [301, '5:00'],
+      [9999, '5:00'],
+      [-4, '0:00'],
+      [41.6, '0:42'],
+      [41.4, '0:41'],
+      [Number.NaN, '0:00'],
+    ];
+    for (const [seconds, label] of table) expect(formatVoiceDuration(seconds)).toBe(label);
+  });
+
+  it('2. spokenVoiceDuration reads the length for a screen reader, and 5:00 is never "e 0 segundo" (sketch 024 #2)', () => {
+    const table: [number, string][] = [
+      [0, '0 segundos'],
+      [1, '1 segundo'],
+      [42, '42 segundos'],
+      [59, '59 segundos'],
+      [60, '1 minuto'],
+      [61, '1 minuto e 1 segundo'],
+      [65, '1 minuto e 5 segundos'],
+      [120, '2 minutos'],
+      [125, '2 minutos e 5 segundos'],
+      [300, '5 minutos'],
+    ];
+    for (const [seconds, words] of table) expect(spokenVoiceDuration(seconds, t)).toBe(words);
+    expect(spokenVoiceDuration(300, t)).not.toMatch(/e 0/);
+  });
+
+  it('3. the preview and the deleted words come from the catalog', () => {
+    expect(voicePreviewText(42, t)).toBe('Mensagem de voz · 0:42');
+    expect(voicePreviewText(300, t)).toBe('Mensagem de voz · 5:00');
+    expect(voiceDeletedText(t)).toBe('Mensagem de voz apagada');
+  });
+
+  it('4. a voice API row becomes a finished view with its length, for each viewer; body stays empty', () => {
+    const voiceRow = (overrides: Partial<MessageRow> = {}) =>
+      row({ body: '', voice: { mediaId: MEDIA, durationSeconds: 42 }, ...overrides });
+    for (const viewer of ['member', 'staff'] as const) {
+      const view = chatMessageView(voiceRow(), { timeZone: SP, viewer, t });
+      expect(view.body).toBe('');
+      expect(view.voice).toEqual({
+        mediaId: MEDIA,
+        durationSeconds: 42,
+        durationLabel: '0:42',
+        spokenLabel: '42 segundos',
+      });
+      expect(view).toMatchObject({ side: viewer === 'member' ? 'own' : 'other', time: '14:00' });
+    }
+    const staffVoice = chatMessageView(
+      staffRow({ body: '', voice: { mediaId: MEDIA, durationSeconds: 65 } }),
+      { timeZone: SP, viewer: 'member', t },
+    );
+    expect(staffVoice.label).toEqual({
+      firstName: 'Carla',
+      srSuffix: ', da equipe',
+      icon: 'shield',
+    });
+    expect(staffVoice.voice).toMatchObject({
+      durationLabel: '1:05',
+      spokenLabel: '1 minuto e 5 segundos',
+    });
+  });
+
+  it('5. a deleted recording says so, and the voice view has exactly the documented keys (no URL, file name or mime)', () => {
+    const view = chatMessageView(
+      row({ body: '', voice: { mediaId: MEDIA, durationSeconds: 42, deleted: true } }),
+      { timeZone: SP, viewer: 'staff', t },
+    );
+    expect(view.voice?.deleted).toBe(true);
+    expect(Object.keys(view.voice ?? {}).sort()).toEqual(
+      ['deleted', 'durationLabel', 'durationSeconds', 'mediaId', 'spokenLabel'].sort(),
+    );
+    const live = chatMessageView(
+      row({ body: '', voice: { mediaId: MEDIA, durationSeconds: 42 } }),
+      {
+        timeZone: SP,
+        viewer: 'staff',
+        t,
+      },
+    );
+    expect(live.voice).not.toHaveProperty('deleted');
+    expect(Object.keys(live.voice ?? {}).sort()).toEqual(
+      ['durationLabel', 'durationSeconds', 'mediaId', 'spokenLabel'].sort(),
+    );
+  });
+
+  it('6. a text row has no voice key and the same keys as before', () => {
+    const view = chatMessageView(row(), { timeZone: SP, viewer: 'member', t });
+    expect(view).not.toHaveProperty('voice');
+    expect(Object.keys(view).sort()).toEqual(
+      ['authorKey', 'body', 'createdAtMs', 'dayKey', 'id', 'label', 'seq', 'side', 'time'].sort(),
+    );
   });
 });

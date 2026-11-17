@@ -71,6 +71,65 @@ export interface ChatMessageView {
   createdAtMs: number;
   /** An optimistic bubble while its send is in flight (client only). */
   pending?: boolean;
+  /**
+   * 12.5 (D-846, VOICE-04): the recording of a voice message, ABSENT on a text view. `body` is the empty
+   * string then, so text and recording stay mutually exclusive in practice.
+   */
+  voice?: ChatVoiceView;
+}
+
+/**
+ * The recording of one message, finished (D-853). Only what a screen needs: the media id the HOST turns into
+ * the player link (UI-D-857), the stored length and its two finished labels. There is no file name, URL or
+ * mime type here, and `deleted` exists only when the row says the recording is gone (D-868).
+ */
+export interface ChatVoiceView {
+  mediaId: string;
+  durationSeconds: number;
+  /** `m:ss`, e.g. `0:42`. */
+  durationLabel: string;
+  /** The screen-reader length, e.g. `1 minuto e 5 segundos`. */
+  spokenLabel: string;
+  deleted?: true;
+}
+
+/** The longest recording, in seconds (D-850): the same bound the API contract enforces. */
+const VOICE_MAX_SECONDS = 300;
+
+/** A stored duration as a whole number of seconds inside `0..300` (T-12.5-40): NaN reads as 0. */
+function clampVoiceSeconds(seconds: number): number {
+  if (!Number.isFinite(seconds)) return 0;
+  return Math.min(Math.max(Math.round(seconds), 0), VOICE_MAX_SECONDS);
+}
+
+/** D-853: `m:ss` with no leading zero on the minutes (`0:42`, `1:05`, `5:00`), clamped to 0..300 and rounded. */
+export function formatVoiceDuration(seconds: number): string {
+  const whole = clampVoiceSeconds(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+}
+
+/**
+ * The duration as a screen reader says it (D-853, sketch 024 #2): "42 segundos", "1 minuto e 5 segundos",
+ * "1 minuto", "5 minutos" and "0 segundos". A whole number of minutes uses the single-unit sentence, so 5:00 is
+ * never "5 minutos e 0 segundo".
+ */
+export function spokenVoiceDuration(seconds: number, t: Translator): string {
+  const whole = clampVoiceSeconds(seconds);
+  const minutes = Math.floor(whole / 60);
+  const rest = whole % 60;
+  if (minutes === 0) return t('voice.spokenSeconds', { seconds: rest });
+  if (rest === 0) return t('voice.spokenMinutes', { minutes });
+  return t('voice.spoken', { minutes, seconds: rest });
+}
+
+/** D-860: the one-line preview of a recording, "Mensagem de voz · 0:42" (the words, a middle dot, `m:ss`). */
+export function voicePreviewText(seconds: number, t: Translator): string {
+  return t('voice.preview', { duration: formatVoiceDuration(seconds) });
+}
+
+/** D-868: what a preview or a bubble says for a recording whose sender left, "Mensagem de voz apagada". */
+export function voiceDeletedText(t: Translator): string {
+  return t('voice.deleted');
 }
 
 const DAY_MS = 86_400_000;
@@ -142,6 +201,18 @@ export function chatMessageView(
     time: formatEventTime(row.createdAt, timeZone),
     dayKey: tenantDayKey(row.createdAt, timeZone),
     createdAtMs: Date.parse(row.createdAt),
+    ...(row.voice ? { voice: voiceView(row.voice, t) } : {}),
+  };
+}
+
+/** The `voice` of a row as the finished view: the stored length as its two labels, `deleted` only when true. */
+function voiceView(voice: NonNullable<MessageRow['voice']>, t: Translator): ChatVoiceView {
+  return {
+    mediaId: voice.mediaId,
+    durationSeconds: voice.durationSeconds,
+    durationLabel: formatVoiceDuration(voice.durationSeconds),
+    spokenLabel: spokenVoiceDuration(voice.durationSeconds, t),
+    ...(voice.deleted ? { deleted: true as const } : {}),
   };
 }
 

@@ -286,6 +286,70 @@
       "takenBy": "Chamado #{number} assumido por {name}.",
       "resolvedBy": "Chamado #{number} resolvido por {name}.",
       "closedBy": "Chamado #{number} fechado por {name}."
+    },
+    "voice": {
+      "message": "Mensagem de voz",
+      "group": "Mensagem de voz, {spoken}",
+      "spoken": "{minutes, plural, =0 {} one {# minuto e } other {# minutos e }}{seconds, plural, =0 {# segundos} one {# segundo} other {# segundos}}",
+      "spokenSeconds": "{seconds, plural, =0 {# segundos} one {# segundo} other {# segundos}}",
+      "spokenMinutes": "{minutes, plural, one {# minuto} other {# minutos}}",
+      "preview": "Mensagem de voz · {duration}",
+      "deleted": "Mensagem de voz apagada",
+      "mic": {
+        "label": "Gravar mensagem de voz",
+        "requesting": "Aguardando permissão do microfone"
+      },
+      "recording": {
+        "status": "Gravando",
+        "timer": "Tempo de gravação",
+        "discard": "Descartar gravação",
+        "send": "Enviar mensagem de voz",
+        "sendNew": "Abrir chamado com a mensagem de voz",
+        "limitWord": "Limite atingido",
+        "interruptedWord": "Interrompida"
+      },
+      "notice": {
+        "warning": "Faltam 30 segundos para o limite de 5 minutos.",
+        "limit": "Você chegou ao limite de 5 minutos. Envie ou descarte a gravação.",
+        "interrupted": "A gravação foi interrompida. Envie o que foi gravado ou descarte.",
+        "tooShort": "A gravação ficou muito curta e foi descartada. Toque no microfone e fale de novo."
+      },
+      "problem": {
+        "blocked": "O acesso ao microfone está bloqueado. Libere nas configurações e toque no microfone de novo. Você também pode escrever sua mensagem.",
+        "missing": "Não encontramos um microfone neste aparelho. Você pode escrever sua mensagem.",
+        "busy": "O microfone está em uso por outro app. Feche-o e tente de novo.",
+        "failed": "Não foi possível gravar. Tente de novo."
+      },
+      "live": {
+        "started": "Gravando.",
+        "minute": "{count, plural, one {# minuto de gravação.} other {# minutos de gravação.}}",
+        "discarded": "Gravação descartada.",
+        "rate": "Velocidade {rate}."
+      },
+      "player": {
+        "play": "Tocar mensagem de voz",
+        "pause": "Pausar mensagem de voz",
+        "seek": "Posição da mensagem de voz",
+        "seekValue": "{current} de {total}",
+        "speed": "Velocidade de reprodução: {rate}",
+        "loading": "Carregando mensagem de voz",
+        "error": "Não foi possível carregar a mensagem de voz.",
+        "unsupported": "Este aparelho não toca este tipo de áudio."
+      },
+      "rate": {
+        "one": "1x",
+        "oneHalf": "1,5x",
+        "two": "2x"
+      },
+      "upload": {
+        "label": "Enviando mensagem de voz",
+        "progress": "Enviando… {percent}%"
+      },
+      "failed": {
+        "retriable": "Não foi possível enviar.",
+        "permanent": "Não foi possível enviar esta mensagem de voz. Escreva sua mensagem.",
+        "discard": "Descartar"
+      }
     }
   }
 }
