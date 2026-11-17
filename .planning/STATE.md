@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 10
+current_plan: 11
 status: executing
-stopped_at: Completed 12.4-08-PLAN.md
-last_updated: "2026-11-17T10:38:21.894Z"
+stopped_at: Completed 12.4-09-PLAN.md
+last_updated: "2026-11-17T10:58:05.653Z"
 last_activity: 2026-11-17
 last_activity_desc: Phase 12.4 execution started
-state_head: eee24c1cb004a3be5f01694bbd324052f8481eff
+state_head: 28cdcfe447be17de7cbe54baf2fbbf6a500329b8
 progress:
   total_phases: 34
   completed_phases: 0
   total_plans: 471
-  completed_plans: 434
+  completed_plans: 435
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
-Current Plan: 10
+Current Plan: 11
 Total Plans in Phase: 20
-Plan: 10 of 20
+Plan: 11 of 20
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.4 execution started
 
@@ -383,6 +383,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12.4 P07 | 13 min | 3 tasks | 9 files |
 | Phase 12.4 P16 | 6 min | 3 tasks | 8 files |
 | Phase 12.4 P08 | 12 min | 3 tasks | 9 files |
+| Phase 12.4 P09 | 17 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -1175,6 +1176,7 @@ Recent decisions affecting current work:
 - [Phase 12.4]: 12.4-07: inbox tab statements are complete literal predicates (open restates state in open,in_progress for the partial index); a no-message thread carries the cursor literal none so a limit=1 walk continues past it — EP-053 and CASE-17
 - [Phase 12.4]: 12.4-16: owner's category card takes counts only; old not-measured snapshot keeps the Em breve block; queue card links to /suporte?aguardando=1, overview KPI stays on /suporte — UI-D-831, D-813, D-815, INSIGHT-21
 - [Phase 12.4]: 12.4-08: the six case write routes, their inventory rows and the isolation case land with the tracer commit (the inventory unit gate fails on an unclassified route); 23514 maps to subject_too_long only for chat_conversations_subject_chk
+- [Phase 12.4]: 12.4-09: a member message pushes the case owner alone when the owner is live staff, else the whole live team; a reopen is detected by the reopened history row carrying the message id; a self-assignment notifies nobody — D-809, D-841; keeps the banner to the person responsible and survives later reassignment
 
 ### Pending Todos
 
@@ -1309,6 +1311,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-17T10:38:21.575Z
-Stopped at: Completed 12.4-08-PLAN.md
+Last session: 2026-11-17T10:58:05.335Z
+Stopped at: Completed 12.4-09-PLAN.md
 Resume file: None
