@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 12
+current_plan: 13
 status: executing
-stopped_at: Completed 12.4-20-PLAN.md
-last_updated: "2026-11-17T11:08:19.102Z"
+stopped_at: Completed 12.4-12-PLAN.md
+last_updated: "2026-11-17T11:24:54.837Z"
 last_activity: 2026-11-17
 last_activity_desc: Phase 12.4 execution started
-state_head: 7be624cb117f8bba75ec9de101214f01855e6571
+state_head: 1c09b5fb283bcf2a6a75b9f5d0e3891759f3297f
 progress:
   total_phases: 34
   completed_phases: 0
   total_plans: 471
-  completed_plans: 436
+  completed_plans: 437
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
-Current Plan: 12
+Current Plan: 13
 Total Plans in Phase: 20
-Plan: 12 of 20
+Plan: 13 of 20
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.4 execution started
 
@@ -385,6 +385,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12.4 P08 | 12 min | 3 tasks | 9 files |
 | Phase 12.4 P09 | 17 min | 3 tasks | 9 files |
 | Phase 12.4 P20 | 10 min | 3 tasks | 12 files |
+| Phase 12.4 P12 | 14min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -1179,6 +1180,7 @@ Recent decisions affecting current work:
 - [Phase 12.4]: 12.4-08: the six case write routes, their inventory rows and the isolation case land with the tracer commit (the inventory unit gate fails on an unclassified route); 23514 maps to subject_too_long only for chat_conversations_subject_chk
 - [Phase 12.4]: 12.4-09: a member message pushes the case owner alone when the owner is live staff, else the whole live team; a reopen is detected by the reopened history row carrying the message id; a self-assignment notifies nobody — D-809, D-841; keeps the banner to the person responsible and survives later reassignment
 - [Phase 12.4]: 12.4-20: case server actions answer { ok: true, header } or a closed word (stale, closed, not_allowed, invalid, failed); the header handler answers { viewer, header } from the API's own viewer — the client never computes a transition; the screens map the closed word to the UI-D-827 toasts
+- [Phase 12.4]: 12.4-12: the member's case chip group is a fieldset and the bar's reading unit a hidden sentence (lint forbids role=group); row 2 after the first send starts provisional and is replaced by the server's subjectLabel on the immediate header read
 
 ### Pending Todos
 
@@ -1313,6 +1315,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-17T11:08:18.775Z
-Stopped at: Completed 12.4-20-PLAN.md
+Last session: 2026-11-17T11:24:54.521Z
+Stopped at: Completed 12.4-12-PLAN.md
 Resume file: None
