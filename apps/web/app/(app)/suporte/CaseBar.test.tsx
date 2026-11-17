@@ -6,7 +6,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import type { MemberCaseHeaderView } from '@/lib/chat-view';
-import { CaseBar } from './CaseBar';
+import { CaseBar, ClosedStrip, ResolvedStrip } from './CaseBar';
 
 /**
  * 12.4-12 Task 1 (UI-D-818, UI-D-835; UC M01, M02; T-12.4-55): the member's case bar. It takes the
@@ -128,5 +128,125 @@ describe('CaseBar (UI-D-818)', () => {
   it('exposes the number and the state as one reading unit', () => {
     bar({ header: header(), hasAnyCase: true });
     expect(screen.getByText('Chamado #42, Aberto').className).toContain('sr-only');
+  });
+});
+
+/**
+ * 12.4-12 Task 2 (UI-D-820, UI-D-833; UC M06, M08, M09): the strips and the live region.
+ */
+const stateOf = (
+  state: 'open' | 'in_progress' | 'resolved' | 'closed',
+): MemberCaseHeaderView['state'] => {
+  const words = {
+    open: ['Aberto', 'warning', 'CircleDot'],
+    in_progress: ['Em atendimento', 'brand', 'UserCheck'],
+    resolved: ['Resolvido', 'success', 'CircleCheck'],
+    closed: ['Fechado', 'neutral', 'Lock'],
+  } as const;
+  const [label, tone, glyph] = words[state];
+  return { state, label, tone, glyph };
+};
+
+const wrap = (node: React.ReactNode) => (
+  <NextIntlClientProvider locale="pt-BR" messages={messages}>
+    {node}
+  </NextIntlClientProvider>
+);
+
+const live = (container: HTMLElement) => container.querySelector('[aria-live="polite"]');
+
+describe('the Resolvido and Fechado strips (UI-D-820c, UI-D-820e, UI-D-833)', () => {
+  it('draws the non-dismissible resolved notice as a status', () => {
+    render(wrap(<ResolvedStrip />));
+    const strip = screen.getByRole('status');
+    expect(strip.textContent).toBe(
+      'Este chamado foi marcado como resolvido. Se ainda precisar de ajuda, responda aqui e ele volta a ser atendido.',
+    );
+    expect(strip.querySelector('button')).toBeNull();
+  });
+
+  it('draws the closed notice as a status with Novo chamado pointing at /suporte', () => {
+    render(wrap(<ClosedStrip />));
+    const strip = screen.getByRole('status');
+    expect(strip.textContent).toContain(
+      'Este chamado foi fechado. Para falar com a equipe de novo, abra um novo chamado.',
+    );
+    expect(screen.getByRole('link', { name: 'Novo chamado' }).getAttribute('href')).toBe(
+      '/suporte',
+    );
+  });
+
+  it('makes Novo chamado full width below 360px', () => {
+    render(wrap(<ClosedStrip />));
+    expect(screen.getByRole('link', { name: 'Novo chamado' }).className).toContain(
+      'max-[359px]:w-full',
+    );
+  });
+});
+
+describe('the polite live region (UI-D-830, UI-D-833; UC M09)', () => {
+  it('is one persistent visually hidden polite region, empty on first render, never assertive', () => {
+    const { container } = render(wrap(<CaseBar header={header()} hasAnyCase />));
+    const regions = container.querySelectorAll('[aria-live]');
+    expect(regions).toHaveLength(1);
+    expect(regions[0]?.getAttribute('aria-live')).toBe('polite');
+    expect(regions[0]?.className).toContain('sr-only');
+    expect(regions[0]?.textContent).toBe('');
+  });
+
+  it('keeps the region when there is no case at all', () => {
+    const { container } = render(wrap(<CaseBar header={null} hasAnyCase={false} />));
+    expect(live(container)).not.toBeNull();
+    expect(container.querySelector('[data-case-bar]')).toBeNull();
+  });
+
+  it('speaks the resolved sentence only when the state changes to resolved after mount', () => {
+    const { container, rerender } = render(wrap(<CaseBar header={header()} hasAnyCase />));
+    expect(live(container)?.textContent).toBe('');
+    rerender(wrap(<CaseBar header={header({ state: stateOf('resolved') })} hasAnyCase />));
+    expect(live(container)?.textContent).toBe('Seu chamado #42 foi resolvido.');
+  });
+
+  it('speaks the closed sentence, and the reopened one when a resolved case goes back to Aberto', () => {
+    const { container, rerender } = render(
+      wrap(<CaseBar header={header({ state: stateOf('resolved') })} hasAnyCase />),
+    );
+    expect(live(container)?.textContent).toBe('');
+    rerender(wrap(<CaseBar header={header({ state: stateOf('open') })} hasAnyCase />));
+    expect(live(container)?.textContent).toBe('Seu chamado #42 foi reaberto.');
+    rerender(wrap(<CaseBar header={header({ state: stateOf('closed') })} hasAnyCase />));
+    expect(live(container)?.textContent).toBe('Seu chamado #42 foi fechado.');
+  });
+
+  it('says nothing for a change that is not resolved, closed or reopened (Aberto to Em atendimento)', () => {
+    const { container, rerender } = render(wrap(<CaseBar header={header()} hasAnyCase />));
+    rerender(wrap(<CaseBar header={header({ state: stateOf('in_progress') })} hasAnyCase />));
+    expect(live(container)?.textContent).toBe('');
+  });
+
+  it('says nothing when a first case swaps in, or for another case', () => {
+    const { container, rerender } = render(wrap(<CaseBar header={null} hasAnyCase={false} />));
+    rerender(wrap(<CaseBar header={header({ state: stateOf('resolved') })} hasAnyCase />));
+    expect(live(container)?.textContent).toBe('');
+    rerender(
+      wrap(
+        <CaseBar
+          header={header({ id: '33333333-3333-4333-8333-333333333333', state: stateOf('closed') })}
+          hasAnyCase
+        />,
+      ),
+    );
+    expect(live(container)?.textContent).toBe('');
+  });
+
+  it('moves no focus on a live change', () => {
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    const { rerender } = render(wrap(<CaseBar header={header()} hasAnyCase />));
+    input.focus();
+    rerender(wrap(<CaseBar header={header({ state: stateOf('closed') })} hasAnyCase />));
+    expect(document.activeElement).toBe(input);
+    input.remove();
   });
 });

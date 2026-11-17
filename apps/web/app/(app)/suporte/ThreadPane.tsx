@@ -24,8 +24,9 @@ import {
   type SendSupportMessageResult,
   sendSupportMessageAction,
 } from './actions';
-import { CaseBar, CaseOpenedRow } from './CaseBar';
+import { CaseBar, CaseOpenedRow, ClosedStrip, ResolvedStrip } from './CaseBar';
 import { CaseOpener, type CaseOpenerValue } from './CaseOpener';
+import { useBarHeightAnchor } from './useBarHeightAnchor';
 
 /**
  * The member's support thread pane (UI-D-261, D-240, CHAT-04) [designed]: the scroller and the
@@ -162,6 +163,48 @@ function SupportGreeting({
   );
 }
 
+/**
+ * The finished member header of the conversation, read through the BFF handler (UI-D-830, T-12.4-57). The
+ * answer is rebuilt from NAMED fields, so nothing a payload wrongly carried is kept, and anything that is
+ * not a member header (a staff shape, a conversation with no case, a failure) is `null`: the bar then keeps
+ * what it shows. The pane never derives a state from anything but this answer or a send's answer.
+ */
+async function fetchCaseHeader(conversationId: string): Promise<MemberCaseHeaderView | null> {
+  try {
+    const res = await fetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}`, {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      redirect: 'manual',
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      viewer?: unknown;
+      header?: Partial<MemberCaseHeaderView> | null;
+    };
+    const header = body.header;
+    if (body.viewer !== 'member' || !header || header.viewer !== 'member') return null;
+    if (
+      typeof header.id !== 'string' ||
+      typeof header.number !== 'number' ||
+      typeof header.title !== 'string' ||
+      typeof header.state?.state !== 'string'
+    ) {
+      return null;
+    }
+    return {
+      viewer: 'member',
+      id: header.id,
+      number: header.number,
+      title: header.title,
+      state: header.state,
+      subject: typeof header.subject === 'string' ? header.subject : '',
+      subjectLine: typeof header.subjectLine === 'string' ? header.subjectLine : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchPage(conversationId: string, query: string): Promise<MessagesAnswer | null> {
   try {
     const res = await fetch(
@@ -225,6 +268,13 @@ export function ThreadPane({
   const readSeqRef = useRef(0);
   const pendingIdRef = useRef(0);
   const catchUpRef = useRef<{ running: boolean; again: boolean }>({ running: false, again: false });
+  /** The case header re-read, coalesced the same way: one in flight, one queued (T-07-71, T-12.4-59). */
+  const caseReadRef = useRef<{ running: boolean; again: boolean }>({
+    running: false,
+    again: false,
+  });
+  const barRef = useRef<HTMLDivElement>(null);
+  useBarHeightAnchor(barRef, scrollerRef);
 
   const nearBottom = useCallback(() => {
     const el = scrollerRef.current;
@@ -315,32 +365,66 @@ export function ThreadPane({
     }
   }, [nearBottom, markRead]);
 
+  /**
+   * UI-D-830: re-read the member's case header, one at a time (a request during a run schedules exactly one
+   * more). Only the member's pane reads a case; a failed or foreign answer keeps the bar as it is.
+   */
+  const refreshCase = useCallback(async () => {
+    if (viewer !== 'member') return;
+    const state = caseReadRef.current;
+    if (state.running) {
+      state.again = true;
+      return;
+    }
+    state.running = true;
+    try {
+      do {
+        state.again = false;
+        const id = conversationRef.current;
+        if (!id) break;
+        const header = await fetchCaseHeader(id);
+        if (header) setCaseView(header);
+      } while (state.again);
+    } finally {
+      state.running = false;
+    }
+  }, [viewer]);
+
   const onSignal = useCallback(
-    (_event: string, payload: unknown) => {
+    (event: string, payload: unknown) => {
+      // A signal says "something changed": the case header is re-read for every one of them.
+      void refreshCase();
+      if (event === REALTIME_EVENTS.chatCase) return;
       const seq = (payload as { seq?: unknown } | null)?.seq;
       // Ids-only signal: a seq at or below the cursor is a replay, nothing to fetch (T-07-64).
       if (isReplayedSignal(cursorRef.current, seq)) return;
       void catchUp();
     },
-    [catchUp],
+    [catchUp, refreshCase],
   );
 
   useRealtimeTopic(
     conversationId ? convTopic(tenantId, conversationId) : null,
-    [REALTIME_EVENTS.chatMessage],
+    [REALTIME_EVENTS.chatMessage, REALTIME_EVENTS.chatCase],
     onSignal,
-    { onSubscribed: () => void catchUp() },
+    {
+      onSubscribed: () => {
+        void catchUp();
+        void refreshCase();
+      },
+    },
   );
 
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
       void catchUp();
+      void refreshCase();
       markRead();
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [catchUp, markRead]);
+  }, [catchUp, refreshCase, markRead]);
 
   const loadOlder = async () => {
     const id = conversationRef.current;
@@ -440,7 +524,21 @@ export function ThreadPane({
           subjectLine: '',
         });
         setOpenedNumber(sentCase.number);
+      } else {
+        // The server's own word on the state after this send (a reply may reopen a resolved case).
+        setCaseView((current) =>
+          current && current.id === sentCase.id
+            ? { ...current, state: caseStateView(sentCase.state, t) }
+            : current,
+        );
+        if (sentCase.reopened) {
+          show({
+            tone: 'success',
+            message: t('case.reopenedToast', { number: String(sentCase.number) }),
+          });
+        }
       }
+      void refreshCase();
     }
     return true;
   };
@@ -488,7 +586,7 @@ export function ThreadPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {viewer === 'member' ? (
-        <div className="shrink-0">
+        <div ref={barRef} className="shrink-0">
           <CaseBar header={caseView} hasAnyCase={hasAnyCase} />
         </div>
       ) : null}
@@ -556,18 +654,24 @@ export function ThreadPane({
             <Ban aria-hidden size={20} className="shrink-0 text-text-tertiary" />
             <p className="text-sm font-normal text-text-secondary">{readOnlyNotice}</p>
           </div>
+        ) : caseView?.state.state === 'closed' ? (
+          // UI-D-820e: a closed case is read-only; a blocked or removed notice above wins (A-UI-4).
+          <ClosedStrip />
         ) : (
-          <ChatComposer
-            label={t('composer.label')}
-            placeholder={showOpener ? t('composer.placeholderNew') : t('composer.placeholder')}
-            sendLabel={showOpener ? t('composer.sendNew') : t('composer.send')}
-            // pt-BR grouping ("1.800") to match the catalog's literal "2.000".
-            counterTemplate={(count) =>
-              t('composer.counter', { count: count.toLocaleString('pt-BR') })
-            }
-            errorText={sendError ?? t('composer.errors.failed')}
-            onSend={onSend}
-          />
+          <>
+            {caseView?.state.state === 'resolved' ? <ResolvedStrip /> : null}
+            <ChatComposer
+              label={t('composer.label')}
+              placeholder={showOpener ? t('composer.placeholderNew') : t('composer.placeholder')}
+              sendLabel={showOpener ? t('composer.sendNew') : t('composer.send')}
+              // pt-BR grouping ("1.800") to match the catalog's literal "2.000".
+              counterTemplate={(count) =>
+                t('composer.counter', { count: count.toLocaleString('pt-BR') })
+              }
+              errorText={sendError ?? t('composer.errors.failed')}
+              onSend={onSend}
+            />
+          </>
         )}
       </div>
     </div>
