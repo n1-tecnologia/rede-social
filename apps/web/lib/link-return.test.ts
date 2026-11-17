@@ -68,9 +68,23 @@ describe('parseLinkReturn', () => {
 });
 
 describe('linkReturnScreen', () => {
-  it('8. no marker: no screen on any path', () => {
+  it('8. no marker: no screen on any path except the confirmation interstitial', () => {
     expect(linkReturnScreen(null, '/inicio')).toBeNull();
     expect(linkReturnScreen(null, '/redefinir-senha')).toBeNull();
+    expect(linkReturnScreen(null, '/auth/confirm')).toBeNull();
+    expect(linkReturnScreen(null, '/auth/continuar-x')).toBeNull();
+  });
+
+  it('8b. the interstitial passes with no marker and below its path (quick 261117-kkx)', () => {
+    expect(linkReturnScreen(null, '/auth/continuar')).toBe('pass');
+    expect(linkReturnScreen(null, '/auth/continuar/x')).toBe('pass');
+  });
+
+  it('8c. a stale marker never hides the interstitial button', () => {
+    for (const marker of ['signup', 'recovery', 'invite'] as const) {
+      expect(linkReturnScreen(marker, '/auth/continuar')).toBe('pass');
+    }
+    expect(linkReturnScreen('signup', '/auth/continuar-x')).toBe('show');
   });
 
   it('9. signup shows on every path', () => {

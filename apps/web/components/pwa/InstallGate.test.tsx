@@ -295,6 +295,23 @@ describe('InstallGate: link return (quick 261007-kyp, task 2)', () => {
     await mount({ linkReturn: null });
     expect(screen.getByRole('heading', { name: TITLE })).toBeTruthy();
   });
+
+  it('10. quick 261117-kkx: a gated phone with no marker still sees the /auth/continuar interstitial', async () => {
+    setDevice(UA.iphoneSafari17, 5);
+    pathname = '/auth/continuar';
+    await mount({ linkReturn: null });
+    expect(screen.getByText('app-child')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: TITLE })).toBeNull();
+    expect(document.documentElement.dataset.installGate).toBe('open');
+  });
+
+  it('11. control: the same device on /entrar still gets the install screen', async () => {
+    setDevice(UA.iphoneSafari17, 5);
+    pathname = '/entrar';
+    await mount({ linkReturn: null });
+    expect(screen.getByRole('heading', { name: TITLE })).toBeTruthy();
+    expect(screen.queryByText('app-child')).toBeNull();
+  });
 });
 
 describe('InstallGate: Android prompt', () => {

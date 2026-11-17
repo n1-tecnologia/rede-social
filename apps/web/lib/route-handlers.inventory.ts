@@ -77,7 +77,7 @@ export const ROUTE_HANDLER_INVENTORY: Record<string, RouteHandlerEntry> = {
   },
   'auth/confirm/route.ts': {
     exempt:
-      'auth redirect: exchanges a GoTrue e-mail link for a session and redirects same-origin only (open-redirect guard); calls no API route',
+      'auth redirect: GET is inert (hands a token link to the /auth/continuar interstitial, calls nothing); POST exchanges a GoTrue e-mail link for a session and redirects same-origin only (open-redirect guard, OTP allow-list, cross-site refusal); calls no API route',
   },
   'auth/host-mismatch/route.ts': {
     exempt: 'auth redirect to /endereco-invalido; reads no session data and no tenant row',

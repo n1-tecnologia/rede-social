@@ -1,3 +1,4 @@
+import { CONFIRM_CONTINUE_PATH } from '@/lib/auth-confirm';
 import { sessionCookieOptions } from '@/lib/supabase/cookie-options';
 
 /**
@@ -15,6 +16,12 @@ import { sessionCookieOptions } from '@/lib/supabase/cookie-options';
  * in the installed app: `/redefinir-senha` and `/aceitar-convite` must run right there, while the
  * matching marker stands. Sign-up confirmation is finished in the browser, so it only needs the
  * "E-mail confirmado, abra o app" screen.
+ *
+ * Why the confirmation interstitial is exempt too (quick 261117-kkx): `/auth/continuar` is the step
+ * that PRECEDES the marker (the marker is written by the POST the button sends). A gated phone would
+ * otherwise see the install screen in place of the only button that can finish the mail link. Like
+ * the password forms it is a public, tokenised, session-less page, and the exemption is UX policy,
+ * not authorization (same stance as install-gate.ts).
  *
  * Why HttpOnly and host-only (no `Domain`): it stays on the origin that served the link, so one
  * tenant's marker never reaches another origin, and no script can read it. Forging it gains nothing
@@ -66,11 +73,13 @@ function underPath(pathname: string, base: string): boolean {
 /**
  * What a gated device shows for the marker on `pathname`: `show` the link-return screen, `pass`
  * (the matching password form runs in this browser) or `null` (no marker, no special screen).
+ * The confirmation interstitial is `pass` first, marker or not (see the file header).
  */
 export function linkReturnScreen(
   marker: LinkReturn | null,
   pathname: string,
 ): 'show' | 'pass' | null {
+  if (underPath(pathname, CONFIRM_CONTINUE_PATH)) return 'pass';
   if (marker === null) return null;
   if (marker === 'recovery') return underPath(pathname, RECOVERY_PATH) ? 'pass' : 'show';
   if (marker === 'invite') return underPath(pathname, INVITE_PATH) ? 'pass' : 'show';
