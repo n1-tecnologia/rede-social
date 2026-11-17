@@ -33,7 +33,7 @@ Current Plan: 22
 Total Plans in Phase: 22
 Plan: 22 of 22
 Status: Gap round (plans 21, 22) executed; one new gap WR-06 (SupportInbox load-more race) left to close
-Last activity: 2026-11-17 — Phase 12.4 gap round executed, re-verified (10/11)
+Last activity: 2026-11-17 - Completed quick task 261117-jke: WR-06 SupportInbox load-more race fixed (Phase 12.4 gap; phase not re-verified)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -1279,6 +1279,7 @@ None yet.
 | 261112-kuk | Phase 10 gap MPUB-04: one migration with database write gates for member stories (update guard trigger, delete gate), highlights and highlight items, the staff branch of the community post insert gate, and hidden-community video (WR-03, WR-04, WR-05); `resolveHighlight` reads unlocked before locking; pgTAP 65 files / 4552 tests, 20 integration files green; ninth Phase 10 migration, deploy with the API; nothing pushed | 2026-11-12 | 2a522c06 | complete | [261112-kuk-close-phase-10-mpub-04-database-write-ga](./quick/261112-kuk-close-phase-10-mpub-04-database-write-ga/) |
 | 261116-hj0 | Fix the two Phase 10.2 tests that failed in CI run 43866055430 (demo payments module in the event-mapping integration test, 30s timeout on events-payload 9v) | 2026-11-16 | 2bf58b9c | — | [261116-hj0-fix-the-two-phase-10-2-tests-that-failed](./quick/261116-hj0-fix-the-two-phase-10-2-tests-that-failed/) |
 | 261117-d1o | TEMPORARY: feed post video cap raised from 500 MiB / 300 s to 4 GiB / 9000 s (2 h 30) so the tenant admin can post one 2 h video at the boss's request; story, lesson, the 3 h tenant ceiling and the 1 h upload window untouched; member-video range in the platform form widens through D-474; revert recipe in the SUMMARY; 4 integration/e2e pins edited but NOT run; nothing pushed or deployed | 2026-11-17 | e4042a91 | complete | [261117-d1o-liberar-video-de-2h-como-post-do-feed-te](./quick/261117-d1o-liberar-video-de-2h-como-post-do-feed-te/) |
+| 261117-jke | Phase 12.4 WR-06: SupportInbox keeps every loaded row when a page-1 refetch lands during a load-more (loadingMoreRef; repro test red then green, 39/39 in the file; chat-view.ts untouched); phase re-verification and the CASE-16 flip not done; nothing pushed | 2026-11-17 | 2cbf0c75 | complete | [261117-jke-fix-wr-06-supportinbox-a-page-1-refetch-](./quick/261117-jke-fix-wr-06-supportinbox-a-page-1-refetch-/) |
 
 ### Roadmap Evolution
 
