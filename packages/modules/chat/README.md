@@ -31,6 +31,10 @@ Main server names (`./server`): `chatRoutes`, `sendSupportMessage`, `replyToConv
 
 - `chat.message_sent`: `tenantId`, `conversationId`, `messageId`, `seq`, `authorUserId`,
   `authorSide`. Never the body.
+- Realtime signal (not a bus event): the ids-only Broadcast signal named chat.case, published by the
+  case definers and by the auto-close sweep on the conversation, the support inbox and the member's
+  own topic. Its payload is the conversation id (plus the injected message id), never a title,
+  subject, name or body.
 
 ## Events consumed
 
@@ -70,7 +74,8 @@ grant lives in this manifest rather than in the kernel.
 ## Jobs
 
 - Jobs: none.
-- Sweep functions: none.
+- Sweep functions: `chat_cases_auto_close` (closes every support case left resolved for 7 days, hourly,
+  admin lane, silent for the member; it writes a history row with no actor).
 - `counters`: `chatCounters` contributes `unreadConversations` to `bootstrap.counters`.
 
 ## Reuse

@@ -45,7 +45,7 @@ begin;
 --    edited row per changed field, no-op edits, the closed refusal, the value bounds, the lanes and the signals.
 --
 -- Fixture ids use the `1e350000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(342);
+select plan(354);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-case-a', 'Chamado A', '1e350000-0000-4000-8000-000000000001');
@@ -1541,6 +1541,64 @@ select ok(has_function_privilege('authenticated', 'app.chat_case_edit(uuid,text,
   and not has_function_privilege('anon', 'app.chat_case_edit(uuid,text,text,text,boolean,text)', 'execute')
   and not has_function_privilege('public', 'app.chat_case_edit(uuid,text,text,text,boolean,text)', 'execute'),
   'D-845: authenticated can execute the edit definer; anon and public cannot');
+
+-- ── 12. the sweep, end to end ─────────────────────────────────────────────────────────────────
+-- Plan 04 (CASE-13, CASE-12, CASE-18, CASE-23; D-807, D-844, D-810; T-12.4-17..20). `app.chat_cases_auto_close` is the
+-- function the kernel's hourly sweeper runs: a support case left `resolved` for 7 days is closed, silently, with a history
+-- row that has no actor. The function is cross-tenant by design, so residue the local database already holds (a resolved
+-- case of an earlier integration run, older than 7 days) is moved to now() first; this file rolls back.
+update public.chat_conversations
+   set resolved_at = now()
+ where state = 'resolved' and resolved_at <= now() - interval '6 days';
+
+select tests.mkcase(61, 'resolved', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(62, 'resolved', '1e350000-0000-4000-8000-000000000401', 0);
+update public.chat_conversations set resolved_at = now() - interval '7 days' - interval '1 minute' where id = tests.cid(61);
+update public.chat_conversations set resolved_at = now() - interval '6 days 23 hours' where id = tests.cid(62);
+
+select is(app.chat_cases_auto_close(500), 1, 'D-807: one sweep closes the one case resolved 7 days and a minute ago and returns 1');
+select is(tests.row(61), 'closed|1e350000-0000-4000-8000-000000000401|false|true|0',
+  'D-807: the case is closed, closed_at set, resolved_at cleared, the owner kept');
+select is(tests.evs(61), 'closed:resolved>closed', 'D-810: exactly one closed event, from resolved to closed');
+select results_eq(
+  $$ select actor_user_id is null, target_user_id is null, message_id is null, tenant_id::text
+       from public.chat_case_events where conversation_id = tests.cid(61) and kind = 'closed' $$,
+  $$ values (true, true, true, '1e350000-0000-4000-8000-000000000007'::text) $$,
+  'D-807: the closed event has no actor, no target and no message, and sits in the case''s own tenant');
+select is(tests.row(62), 'resolved|1e350000-0000-4000-8000-000000000401|true|false|0',
+  'EP-039: a case resolved 6 days 23 hours ago is left alone');
+select is(tests.evs(62), '', 'EP-039: ... and gets no event');
+
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$ select topic from realtime.messages
+      where event = 'chat.case' and payload->>'conversationId' = tests.cid(61)::text
+      order by topic collate "C" $$,
+  $$ values ('tenant:1e350000-0000-4000-8000-000000000007:conv:' || tests.cid(61)::text),
+            ('tenant:1e350000-0000-4000-8000-000000000007:support-inbox'),
+            ('tenant:1e350000-0000-4000-8000-000000000007:user:' || tests.uid(61)::text) $$,
+  'CASE-18: the close published one chat.case signal on the conversation, one on the support inbox and one on the member''s own topic'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$ select distinct array(select jsonb_object_keys(payload) order by 1)
+       from realtime.messages
+      where event = 'chat.case' and payload->>'conversationId' = tests.cid(61)::text $$,
+  $$ values (array['conversationId', 'id']) $$,
+  'T-12.4-20: the close signal carries exactly conversationId and the injected id'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$ select count(*)::int from realtime.messages where event = 'chat.case' and payload->>'conversationId' = tests.cid(62)::text $$,
+  ARRAY[0], 'D-807: the case left alone published nothing'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+
+select ok(not has_function_privilege('authenticated', 'app.chat_cases_auto_close(int)', 'execute')
+  and not has_function_privilege('anon', 'app.chat_cases_auto_close(int)', 'execute')
+  and not has_function_privilege('public', 'app.chat_cases_auto_close(int)', 'execute'),
+  'T-12.4-18: no tenant lane, anon or public can execute the sweep');
+select ok(has_function_privilege('service_role', 'app.chat_cases_auto_close(int)', 'execute'),
+  'D-844: the admin lane (service_role) can execute the sweep');
+select ok((select p.prosecdef and p.proconfig @> array['search_path=""']
+             from pg_proc p where p.oid = 'app.chat_cases_auto_close(int)'::regprocedure),
+  'D-844: the sweep is a security definer with search_path pinned to ""');
 
 select * from finish();
 rollback;

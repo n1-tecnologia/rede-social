@@ -20,6 +20,10 @@ import { chatCounters } from './server/service';
  * permissions. `notificationSources` (D-228): `chat.message_sent` becomes a PUSH-ONLY intent to the
  * other side of the thread, delivered by the notifications module's push channel through the kernel
  * seam; chat never imports that module, and support messages never write a bell row.
+ *
+ * `sweepFunctions` (D-844, D-807): `chat_cases_auto_close` closes every support case left `resolved` for 7 days, run
+ * by the kernel's existing hourly sweeper through the admin lane (no new queue, no new job name). The 7 days live in the
+ * SQL function only, never here (D-807); the closing is silent for the member (D-808).
  */
 export const chatModule = defineModule({
   key: 'chat',
@@ -39,4 +43,5 @@ export const chatModule = defineModule({
   },
   counters: chatCounters,
   notificationSources: chatNotificationSources,
+  sweepFunctions: ['chat_cases_auto_close'],
 });
