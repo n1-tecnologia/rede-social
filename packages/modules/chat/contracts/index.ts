@@ -50,6 +50,39 @@ export type ChatCasePriority = (typeof CHAT_CASE_PRIORITIES)[number];
 /** The typed subject of a case, at most this many code points after trim (D-811). */
 export const CHAT_SUBJECT_MAX = 80;
 
+/** D-805: the four states of a support case. A closed ORDERED tuple, pinned by a contract test. */
+export const CHAT_CASE_STATES = ['open', 'in_progress', 'resolved', 'closed'] as const;
+export type ChatCaseState = (typeof CHAT_CASE_STATES)[number];
+
+/** What the server may list for a viewer of a case (UI-D-826): the UI draws exactly this list, in this order. */
+export const CHAT_CASE_ACTIONS = ['take', 'assign', 'resolve', 'close', 'reopen', 'edit'] as const;
+export type ChatCaseAction = (typeof CHAT_CASE_ACTIONS)[number];
+
+/** D-810: the kinds of a history row, equal to the CHECK of `chat_case_events.kind`. */
+export const CHAT_CASE_EVENT_KINDS = [
+  'opened',
+  'taken',
+  'assigned',
+  'resolved',
+  'closed',
+  'reopened',
+  'edited',
+] as const;
+export type ChatCaseEventKind = (typeof CHAT_CASE_EVENT_KINDS)[number];
+
+/** The fields the team may correct on a case, as an `edited` history row names them (D-812). */
+export const CHAT_CASE_EDIT_FIELDS = ['category', 'subject', 'priority'] as const;
+
+/** The member's "Meus chamados" page: 20 cards, newest first. */
+export const CHAT_MY_CASES_PAGE_SIZE = 20;
+
+/** The most cards one "Meus chamados" request may ask for. */
+export const CHAT_MAX_MY_CASES_PAGE_SIZE = 50;
+
+/** The inbox tabs (D-805): the open group, resolved and closed. */
+export const CHAT_INBOX_TABS = ['open', 'resolved', 'closed'] as const;
+export type ChatInboxTab = (typeof CHAT_INBOX_TABS)[number];
+
 /** D-225: 1..2000 code points after trim. */
 export const CHAT_MAX_BODY = 2000;
 
@@ -85,6 +118,12 @@ export const CHAT_ISSUES = [
   'member_blocked',
   'member_removed',
   'staff_has_inbox',
+  'case_stale',
+  'case_closed',
+  'transition_not_allowed',
+  'assignee_invalid',
+  'subject_too_long',
+  'case_nothing_to_edit',
 ] as const;
 export type ChatIssue = (typeof CHAT_ISSUES)[number];
 export const CHAT_ISSUE_SET: ReadonlySet<string> = new Set(CHAT_ISSUES);
@@ -208,6 +247,202 @@ export const memberThreadMetaSchema = z
   .strict();
 
 /**
+ * What every viewer of a case shares (fact 7). `id` is the conversation id (a case IS a support conversation);
+ * `subject` is the typed one (null when the member typed none) and `subjectLabel` is the server's finished fallback
+ * (the subject, else the start of the first message cut at `CHAT_SUBJECT_MAX`), so the UI never computes it.
+ */
+const caseSharedShape = {
+  id: z.uuid(),
+  number: z.int().positive(),
+  state: z.enum(CHAT_CASE_STATES),
+  subject: z.string().nullable(),
+  subjectLabel: z.string(),
+  category: z.enum(CHAT_CASE_CATEGORIES),
+  openedAt: z.string(),
+};
+
+/**
+ * A case as the MEMBER reads it (UI-D-835, T-12.4-23): the shared facts and NOTHING else. No priority, owner, history,
+ * resolve or close instant, action list or staff id: the schema is strict, so a staff-shaped payload does not parse.
+ */
+export const memberCaseSchema = z.object(caseSharedShape).strict();
+export type MemberCase = z.infer<typeof memberCaseSchema>;
+
+/**
+ * A case as the TEAM reads it: the shared facts, the priority, the owner (`ownerName` is the live display name, null
+ * for no owner or an owner who is no longer live staff, and the UI draws "Sem responsavel"), `ownerIsViewer`, the
+ * resolve and close instants and the `actions[]` the viewer may take in this state.
+ */
+export const staffCaseSchema = z
+  .object({
+    ...caseSharedShape,
+    priority: z.enum(CHAT_CASE_PRIORITIES),
+    ownerUserId: z.uuid().nullable(),
+    ownerName: z.string().nullable(),
+    ownerIsViewer: z.boolean(),
+    resolvedAt: z.string().nullable(),
+    closedAt: z.string().nullable(),
+    actions: z.array(z.enum(CHAT_CASE_ACTIONS)),
+  })
+  .strict();
+export type StaffCase = z.infer<typeof staffCaseSchema>;
+
+/**
+ * One card of "Meus chamados" (the member's own cases only): the member facts plus the one-line preview of the last
+ * message with its side (the UI prefixes "Voce" or the team) and the instant. Never a priority or an owner.
+ */
+export const caseCardSchema = z
+  .object({
+    ...caseSharedShape,
+    lastMessage: z
+      .object({ preview: z.string(), side: z.enum(CHAT_SIDES) })
+      .strict()
+      .nullable(),
+    lastMessageAt: z.string().nullable(),
+  })
+  .strict();
+export type CaseCard = z.infer<typeof caseCardSchema>;
+
+/**
+ * `GET /v1/chat/support/cases?cursor=&limit=`: the same cursor clamp and limit rule as the inbox (an over-long cursor
+ * degrades to page 1), 20 per page by default.
+ */
+export const myCasesQuerySchema = z
+  .object({
+    cursor: z
+      .string()
+      .optional()
+      .transform((value) =>
+        value !== undefined && value.length > CHAT_MAX_CURSOR_LENGTH ? undefined : value,
+      ),
+    limit: z.coerce
+      .number()
+      .int()
+      .catch(CHAT_MY_CASES_PAGE_SIZE)
+      .transform((value) => Math.min(Math.max(value, 1), CHAT_MAX_MY_CASES_PAGE_SIZE))
+      .default(CHAT_MY_CASES_PAGE_SIZE),
+  })
+  .strict();
+export type MyCasesQuery = z.infer<typeof myCasesQuerySchema>;
+
+/**
+ * "Meus chamados": `current` is the active case (null when none), `items` the closed ones newest first, `total`
+ * counts every case of the member, `nextCursor` is opaque.
+ */
+export const myCasesPageSchema = z
+  .object({
+    current: caseCardSchema.nullable(),
+    items: z.array(caseCardSchema),
+    total: z.int().min(0),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type MyCasesPage = z.infer<typeof myCasesPageSchema>;
+
+/**
+ * `POST /v1/chat/conversations/{id}/case/take|resolve|close|reopen`: the state the client read (a stale one is
+ * `case_stale`, 409) and, when it read an owner, that owner. Strict: nothing else can be written through an action.
+ */
+export const caseActionInputSchema = z
+  .object({
+    expectedState: z.enum(CHAT_CASE_STATES),
+    expectedOwnerId: z.uuid().optional(),
+  })
+  .strict();
+export type CaseActionInput = z.infer<typeof caseActionInputSchema>;
+
+/** `POST /v1/chat/conversations/{id}/case/assign` (`chat.support.assign`, D-806): an action plus the target. */
+export const caseAssignInputSchema = z
+  .object({
+    expectedState: z.enum(CHAT_CASE_STATES),
+    expectedOwnerId: z.uuid().optional(),
+    assigneeUserId: z.uuid(),
+  })
+  .strict();
+export type CaseAssignInput = z.infer<typeof caseAssignInputSchema>;
+
+/**
+ * `PATCH /v1/chat/conversations/{id}/case` (D-812): the team corrects the category, the subject or the priority.
+ * `subject: null` (or an empty one) blanks it. An edit with no field is the issue `case_nothing_to_edit`. There is
+ * no `state` and no owner key: a transition is an action, never an edit.
+ */
+export const caseEditInputSchema = z
+  .object({
+    expectedState: z.enum(CHAT_CASE_STATES),
+    category: z.enum(CHAT_CASE_CATEGORIES).optional(),
+    priority: z.enum(CHAT_CASE_PRIORITIES).optional(),
+    subject: z
+      .string()
+      .transform((value) => value.trim())
+      .superRefine((value, issue) => {
+        if (codePointLength(value) > CHAT_SUBJECT_MAX)
+          issue.addIssue({ code: 'custom', message: 'subject_too_long' });
+      })
+      .transform((value) => (value === '' ? null : value))
+      .nullable()
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (edit) =>
+      edit.category !== undefined || edit.priority !== undefined || edit.subject !== undefined,
+    { message: 'case_nothing_to_edit' },
+  );
+export type CaseEditInput = z.infer<typeof caseEditInputSchema>;
+
+/** Every case action and edit answers the fresh case, with its `actions[]`. */
+export const caseResultSchema = z.object({ case: staffCaseSchema }).strict();
+export type CaseResult = z.infer<typeof caseResultSchema>;
+
+/** One row of the append-only history (D-810). `actorName` is absent for the automatic close. */
+export const caseEventSchema = z
+  .object({
+    kind: z.enum(CHAT_CASE_EVENT_KINDS),
+    at: z.string(),
+    actorName: z.string().optional(),
+    targetName: z.string().optional(),
+    fromState: z.enum(CHAT_CASE_STATES).optional(),
+    toState: z.enum(CHAT_CASE_STATES).optional(),
+    field: z.enum(CHAT_CASE_EDIT_FIELDS).optional(),
+    from: z.string().nullable().optional(),
+    to: z.string().nullable().optional(),
+  })
+  .strict();
+export type CaseEvent = z.infer<typeof caseEventSchema>;
+
+/** An earlier case of the same member, for the details sheet (never the current one). */
+export const earlierCaseSchema = z
+  .object({
+    id: z.uuid(),
+    number: z.int().positive(),
+    state: z.enum(CHAT_CASE_STATES),
+    subjectLabel: z.string(),
+    openedAt: z.string(),
+  })
+  .strict();
+
+/** The most earlier cases the details sheet lists. */
+export const CHAT_EARLIER_CASES_MAX = 5;
+
+/** `GET /v1/chat/conversations/{id}/case/history` (staff only): the events and up to five earlier cases. */
+export const caseHistorySchema = z
+  .object({
+    events: z.array(caseEventSchema),
+    earlierCases: z.array(earlierCaseSchema).max(CHAT_EARLIER_CASES_MAX),
+    hasMoreEarlier: z.boolean(),
+  })
+  .strict();
+export type CaseHistory = z.infer<typeof caseHistorySchema>;
+
+/** `GET /v1/chat/staff`: the live team, names only (the owner filter and the assign sheet). */
+export const staffRosterSchema = z
+  .object({
+    items: z.array(z.object({ userId: z.uuid(), name: z.string() }).strict()),
+  })
+  .strict();
+export type StaffRoster = z.infer<typeof staffRosterSchema>;
+
+/**
  * `GET /v1/chat/support` (D-220). Before the member's first message there is NO conversation: the
  * answer is `{ conversation: null, messages: [], hasOlder: false }` and nothing is written.
  */
@@ -216,6 +451,9 @@ export const supportThreadSchema = z
     conversation: memberThreadMetaSchema.nullable(),
     messages: z.array(messageRowSchema),
     hasOlder: z.boolean(),
+    /** 12.4: the member's active case (null when none) and whether they ever wrote. Optional: the previous API omits them. */
+    case: memberCaseSchema.nullable().optional(),
+    hasAnyCase: z.boolean().optional(),
   })
   .strict();
 export type SupportThread = z.infer<typeof supportThreadSchema>;
@@ -225,6 +463,17 @@ export const sendResultSchema = z
   .object({
     conversationId: z.uuid(),
     message: messageRowSchema,
+    /** 12.4: which case the message landed in, and whether it opened or reopened it. Optional like every new key. */
+    case: z
+      .object({
+        id: z.uuid(),
+        number: z.int().positive(),
+        state: z.enum(CHAT_CASE_STATES),
+        opened: z.boolean(),
+        reopened: z.boolean(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type SendResult = z.infer<typeof sendResultSchema>;
@@ -264,6 +513,7 @@ export const conversationDetailSchema = z.discriminatedUnion('viewer', [
       member: conversationMemberSchema,
       lastSeq: z.int().min(0),
       staffLastReadSeq: z.int().min(0),
+      case: staffCaseSchema.optional(),
     })
     .strict(),
   z
@@ -273,6 +523,7 @@ export const conversationDetailSchema = z.discriminatedUnion('viewer', [
       lastSeq: z.int().min(0),
       lastReadSeq: z.int().min(0),
       lastStaffSeq: z.int().min(0),
+      case: memberCaseSchema.optional(),
     })
     .strict(),
 ]);
@@ -297,9 +548,34 @@ export const inboxQuerySchema = z
       .catch(CHAT_INBOX_PAGE_SIZE)
       .transform((value) => Math.min(Math.max(value, 1), CHAT_MAX_INBOX_PAGE_SIZE))
       .default(CHAT_INBOX_PAGE_SIZE),
+    /** 12.4 filters: a bad value degrades to its default, like the cursor, never to a 500. */
+    tab: z.enum(CHAT_INBOX_TABS).catch('open').default('open'),
+    owner: z
+      .union([z.enum(['me', 'none']), z.uuid()])
+      .optional()
+      .catch(undefined),
+    priority: z.enum(CHAT_CASE_PRIORITIES).optional().catch(undefined),
+    awaiting: z
+      .union([z.literal('1'), z.literal('true'), z.literal(1), z.literal(true)])
+      .transform(() => true)
+      .catch(false)
+      .default(false),
   })
   .strict();
 export type InboxQuery = z.infer<typeof inboxQuerySchema>;
+
+/** The case facts of one inbox row (staff only; the owner is a name, never an id). */
+export const inboxCaseSchema = z
+  .object({
+    number: z.int().positive(),
+    state: z.enum(CHAT_CASE_STATES),
+    subjectLabel: z.string(),
+    category: z.enum(CHAT_CASE_CATEGORIES),
+    priority: z.enum(CHAT_CASE_PRIORITIES),
+    ownerName: z.string().nullable(),
+    ownerIsViewer: z.boolean(),
+  })
+  .strict();
 
 /**
  * One inbox row. `lastMessage.preview` is ONE line (newlines as spaces) of at most
@@ -322,6 +598,8 @@ export const inboxRowSchema = z
       .nullable(),
     lastMessageAt: z.string().nullable(),
     awaiting: z.boolean(),
+    /** 12.4: the case facts the row draws. Optional: the previous API omits it. */
+    case: inboxCaseSchema.optional(),
   })
   .strict();
 export type InboxRow = z.infer<typeof inboxRowSchema>;
@@ -341,6 +619,14 @@ export const CHAT_NOTIFICATION_KINDS = {
   supportReply: 'chat.support_reply',
   /** A member message, pushed to every live staff member. */
   memberMessage: 'chat.member_message',
+  /** D-808: a case became Resolvido. The member's ONLY case notice, push plus a bell row (ids only). */
+  caseResolved: 'chat.case_resolved',
+  /** D-809: a case was assigned to a staff member, pushed to the assignee. */
+  caseAssigned: 'chat.case_assigned',
+  /** D-809: a new case opened, pushed to the team. */
+  caseNew: 'chat.case_new',
+  /** D-809: a Resolvido case came back to Aberto by a member message, pushed to the team. */
+  caseReopened: 'chat.case_reopened',
 } as const;
 
 /**
@@ -357,11 +643,31 @@ export interface ChatMessageSent {
 }
 
 /**
+ * `chat.case_resolved` (D-808): ids and an instant only. No text, no name, no subject: the renderer and the push
+ * source read what they show themselves, through the policies.
+ */
+export interface ChatCaseResolved {
+  tenantId: string;
+  conversationId: string;
+  resolvedAt: string;
+}
+
+/** `chat.case_assigned` (D-809): ids only, `assigneeUserId` is who is notified, `actorUserId` who assigned. */
+export interface ChatCaseAssigned {
+  tenantId: string;
+  conversationId: string;
+  assigneeUserId: string;
+  actorUserId: string;
+}
+
+/**
  * MOD-02: the module teaches the KERNEL's `EventMap` about its own event. Nothing goes into
  * `packages/contracts/src/events.ts`, which is the bus contract and knows no module.
  */
 declare module '@rede-social/contracts' {
   interface EventMap {
     'chat.message_sent': ChatMessageSent;
+    'chat.case_resolved': ChatCaseResolved;
+    'chat.case_assigned': ChatCaseAssigned;
   }
 }

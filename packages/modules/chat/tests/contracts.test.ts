@@ -38,6 +38,12 @@ describe('chat contracts', () => {
       'member_blocked',
       'member_removed',
       'staff_has_inbox',
+      'case_stale',
+      'case_closed',
+      'transition_not_allowed',
+      'assignee_invalid',
+      'subject_too_long',
+      'case_nothing_to_edit',
     ]);
     for (const issue of CHAT_ISSUES) expect(CHAT_ISSUE_SET.has(issue)).toBe(true);
   });
