@@ -2,7 +2,7 @@
 
 import { join } from 'node:path';
 import { REALTIME_EVENTS } from '@rede-social/contracts/realtime';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -151,6 +151,12 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
 });
+
+const hasClass = (element: Element | null | undefined, ...names: string[]) =>
+  element !== null &&
+  element !== undefined &&
+  names.every((name) => element.classList.contains(name));
+const text = (element: Element | null | undefined) => element?.textContent ?? '';
 
 afterEach(() => {
   cleanup();
@@ -396,5 +402,133 @@ describe('live: the refetch is for the current tab and filters (UI-D-830, T-12.4
     gates[1]?.(Response.json({ items: [view({ name: 'Fechado 1' })], nextCursor: null }));
     await screen.findByRole('link', { name: /Fechado 1/ });
     expect(screen.queryByRole('link', { name: /Intruso/ })).toBeNull();
+  });
+});
+
+describe('the five empty states, one per cause (UI-D-823, UI-D-832; UC S02)', () => {
+  const empty = () => document.querySelector('[data-inbox-empty]');
+
+  it('the default view says Nenhum chamado em aberto', () => {
+    renderInbox();
+    expect(text(empty())).toContain('Nenhum chamado em aberto');
+    expect(text(empty())).toContain('Quando um membro pedir ajuda, o chamado aparece aqui.');
+    expect(within(empty() as HTMLElement).queryByRole('button')).toBeNull();
+  });
+
+  it('the toggle on says Ninguém aguardando resposta, and it wins over the open-tab sentence', async () => {
+    mocks.search.current = 'aguardando=1';
+    renderInbox();
+    await waitFor(() => expect(text(empty())).toContain('Ninguém aguardando resposta'));
+    expect(text(empty())).toContain('Todos os chamados em aberto já foram respondidos.');
+    expect(text(empty())).not.toContain('Nenhum chamado em aberto');
+  });
+
+  it('Resolvidos and Fechados each have their own sentence', async () => {
+    mocks.search.current = 'aba=resolvidos';
+    const { rerender } = renderInbox();
+    await waitFor(() => expect(text(empty())).toContain('Nenhum chamado resolvido'));
+    expect(text(empty())).toContain(
+      'Os chamados marcados como resolvidos aparecem aqui até serem fechados.',
+    );
+    mocks.search.current = 'aba=fechados';
+    rerender(ui());
+    await waitFor(() => expect(text(empty())).toContain('Nenhum chamado fechado'));
+    expect(text(empty())).toContain('Os chamados fechados ficam guardados aqui.');
+  });
+
+  it('an owner or priority filter says Nenhum chamado com esses filtros with a Limpar filtros action', async () => {
+    mocks.search.current = 'aba=resolvidos&resp=eu';
+    renderInbox();
+    await waitFor(() => expect(text(empty())).toContain('Nenhum chamado com esses filtros'));
+    expect(text(empty())).toContain('Tente outro responsável ou outra prioridade.');
+    fireEvent.click(within(empty() as HTMLElement).getByRole('button', { name: 'Limpar filtros' }));
+    // The clear keeps the tab and drops owner, priority and toggle.
+    expect(mocks.replace).toHaveBeenCalledWith('/suporte?aba=resolvidos', { scroll: false });
+  });
+
+  it('filters win over the toggle: a subset is never described as "everyone answered"', async () => {
+    mocks.search.current = 'prio=alta&aguardando=1';
+    renderInbox();
+    await waitFor(() => expect(text(empty())).toContain('Nenhum chamado com esses filtros'));
+    expect(text(empty())).not.toContain('Ninguém aguardando resposta');
+  });
+
+  it('the five titles are five distinct sentences', async () => {
+    const titles = new Set<string>();
+    for (const search of ['', 'aguardando=1', 'aba=resolvidos', 'aba=fechados', 'resp=eu']) {
+      mocks.search.current = search;
+      const view = renderInbox();
+      await waitFor(() => expect(empty()).not.toBeNull());
+      titles.add(empty()?.querySelector('h2, h3, p')?.textContent ?? '');
+      view.unmount();
+    }
+    expect(titles.size).toBe(5);
+  });
+});
+
+describe('loading and error (UI-D-832; UC S04, S05)', () => {
+  it('first paint of a new view: six skeleton rows at the four-line geometry, and the controls stay', async () => {
+    mocks.search.current = 'aba=fechados';
+    const gate: Array<(response: Response) => void> = [];
+    inboxAnswer = () => new Promise<Response>((resolve) => gate.push(resolve));
+    renderInbox({ initialItems: [view({ name: 'Anterior' })] });
+    await waitFor(() => expect(gate).toHaveLength(1));
+    const rows = document.querySelectorAll('[data-inbox-skeleton-row]');
+    expect(rows).toHaveLength(6);
+    expect(hasClass(rows[0], 'items-start', 'min-h-18')).toBe(true);
+    // A circle and four bars (name, subject, preview and the meta line) plus the time bar.
+    expect(rows[0]?.querySelectorAll('[class*="rounded-full"]').length).toBeGreaterThanOrEqual(2);
+    expect(rows[0]?.querySelectorAll('[class*="h-3"]').length).toBeGreaterThanOrEqual(4);
+    // The rows of the view the staff left are not shown under the new tab.
+    expect(screen.queryByRole('link', { name: /Anterior/ })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Fechados' })).toBeTruthy();
+    gate[0]?.(Response.json({ items: [view({ name: 'Novo' })], nextCursor: null }));
+    await screen.findByRole('link', { name: /Novo/ });
+    expect(document.querySelectorAll('[data-inbox-skeleton-row]')).toHaveLength(0);
+  });
+
+  it('a plain refresh keeps the rows on screen while it reads', async () => {
+    const gate: Array<(response: Response) => void> = [];
+    inboxAnswer = () => new Promise<Response>((resolve) => gate.push(resolve));
+    renderInbox({ initialItems: [view({ name: 'Fica' })] });
+    await act(async () => {
+      realtime().onSignal(REALTIME_EVENTS.chatMessage, {});
+    });
+    await waitFor(() => expect(gate).toHaveLength(1));
+    expect(screen.getByRole('link', { name: /Fica/ })).toBeTruthy();
+    expect(document.querySelectorAll('[data-inbox-skeleton-row]')).toHaveLength(0);
+  });
+
+  it('a failed first read of a view shows the shipped card with a retry that reads again', async () => {
+    mocks.search.current = 'aba=resolvidos';
+    inboxAnswer = () => new Response(null, { status: 500 });
+    renderInbox({ initialItems: [view()] });
+    const card = await waitFor(() => {
+      const found = document.querySelector('[data-inbox-error]');
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    inboxAnswer = () => Response.json({ items: [view({ name: 'Voltou' })], nextCursor: null });
+    fireEvent.click(within(card).getByRole('button', { name: 'Tentar novamente' }));
+    await screen.findByRole('link', { name: /Voltou/ });
+    expect(document.querySelector('[data-inbox-error]')).toBeNull();
+  });
+
+  it('a failed page keeps its rows and shows the inline retry line', async () => {
+    renderInbox({ initialItems: [view({ name: 'Mantida' })], initialCursor: 'cursor-1' });
+    mocks.loadMore.mockResolvedValue({ ok: false });
+    fireEvent.click(screen.getByTestId('load-more'));
+    await waitFor(() => expect(document.querySelector('[data-inbox-page-error]')).not.toBeNull());
+    expect(text(document.querySelector('[data-inbox-page-error]'))).toContain(
+      'Não foi possível carregar mais chamados.',
+    );
+    expect(screen.getByRole('link', { name: /Mantida/ })).toBeTruthy();
+    expect(screen.queryByTestId('load-more')).toBeNull();
+  });
+
+  it('the server could not read page 1: the card, not the empty sentence', () => {
+    renderInbox({ initialError: true });
+    expect(document.querySelector('[data-inbox-error]')).not.toBeNull();
+    expect(document.querySelector('[data-inbox-empty]')).toBeNull();
   });
 });

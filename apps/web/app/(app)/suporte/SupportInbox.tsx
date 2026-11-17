@@ -32,6 +32,7 @@ import {
 } from 'react';
 import type { CaseStateGlyph, InboxCaseView, InboxRowView } from '@/lib/chat-view';
 import {
+  anyInboxFilter,
   INBOX_DEFAULTS,
   type InboxQueryState,
   inboxApiFilters,
@@ -119,6 +120,19 @@ function casePills(kase: InboxCaseView) {
       </StatusPill>
     ) : undefined,
   };
+}
+
+type EmptyCause = 'open' | 'awaiting' | 'resolved' | 'closed' | 'filtered';
+
+/**
+ * Which of the five empty sentences a view earns (UI-D-823; never one generic line for different causes): an
+ * owner or priority filter makes it "filtered" (a subset is never described as "everyone answered"), then the
+ * toggle makes it "awaiting", else the tab's own.
+ */
+function emptyCause(query: InboxQueryState): EmptyCause {
+  if (query.owner !== null || query.priority !== null) return 'filtered';
+  if (query.awaiting) return 'awaiting';
+  return query.tab === 'resolvidos' ? 'resolved' : query.tab === 'fechados' ? 'closed' : 'open';
 }
 
 /** The API query of the default view: the page the server renders is this one. */
@@ -366,12 +380,24 @@ export function SupportInbox({
       </div>
     );
   } else if (items.length === 0) {
+    const cause = emptyCause(query);
     body = (
       <EmptyState
         icon={MessageCircle}
         data-inbox-empty
-        title={t('inbox.empty.open.title')}
-        body={t('inbox.empty.open.body')}
+        data-inbox-empty-cause={cause}
+        title={t(`inbox.empty.${cause}.title`)}
+        body={t(`inbox.empty.${cause}.body`)}
+        action={
+          cause === 'filtered' && anyInboxFilter(query) ? (
+            <Button
+              variant="outline"
+              onClick={() => changeQuery({ ...INBOX_DEFAULTS, tab: query.tab })}
+            >
+              {t('inbox.filter.clear')}
+            </Button>
+          ) : undefined
+        }
       />
     );
   } else {
