@@ -2,7 +2,7 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 10
+current_plan: 8
 status: executing
 stopped_at: Completed 12.4-07-PLAN.md
 last_updated: "2026-11-17T10:15:46.348Z"
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
-Current Plan: 10
+Current Plan: 8
 Total Plans in Phase: 20
-Plan: 10 of 20
+Plan: 8 of 20
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.4 execution started
 
