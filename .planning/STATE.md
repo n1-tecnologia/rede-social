@@ -33,7 +33,7 @@ Current Plan: 22
 Total Plans in Phase: 22
 Plan: 22 of 22
 Status: Gap round (plans 21, 22) executed; one new gap WR-06 (SupportInbox load-more race) left to close
-Last activity: 2026-11-17 - Completed quick task 261117-kkx: /auth/confirm no longer consumes the mail token on GET (interstitial button POSTs it; Hotmail SafeLinks fix; not pushed or deployed)
+Last activity: 2026-11-17 - Completed quick task 261117-mvo: Mux Player bar on lessons, live replays and the media library preview (opt-in `controls` prop; feed, Reels and stories unchanged; not pushed or deployed)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -1281,6 +1281,7 @@ None yet.
 | 261117-d1o | TEMPORARY: feed post video cap raised from 500 MiB / 300 s to 4 GiB / 9000 s (2 h 30) so the tenant admin can post one 2 h video at the boss's request; story, lesson, the 3 h tenant ceiling and the 1 h upload window untouched; member-video range in the platform form widens through D-474; revert recipe in the SUMMARY; 4 integration/e2e pins edited but NOT run; nothing pushed or deployed | 2026-11-17 | e4042a91 | complete | [261117-d1o-liberar-video-de-2h-como-post-do-feed-te](./quick/261117-d1o-liberar-video-de-2h-como-post-do-feed-te/) |
 | 261117-jke | Phase 12.4 WR-06: SupportInbox keeps every loaded row when a page-1 refetch lands during a load-more (loadingMoreRef; repro test red then green, 39/39 in the file; chat-view.ts untouched); phase re-verification and the CASE-16 flip not done; nothing pushed | 2026-11-17 | 2cbf0c75 | complete | [261117-jke-fix-wr-06-supportinbox-a-page-1-refetch-](./quick/261117-jke-fix-wr-06-supportinbox-a-page-1-refetch-/) |
 | 261117-kkx | Mail-scanner-proof /auth/confirm (prod bug, tenant igor-alves, Hotmail SafeLinks burned the signup and recovery tokens): GET /auth/confirm no longer calls verifyOtp, it hands a valid-shaped link to the new /auth/continuar interstitial, whose button POSTs back; only the POST consumes the token, writes link_return and answers 303; install gate lets /auth/continuar through; web suite 409 files / 9811 tests green, typecheck, boundaries, ui-literals, guard:lanes, biome green; Playwright e2e edits (followMailLink + scanner-first cases) NOT run, check:static-routes NOT run, no live request made; nothing pushed or deployed; tasks 1 and 2 must ship together | 2026-11-17 | ba37f69b | complete | [261117-kkx-mail-scanner-proof-auth-confirm-get-show](./quick/261117-kkx-mail-scanner-proof-auth-confirm-get-show/) |
+| 261117-mvo | Mux Player bar (back/forward 10 s, speed 0.5-2x, time bar, volume, fullscreen) on lessons, live replays and the media library preview via an opt-in `controls` prop on VideoPlayer; feed, Reels and stories keep no bar; vendor labels stay in English (media-chrome pt.js needs a dependency decision); local, not pushed or deployed | 2026-11-17 | 9c1899b2 | complete | [261117-mvo-barra-de-controles-do-mux-player-voltar-](./quick/261117-mvo-barra-de-controles-do-mux-player-voltar-/) |
 
 ### Roadmap Evolution
 
