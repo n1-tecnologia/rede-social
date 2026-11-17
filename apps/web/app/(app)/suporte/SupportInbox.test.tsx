@@ -568,6 +568,75 @@ describe('WR-01 / T7: a row that left the tab leaves on the next refetch (UI-D-8
       await waitFor(() => expect(mocks.loadMore).toHaveBeenCalledTimes(2));
       expect(mocks.loadMore.mock.calls[1]?.[0]).toBe('c2');
     });
+
+    // After a successful append `pagesRef` is 2, so this is a regression pin for the WR-01 behaviour, NOT the
+    // proof that the in-flight mark is cleared (the refused and rejected cases below are).
+    it('a second refetch after the late page still drops a row that left its window and leaves the cursor (WR-01 still holds)', async () => {
+      const [r1, r2, r3] = [view({ name: 'R1' }), view({ name: 'R2' }), view({ name: 'R3' })];
+      const [r4, r5] = [view({ name: 'R4' }), view({ name: 'R5' })];
+      const fresh = view({ name: 'NEW', lastMessageAt: '2026-09-30T18:00:00.000000Z' });
+      renderInbox({ initialItems: [r1, r2, r3], initialCursor: 'c1' });
+
+      const gates: Array<(answer: unknown) => void> = [];
+      mocks.loadMore.mockImplementationOnce(() => new Promise((resolve) => gates.push(resolve)));
+      fireEvent.click(screen.getByTestId('load-more'));
+      await waitFor(() => expect(mocks.loadMore).toHaveBeenCalledTimes(1));
+
+      inboxAnswer = () => Response.json({ items: [fresh, r1, r2], nextCursor: 'cX' });
+      await signal();
+      await waitFor(() => expect(rowNames()).toContain('NEW'));
+      await act(async () => {
+        gates[0]?.({ ok: true, items: [r4, r5], nextCursor: 'c2' });
+      });
+      await waitFor(() => expect(rowNames()).toContain('R4'));
+
+      // R2 left its window; the deeper R4 and R5 stay and the cursor is left alone.
+      inboxAnswer = () => Response.json({ items: [fresh, r1, r3], nextCursor: 'cY' });
+      await signal();
+      await waitFor(() => expect(rowNames()).toEqual(['NEW', 'R1', 'R3', 'R4', 'R5']));
+
+      mocks.loadMore.mockResolvedValueOnce({ ok: true, items: [], nextCursor: null });
+      fireEvent.click(screen.getByTestId('load-more'));
+      await waitFor(() => expect(mocks.loadMore).toHaveBeenCalledTimes(2));
+      expect(mocks.loadMore.mock.calls[1]?.[0]).toBe('c2');
+    });
+
+    // The real proof that the mark is cleared: on these exits `pagesRef` stays at 1, so only a stuck mark
+    // could keep the next refetch from being the whole view.
+    it.each([
+      ['a refused page', () => Promise.resolve({ ok: false })],
+      ['a rejected call', () => Promise.reject(new Error('boom'))],
+    ])(
+      '%s clears the in-flight mark: the next refetch is the whole view again (WR-06)',
+      async (_name, answer) => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+          const [r1, r2, r3] = [view({ name: 'R1' }), view({ name: 'R2' }), view({ name: 'R3' })];
+          renderInbox({ initialItems: [r1, r2, r3], initialCursor: 'c1' });
+          mocks.loadMore.mockImplementationOnce(answer);
+          fireEvent.click(screen.getByTestId('load-more'));
+          await waitFor(() =>
+            expect(document.querySelector('[data-inbox-page-error]')).not.toBeNull(),
+          );
+
+          inboxAnswer = () => Response.json({ items: [r1, r2], nextCursor: 'c9' });
+          await signal();
+          // With the mark stuck true, R3 would be kept as a "deeper" row.
+          await waitFor(() => expect(rowNames()).toEqual(['R1', 'R2']));
+
+          // The page-error line stays (a whole answer with a cursor does not clear it) and the sentinel is
+          // disabled until it is dismissed.
+          const line = document.querySelector('[data-inbox-page-error]') as HTMLElement;
+          fireEvent.click(within(line).getByRole('button', { name: 'Tentar novamente' }));
+          mocks.loadMore.mockResolvedValueOnce({ ok: true, items: [], nextCursor: null });
+          fireEvent.click(await screen.findByTestId('load-more'));
+          await waitFor(() => expect(mocks.loadMore).toHaveBeenCalledTimes(2));
+          expect(mocks.loadMore.mock.calls[1]?.[0]).toBe('c9');
+        } finally {
+          spy.mockRestore();
+        }
+      },
+    );
   });
 });
 
