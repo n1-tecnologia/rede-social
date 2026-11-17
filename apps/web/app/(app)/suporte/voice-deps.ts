@@ -36,5 +36,6 @@ export function voiceSendDeps<R extends { ok: true }>(
       return answer.ok ? { ok: true, sent: answer } : { ok: false, error: answer.error };
     },
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now: () => Date.now(),
   };
 }

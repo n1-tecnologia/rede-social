@@ -137,5 +137,6 @@ describe('voiceSendDeps', () => {
     await vi.advanceTimersByTimeAsync(700);
     await expect(slept).resolves.toBeUndefined();
     vi.useRealTimers();
+    expect(typeof deps.now?.()).toBe('number');
   });
 });
