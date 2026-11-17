@@ -120,12 +120,29 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     });
     // D-223: `chat.support` comes from the chat manifest for BOTH staff roles (so disabling chat
     // revokes it), and members get only the right to write to the team.
+    // D-806 (12.4-05): only `admin_tenant` also holds `chat.support.assign`, the right to hand a case to a colleague.
     expect(MODULE_REGISTRY.chat?.defaultRolePermissions).toEqual({
-      admin_tenant: ['chat.support'],
+      admin_tenant: ['chat.support', 'chat.support.assign'],
       support_tenant: ['chat.support'],
       member: ['chat.support.contact'],
     });
     expect(permissionsFor('admin_tenant', new Set<ModuleKey>(['chat']))).toContain('chat.support');
+    expect(permissionsFor('admin_tenant', new Set<ModuleKey>(['chat']))).toContain(
+      'chat.support.assign',
+    );
+    expect(permissionsFor('support_tenant', new Set<ModuleKey>(['chat']))).toEqual([
+      'chat.support',
+    ]);
+    expect(permissionsFor('support_tenant', new Set<ModuleKey>(['chat']))).not.toContain(
+      'chat.support.assign',
+    );
+    expect(permissionsFor('member', new Set<ModuleKey>(['chat']))).not.toContain(
+      'chat.support.assign',
+    );
+    // With chat off the assign permission is revoked together with `chat.support` (D-223).
+    expect(permissionsFor('admin_tenant', new Set<ModuleKey>())).not.toContain(
+      'chat.support.assign',
+    );
     expect(permissionsFor('member', new Set<ModuleKey>(['chat']))).toEqual([
       'chat.support.contact',
     ]);

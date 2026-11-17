@@ -17,6 +17,16 @@ import { z } from 'zod';
  *    per-conversation `seq`; catch-up is `afterSeq`, history is `beforeSeq`.
  * 4. **A member never learns more than a staff member's FIRST NAME** (D-222): a staff row carries
  *    `author: { firstName }` and nothing else about the agent (no avatar, surname, e-mail, role or id).
+ * 5. **The member's first message may carry a category and a subject, never a priority** (D-811, D-812).
+ *    `supportSendInputSchema` is strict with exactly `body`, `category?`, `subject?`: a forged `priority`,
+ *    `state` or owner key is the plain `VALIDATION_FAILED`, not an issue code (T-12.4-21). The reply route
+ *    keeps `sendMessageInputSchema` unchanged. A subject is trimmed, an empty one is absent, and it counts
+ *    `CHAT_SUBJECT_MAX` CODE POINTS (`subject_too_long`).
+ * 6. **Existing responses only gain `.optional()` keys** (CASE-24): the new web must tolerate the previous
+ *    API between the web step and the API step. Every new REQUEST key lives on a NEW schema.
+ * 7. **What a member never receives** (UI-D-835): `memberCaseSchema` carries no priority, owner, history or
+ *    staff id; only `staffCaseSchema` does. The contracts index imports `zod` and nothing else, so it stays
+ *    client-safe (a `node:fs` leak is caught only by `next build`).
  */
 
 /** D-223: the two chat permissions, spelled once. */
@@ -25,7 +35,20 @@ export const CHAT_PERMISSIONS = {
   answer: 'chat.support',
   /** Write to the team: the member's own support thread. Members only. */
   contact: 'chat.support.contact',
+  /** Hand a support case to a colleague (D-806, CASE-08). `admin_tenant` only, granted by the chat manifest. */
+  assign: 'chat.support.assign',
 } as const;
+
+/** D-811: the subject of a case, picked by the member from this closed list of areas. */
+export const CHAT_CASE_CATEGORIES = ['check_in', 'events', 'payment', 'account', 'other'] as const;
+export type ChatCaseCategory = (typeof CHAT_CASE_CATEGORIES)[number];
+
+/** D-812: the team's priority of a case. A member neither sets nor reads it. */
+export const CHAT_CASE_PRIORITIES = ['low', 'normal', 'high'] as const;
+export type ChatCasePriority = (typeof CHAT_CASE_PRIORITIES)[number];
+
+/** The typed subject of a case, at most this many code points after trim (D-811). */
+export const CHAT_SUBJECT_MAX = 80;
 
 /** D-225: 1..2000 code points after trim. */
 export const CHAT_MAX_BODY = 2000;
@@ -82,7 +105,38 @@ export const chatBodySchema = z
     else if (length > CHAT_MAX_BODY) issue.addIssue({ code: 'custom', message: 'body_too_long' });
   });
 
-/** `POST /v1/chat/support/messages` and `POST /v1/chat/conversations/{id}/messages`. */
+/**
+ * The typed subject of a case (D-811): trimmed, an empty or whitespace-only one is ABSENT, and one over
+ * `CHAT_SUBJECT_MAX` code points is the machine message `subject_too_long` (so the route lifts it to
+ * `details.chat`).
+ */
+export const subjectInputSchema = z
+  .string()
+  .transform((value) => value.trim())
+  .superRefine((value, issue) => {
+    if (codePointLength(value) > CHAT_SUBJECT_MAX)
+      issue.addIssue({ code: 'custom', message: 'subject_too_long' });
+  })
+  .transform((value) => (value === '' ? undefined : value));
+
+/**
+ * `POST /v1/chat/support/messages` (D-811, D-812, T-12.4-21): the member's message, which may carry the
+ * category and the subject of the case it opens. Strict: `priority`, `state`, an owner and every other key
+ * are the plain `VALIDATION_FAILED`.
+ */
+export const supportSendInputSchema = z
+  .object({
+    body: chatBodySchema,
+    category: z.enum(CHAT_CASE_CATEGORIES).optional(),
+    subject: subjectInputSchema.optional(),
+  })
+  .strict();
+export type SupportSendInput = z.infer<typeof supportSendInputSchema>;
+
+/**
+ * `POST /v1/chat/conversations/{id}/messages` (the reply route, unchanged by 12.4) and, until the case routes
+ * move the member's first message to `supportSendInputSchema`, `POST /v1/chat/support/messages`.
+ */
 export const sendMessageInputSchema = z.object({ body: chatBodySchema }).strict();
 export type SendMessageInput = z.infer<typeof sendMessageInputSchema>;
 

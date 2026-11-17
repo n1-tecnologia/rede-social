@@ -16,6 +16,10 @@ import { chatCounters } from './server/service';
  * Members get `chat.support.contact` instead, the right to write to the team; staff never hold it,
  * so they are never offered a support conversation of their own.
  *
+ * **D-806: `chat.support.assign` (hand a support case to a colleague) is granted to `admin_tenant` ONLY**; the
+ * database definer spells the same role once, and the drift test compares both. The permission gates the UI and the
+ * API, never roles (D-223); with chat off it is revoked together with `chat.support`.
+ *
  * `counters` (D-237, D-238): the member's dot or the staff count, decided from the caller's composed
  * permissions. `notificationSources` (D-228): `chat.message_sent` becomes a PUSH-ONLY intent to the
  * other side of the thread, delivered by the notifications module's push channel through the kernel
@@ -37,7 +41,7 @@ export const chatModule = defineModule({
   },
   routes: () => import('./server/routes').then((m) => m.chatRoutes),
   defaultRolePermissions: {
-    admin_tenant: ['chat.support'],
+    admin_tenant: ['chat.support', 'chat.support.assign'],
     support_tenant: ['chat.support'],
     member: ['chat.support.contact'],
   },

@@ -26,8 +26,12 @@ const issuesOf = (value: unknown): string[] => {
 };
 
 describe('chat contracts', () => {
-  it('names the two permissions and the closed issue vocabulary', () => {
-    expect(CHAT_PERMISSIONS).toEqual({ answer: 'chat.support', contact: 'chat.support.contact' });
+  it('names the three permissions and the closed issue vocabulary', () => {
+    expect(CHAT_PERMISSIONS).toEqual({
+      answer: 'chat.support',
+      contact: 'chat.support.contact',
+      assign: 'chat.support.assign',
+    });
     expect(CHAT_ISSUES).toEqual([
       'body_required',
       'body_too_long',
