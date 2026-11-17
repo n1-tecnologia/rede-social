@@ -3,7 +3,7 @@
 import { Button, IconButton, StatusPill } from '@rede-social/ui';
 import { CircleCheck, CircleDot, Ellipsis, Info, Lock, UserCheck } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CaseStateGlyph, StaffCaseHeaderView } from '@/lib/chat-view';
 import { CaseActionSheet, type StaffSheetKind } from './CaseActionSheet';
 import { CaseDialogs } from './CaseDialogs';
@@ -59,6 +59,43 @@ function primaryOf(header: StaffCaseHeaderView): Primary | null {
   }
 }
 
+/**
+ * UI-D-833, A-12.4-LIVE (a planner assumption, flagged for the ledger): the one persistent, visually hidden,
+ * POLITE region of the staff bar. It speaks "Chamado #N assumido por {name}.", "... resolvido por {name}."
+ * and "... fechado por {name}." only when the change ARRIVES while the page is open: the first header of a
+ * case never speaks, a header of another case never speaks, and nothing here moves focus. The header read
+ * carries no actor of the last event, so {name} is the case's CURRENT OWNER and the sentence is skipped when
+ * the case has none (a close of an unowned case, a reopen). No assertive region exists.
+ */
+function useCaseAnnouncement(header: StaffCaseHeaderView): string {
+  const t = useTranslations('chat');
+  const [spoken, setSpoken] = useState('');
+  const before = useRef(header);
+
+  useEffect(() => {
+    const previous = before.current;
+    before.current = header;
+    if (previous === header || previous.id !== header.id) return;
+    const name = header.ownerName?.trim();
+    if (!name) return;
+    const number = String(header.number);
+    const now = header.state.state;
+    if (now !== previous.state.state) {
+      if (now === 'resolved') setSpoken(t('live.resolvedBy', { number, name }));
+      else if (now === 'closed') setSpoken(t('live.closedBy', { number, name }));
+      else if (header.ownerUserId !== previous.ownerUserId)
+        setSpoken(t('live.takenBy', { number, name }));
+    } else if (
+      header.ownerUserId !== previous.ownerUserId &&
+      (now === 'open' || now === 'in_progress')
+    ) {
+      setSpoken(t('live.takenBy', { number, name }));
+    }
+  }, [header, t]);
+
+  return spoken;
+}
+
 export interface StaffCaseBarProps {
   conversationId: string;
   /** The finished staff header (plans 11 and 20): the server's facts, drawn as they are. */
@@ -69,6 +106,11 @@ export interface StaffCaseBarProps {
   onRefresh: () => void;
   /** The rows that open another sheet (assign, edit) and the bar's own details button. */
   onOpenSheet: (kind: StaffSheetKind) => void;
+  /**
+   * Which of those sheets the pane has open. When it goes back to `null` the bar hands the focus to the
+   * control that asked for it (UI-D-833), if the sheet's own trap could not.
+   */
+  openSheet?: StaffSheetKind | null;
 }
 
 export function StaffCaseBar({
@@ -77,13 +119,36 @@ export function StaffCaseBar({
   onHeader,
   onRefresh,
   onOpenSheet,
+  openSheet = null,
 }: StaffCaseBarProps) {
   const t = useTranslations('chat');
   const [menuOpen, setMenuOpen] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
+  const detailsRef = useRef<HTMLButtonElement>(null);
   /** Which control opened the dialog, so focus goes back to it when the dialog settles. */
   const openerRef = useRef<'primary' | 'menu'>('menu');
+  /** Which control asked for the sheet the pane mounts: the bar's own details button, or the menu. */
+  const sheetOpenerRef = useRef<'details' | 'menu'>('menu');
+  const sheetWasOpen = useRef(false);
+  const announce = useCaseAnnouncement(header);
+
+  // UI-D-833: when a sheet the pane mounted closes, focus goes back to the control that opened it. The sheet's
+  // trap does it when that control is still there; the menu's row left with its sheet, so the "Mais ações"
+  // button takes the focus then (only when it was lost, never stealing it from a control the user moved to).
+  useEffect(() => {
+    const wasOpen = sheetWasOpen.current;
+    sheetWasOpen.current = openSheet !== null;
+    if (!wasOpen || openSheet !== null) return;
+    const timer = setTimeout(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && barRef.current?.contains(active)) return;
+      if (active && active !== document.body && active.closest('[aria-modal="true"]')) return;
+      const target = sheetOpenerRef.current === 'details' ? detailsRef.current : menuRef.current;
+      target?.focus({ preventScroll: true });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [openSheet]);
 
   const { pending, dialog, request, confirm, dismiss } = useCaseActions({
     conversationId,
@@ -118,9 +183,13 @@ export function StaffCaseBar({
         className="shrink-0 border-b border-border bg-bg-secondary px-4 py-2"
       >
         <button
+          ref={detailsRef}
           type="button"
           aria-label={t('staffCase.detailsLabel', { number: String(header.number) })}
-          onClick={() => onOpenSheet('details')}
+          onClick={() => {
+            sheetOpenerRef.current = 'details';
+            onOpenSheet('details');
+          }}
           className="flex min-h-11 w-full items-center gap-2 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           <span aria-hidden className="shrink-0 text-sm font-bold text-text">
@@ -181,9 +250,15 @@ export function StaffCaseBar({
           openerRef.current = 'menu';
           request(kind);
         }}
-        onOpenSheet={onOpenSheet}
+        onOpenSheet={(kind) => {
+          sheetOpenerRef.current = 'menu';
+          onOpenSheet(kind);
+        }}
       />
       <CaseDialogs dialog={dialog} onConfirm={confirm} onClose={closeDialog} />
+      <span data-case-live aria-live="polite" aria-atomic="true" className="sr-only">
+        {announce}
+      </span>
     </>
   );
 }

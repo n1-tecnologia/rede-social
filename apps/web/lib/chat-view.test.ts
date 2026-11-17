@@ -441,6 +441,27 @@ describe('12.4-11 tracer — caseStateView, caseTitle and caseHeaderView', () =>
     ]);
   });
 
+  it("3b. 12.4-19: the staff header carries the sheets' facts: category, priority, the TYPED subject and the opening instant", () => {
+    const typed = caseHeaderView(staffCase(), { viewer: 'staff', t });
+    expect(typed).toMatchObject({
+      category: 'payment',
+      priority: 'normal',
+      typedSubject: 'Cobrança duplicada',
+      openedAt: '2026-09-30T17:00:00.000000Z',
+    });
+    // A case with no typed subject keeps `null` there while `subject` is the server's fallback label.
+    const fallback = caseHeaderView(
+      staffCase({ subject: null, subjectLabel: 'Meu ingresso não chegou' }),
+      { viewer: 'staff', t },
+    );
+    expect(fallback).toMatchObject({ typedSubject: null, subject: 'Meu ingresso não chegou' });
+    // The member header never carries any of it.
+    const member = caseHeaderView(staffCase(), { viewer: 'member', t });
+    for (const key of ['category', 'priority', 'typedSubject', 'openedAt']) {
+      expect(member).not.toHaveProperty(key);
+    }
+  });
+
   it('4. the same case read by its owner says "Com você"; no owner says "Sem responsável"', () => {
     const mine = caseHeaderView(staffCase({ ownerIsViewer: true }), { viewer: 'staff', t });
     expect(mine.viewer === 'staff' && mine.meta).toBe('Pagamento · Normal · Com você');

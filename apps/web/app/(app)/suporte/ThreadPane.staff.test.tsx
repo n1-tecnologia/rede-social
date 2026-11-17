@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   sendStaff: vi.fn(),
   sendMember: vi.fn(),
   run: vi.fn(),
+  edit: vi.fn(),
   refresh: vi.fn(),
   realtime: vi.fn(),
 }));
@@ -37,6 +38,7 @@ MotionGlobalConfig.skipAnimations = true;
 vi.mock('./actions', () => ({
   sendSupportMessageAction: (...args: unknown[]) => mocks.sendMember(...args),
   runCaseActionAction: (...args: unknown[]) => mocks.run(...args),
+  editCaseAction: (...args: unknown[]) => mocks.edit(...args),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
@@ -53,6 +55,7 @@ const CASE_ID = '33333333-3333-4333-8333-333333333333';
 const OWNER_ID = '44444444-4444-4444-8444-444444444444';
 const TENANT_ID = '99999999-9999-4999-8999-999999999999';
 const HEADER_URL = `/api/chat/conversations/${CONVERSATION_ID}`;
+const HISTORY_URL = `${HEADER_URL}/case/history`;
 
 type CaseState = 'open' | 'in_progress' | 'resolved' | 'closed';
 
@@ -86,6 +89,10 @@ const staffHeader = (
   ownerUserId: null,
   ownerName: null,
   ownerIsViewer: false,
+  category: 'payment',
+  priority: 'normal',
+  typedSubject: 'Meu ingresso',
+  openedAt: '2026-11-17T14:02:00.000Z',
   ...over,
 });
 
@@ -115,6 +122,9 @@ let headerAnswer: () => Promise<Response> | Response = () =>
 
 const headerCalls = () => fetchMock.mock.calls.filter(([url]) => url === HEADER_URL).length;
 const staffCalls = () => fetchMock.mock.calls.filter(([url]) => url === '/api/chat/staff').length;
+const historyCalls = () => fetchMock.mock.calls.filter(([url]) => url === HISTORY_URL).length;
+
+const ANA_ID = '55555555-5555-4555-8555-555555555555';
 
 function renderPane(over: Partial<ThreadPaneProps> = {}) {
   const props: ThreadPaneProps = {
@@ -159,6 +169,7 @@ beforeEach(() => {
   mocks.sendStaff.mockReset();
   mocks.sendMember.mockReset();
   mocks.run.mockReset();
+  mocks.edit.mockReset();
   mocks.refresh.mockReset();
   mocks.realtime.mockReset();
   fetchMock.mockReset();
@@ -173,6 +184,17 @@ beforeEach(() => {
       });
     }
     if (String(url).endsWith('/read')) return new Response(null, { status: 204 });
+    if (String(url) === '/api/chat/staff') {
+      return Response.json({
+        items: [
+          { userId: OWNER_ID, name: 'Carla Souza' },
+          { userId: ANA_ID, name: 'Ana' },
+        ],
+      });
+    }
+    if (String(url) === HISTORY_URL) {
+      return Response.json({ events: [], earlier: [], hasMoreEarlier: false });
+    }
     return headerAnswer();
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -421,12 +443,67 @@ describe('the bar follows the case live (UI-D-830, UC S18)', () => {
     expect(headerCalls()).toBe(1);
   });
 
-  it('the rows that open another sheet only record the request here (plan 19 mounts them)', () => {
+  it('no stub attribute is left on the bar wrapper (plan 19 mounts the real sheets)', () => {
     renderPane();
     const pane = document.querySelector('[data-case-staff]')?.parentElement as HTMLElement;
-    expect(pane.getAttribute('data-staff-sheet')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Ver detalhes do chamado #42' }));
-    expect(pane.getAttribute('data-staff-sheet')).toBe('details');
+    expect(pane.hasAttribute('data-staff-sheet')).toBe(false);
+  });
+});
+
+describe('the assign sheet is mounted from the menu (12.4-19 tracer, key link onOpenSheet, UI-D-827)', () => {
+  const openMenuRow = (name: string) => {
+    fireEvent.click(screen.getByRole('button', { name: 'Mais ações' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name }));
+  };
+
+  it('a tap on "Atribuir a…" mounts the assign sheet and reads the roster on open', async () => {
+    renderPane({ initialStaffCase: mine() });
+    expect(staffCalls()).toBe(0);
+    openMenuRow('Atribuir a…');
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: 'Atribuir chamado #42' })).toBeTruthy(),
+    );
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Ana/ })).toBeTruthy());
+    expect(staffCalls()).toBe(1);
+    expect(screen.getByText('responsável hoje')).toBeTruthy();
+  });
+
+  it('assigning from the thread calls the action and the bar takes the answered header', async () => {
+    mocks.run.mockResolvedValue({
+      ok: true,
+      header: staffHeader('in_progress', {
+        meta: 'Pagamento · Normal · Com Ana',
+        ownerUserId: ANA_ID,
+        ownerName: 'Ana',
+        actions: ACTIONS.in_progress,
+      }),
+    });
+    renderPane({ initialStaffCase: mine() });
+    openMenuRow('Atribuir a…');
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Ana/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole('radio', { name: /Ana/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Atribuir' }));
+    });
+    expect(mocks.run).toHaveBeenCalledWith(CONVERSATION_ID, {
+      action: 'assign',
+      expectedState: 'in_progress',
+      assigneeUserId: ANA_ID,
+    });
+    await waitFor(() => expect(screen.getByText('Pagamento · Normal · Com Ana')).toBeTruthy());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Atribuir/ })).toBeNull());
+  });
+
+  it('a case whose actions[] omit assign draws no such row and mounts no sheet', async () => {
+    renderPane({
+      initialStaffCase: staffHeader('in_progress', { actions: ['resolve', 'close', 'edit'] }),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Mais ações' }));
+    expect(
+      within(screen.getByRole('dialog')).queryByRole('button', { name: 'Atribuir a…' }),
+    ).toBeNull();
+    expect(screen.queryByRole('dialog', { name: /Atribuir chamado/ })).toBeNull();
+    expect(staffCalls()).toBe(0);
   });
 });
 
@@ -457,7 +534,9 @@ describe('a member viewer never renders the team surfaces (checker W10, T-12.4-7
     await fire(REALTIME_EVENTS.chatCase);
     await act(async () => {});
     expect(staffCalls()).toBe(0);
+    expect(historyCalls()).toBe(0);
     expect(screen.queryByRole('button', { name: 'Mais ações' })).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('a staff-shaped answer to a member re-read is ignored', async () => {

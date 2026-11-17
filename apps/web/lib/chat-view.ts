@@ -447,6 +447,16 @@ export interface StaffCaseHeaderView extends Omit<MemberCaseHeaderView, 'viewer'
   ownerUserId: string | null;
   ownerName: string | null;
   ownerIsViewer: boolean;
+  /**
+   * The facts the edit and details sheets open on (UI-D-827, UI-D-829): the closed category and priority words
+   * (the sheets word them through the catalog), the TYPED subject (`null` when the member typed none, so the
+   * edit sheet never prefills the first-message fallback) and the opening instant as an ISO string (the
+   * details sheet words it in the tenant clock with `caseOpenedMoment`).
+   */
+  category: ChatCaseCategory;
+  priority: ChatCasePriority;
+  typedSubject: string | null;
+  openedAt: string;
 }
 
 export type CaseHeaderView = MemberCaseHeaderView | StaffCaseHeaderView;
@@ -483,6 +493,10 @@ export function caseHeaderView(
     ownerUserId: team.ownerUserId,
     ownerName: team.ownerName,
     ownerIsViewer: team.ownerIsViewer,
+    category: team.category,
+    priority: team.priority,
+    typedSubject: team.subject,
+    openedAt: team.openedAt,
   };
 }
 
@@ -686,6 +700,17 @@ function caseDayWord(iso: string, keys: ChatDayKeys, timeZone: string, t: Transl
 /** "Hoje · 14:02", "Ontem · 09:10" or "12/10 · 16:40" in the tenant zone (UI-D-829). Clock-free. */
 function caseMoment(iso: string, keys: ChatDayKeys, timeZone: string, t: Translator): string {
   return `${caseDayWord(iso, keys, timeZone, t)} · ${formatEventTime(iso, timeZone)}`;
+}
+
+/**
+ * UI-D-829: the details sheet's "Aberto em" for a case opened at `iso`, in the thread's day-label rule and the
+ * tenant clock (`Hoje · 14:02`, `Ontem · 09:10`, `12/10 · 16:40`). Clock-free: the day keys come from the host.
+ */
+export function caseOpenedMoment(
+  iso: string,
+  { keys, timeZone, t }: { keys: ChatDayKeys; timeZone: string; t: Translator },
+): string {
+  return caseMoment(iso, keys, timeZone, t);
 }
 
 /** One history row as the details sheet draws it: the finished sentence (actor in the bold part) and its time. */

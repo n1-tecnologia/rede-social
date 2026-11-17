@@ -71,6 +71,10 @@ const staffHeader = (
   ownerUserId: null,
   ownerName: null,
   ownerIsViewer: false,
+  category: 'payment',
+  priority: 'normal',
+  typedSubject: 'Meu ingresso',
+  openedAt: '2026-11-17T14:02:00.000Z',
   ...over,
 });
 

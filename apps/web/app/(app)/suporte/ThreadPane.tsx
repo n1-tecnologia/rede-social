@@ -2,7 +2,12 @@
 
 import { convTopic, REALTIME_EVENTS } from '@rede-social/contracts/realtime';
 import { TenantLogo, useRealtimeTopic } from '@rede-social/core/ui';
-import { CHAT_CASE_ACTIONS, CHAT_PAGE_SIZE } from '@rede-social/module-chat/contracts';
+import {
+  CHAT_CASE_ACTIONS,
+  CHAT_CASE_CATEGORIES,
+  CHAT_CASE_PRIORITIES,
+  CHAT_PAGE_SIZE,
+} from '@rede-social/module-chat/contracts';
 import { ChatComposer, MessageList } from '@rede-social/module-chat/ui';
 import { Button, EmptyState, useToast } from '@rede-social/ui';
 import { ArrowDown, Ban, MessageCircle } from 'lucide-react';
@@ -20,6 +25,7 @@ import {
   type MemberCaseHeaderView,
   type StaffCaseHeaderView,
 } from '@/lib/chat-view';
+import { AssignSheet } from './AssignSheet';
 import {
   type ReplyToConversationResult,
   type SendSupportMessageResult,
@@ -225,6 +231,8 @@ async function fetchCaseHeader(conversationId: string): Promise<MemberCaseHeader
 }
 
 const KNOWN_ACTIONS: readonly string[] = CHAT_CASE_ACTIONS;
+const KNOWN_CATEGORIES: readonly string[] = CHAT_CASE_CATEGORIES;
+const KNOWN_PRIORITIES: readonly string[] = CHAT_CASE_PRIORITIES;
 
 /**
  * The finished STAFF header of the conversation through the same BFF handler. Rebuilt from NAMED fields, and
@@ -251,7 +259,12 @@ async function fetchStaffCaseHeader(conversationId: string): Promise<StaffCaseHe
       typeof header.title !== 'string' ||
       typeof header.state?.state !== 'string' ||
       typeof header.meta !== 'string' ||
-      !Array.isArray(header.actions)
+      !Array.isArray(header.actions) ||
+      !header.category ||
+      !KNOWN_CATEGORIES.includes(header.category) ||
+      !header.priority ||
+      !KNOWN_PRIORITIES.includes(header.priority) ||
+      typeof header.openedAt !== 'string'
     ) {
       return null;
     }
@@ -271,6 +284,10 @@ async function fetchStaffCaseHeader(conversationId: string): Promise<StaffCaseHe
       ownerUserId: typeof header.ownerUserId === 'string' ? header.ownerUserId : null,
       ownerName: typeof header.ownerName === 'string' ? header.ownerName : null,
       ownerIsViewer: header.ownerIsViewer === true,
+      category: header.category,
+      priority: header.priority,
+      typedSubject: typeof header.typedSubject === 'string' ? header.typedSubject : null,
+      openedAt: header.openedAt,
     };
   } catch {
     return null;
@@ -324,7 +341,7 @@ export function ThreadPane({
   const [staffCase, setStaffCase] = useState<StaffCaseHeaderView | null>(
     viewer === 'staff' ? initialStaffCase : null,
   );
-  /** 12.4-15: which sheet a bar row asked for; plan 12.4-19 mounts the sheets and clears it on close. */
+  /** 12.4-15, 12.4-19: which sheet a bar row asked for; the staff pane mounts it and clears this on close. */
   const [openSheet, setOpenSheet] = useState<StaffSheetKind | null>(null);
   /** The case number to confirm on THIS client after its first send (A-UI-16); never set by a reload. */
   const [openedNumber, setOpenedNumber] = useState<number | null>(null);
@@ -354,6 +371,14 @@ export function ThreadPane({
   });
   const barRef = useRef<HTMLDivElement>(null);
   useBarHeightAnchor(barRef, scrollerRef);
+
+  const closeSheet = useCallback(() => setOpenSheet(null), []);
+
+  // A sheet whose verb the server no longer lists (the case moved on) must not pop open when it is listed again.
+  useEffect(() => {
+    if (openSheet === null || openSheet === 'details') return;
+    if (!staffCase?.actions.includes(openSheet)) setOpenSheet(null);
+  }, [openSheet, staffCase]);
 
   const nearBottom = useCallback(() => {
     const el = scrollerRef.current;
@@ -676,15 +701,30 @@ export function ThreadPane({
           <CaseBar header={caseView} hasAnyCase={hasAnyCase} />
         </div>
       ) : staffCase && conversationId ? (
-        <div ref={barRef} className="shrink-0" data-staff-sheet={openSheet ?? undefined}>
+        <div ref={barRef} className="shrink-0">
           <StaffCaseBar
             conversationId={conversationId}
             header={staffCase}
             onHeader={setStaffCase}
             onRefresh={() => void refreshCase()}
             onOpenSheet={setOpenSheet}
+            openSheet={openSheet}
           />
         </div>
+      ) : null}
+      {viewer === 'staff' && staffCase && conversationId ? (
+        <>
+          {staffCase.actions.includes('assign') ? (
+            <AssignSheet
+              open={openSheet === 'assign'}
+              onClose={closeSheet}
+              conversationId={conversationId}
+              header={staffCase}
+              onHeader={setStaffCase}
+              onStale={() => void refreshCase()}
+            />
+          ) : null}
+        </>
       ) : null}
       <div
         ref={scrollerRef}
