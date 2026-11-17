@@ -135,7 +135,11 @@ export const MEDIA_LIMITS: Record<MediaKind, Partial<Record<MediaPurpose, MediaL
     story: { mimes: IMAGE_MIMES, maxBytes: 15 * 1024 * 1024 },
   },
   video: {
-    post: { mimes: VIDEO_MIMES, maxBytes: 500 * 1024 * 1024, maxDurationSeconds: 300 },
+    // TEMPORARY (quick 261117-d1o): the boss asked for ONE 2 h video posted by the tenant admin.
+    // Old values: 500 MiB and 300 s. Revert = put them back and flip the explicit post pin in
+    // packages/contracts/tests/media.test.ts. The member-video range in the platform social form
+    // follows this entry through D-474.
+    post: { mimes: VIDEO_MIMES, maxBytes: 4 * 1024 * 1024 * 1024, maxDurationSeconds: 9000 },
     story: { mimes: VIDEO_MIMES, maxBytes: 500 * 1024 * 1024, maxDurationSeconds: 60 },
     // 08.3 (D-409, COURSE-12; RESEARCH A1): a long-form lecture, 4 GiB and 4 hours. Same mimes as a
     // post video; the ready-event job compares the provider's duration against this cap. The

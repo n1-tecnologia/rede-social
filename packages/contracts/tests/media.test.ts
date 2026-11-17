@@ -30,13 +30,20 @@ describe('media contract: the lesson purpose (08.3-01)', () => {
     expect(PURPOSE_WIDTHS.lesson).toEqual([]);
   });
 
-  it('video/lesson is 4 GiB and 14 400 s; the post caps are untouched', () => {
+  it('video/lesson is 4 GiB and 14 400 s', () => {
     const lesson = MEDIA_LIMITS.video.lesson;
     expect(lesson?.maxBytes).toBe(4 * 1024 * 1024 * 1024);
     expect(lesson?.maxDurationSeconds).toBe(14_400);
     expect(lesson?.mimes).toEqual(['video/mp4', 'video/quicktime']);
-    expect(MEDIA_LIMITS.video.post?.maxDurationSeconds).toBe(300);
-    expect(MEDIA_LIMITS.video.post?.maxBytes).toBe(500 * 1024 * 1024);
+  });
+
+  it('TEMPORARY raise (quick 261117-d1o): video/post is 4 GiB and 9000 s; story and lesson did not move', () => {
+    // TEMPORARY pin: flip it back to 500 MiB and 300 s together with the constant in media.ts.
+    expect(MEDIA_LIMITS.video.post?.maxBytes).toBe(4 * 1024 ** 3);
+    expect(MEDIA_LIMITS.video.post?.maxDurationSeconds).toBe(9000);
+    expect(MEDIA_LIMITS.video.story?.maxBytes).toBe(500 * 1024 * 1024);
+    expect(MEDIA_LIMITS.video.story?.maxDurationSeconds).toBe(60);
+    expect(MEDIA_LIMITS.video.lesson?.maxDurationSeconds).toBe(14_400);
   });
 
   it('no image.lesson or file.lesson pair exists (covers use cover, materials use attachment)', () => {

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SaveSocialLimitsResult } from '@/app/(platform)/plataforma/tenants/[id]/modulos/actions';
+import { SOCIAL_LIMIT_RANGES } from '@/lib/social-limits';
 
 /**
  * 09-12 (UI-D-505 c, D-474, T-09-39) - the limits sheet of the `social` row.
@@ -174,11 +175,15 @@ describe('09-12 - SocialLimitsSheet: validation', () => {
     open();
     fireEvent.click(videoSwitch());
     typeInto(labels.fields.videoSeconds, '0');
-    typeInto(labels.fields.videoMb, '501');
+    typeInto(labels.fields.videoMb, String(SOCIAL_LIMIT_RANGES.videoMb.max + 1));
     save();
 
-    expect(screen.getByText('Informe um valor entre 1 e 300.')).toBeTruthy();
-    expect(screen.getByText('Informe um valor entre 1 e 500.')).toBeTruthy();
+    expect(
+      screen.getByText(`Informe um valor entre 1 e ${SOCIAL_LIMIT_RANGES.videoSeconds.max}.`),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(`Informe um valor entre 1 e ${SOCIAL_LIMIT_RANGES.videoMb.max}.`),
+    ).toBeTruthy();
     expect(field(labels.fields.videoSeconds).getAttribute('aria-invalid')).toBe('true');
     expect(field(labels.fields.photos).getAttribute('aria-invalid')).toBeNull();
     expect(action).not.toHaveBeenCalled();

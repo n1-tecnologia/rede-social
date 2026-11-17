@@ -1,3 +1,4 @@
+import { MEDIA_LIMITS } from '@rede-social/contracts/media';
 import { memberProfileSchema } from '@rede-social/contracts/profiles';
 import { describe, expect, it } from 'vitest';
 import {
@@ -214,8 +215,9 @@ describe('socialSettingsSchema (D-474)', () => {
 
   it('pins the caps to the admin limits, so a tenant can narrow but never widen', () => {
     expect(SOCIAL_MAX_PHOTO_BYTES).toBe(15 * MIB);
-    expect(SOCIAL_MAX_VIDEO_BYTES).toBe(500 * MIB);
-    expect(SOCIAL_MAX_VIDEO_SECONDS).toBe(300);
+    // The video numbers follow the TEMPORARY post raise (quick 261117-d1o) through D-474.
+    expect(SOCIAL_MAX_VIDEO_BYTES).toBe(MEDIA_LIMITS.video.post?.maxBytes);
+    expect(SOCIAL_MAX_VIDEO_SECONDS).toBe(MEDIA_LIMITS.video.post?.maxDurationSeconds);
     expect(SOCIAL_MAX_PHOTOS_PER_POST).toBe(10);
   });
 
@@ -239,8 +241,8 @@ describe('socialSettingsSchema (D-474)', () => {
     expect(ok({ photosPerPost: 10 })).toBe(true);
     expect(ok({ photosPerPost: 11 })).toBe(false);
     expect(ok({ photosPerPost: 0 })).toBe(false);
-    expect(ok({ video: { maxDurationSeconds: 300 } })).toBe(true);
-    expect(ok({ video: { maxDurationSeconds: 301 } })).toBe(false);
+    expect(ok({ video: { maxDurationSeconds: SOCIAL_MAX_VIDEO_SECONDS } })).toBe(true);
+    expect(ok({ video: { maxDurationSeconds: SOCIAL_MAX_VIDEO_SECONDS + 1 } })).toBe(false);
     expect(ok({ video: { maxBytes: SOCIAL_MAX_VIDEO_BYTES } })).toBe(true);
     expect(ok({ video: { maxBytes: SOCIAL_MAX_VIDEO_BYTES + 1 } })).toBe(false);
   });

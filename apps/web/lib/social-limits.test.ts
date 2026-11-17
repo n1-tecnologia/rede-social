@@ -36,12 +36,12 @@ const defaults: SocialLimitsForm = {
 };
 
 describe('SOCIAL_LIMIT_RANGES', () => {
-  it('are the contract caps: 10 photos, 15 MB, 300 s, 500 MB, each from 1', () => {
+  it('are the contract caps: 10 photos, 15 MB, the admin post video bounds, each from 1', () => {
     expect(SOCIAL_LIMIT_RANGES).toEqual({
       photos: { min: 1, max: 10 },
       photoMb: { min: 1, max: 15 },
-      videoSeconds: { min: 1, max: 300 },
-      videoMb: { min: 1, max: 500 },
+      videoSeconds: { min: 1, max: SOCIAL_MAX_VIDEO_SECONDS },
+      videoMb: { min: 1, max: Math.floor(SOCIAL_MAX_VIDEO_BYTES / MIB) },
       maxPerMember: { min: 0, max: 20 },
     });
   });
@@ -107,8 +107,8 @@ describe('socialLimitsToPatch', () => {
       photos: 10,
       photoMb: 15,
       videoEnabled: true,
-      videoSeconds: 300,
-      videoMb: 500,
+      videoSeconds: SOCIAL_LIMIT_RANGES.videoSeconds.max,
+      videoMb: SOCIAL_LIMIT_RANGES.videoMb.max,
       maxPerMember: 20,
     };
     expect(socialSettingsPatchSchema.safeParse(socialLimitsToPatch(low)).success).toBe(true);
@@ -187,8 +187,8 @@ describe('validateSocialLimits', () => {
         photos: 10,
         photoMb: 15,
         videoEnabled: true,
-        videoSeconds: 300,
-        videoMb: 500,
+        videoSeconds: SOCIAL_LIMIT_RANGES.videoSeconds.max,
+        videoMb: SOCIAL_LIMIT_RANGES.videoMb.max,
         maxPerMember: 20,
       }),
     ).toEqual({});
@@ -197,8 +197,18 @@ describe('validateSocialLimits', () => {
   it.each([
     ['photos', 0, 11, { min: 1, max: 10 }],
     ['photoMb', 0, 16, { min: 1, max: 15 }],
-    ['videoSeconds', 0, 301, { min: 1, max: 300 }],
-    ['videoMb', 0, 501, { min: 1, max: 500 }],
+    [
+      'videoSeconds',
+      0,
+      SOCIAL_LIMIT_RANGES.videoSeconds.max + 1,
+      { min: 1, max: SOCIAL_LIMIT_RANGES.videoSeconds.max },
+    ],
+    [
+      'videoMb',
+      0,
+      SOCIAL_LIMIT_RANGES.videoMb.max + 1,
+      { min: 1, max: SOCIAL_LIMIT_RANGES.videoMb.max },
+    ],
     ['maxPerMember', -1, 21, { min: 0, max: 20 }],
   ] as const)(
     '%s: one step below the minimum and one above the maximum are reported with the bounds',
@@ -238,7 +248,10 @@ describe('validateSocialLimits', () => {
         videoMb: 100,
         maxPerMember: 3,
       }),
-    ).toEqual({ photos: { min: 1, max: 10 }, videoSeconds: { min: 1, max: 300 } });
+    ).toEqual({
+      photos: { min: 1, max: 10 },
+      videoSeconds: { min: 1, max: SOCIAL_LIMIT_RANGES.videoSeconds.max },
+    });
   });
 
   it('validates the community limit whatever the video switch says: 0 is valid, 3.5 and NaN are not', () => {
