@@ -76,7 +76,9 @@ const AUDIO_SIGNATURES: Record<string, { offset: number; magic: Buffer }> = {
  * empty buffer and any unlisted mime are all `format_mismatch`.
  */
 export function inspectAudioSignature(buf: Buffer, declaredMime: string): void {
-  const signature = AUDIO_SIGNATURES[declaredMime];
+  const signature = Object.hasOwn(AUDIO_SIGNATURES, declaredMime)
+    ? AUDIO_SIGNATURES[declaredMime]
+    : undefined;
   if (!signature) throw new MediaImageError('format_mismatch');
   const end = signature.offset + signature.magic.length;
   if (buf.length < end || !buf.subarray(signature.offset, end).equals(signature.magic)) {
@@ -134,7 +136,7 @@ export async function inspectFile(buf: Buffer, declaredMime: string): Promise<vo
     await inspectMediaImage(buf, declaredMime);
     return;
   }
-  if (declaredMime in AUDIO_SIGNATURES) {
+  if (Object.hasOwn(AUDIO_SIGNATURES, declaredMime)) {
     inspectAudioSignature(buf, declaredMime);
     return;
   }
