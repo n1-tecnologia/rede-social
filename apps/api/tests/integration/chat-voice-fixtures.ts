@@ -35,12 +35,17 @@ function mimeOf(name: string): string {
   return mime;
 }
 
-const media = (path: string, token: string, init: { method: string; body?: unknown }) =>
+const media = (
+  path: string,
+  token: string,
+  init: { method: string; body?: unknown },
+  host: string,
+) =>
   api.request(`/v1/media${path}`, {
     method: init.method,
     headers: {
       authorization: `Bearer ${token}`,
-      'x-tenant-host': HOSTS.demo,
+      'x-tenant-host': host,
       ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}),
     },
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
@@ -50,13 +55,19 @@ const media = (path: string, token: string, init: { method: string; body?: unkno
  * Start, PUT and complete one recording and STOP there: the row is `processing` and the derive job is queued
  * but not run. The asset a "not ready" test needs.
  */
-export async function processingVoiceAsset(token: string, name: string): Promise<string> {
+export async function processingVoiceAsset(
+  token: string,
+  name: string,
+  host: string = HOSTS.demo,
+): Promise<string> {
   const bytes = voiceFixtureBytes(name);
   const mime = mimeOf(name);
-  const start = await media('/uploads', token, {
-    method: 'POST',
-    body: { kind: 'audio', purpose: 'voice', mime, size: bytes.length },
-  });
+  const start = await media(
+    '/uploads',
+    token,
+    { method: 'POST', body: { kind: 'audio', purpose: 'voice', mime, size: bytes.length } },
+    host,
+  );
   const startBody = (await start.json()) as { assetId?: string; signedUrl?: string };
   if (start.status !== 201 || !startBody.assetId || !startBody.signedUrl) {
     throw new Error(`voice upload start failed: ${start.status} ${JSON.stringify(startBody)}`);
@@ -68,7 +79,12 @@ export async function processingVoiceAsset(token: string, name: string): Promise
     headers: { 'content-type': mime, 'x-upsert': 'false' },
   });
   if (!put.ok) throw new Error(`voice PUT failed: ${put.status}`);
-  const complete = await media(`/uploads/${startBody.assetId}/complete`, token, { method: 'POST' });
+  const complete = await media(
+    `/uploads/${startBody.assetId}/complete`,
+    token,
+    { method: 'POST' },
+    host,
+  );
   if (complete.status !== 200) throw new Error(`voice complete failed: ${complete.status}`);
   return startBody.assetId;
 }
@@ -82,8 +98,12 @@ export async function deriveVoiceAsset(assetId: string): Promise<void> {
 }
 
 /** The whole upload: the asset id once it is `ready` (mono AAC audio/mp4 with a measured duration). */
-export async function readyVoiceAsset(token: string, name: string): Promise<string> {
-  const assetId = await processingVoiceAsset(token, name);
+export async function readyVoiceAsset(
+  token: string,
+  name: string,
+  host: string = HOSTS.demo,
+): Promise<string> {
+  const assetId = await processingVoiceAsset(token, name, host);
   await deriveVoiceAsset(assetId);
   const [row] = await adminSql<{ status: string }[]>`
     select status from public.media_assets where id = ${assetId}::uuid`;
