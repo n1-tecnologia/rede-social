@@ -2155,6 +2155,103 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("chat voice: tenant B's member cannot send tenant A's recording (the same voice_invalid as an unknown id), nothing is created, tenant A's own member sends it, and the wrong host is refused (12.5-05, VOICE-34, T-12.5-15)", async () => {
+    // `POST /v1/chat/support/voice-messages`. rede-lab has `chat` OFF in the seed, so it is turned on here and restored
+    // in `finally`. The recordings are written directly in the `seedVideo` shape: what matters is what the route does
+    // with an id from the other tenant, not how a take becomes ready (plan 02 proves that end to end).
+    const asHost = (token: string, host: string, mediaId: string) =>
+      api.request('/v1/chat/support/voice-messages', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          [TENANT_HOST_HEADER]: host,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ mediaId }),
+      });
+    const readyTake = async (tenantId: string, ownerId: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.media_assets
+          (tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds, ready_at)
+        values (${tenantId}::uuid, ${ownerId}::uuid, 'audio', 'voice', 'ready', 'audio/mp4', 1000, 2, now())
+        returning id::text as id`;
+      if (!row) throw new Error('could not seed a voice take');
+      return row.id;
+    };
+    const bodyOf = async (res: Response) => {
+      const { error } = (await res.json()) as Envelope & { error: { requestId?: string } };
+      const { requestId: _requestId, ...rest } = error;
+      return rest;
+    };
+    const [labUser] = await adminSql<{ id: string }[]>`
+      select id::text as id from auth.users where email = 'member@rede-lab.local'`;
+    const labUserId = labUser?.id ?? '';
+    const [labFlag] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+    const demoEmail = `voiceiso-${RUN}@rede-demo.local`;
+    let demoTake = '';
+    let labTake = '';
+    let demoOwnerId = '';
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'chat', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(tenantIds.lab);
+      const demoToken = await throwawayMember(tenantIds.demo, demoEmail);
+      demoOwnerId = throwawayUsers[throwawayUsers.length - 1] ?? '';
+      demoTake = await readyTake(tenantIds.demo, demoOwnerId);
+      labTake = await readyTake(tenantIds.lab, labUserId);
+      const unknown = '7d4d70f2-82b2-4b4c-9f5e-5d5f7d2e3c33';
+
+      // Negative: tenant B's member names tenant A's ready recording, and an unknown id for comparison.
+      const foreign = await asHost(tokens.labMember, HOSTS.lab, demoTake);
+      const random = await asHost(tokens.labMember, HOSTS.lab, unknown);
+      expect(foreign.status).toBe(400);
+      expect(random.status).toBe(400);
+      expect(await bodyOf(foreign)).toEqual(await bodyOf(random));
+      // And the other way round: tenant A's member names tenant B's recording.
+      const reverse = await asHost(demoToken, HOSTS.demo, labTake);
+      expect(reverse.status).toBe(400);
+      expect(((await reverse.json()) as Envelope).error.details).toEqual({ chat: 'voice_invalid' });
+      const [created] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.chat_conversations
+         where created_by_user_id in (${labUserId}::uuid, ${demoOwnerId}::uuid)`;
+      expect(created?.n).toBe(0);
+
+      // The wrong host: tenant A's session on tenant B's host is refused before the route.
+      const wrongHost = await asHost(demoToken, HOSTS.lab, demoTake);
+      expect(wrongHost.status).toBe(403);
+      expect(await code(wrongHost)).toBe('TENANT_HOST_MISMATCH');
+
+      // Positive controls beside every negative: each member sends THEIR OWN recording on THEIR OWN host.
+      const own = await asHost(demoToken, HOSTS.demo, demoTake);
+      expect(own.status).toBe(201);
+      const ownBody = (await own.json()) as { message: { voice?: { mediaId: string } } };
+      expect(ownBody.message.voice?.mediaId).toBe(demoTake);
+      const labOwn = await asHost(tokens.labMember, HOSTS.lab, labTake);
+      expect(labOwn.status).toBe(201);
+    } finally {
+      await adminSql`
+        delete from public.chat_conversations
+         where created_by_user_id in (${labUserId}::uuid, ${demoOwnerId || labUserId}::uuid)`;
+      for (const id of [demoTake, labTake]) {
+        if (id) await adminSql`delete from public.media_assets where id = ${id}::uuid`;
+      }
+      if (labFlag) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${labFlag.enabled}
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+      }
+      moduleFlags.invalidate(tenantIds.lab);
+    }
+  });
+
   it('phase 7 sweep: every Phase 7 route answers a demo session about its own tenant only, each block beside its positive control (07-11, TENANT-05)', async () => {
     // The route inventory this case closes (07-11). "b10/b11/b12" = already covered by that case;
     // "sweep" = asserted below. Every negative sits beside a demo positive control in this test, and

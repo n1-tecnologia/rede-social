@@ -48,7 +48,11 @@ describe('chat contracts', () => {
       'assignee_invalid',
       'subject_too_long',
       'case_nothing_to_edit',
+      // 12.5 (D-862): appended last, the list only ever grows at the end.
+      'voice_not_ready',
+      'voice_invalid',
     ]);
+    expect(CHAT_ISSUES).toHaveLength(13);
     for (const issue of CHAT_ISSUES) expect(CHAT_ISSUE_SET.has(issue)).toBe(true);
   });
 

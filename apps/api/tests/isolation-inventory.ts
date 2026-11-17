@@ -305,6 +305,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/chat/support': { case: 'phase 7 sweep' },
   'GET /v1/chat/support/cases': { case: 'chat cases' },
   'POST /v1/chat/support/messages': { case: 'phase 7 sweep' },
+  // 12.5-05: the member's voice send; one case proves it (tenant B's member on tenant A's recording is the same
+  // `voice_invalid` as an unknown id, beside both positive controls, plus the wrong-host 403).
+  'POST /v1/chat/support/voice-messages': { case: 'chat voice' },
   'GET /v1/chat/conversations/:conversationId/messages': { case: 'b12' },
   'POST /v1/chat/conversations/:conversationId/messages': { case: 'phase 7 sweep' },
   'GET /v1/chat/conversations/:conversationId': { case: 'phase 7 sweep' },
