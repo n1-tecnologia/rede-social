@@ -42,8 +42,8 @@ owner is refused), `memberCaseSchema` (no priority, owner or history), `staffCas
 All three come from this manifest, so turning chat off revokes them.
 
 Main server names (`./server`): `chatRoutes`, `sendSupportMessage`, `replyToConversation`,
-`getSupportThread`, `getConversation`, `getMyCases`, `memberCaseOf`, `subjectLabelOf`,
-`listMessages`, `listInbox`, `markConversationRead`, `isStaff`, `chatCounters`,
+`getSupportThread`, `getConversation`, `getMyCases`, `memberCaseOf`, `staffCaseOf`, `actionsFor`,
+`getCaseHistory`, `getStaffRoster`, `subjectLabelOf`, `listMessages`, `listInbox`, `markConversationRead`, `isStaff`, `chatCounters`,
 `chatNotificationSources`.
 
 ## Events emitted

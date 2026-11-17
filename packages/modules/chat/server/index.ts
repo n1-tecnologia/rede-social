@@ -2,7 +2,15 @@
  * `@rede-social/module-chat/server` — everything the API tier may touch. The app imports THIS,
  * never a file path inside the package (the `exports` map has no `./server/*`).
  */
-export { getMyCases, memberCaseOf, subjectLabelOf } from './cases';
+export {
+  actionsFor,
+  getCaseHistory,
+  getMyCases,
+  getStaffRoster,
+  memberCaseOf,
+  staffCaseOf,
+  subjectLabelOf,
+} from './cases';
 export { firstNameOf } from './first-name';
 export {
   CHAT_PUSH_BODY_MAX,
