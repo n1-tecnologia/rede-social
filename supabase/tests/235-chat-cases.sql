@@ -25,8 +25,12 @@ begin;
 -- 5. LEGACY ROWS (plan 01, B1, T-12.4-85): a support conversation whose case columns are all null still takes a member
 --    message and a staff reply, moves its counters as before and writes no event.
 --
+-- 6. LEGACY BACKFILL AND THE SWAP (plan 02, CASE-03, CASE-04, CASE-21, D-802, D-814, D-838): `app.chat_cases_backfill`
+--    on legacy-shaped rows, then the support-state constraint added NOT VALID and validated, then the active-case
+--    index that replaces the one-per-member one.
+--
 -- Fixture ids use the `1e350000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(98);
+select plan(137);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-case-a', 'Chamado A', '1e350000-0000-4000-8000-000000000001');
@@ -60,6 +64,12 @@ select tests.member('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-
 select tests.member('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000d7');
 select tests.member('1e350000-0000-4000-8000-000000000001', '1e350000-0000-4000-8000-0000000000d8');
 
+
+-- Plan 02: the activation migration added `chat_conversations_support_state_chk` (a support row has a state). Sections 1
+-- to 5 are plan 01's proofs, written for a world where a legacy support row (every case column null) is storable, so the
+-- constraint is dropped for them (DDL is transactional and this file rolls back); section 6 re-adds it, NOT VALID then
+-- validated, exactly as the activation file does, and proves it.
+alter table public.chat_conversations drop constraint if exists chat_conversations_support_state_chk;
 
 -- ── 1. the path ────────────────────────────────────────────────────────────────────────────────
 -- A fresh tenant has no counter row and no event (EP-001, EP-003): the counter appears at the first case.
@@ -374,13 +384,14 @@ select is(
   0, 'EP-001/EP-003: a tenant with no support conversation has no counter row and no event row');
 select set_config('tests.a_counter', (select last_number::text from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000001'), true);
 
--- EP-008: the same insert twice with `on conflict do nothing` (the shape of the shipped API) moves the counter ONCE.
+-- EP-008: the same insert twice with `on conflict do nothing` (the shape of the API since plan 02: the arbiter repeats the
+-- active-case index predicate) moves the counter ONCE.
 insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
 values ('1e350000-0000-4000-8000-0000000000c4', '1e350000-0000-4000-8000-000000000003', 'support', '1e350000-0000-4000-8000-0000000000e1')
-on conflict (tenant_id, created_by_user_id) where kind = 'support' do nothing;
+on conflict (tenant_id, created_by_user_id) where kind = 'support' and state in ('open','in_progress','resolved') do nothing;
 insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
 values ('1e350000-0000-4000-8000-0000000000c5', '1e350000-0000-4000-8000-000000000003', 'support', '1e350000-0000-4000-8000-0000000000e1')
-on conflict (tenant_id, created_by_user_id) where kind = 'support' do nothing;
+on conflict (tenant_id, created_by_user_id) where kind = 'support' and state in ('open','in_progress','resolved') do nothing;
 select is(
   (select last_number from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000003'),
   1, 'EP-008: a retried insert that conflicts burns no number (the counter moved once, by equality)');
@@ -591,6 +602,228 @@ select results_eq(
 select is(
   (select count(*)::int from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-0000000000c9'),
   1, 'B1: no new event row was written by the legacy messages');
+
+-- ── 6. legacy backfill and the swap ────────────────────────────────────────────────────────────
+-- Plan 02 (CASE-03, CASE-04, CASE-21; D-802, D-814, D-838; EP-010, EP-012, EP-013, EP-066..EP-071; T-12.4-09,
+-- T-12.4-10). Legacy-shaped rows are built INSIDE this rolled-back transaction, in this order: the support-state
+-- constraint is dropped (the activation migration already added it, and DDL is transactional), the support
+-- conversations are inserted as the table owner (the defaults and numbering triggers fire), every case column is nulled
+-- FIRST, the events those inserts wrote are deleted (so the backfill is the only writer of events below), and only THEN
+-- the messages go in (a legacy row has a null state, so the message trigger takes the counters-only branch).
+alter table public.chat_conversations drop constraint if exists chat_conversations_support_state_chk;
+select tests.tenant('pgtap-case-d', 'Chamado D', '1e350000-0000-4000-8000-000000000004');
+select tests.tenant('pgtap-case-e', 'Chamado E', '1e350000-0000-4000-8000-000000000005');
+select tests.auth_user('f3@case-d.local', '1e350000-0000-4000-8000-0000000000f3');
+select tests.auth_user('f4@case-d.local', '1e350000-0000-4000-8000-0000000000f4');
+select tests.auth_user('f5@case-d.local', '1e350000-0000-4000-8000-0000000000f5');
+select tests.auth_user('f6@case-d.local', '1e350000-0000-4000-8000-0000000000f6');
+select tests.auth_user('f7@case-d.local', '1e350000-0000-4000-8000-0000000000f7');
+select tests.auth_user('f8@case-d.local', '1e350000-0000-4000-8000-0000000000f8');
+select tests.auth_user('f9@case-d.local', '1e350000-0000-4000-8000-0000000000f9');
+select tests.auth_user('fa@case-e.local', '1e350000-0000-4000-8000-0000000000fa');
+
+-- Inserted in REVERSE order so insertion order is not the answer. L3 has no message at all (EP-066).
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id, created_at) values
+  ('1e350000-0000-4000-8000-000000000106', '1e350000-0000-4000-8000-000000000004', 'support', '1e350000-0000-4000-8000-0000000000f8', '2025-12-31 09:00+00'),
+  ('1e350000-0000-4000-8000-000000000105', '1e350000-0000-4000-8000-000000000004', 'support', '1e350000-0000-4000-8000-0000000000f7', '2025-12-31 09:00+00'),
+  ('1e350000-0000-4000-8000-000000000104', '1e350000-0000-4000-8000-000000000004', 'support', '1e350000-0000-4000-8000-0000000000f6', '2025-12-31 09:00+00'),
+  ('1e350000-0000-4000-8000-000000000103', '1e350000-0000-4000-8000-000000000004', 'support', '1e350000-0000-4000-8000-0000000000f5', '2026-01-02 12:00+00'),
+  ('1e350000-0000-4000-8000-000000000102', '1e350000-0000-4000-8000-000000000004', 'support', '1e350000-0000-4000-8000-0000000000f4', '2025-12-31 09:00+00'),
+  ('1e350000-0000-4000-8000-000000000101', '1e350000-0000-4000-8000-000000000004', 'support', '1e350000-0000-4000-8000-0000000000f3', '2025-12-31 09:00+00');
+update public.chat_conversations
+   set state = null, case_number = null, priority = null, category = null
+ where tenant_id = '1e350000-0000-4000-8000-000000000004';
+delete from public.chat_case_events where tenant_id = '1e350000-0000-4000-8000-000000000004';
+-- L2 closed (member, staff), L5 closed (member, staff), L6 closed (member last but read), L1 open (member, staff, member),
+-- L4 open (member only). L5 and L6 share ONE first-message instant (EP-067); the lower id must come first.
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body, created_at) values
+  ('1e350000-0000-4000-8000-000000000004', '1e350000-0000-4000-8000-000000000102', '1e350000-0000-4000-8000-0000000000f4', 'member', 'L2 a', '2026-01-01 10:00+00'),
+  ('1e350000-0000-4000-8000-000000000004', '1e350000-0000-4000-8000-000000000102', '1e350000-0000-4000-8000-0000000000f9', 'staff',  'L2 b', '2026-01-01 11:00+00'),
+  ('1e350000-0000-4000-8000-000000000004', '1e350000-0000-4000-8000-000000000105', '1e350000-0000-4000-8000-0000000000f7', 'member', 'L5 a', '2026-01-02 10:00+00'),
+  ('1e350000-0000-4000-8000-000000000004', '1e350000-0000-4000-8000-000000000105', '1e350000-0000-4000-8000-0000000000f9', 'staff',  'L5 b', '2026-01-02 11:00+00'),
+  ('1e350000-0000-4000-8000-000000000004', '1e350000-0000-4000-8000-000000000106', '1e350000-0000-4000-8000-0000000000f8', 'member', 'L6 a', '2026-01-02 10:00+00'),
+  ('1e350000-0000-4000-8000-000000000004', '1e350000-0000-4000-8000-000000000101', '1e350000-0000-4000-8000-0000000000f3', 'member', 'L1 a', '2026-01-03 10:00+00'),
+  ('1e350000-0000-4000-8000-000000000004', '1e350000-0000-4000-8000-000000000101', '1e350000-0000-4000-8000-0000000000f9', 'staff',  'L1 b', '2026-01-03 11:00+00'),
+  ('1e350000-0000-4000-8000-000000000004', '1e350000-0000-4000-8000-000000000101', '1e350000-0000-4000-8000-0000000000f3', 'member', 'L1 c', '2026-01-03 12:00+00'),
+  ('1e350000-0000-4000-8000-000000000004', '1e350000-0000-4000-8000-000000000104', '1e350000-0000-4000-8000-0000000000f6', 'member', 'L4 a', '2026-01-04 10:00+00');
+-- The team read L6 (member last, but read): a sequence comparison, never an instant (EP-071).
+update public.chat_conversations set staff_last_read_seq = last_seq where id = '1e350000-0000-4000-8000-000000000106';
+
+select is(
+  (select count(*)::int from public.chat_conversations where tenant_id = '1e350000-0000-4000-8000-000000000004' and state is null and case_number is null),
+  6, 'D-814 setup: six legacy-shaped support conversations (every case column null)');
+select is(
+  (select count(*)::int from public.chat_case_events where tenant_id = '1e350000-0000-4000-8000-000000000004'),
+  0, 'D-814 setup: no event exists before the backfill, so the backfill is the only writer below');
+select set_config('tests.d_base', (select last_number::text from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000004'), true);
+
+select is(app.chat_cases_backfill('1e350000-0000-4000-8000-000000000004'), 6, 'D-814: the backfill numbers the six legacy conversations of the tenant');
+
+select results_eq(
+  $$ select id::text, case_number - current_setting('tests.d_base')::int from public.chat_conversations
+      where tenant_id = '1e350000-0000-4000-8000-000000000004' order by case_number $$,
+  $$ values ('1e350000-0000-4000-8000-000000000102'::text, 1), ('1e350000-0000-4000-8000-000000000105', 2), ('1e350000-0000-4000-8000-000000000106', 3), ('1e350000-0000-4000-8000-000000000103', 4), ('1e350000-0000-4000-8000-000000000101', 5), ('1e350000-0000-4000-8000-000000000104', 6) $$,
+  'D-814/EP-067/EP-070: numbers follow (first message instant, id) and continue after the counter; the tie of L5 and L6 goes to the lower id, a conversation without a message is numbered by its creation');
+select results_eq(
+  $$ select id::text, state from public.chat_conversations where tenant_id = '1e350000-0000-4000-8000-000000000004' order by id $$,
+  $$ values ('1e350000-0000-4000-8000-000000000101'::text, 'open'::text), ('1e350000-0000-4000-8000-000000000102', 'closed'), ('1e350000-0000-4000-8000-000000000103', 'closed'), ('1e350000-0000-4000-8000-000000000104', 'open'), ('1e350000-0000-4000-8000-000000000105', 'closed'), ('1e350000-0000-4000-8000-000000000106', 'closed') $$,
+  'D-814/EP-071: open when the last message is the member''s and unread by the team, closed otherwise (a zero-message conversation is closed)');
+select results_eq(
+  $$ select id::text, closed_at = coalesce(last_message_at, created_at) from public.chat_conversations
+      where tenant_id = '1e350000-0000-4000-8000-000000000004' and state = 'closed' order by id $$,
+  $$ values ('1e350000-0000-4000-8000-000000000102'::text, true), ('1e350000-0000-4000-8000-000000000103', true), ('1e350000-0000-4000-8000-000000000105', true), ('1e350000-0000-4000-8000-000000000106', true) $$,
+  'D-814/EP-066: closed_at is the last message instant, or the creation instant when there is no message');
+select is(
+  (select count(*)::int from public.chat_conversations
+    where tenant_id = '1e350000-0000-4000-8000-000000000004' and category = 'other' and priority = 'normal' and subject is null
+      and owner_user_id is null and resolved_at is null and (state = 'closed') = (closed_at is not null)),
+  6, 'D-814: category other, priority normal, no stored subject, no owner, no resolved_at, closed_at only on closed cases');
+select results_eq(
+  $$ select conversation_id::text, actor_user_id::text, created_at from public.chat_case_events
+      where tenant_id = '1e350000-0000-4000-8000-000000000004' and kind = 'opened' order by conversation_id $$,
+  $$ values ('1e350000-0000-4000-8000-000000000101'::text, '1e350000-0000-4000-8000-0000000000f3'::text, '2026-01-03 10:00+00'::timestamptz),
+            ('1e350000-0000-4000-8000-000000000102', '1e350000-0000-4000-8000-0000000000f4', '2026-01-01 10:00+00'),
+            ('1e350000-0000-4000-8000-000000000103', '1e350000-0000-4000-8000-0000000000f5', '2026-01-02 12:00+00'),
+            ('1e350000-0000-4000-8000-000000000104', '1e350000-0000-4000-8000-0000000000f6', '2026-01-04 10:00+00'),
+            ('1e350000-0000-4000-8000-000000000105', '1e350000-0000-4000-8000-0000000000f7', '2026-01-02 10:00+00'),
+            ('1e350000-0000-4000-8000-000000000106', '1e350000-0000-4000-8000-0000000000f8', '2026-01-02 10:00+00') $$,
+  'D-814: one opened event per case, the member as actor, at the first message instant (the creation instant without a message)');
+select results_eq(
+  $$ select conversation_id::text, actor_user_id is null, from_state, to_state from public.chat_case_events
+      where tenant_id = '1e350000-0000-4000-8000-000000000004' and kind = 'closed' order by conversation_id $$,
+  $$ values ('1e350000-0000-4000-8000-000000000102'::text, true, 'open'::text, 'closed'::text), ('1e350000-0000-4000-8000-000000000103', true, 'open', 'closed'),
+            ('1e350000-0000-4000-8000-000000000105', true, 'open', 'closed'), ('1e350000-0000-4000-8000-000000000106', true, 'open', 'closed') $$,
+  'D-814: a closed event with no actor for each closed case, none for the open ones');
+select is(
+  (select count(*)::int from public.chat_case_events where tenant_id = '1e350000-0000-4000-8000-000000000004'), 10,
+  'D-814: the backfill wrote six opened and four closed events and nothing else');
+select is(
+  (select last_number - current_setting('tests.d_base')::int from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000004'),
+  6, 'D-814: the tenant counter is left at the highest number');
+select is(
+  (select count(*)::int from public.chat_messages where tenant_id = '1e350000-0000-4000-8000-000000000004'), 9,
+  'D-814: no message was added or removed');
+select results_eq(
+  $$ select id::text, last_seq::int from public.chat_conversations where tenant_id = '1e350000-0000-4000-8000-000000000004' order by id $$,
+  $$ values ('1e350000-0000-4000-8000-000000000101'::text, 3), ('1e350000-0000-4000-8000-000000000102', 2), ('1e350000-0000-4000-8000-000000000103', 0), ('1e350000-0000-4000-8000-000000000104', 1), ('1e350000-0000-4000-8000-000000000105', 2), ('1e350000-0000-4000-8000-000000000106', 1) $$,
+  'D-814: the ids and the message counters are untouched');
+
+-- idempotent (EP-070, T-12.4-09)
+select set_config('tests.d_snap',
+  (select string_agg(id::text || '|' || state || '|' || case_number || '|' || coalesce(closed_at::text, ''), ',' order by id)
+     from public.chat_conversations where tenant_id = '1e350000-0000-4000-8000-000000000004'), true);
+select is(app.chat_cases_backfill('1e350000-0000-4000-8000-000000000004'), 0, 'EP-070/T-12.4-09: a second run assigns nothing');
+select is(
+  (select string_agg(id::text || '|' || state || '|' || case_number || '|' || coalesce(closed_at::text, ''), ',' order by id)
+     from public.chat_conversations where tenant_id = '1e350000-0000-4000-8000-000000000004'),
+  current_setting('tests.d_snap'), 'EP-070/T-12.4-09: a second run moves no number, state or instant');
+select is(
+  (select count(*)::int from public.chat_case_events where tenant_id = '1e350000-0000-4000-8000-000000000004'), 10,
+  'EP-070/T-12.4-09: a second run writes no event');
+select is(
+  (select last_number - current_setting('tests.d_base')::int from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000004'),
+  6, 'EP-070: a second run leaves the counter where it was');
+
+-- EP-068: only direct or group rows (or nothing at all) means nothing to do
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id) values
+  ('1e350000-0000-4000-8000-000000000111', '1e350000-0000-4000-8000-000000000005', 'direct', '1e350000-0000-4000-8000-0000000000fa'),
+  ('1e350000-0000-4000-8000-000000000112', '1e350000-0000-4000-8000-000000000005', 'group', '1e350000-0000-4000-8000-0000000000fa');
+select is(app.chat_cases_backfill('1e350000-0000-4000-8000-000000000005'), 0, 'EP-068: a tenant with only direct or group rows is not backfilled');
+select is(
+  (select count(*)::int from public.chat_case_counters where tenant_id = '1e350000-0000-4000-8000-000000000005'), 0,
+  'EP-068: ... and gets no counter row');
+select is(app.chat_cases_backfill('1e350000-0000-4000-8000-0000000000ff'), 0,
+  'EP-068: a tenant that has no support conversation (or does not exist) gets nothing');
+select is(
+  (select count(*)::int from public.chat_conversations where tenant_id = '1e350000-0000-4000-8000-000000000005' and state is null and case_number is null),
+  2, 'EP-068: the direct and group rows keep every case column null');
+
+-- T-12.4-10: callable by the service role only; EP-069: the ordering note is on the function
+select ok(
+  (select p.prosecdef and p.proconfig @> array['search_path=""'] from pg_proc p
+    where p.oid = 'app.chat_cases_backfill(uuid)'::regprocedure),
+  'T-12.4-10: the backfill is a security definer with search_path pinned to ""');
+select ok(
+  has_function_privilege('service_role', 'app.chat_cases_backfill(uuid)', 'execute')
+  and not has_function_privilege('authenticated', 'app.chat_cases_backfill(uuid)', 'execute')
+  and not has_function_privilege('anon', 'app.chat_cases_backfill(uuid)', 'execute'),
+  'T-12.4-10: only service_role may execute the backfill');
+select tests.as_tenant('1e350000-0000-4000-8000-000000000004', '1e350000-0000-4000-8000-0000000000f3');
+select throws_ok(
+  $$ select app.chat_cases_backfill() $$, '42501', 'permission denied for function chat_cases_backfill',
+  'T-12.4-10: a member lane cannot run the backfill');
+reset role;
+select ok(
+  (select obj_description('app.chat_cases_backfill(uuid)'::regprocedure, 'pg_proc') like '%timestamptz%uuid%'),
+  'EP-069: the function comment says the ordering uses the timestamptz value and the uuid byte order, never text');
+
+-- Sections 2 and 5 left two legacy-shaped rows in tenant A (a null state); the backfill must number it BEFORE the constraint can
+-- be validated, which is exactly the order of the activation file (the global call there reaches every tenant).
+select is(app.chat_cases_backfill('1e350000-0000-4000-8000-000000000001'), 2,
+  'D-838: the two legacy-shaped rows left in tenant A by sections 2 and 5 are numbered before the constraint is validated');
+-- CASE-04: the second half of the shape rule, added after the backfill (D-836, D-838)
+select lives_ok(
+  $$ alter table public.chat_conversations add constraint chat_conversations_support_state_chk
+       check (kind <> 'support' or state is not null) not valid $$,
+  'D-838: the support-state constraint is added NOT VALID once every legacy row is numbered');
+select lives_ok(
+  $$ alter table public.chat_conversations validate constraint chat_conversations_support_state_chk $$,
+  'D-838: ... and validates against every row of the table');
+select ok(
+  (select convalidated from pg_constraint
+    where conrelid = 'public.chat_conversations'::regclass and conname = 'chat_conversations_support_state_chk'),
+  'EP-016: chat_conversations_support_state_chk is VALID');
+select throws_ok(
+  $$ update public.chat_conversations
+        set state = null, case_number = null, priority = null, category = null
+      where id = '1e350000-0000-4000-8000-000000000102' $$,
+  '23514', 'new row for relation "chat_conversations" violates check constraint "chat_conversations_support_state_chk"',
+  'D-838: a support row with a null state is now refused');
+
+-- the swap (D-802)
+select is(
+  (select count(*)::int from pg_indexes where schemaname = 'public' and indexname = 'chat_conversations_one_support_per_member'),
+  0, 'D-802: the one-conversation-per-member index no longer exists');
+select is(
+  (select count(*)::int from pg_indexes where schemaname = 'public' and indexname = 'chat_conversations_one_active_case_per_member'),
+  1, 'D-802: the one-active-case-per-member index exists');
+select ok(
+  (select indexdef like 'CREATE UNIQUE INDEX%(tenant_id, created_by_user_id)%'
+      and indexdef like '%''open''%''in_progress''%''resolved''%' and indexdef not like '%closed%'
+     from pg_indexes where schemaname = 'public' and indexname = 'chat_conversations_one_active_case_per_member'),
+  'EP-012/EP-013: the index is unique on (tenant_id, created_by_user_id) and its predicate lists exactly open, in_progress and resolved as lowercase literals');
+select throws_ok(
+  $$ insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+     values ('1e350000-0000-4000-8000-000000000004', 'support', '1e350000-0000-4000-8000-0000000000f3') $$,
+  '23505', 'duplicate key value violates unique constraint "chat_conversations_one_active_case_per_member"',
+  'D-802: a second ACTIVE case for a member is refused (L1 is open)');
+update public.chat_conversations set state = 'closed', closed_at = now() where id = '1e350000-0000-4000-8000-000000000101';
+select lives_ok(
+  $$ insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+     values ('1e350000-0000-4000-8000-000000000121', '1e350000-0000-4000-8000-000000000004', 'support', '1e350000-0000-4000-8000-0000000000f3') $$,
+  'D-802/EP-010: a new case is accepted once the previous one is closed');
+select is(
+  (select case_number - current_setting('tests.d_base')::int from public.chat_conversations
+    where id = '1e350000-0000-4000-8000-000000000121'),
+  7, 'D-814: a case born after the activation continues from the backfilled counter');
+update public.chat_conversations set state = 'resolved', resolved_at = now() where id = '1e350000-0000-4000-8000-000000000104';
+select throws_ok(
+  $$ insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+     values ('1e350000-0000-4000-8000-000000000004', 'support', '1e350000-0000-4000-8000-0000000000f6') $$,
+  '23505', 'duplicate key value violates unique constraint "chat_conversations_one_active_case_per_member"',
+  'EP-010: a resolved case still counts as active at the index predicate');
+update public.chat_conversations set state = 'closed', resolved_at = null, closed_at = now() where id = '1e350000-0000-4000-8000-000000000104';
+select lives_ok(
+  $$ insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+     values ('1e350000-0000-4000-8000-000000000004', 'support', '1e350000-0000-4000-8000-0000000000f6') $$,
+  'EP-010: a closed case does not count as active (one step either side of the boundary)');
+-- D-800: the previous API revision's insert text no longer matches any index
+select throws_ok(
+  $$ insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+     values ('1e350000-0000-4000-8000-000000000004', 'support', '1e350000-0000-4000-8000-0000000000f3')
+     on conflict (tenant_id, created_by_user_id) where kind = 'support' do nothing $$,
+  '42P10', 'there is no unique or exclusion constraint matching the ON CONFLICT specification',
+  'D-800: the previous member send (the old on conflict text) answers 42P10 after the swap, the release window of plan 18');
 
 select * from finish();
 rollback;

@@ -1380,6 +1380,20 @@
       "when": 1794904017701,
       "tag": "20261117082657_chat_cases_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 197,
+      "version": "7",
+      "when": 1794904913205,
+      "tag": "20261117084153_chat_cases_transitions",
+      "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "7",
+      "when": 1794904955262,
+      "tag": "20261117084235_chat_cases_activate",
+      "breakpoints": true
     }
   ]
 }

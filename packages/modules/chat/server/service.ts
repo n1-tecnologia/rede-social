@@ -8,8 +8,10 @@ import { moduleLogger } from '@rede-social/core/server/logging';
 import type { Counters } from '@rede-social/core/server/modules/counters';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { permissionsForRequest } from '@rede-social/core/server/rbac/permissions';
+import { sqlstateOf } from '@rede-social/core/server/safety/sqlstate';
 import { sql } from 'drizzle-orm';
 import {
+  CASE_ACTIVE_STATES,
   CHAT_PAGE_SIZE,
   CHAT_PERMISSIONS,
   CHAT_PREVIEW_GRAPHEMES,
@@ -216,47 +218,85 @@ async function insertMessage(
 }
 
 /**
- * `POST /v1/chat/support/messages` (CHAT-02, D-220): the member writes to the team.
- *
- * The conversation is created LAZILY, here, on the first message: in ONE transaction the member's
- * support conversation is inserted with `on conflict … do nothing` on the partial unique index
- * `chat_conversations_one_support_per_member`, read back, the member's participant row is ensured,
- * and the message is inserted. Twenty concurrent first messages therefore create exactly one
- * conversation: every loser of the insert race waits on the winner's index entry, does nothing, and
- * reads the committed row. `body` arrives trimmed and bounded (`chatBodySchema`).
- *
- * The `chat.message_sent` event is queued AFTER the transaction returned, so a rolled-back send
- * notifies nobody.
+ * The state list of the active-case index `chat_conversations_one_active_case_per_member` (D-802), spelled
+ * ONCE from the contract constant: the `on conflict` arbiter must repeat the index predicate to the letter or
+ * Postgres answers 42P10 (probed), and a test compares this list with the one read back from `pg_indexes`.
+ * Exact lowercase literals, no normalisation (EP-012, EP-013).
  */
-export async function sendSupportMessage(ctx: RequestContext, body: string): Promise<SendResult> {
-  let result: SendResult;
-  try {
-    result = await withTenantTx(ctx, async (tx) => {
+const ACTIVE_CASE_STATES = sql.raw(CASE_ACTIVE_STATES.map((state) => `'${state}'`).join(','));
+
+/** The member's ACTIVE case (open, in_progress or resolved), or null when every case they had is closed. */
+async function activeCaseOf(tx: Tx, ctx: RequestContext): Promise<string | null> {
+  const rows = await tx.execute<{ id: string }>(sql`
+    select c.id
+      from chat_conversations c
+     where c.tenant_id = ${ctx.tenantId}::uuid
+       and c.kind = 'support'
+       and c.created_by_user_id = ${ctx.userId}::uuid
+       and c.state in (${ACTIVE_CASE_STATES})
+     order by c.case_number desc nulls last
+     limit 1`);
+  return rows[0]?.id ?? null;
+}
+
+/** One attempt of the member's send, in ITS OWN transaction (a raised CS004 aborts the Postgres transaction). */
+async function sendSupportMessageOnce(ctx: RequestContext, body: string): Promise<SendResult> {
+  return withTenantTx(ctx, async (tx) => {
+    let conversationId = await activeCaseOf(tx, ctx);
+    if (!conversationId) {
       await tx.execute(sql`
         insert into chat_conversations (tenant_id, kind, created_by_user_id)
         values (${ctx.tenantId}::uuid, 'support', ${ctx.userId}::uuid)
-        on conflict (tenant_id, created_by_user_id) where kind = 'support' do nothing`);
-      const conversations = await tx.execute<{ id: string }>(sql`
-        select c.id
-          from chat_conversations c
-         where c.tenant_id = ${ctx.tenantId}::uuid
-           and c.kind = 'support'
-           and c.created_by_user_id = ${ctx.userId}::uuid`);
-      const conversationId = conversations[0]?.id;
-      if (!conversationId) throw new ApiError(500, 'INTERNAL');
-      await tx.execute(sql`
-        insert into chat_participants (conversation_id, tenant_id, user_id, role)
-        values (${conversationId}::uuid, ${ctx.tenantId}::uuid, ${ctx.userId}::uuid, 'member')
-        on conflict (conversation_id, user_id) do nothing`);
-      const message = await insertMessage(tx, ctx, conversationId, 'member', body);
-      return { conversationId, message };
-    });
-  } catch (error) {
-    if (bodyCheckViolated(error)) {
-      throw new ApiError(400, 'VALIDATION_FAILED', { chat: 'body_required' });
+        on conflict (tenant_id, created_by_user_id)
+          where kind = 'support' and state in (${ACTIVE_CASE_STATES}) do nothing`);
+      conversationId = await activeCaseOf(tx, ctx);
     }
-    throw error;
+    if (!conversationId) throw new ApiError(500, 'INTERNAL');
+    await tx.execute(sql`
+      insert into chat_participants (conversation_id, tenant_id, user_id, role)
+      values (${conversationId}::uuid, ${ctx.tenantId}::uuid, ${ctx.userId}::uuid, 'member')
+      on conflict (conversation_id, user_id) do nothing`);
+    const message = await insertMessage(tx, ctx, conversationId, 'member', body);
+    return { conversationId, message };
+  });
+}
+
+/**
+ * `POST /v1/chat/support/messages` (CHAT-02, D-220, D-801, D-802): the member writes to the team.
+ *
+ * The member's ACTIVE case (state open, in_progress or resolved) takes the message. With none, the case is
+ * created LAZILY, here, on the first message: in ONE transaction it is inserted with `on conflict … do
+ * nothing` on the partial unique index `chat_conversations_one_active_case_per_member`, read back, the
+ * member's participant row is ensured, and the message is inserted. Twenty concurrent first messages
+ * therefore create exactly one case: every loser of the insert race waits on the winner's index entry,
+ * does nothing, and reads the committed row. `body` arrives trimmed and bounded (`chatBodySchema`).
+ *
+ * A case the team closed while the member was typing refuses the message in the database (SQLSTATE CS004,
+ * the message trigger, D-845). That aborts the transaction, so the retry is NEVER in the same one: the send
+ * runs at most twice, each attempt in its own `withTenantTx`, and the second attempt opens a NEW case (the
+ * closed one no longer counts at the index), so the message never lands in a closed case. A second refusal
+ * in a row is a 409.
+ *
+ * The `chat.message_sent` event is queued AFTER the transaction returned (once, for the attempt that
+ * committed), so a rolled-back send notifies nobody.
+ */
+export async function sendSupportMessage(ctx: RequestContext, body: string): Promise<SendResult> {
+  let result: SendResult | undefined;
+  for (let attempt = 0; attempt < 2 && !result; attempt += 1) {
+    try {
+      result = await sendSupportMessageOnce(ctx, body);
+    } catch (error) {
+      if (bodyCheckViolated(error)) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { chat: 'body_required' });
+      }
+      if (sqlstateOf(error) === 'CS004') {
+        if (attempt === 1) throw new ApiError(409, 'CONFLICT');
+        continue;
+      }
+      throw error;
+    }
   }
+  if (!result) throw new ApiError(500, 'INTERNAL');
 
   emit(ctx, 'chat.message_sent', {
     tenantId: ctx.tenantId,
@@ -280,10 +320,11 @@ export async function sendSupportMessage(ctx: RequestContext, body: string): Pro
 }
 
 /**
- * `GET /v1/chat/support` (D-220): the member's own thread, READ-ONLY. Before the first message there
- * is no conversation, and the answer is `{ conversation: null, messages: [], hasOlder: false }`; this
- * GET never writes (the 06-06 prefetch rule), so opening the screen never fills the staff inbox with
- * an empty thread. Otherwise it answers the member's read position and the latest page.
+ * `GET /v1/chat/support` (D-220, D-803): the member's ACTIVE case, READ-ONLY. When every case they had is
+ * closed, or before the first message, there is none and the answer is
+ * `{ conversation: null, messages: [], hasOlder: false }`; this GET never writes (the 06-06 prefetch rule),
+ * so opening the screen never fills the staff inbox with an empty thread. Otherwise it answers the member's
+ * read position and the latest page of that case.
  */
 export async function getSupportThread(ctx: RequestContext): Promise<SupportThread> {
   return withTenantTx(ctx, async (tx) => {
@@ -304,7 +345,10 @@ export async function getSupportThread(ctx: RequestContext): Promise<SupportThre
               and p.user_id = ${ctx.userId}::uuid
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.kind = 'support'
-         and c.created_by_user_id = ${ctx.userId}::uuid`);
+         and c.created_by_user_id = ${ctx.userId}::uuid
+         and c.state in (${ACTIVE_CASE_STATES})
+       order by c.case_number desc nulls last
+       limit 1`);
     const conversation = rows[0];
     if (!conversation) return { conversation: null, messages: [], hasOlder: false };
     const page = await pageOf(tx, ctx, conversation.id, { before: LATEST }, CHAT_PAGE_SIZE);

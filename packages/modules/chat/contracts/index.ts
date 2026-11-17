@@ -43,6 +43,14 @@ export const CHAT_PREVIEW_GRAPHEMES = 100;
 export const CHAT_MAX_CURSOR_LENGTH = 512;
 
 /**
+ * The ACTIVE states of a support case (D-802): a member holds at most one case in these states at a time. It is
+ * the predicate of the partial unique index `chat_conversations_one_active_case_per_member`, and the member
+ * send's `on conflict` arbiter repeats it to the letter (a test compares both lists). `closed` is the only state
+ * that frees the member to open the next case (D-801).
+ */
+export const CASE_ACTIVE_STATES = ['open', 'in_progress', 'resolved'] as const;
+
+/**
  * The closed vocabulary of `details.chat`. Input problems are `400 VALIDATION_FAILED`
  * (`body_required`, `body_too_long`); state refusals are `409 CONFLICT` (`member_blocked`,
  * `member_removed`). `staff_has_inbox` names the rule that staff never own a thread (the member routes

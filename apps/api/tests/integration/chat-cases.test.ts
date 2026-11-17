@@ -1,10 +1,11 @@
-import type { SendResult } from '@rede-social/module-chat/contracts';
+import type { SendResult, SupportThread } from '@rede-social/module-chat/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   caseKit,
   highestNumber,
   post,
   removeThrowaways,
+  request,
   SEED_THREAD,
   sweepCases,
   throwawayMember,
@@ -20,9 +21,11 @@ import { adminSql } from './setup';
  * admin lane as an integer and asserted RELATIVE to the tenant's highest number, because the counter is
  * never reset (numbers keep rising across files and runs).
  *
- * `case legacy rows` (T-12.4-85, a PRE-ACTIVATION proof that plan 02 retires): a conversation whose
- * case columns are all null, which is what every conversation is between this plan and the plan 02
- * backfill, still takes a member message and a staff reply.
+ * `case activation` (plan 02, CASE-03, CASE-21, D-801, D-802, D-814): after the activation migration a
+ * member whose case was closed gets the NEXT numbered case on the next message, and no support
+ * conversation is left without a state. (The pre-activation proof of plan 01, a conversation with all
+ * case columns null still taking messages, is retired: the validated support-state constraint now
+ * refuses such a row, and pgTAP 235 section 5 keeps proving the trigger branch.)
  *
  * Test ORDER is load-bearing (`fileParallelism: false`, declaration order).
  */
@@ -104,48 +107,59 @@ describe('case numbering', () => {
   });
 });
 
-describe('case legacy rows', () => {
-  it('a conversation whose case columns are all null still takes a member message and a staff reply', async () => {
-    const { ids, tokens } = await caseKit();
-    // The seeded demo thread, made legacy-shaped: every case column null and no history (what every
-    // conversation is between plan 01 and the plan 02 backfill). `sweepCases` restores it afterwards.
+describe('case activation', () => {
+  it('after a case is closed the next member message opens the next numbered case', async () => {
+    const { ids } = await caseKit();
+    const base = await highestNumber(ids.demo);
+    const member = await throwawayMember('activation');
+
+    const first = await post('/v1/chat/support/messages', member.token, {
+      body: 'Primeiro chamado',
+    });
+    expect(first.status).toBe(201);
+    const one = (await first.json()) as SendResult;
+
+    // The admin lane closes it (the staff action arrives with plan 05; this is the same row change).
     await adminSql`
       update public.chat_conversations
-         set state = null, case_number = null, priority = null, category = null
+         set state = 'closed', closed_at = now(), staff_last_read_seq = last_seq
+       where id = ${one.conversationId}::uuid`;
+
+    const second = await post('/v1/chat/support/messages', member.token, { body: 'Outro assunto' });
+    expect(second.status).toBe(201);
+    const two = (await second.json()) as SendResult;
+    expect(two.conversationId).not.toBe(one.conversationId);
+    expect(two.message.seq).toBe(1);
+
+    const rows = await adminSql<{ id: string; case_number: number; state: string }[]>`
+      select id::text as id, case_number, state
+        from public.chat_conversations
+       where tenant_id = ${ids.demo}::uuid and created_by_user_id = ${member.id}::uuid
+       order by case_number`;
+    expect(rows.map((r) => [r.id, r.case_number, r.state])).toEqual([
+      [one.conversationId, base + 1, 'closed'],
+      [two.conversationId, base + 2, 'open'],
+    ]);
+    const [opened] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.chat_case_events
+       where conversation_id in (${one.conversationId}::uuid, ${two.conversationId}::uuid)
+         and kind = 'opened'`;
+    expect(opened?.n).toBe(2);
+
+    const thread = await request('/v1/chat/support', member.token);
+    expect(thread.status).toBe(200);
+    expect(((await thread.json()) as SupportThread).conversation?.id).toBe(two.conversationId);
+  });
+
+  it('no support conversation has a null state after the activation', async () => {
+    const [nulls] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.chat_conversations
+       where kind = 'support' and state is null`;
+    expect(nulls?.n).toBe(0);
+    const [seed] = await adminSql<{ state: string | null; case_number: number | null }[]>`
+      select state, case_number from public.chat_conversations
        where id = ${SEED_THREAD.id}::uuid`;
-    await adminSql`
-      delete from public.chat_case_events where conversation_id = ${SEED_THREAD.id}::uuid`;
-    const [before] = await adminSql<{ last_seq: number }[]>`
-      select last_seq::int as last_seq from public.chat_conversations
-       where id = ${SEED_THREAD.id}::uuid`;
-
-    const member = await post('/v1/chat/support/messages', tokens.demoMember, {
-      body: 'Mensagem em uma conversa antiga',
-    });
-    expect(member.status).toBe(201);
-    const sent = (await member.json()) as SendResult;
-    expect(sent.conversationId).toBe(SEED_THREAD.id);
-    expect(sent.message.seq).toBe((before?.last_seq ?? 0) + 1);
-
-    const staff = await post(
-      `/v1/chat/conversations/${SEED_THREAD.id}/messages`,
-      tokens.demoSupport,
-      {
-        body: 'Resposta em uma conversa antiga',
-      },
-    );
-    expect(staff.status).toBe(201);
-    const reply = (await staff.json()) as SendResult;
-    expect(reply.message.seq).toBe((before?.last_seq ?? 0) + 2);
-
-    const [row] = await adminSql<
-      { state: string | null; case_number: number | null; events: number }[]
-    >`
-      select c.state, c.case_number,
-             (select count(*)::int from public.chat_case_events e where e.conversation_id = c.id) as events
-        from public.chat_conversations c
-       where c.id = ${SEED_THREAD.id}::uuid`;
-    expect(row).toEqual({ state: null, case_number: null, events: 0 });
-    expect(ids.demo).not.toBe('');
+    expect(seed?.state).not.toBeNull();
+    expect(seed?.case_number).not.toBeNull();
   });
 });

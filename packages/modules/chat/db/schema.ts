@@ -56,10 +56,15 @@ import { authenticatedRole } from 'drizzle-orm/supabase';
  *    `support_tenant`), the same one `app.realtime_topic_allowed` uses; an integration test pins it
  *    against the TypeScript `permissionsFor` (RESEARCH Pitfall 4). There is no recursion:
  *    participants never reference conversations, messages reference conversations.
- * 8. **D-221 is reversed by Phase 12.4 (D-800), in two steps.** Until the activation of plan 02 each
- *    member still has one ongoing thread (`chat_conversations_one_support_per_member`); plan 02
- *    REPLACES that index with the one-active-case-per-member index and backfills the state, it does not
- *    add one beside it.
+ * 8. **D-221 is reversed by Phase 12.4 (D-800): a member has several cases over time, ONE active at
+ *    a time.** The old one-thread-per-member index (`chat_conversations_one_support_per_member`) is
+ *    GONE: the activation migration (plan 02, `*_chat_cases_activate.sql`) backfilled every legacy
+ *    conversation into a numbered case and REPLACED that index, in one atomic file, with
+ *    `chat_conversations_one_active_case_per_member` (unique on tenant and member while the state is
+ *    open, in_progress or resolved; a `closed` case no longer counts). Nothing keeps the old index
+ *    beside it. A support row always has a state (`chat_conversations_support_state_chk`, added after
+ *    the backfill). A message on a `closed` case is refused for every writer (SQLSTATE CS004, the
+ *    message trigger), so the member's next message opens the next case.
  * 9. **The case is the conversation row (D-836, Phase 12.4 plan 01).** Seven NULLABLE, expand-only
  *    columns (`case_number`, `state`, `owner_user_id`, `category`, `priority`, `resolved_at`,
  *    `closed_at`) turn a `support` conversation into a numbered, stateful case; `direct` and `group`
@@ -70,7 +75,7 @@ import { authenticatedRole } from 'drizzle-orm/supabase';
  *    one takes the number from the counter (AFTER, so a skipped `on conflict do nothing` burns nothing,
  *    D-837). The number is a 32-bit integer; the 2147483647 ceiling per tenant is not guarded (EP-005).
  *    The shape and coherence CHECKs are spelled so that a LEGACY support row (every case column null)
- *    passes them; the "a support row has a state" half is plan 02's, added after the backfill.
+ *    passes them; the "a support row has a state" half is plan 02's (`chat_conversations_support_state_chk`), added after the backfill.
  */
 
 /** Staff lanes, spelled once: the tenant role claim of either staff role. */
@@ -118,10 +123,12 @@ export const chatConversations = pgTable(
     closedAt: timestamp('closed_at', { withTimezone: true }),
   },
   (t) => [
-    // One support conversation per member per tenant (ROADMAP Phase 7 note, D-221).
-    uniqueIndex('chat_conversations_one_support_per_member')
+    // D-802: ONE ACTIVE case per member per tenant (active = not closed). It REPLACES the Phase 7 index
+    // `chat_conversations_one_support_per_member` (D-221), which the activation migration drops in the
+    // same atomic file. The member send's `on conflict` predicate is exactly this one (a test pins both).
+    uniqueIndex('chat_conversations_one_active_case_per_member')
       .on(t.tenantId, t.createdByUserId)
-      .where(sql`kind = 'support'`),
+      .where(sql`kind = 'support' and state in ('open','in_progress','resolved')`),
     // D-804: a case number is unique per tenant. NULLs (direct and group rows, legacy rows) never collide.
     uniqueIndex('chat_conversations_case_number_uniq').on(t.tenantId, t.caseNumber),
     index('chat_conversations_tenant_last_message_idx').on(t.tenantId, t.lastMessageAt.desc()),
@@ -168,6 +175,12 @@ export const chatConversations = pgTable(
     check(
       'chat_conversations_case_shape_chk',
       sql`${t.kind} = 'support' or (${t.state} is null and ${t.caseNumber} is null and ${t.ownerUserId} is null and ${t.category} is null and ${t.priority} is null and ${t.resolvedAt} is null and ${t.closedAt} is null)`,
+    ),
+    // D-838: the other half of the shape rule, a support row always has a state. Added by the activation
+    // migration NOT VALID after the backfill and then validated (D-836).
+    check(
+      'chat_conversations_support_state_chk',
+      sql`${t.kind} <> 'support' or ${t.state} is not null`,
     ),
     // D-805, D-806: what each non-null state implies. A null state (a legacy support row) passes.
     check(
