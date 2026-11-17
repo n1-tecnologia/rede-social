@@ -634,3 +634,286 @@ describe('case races', () => {
     else expect(replied.status).toBe(201);
   });
 });
+
+/* ── Task 3: isolation and the edge items ────────────────────────────────────────────────────── */
+
+const ACTION_ROUTES = ['take', 'resolve', 'close', 'reopen', 'assign'] as const;
+
+type LabLanes = { admin: string; support: string; member: string };
+
+/** rede-lab has `chat` OFF in the seed: it is turned on for the call and restored in `finally`. */
+async function withLabChat<T>(fn: (lab: LabLanes) => Promise<T>): Promise<T> {
+  const { ids } = await caseKit();
+  const [flag] = await adminSql<{ enabled: boolean }[]>`
+    select enabled from public.tenant_modules
+     where tenant_id = ${ids.lab}::uuid and module_key = 'chat'`;
+  try {
+    await adminSql`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${ids.lab}::uuid, 'chat', true)
+      on conflict (tenant_id, module_key) do update set enabled = true`;
+    moduleFlags.invalidate(ids.lab);
+    return await fn({
+      admin: await signInAs('admin@rede-lab.local', SEED_PASSWORD),
+      support: await signInAs('support@rede-lab.local', SEED_PASSWORD),
+      member: await signInAs('member@rede-lab.local', SEED_PASSWORD),
+    });
+  } finally {
+    if (flag) {
+      await adminSql`
+        update public.tenant_modules set enabled = ${flag.enabled}
+         where tenant_id = ${ids.lab}::uuid and module_key = 'chat'`;
+    } else {
+      await adminSql`
+        delete from public.tenant_modules
+         where tenant_id = ${ids.lab}::uuid and module_key = 'chat'`;
+    }
+    moduleFlags.invalidate(ids.lab);
+  }
+}
+
+const onLab = (init: RequestInit = {}): RequestInit => ({
+  ...init,
+  headers: { 'x-tenant-host': HOSTS.lab },
+});
+
+/** One of the case routes, on the lab host, with the body that fits it. */
+function labRequest(route: string, token: string, id: string, assignee: string) {
+  const path = `/v1/chat/conversations/${id}`;
+  switch (route) {
+    case 'PATCH':
+      return request(
+        `${path}/case`,
+        token,
+        onLab({
+          method: 'PATCH',
+          body: JSON.stringify({ expectedState: 'open', priority: 'high' }),
+        }),
+      );
+    case 'history':
+      return request(`${path}/case/history`, token, onLab());
+    case 'assign':
+      return request(
+        `${path}/case/assign`,
+        token,
+        onLab({
+          method: 'POST',
+          body: JSON.stringify({ expectedState: 'open', assigneeUserId: assignee }),
+        }),
+      );
+    default:
+      return request(
+        `${path}/case/${route}`,
+        token,
+        onLab({ method: 'POST', body: JSON.stringify({ expectedState: 'open' }) }),
+      );
+  }
+}
+
+describe('case isolation', () => {
+  it("EP-074 boundary: tenant B's staff on tenant A's VALID case id gets the same bare 404 as a random uuid on every case route, and nothing is written or emitted (T-12.4-37)", async () => {
+    const { tokens, ids } = await caseKit();
+    const { id } = await openCase('ep074');
+    const row = await rowOf(id);
+    const events = await countEvents(ids.demo);
+    const before = emitted();
+    await withLabChat(async (lab) => {
+      const routes = [...ACTION_ROUTES, 'PATCH', 'history'];
+      for (const token of [lab.admin, lab.support]) {
+        for (const route of routes) {
+          // The support lane is refused at the route permission for assign (403): the oracle is asked of admin there.
+          if (route === 'assign' && token === lab.support) continue;
+          const foreign = await shape(await labRequest(route, token, id, ids.demoSupport));
+          const unknown = await shape(
+            await labRequest(route, token, crypto.randomUUID(), ids.demoSupport),
+          );
+          expect(foreign, route).toEqual(unknown);
+          expect(foreign.status, route).toBe(404);
+          expect(foreign.body, route).toEqual({
+            error: { code: 'NOT_FOUND', message: expect.any(String) },
+          });
+        }
+      }
+    });
+    // Nothing was written, nothing emitted, and tenant A's own staff still acts on the same id (positive control).
+    expect(await rowOf(id)).toEqual(row);
+    expect(await countEvents(ids.demo)).toBe(events);
+    expect(emitted()).toEqual(before);
+    const own = await caseOf(await act(tokens.demoSupport, id, 'take', { expectedState: 'open' }));
+    expect(own.state).toBe('in_progress');
+  });
+
+  it('EP-075 adjacency: each tenant numbers its own cases, an action on one never touches the other, and no route takes a number (D-804)', async () => {
+    const { tokens, ids } = await caseKit();
+    await withLabChat(async (lab) => {
+      const demoBase = await highestNumber(ids.demo);
+      const labBase = await highestNumber(ids.lab);
+      const numberOf = async (conversationId: string) => {
+        const [row] = await adminSql<{ n: number }[]>`
+          select case_number::int as n from public.chat_conversations
+           where id = ${conversationId}::uuid`;
+        return row?.n ?? 0;
+      };
+      const labCase = async () => {
+        const res = await request(
+          '/v1/chat/support/messages',
+          lab.member,
+          onLab({ method: 'POST', body: JSON.stringify({ body: 'Oi, laboratório.' }) }),
+        );
+        expect(res.status).toBe(201);
+        return ((await res.json()) as SendResult).conversationId;
+      };
+      // Interleaved: demo, lab, demo, lab. Each tenant's numbers advance by exactly one per case of its own, whatever
+      // the other tenant did in between, and each is above that tenant's own highest at the start (the counter is
+      // never reset, so after a sweep it can sit above the highest remaining number: never a literal 1).
+      const demoA = await openCase('ep075-a');
+      const labA = await labCase();
+      const demoB = await openCase('ep075-b');
+      // The lab member has one active case at a time: the lab team closes the first before the member writes again.
+      expect((await labRequest('close', lab.admin, labA, ids.demoSupport)).status).toBe(200);
+      const labB = await labCase();
+      const [nDemoA, nLabA, nDemoB, nLabB] = await Promise.all([
+        numberOf(demoA.id),
+        numberOf(labA),
+        numberOf(demoB.id),
+        numberOf(labB),
+      ]);
+      expect(nDemoA).toBeGreaterThan(demoBase);
+      expect(nLabA).toBeGreaterThan(labBase);
+      expect(nDemoB).toBe(nDemoA + 1);
+      expect(nLabB).toBe(nLabA + 1);
+      const demo = demoB;
+      const labId = labB;
+      const demoRow = { n: nDemoB };
+
+      // An action on tenant A's case never changes tenant B's row.
+      const labBefore = await rowOf(labId);
+      await caseOf(await act(tokens.demoAdmin, demo.id, 'resolve', { expectedState: 'open' }));
+      expect(await rowOf(labId)).toEqual(labBefore);
+
+      // No route accepts a number: it is an unknown key.
+      const withNumber = await refusal(
+        await act(tokens.demoAdmin, demo.id, 'reopen', {
+          expectedState: 'resolved',
+          number: demoRow?.n,
+        }),
+      );
+      expect([withNumber.status, withNumber.code]).toEqual([400, 'VALIDATION_FAILED']);
+    });
+  });
+
+  it('EP-076 empty: in a tenant with no case every action on a random uuid is the bare 404, an empty PATCH is the validation error before any lookup, and the roster answers', async () => {
+    const { ids } = await caseKit();
+    await adminSql`delete from public.chat_conversations where tenant_id = ${ids.lab}::uuid`;
+    await withLabChat(async (lab) => {
+      const none = crypto.randomUUID();
+      for (const route of [...ACTION_ROUTES, 'PATCH', 'history']) {
+        const out = await shape(await labRequest(route, lab.admin, none, ids.demoSupport));
+        expect(out.status, route).toBe(404);
+        expect(out.body, route).toEqual({
+          error: { code: 'NOT_FOUND', message: expect.any(String) },
+        });
+      }
+      const empty = await refusal(
+        await request(
+          `/v1/chat/conversations/${none}/case`,
+          lab.admin,
+          onLab({ method: 'PATCH', body: JSON.stringify({ expectedState: 'open' }) }),
+        ),
+      );
+      expect([empty.status, empty.chat]).toEqual([400, 'case_nothing_to_edit']);
+      const roster = await request('/v1/chat/staff', lab.admin, onLab());
+      expect(roster.status).toBe(200);
+    });
+  });
+
+  it('EP-077 ordering: a refused cross-tenant or stale action writes no event row and publishes no signal (T-12.4-40)', async () => {
+    const { tokens, ids } = await caseKit();
+    const { id } = await openCase('ep077');
+    await caseOf(await act(tokens.demoSupport, id, 'take', { expectedState: 'open' }));
+    const events = await countEvents(ids.demo);
+    const signals = await countSignals();
+    const before = emitted();
+
+    await withLabChat(async (lab) => {
+      for (const route of ['resolve', 'close', 'take', 'PATCH']) {
+        expect((await labRequest(route, lab.admin, id, ids.demoSupport)).status).toBe(404);
+      }
+    });
+    // Stale: the case is in_progress, the caller expects open.
+    for (const route of ['resolve', 'close', 'take']) {
+      expect((await act(tokens.demoAdmin, id, route, { expectedState: 'open' })).status).toBe(409);
+    }
+    expect(
+      (await edit(tokens.demoAdmin, id, { expectedState: 'open', priority: 'high' })).status,
+    ).toBe(409);
+    // A refused transition (reopen of an in-progress case) and a refused assignee leave no trace either.
+    expect(
+      (await act(tokens.demoAdmin, id, 'reopen', { expectedState: 'in_progress' })).status,
+    ).toBe(409);
+    expect(
+      (
+        await act(tokens.demoAdmin, id, 'assign', {
+          expectedState: 'in_progress',
+          assigneeUserId: ids.demoMember,
+        })
+      ).status,
+    ).toBe(400);
+
+    expect(await countEvents(ids.demo)).toBe(events);
+    expect(await countSignals()).toBe(signals);
+    expect(emitted()).toEqual(before);
+  });
+
+  it('EP-078 precision: every code of the closed mapping is produced through the API, one to one (CASE-24)', async () => {
+    const { tokens, ids } = await caseKit();
+    const { id, member } = await openCase('ep078');
+
+    // CS001: an unknown id is the bare 404, never a 403.
+    const cs001 = await refusal(
+      await act(tokens.demoAdmin, crypto.randomUUID(), 'resolve', { expectedState: 'open' }),
+    );
+    expect([cs001.status, cs001.code, cs001.details]).toEqual([404, 'NOT_FOUND', undefined]);
+
+    // CS002 and CS003 are distinguishable by details.chat.
+    await caseOf(await act(tokens.demoSupport, id, 'take', { expectedState: 'open' }));
+    const cs002 = await refusal(
+      await act(tokens.demoAdmin, id, 'resolve', { expectedState: 'open' }),
+    );
+    const cs003 = await refusal(
+      await act(tokens.demoAdmin, id, 'reopen', { expectedState: 'in_progress' }),
+    );
+    expect([cs002.status, cs002.chat]).toEqual([409, 'case_stale']);
+    expect([cs003.status, cs003.chat]).toEqual([409, 'transition_not_allowed']);
+    expect(cs002.chat).not.toBe(cs003.chat);
+
+    // CS005: a member is no assignee.
+    const cs005 = await refusal(
+      await act(tokens.demoAdmin, id, 'assign', {
+        expectedState: 'in_progress',
+        assigneeUserId: ids.demoMember,
+      }),
+    );
+    expect([cs005.status, cs005.chat]).toEqual([400, 'assignee_invalid']);
+
+    // 42501 is never a 404: a member on a case route is a 403 FORBIDDEN, and a staff member demoted after sign-in is
+    // refused the same way (the permission is composed from the live membership, with the definer behind it).
+    const memberRefused = await refusal(
+      await act(member.token, id, 'resolve', { expectedState: 'in_progress' }),
+    );
+    expect([memberRefused.status, memberRefused.code]).toEqual([403, 'FORBIDDEN']);
+    const demoted = await throwawayMember('ep078-demoted', 'support_tenant');
+    await adminSql`
+      update public.memberships set role = 'member'
+       where tenant_id = ${ids.demo}::uuid and user_id = ${demoted.id}::uuid`;
+    const demotedRefused = await refusal(
+      await act(demoted.token, id, 'resolve', { expectedState: 'in_progress' }),
+    );
+    expect([demotedRefused.status, demotedRefused.code]).toEqual([403, 'FORBIDDEN']);
+
+    // CS004: a staff reply to a closed case.
+    await caseOf(await act(tokens.demoAdmin, id, 'close', { expectedState: 'in_progress' }));
+    const cs004 = await refusal(await reply(tokens.demoSupport, id));
+    expect([cs004.status, cs004.chat]).toEqual([409, 'case_closed']);
+  });
+});
