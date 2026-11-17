@@ -15,6 +15,7 @@ import {
   resolveClickUrl,
   subscriptionBody,
 } from '../lib/push-sw';
+import { isNetworkOnlyRequest } from '../lib/sw-rules';
 
 /**
  * Service worker (PWA-01), built by `app/serwist/[path]/route.ts` and served at `/serwist/sw.js`.
@@ -24,7 +25,11 @@ import {
  *    plus `/~offline`, injected per build by the route handler;
  *  - rule (a): every navigation/document, React Server Component payload (`RSC` request header),
  *    server action (`Next-Action` header) and same-origin `/auth/*`, `/v1/*`, `/api/*`, `/m/*`
- *    (manifests, D-25) and `/serwist/*` request goes to the network only — nothing is stored;
+ *    (manifests, D-25) and `/serwist/*` request goes to the network only — nothing is stored.
+ *    The decision is the pure `isNetworkOnlyRequest` of `lib/sw-rules.ts`. 12.5 (D-871, VOICE-22): an
+ *    `<audio>` or `<video>` request is NOT matched, so the worker is not in its path: Safari plays and
+ *    seeks a voice message with Range requests, and with no route the browser's own networking serves
+ *    them from the redirect target of `/v1/media/*`. No media is ever precached or cached here;
  *  - rule (b): hashed `/_next/static/*` chunks are cache-first with a bounded expiration (immutable);
  *  - rule (c): public brand assets — `/icons/*`, `/seed-logos/*` and the public `branding` bucket
  *    (`/storage/v1/object/public/branding/*`, D-28 derived icons) — are stale-while-revalidate with a
@@ -53,7 +58,6 @@ declare const self: ServiceWorkerGlobalScope;
 // esbuild (`platform: 'browser'`) defines `process.env.NODE_ENV` from the build's minify flag.
 const isProd = process.env.NODE_ENV === 'production';
 
-const NETWORK_ONLY_PREFIXES = ['/auth/', '/v1/', '/api/', '/m/', '/serwist/'];
 const BRAND_ASSET_PREFIXES = ['/icons/', '/seed-logos/'];
 const BRANDING_BUCKET_PREFIX = '/storage/v1/object/public/branding/';
 
@@ -62,12 +66,7 @@ const DAY_S = 24 * 3600;
 const productionRules: RuntimeCaching[] = [
   {
     // (a) never stored: documents, RSC payloads, server actions, auth/API/manifest/SW endpoints.
-    matcher: ({ request, url, sameOrigin }) =>
-      request.mode === 'navigate' ||
-      request.destination === 'document' ||
-      request.headers.get('RSC') === '1' ||
-      request.headers.has('Next-Action') ||
-      (sameOrigin && NETWORK_ONLY_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))),
+    matcher: isNetworkOnlyRequest,
     handler: new NetworkOnly(),
   },
   {
