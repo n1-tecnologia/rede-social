@@ -13,3 +13,11 @@ Full pgTAP run (`pnpm supabase test db`) on the local stack that still holds Igo
 | `supabase/tests/154-moderation-log.sql` | 65 | 104 `moderation_log` rows (2026-11-13 and 2026-11-14) are not anchored to two memberships of their tenant | residue of earlier integration runs; known pgTAP 154 residue trip |
 
 All three are fixed by a seeded reset (`pnpm db:reset` then `pnpm db:seed`), which this plan is forbidden to run. The 235 file and every file this plan touched (010, 020, 040, 152) are green.
+
+## Found by the orchestrator at the wave 4 gate (2026-11-17)
+
+| File | Test | Symptom | Likely cause |
+|------|------|---------|--------------|
+| `apps/web/app/(app)/eventos/EventsSections.test.tsx` | 10.2-14 "the tracer: the Em breve tag with the Clock and the live price-first note inside ONE link" | `expected 'R$ 80,00 · Abre em 2 d 4 h 12 min' to be '... 4 h 13 min'` | The countdown reads the real clock and the minute rolled over between render and assertion; no fake timers. Phase 10.2's file, not touched by 12.4 (`git diff 59bb398e..HEAD -- apps/web` is empty). |
+
+Run 1 (`turbo typecheck test --continue --concurrency=4`, load 1.9): 1 failed of 9217 web tests, 40 of 41 tasks. Run 2 (the file alone, `vitest run`): 18 of 18 passed. Treat as a flake; a fix is to freeze the clock in that test (Phase 10.2 owner's call).
