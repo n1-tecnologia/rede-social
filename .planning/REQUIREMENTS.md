@@ -428,7 +428,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **CASE-15**: The first-message route returns the case (id, number, whether it opened or reopened it) as optional keys; every existing response shape of the chat routes is unchanged and every new key is `.optional()` *(D-812, UI-D-820)*
 - [ ] **CASE-16**: The team's inbox has the tabs `Em aberto` (default), `Resolvidos`, `Fechados` and the filters owner, priority and "Aguardando resposta", sorted by latest activity with a stable keyset, rows carrying the case facts and the list of legal actions; a roster route answers live staff names only *(D-805, D-806, D-809, UI-D-823, UI-D-824, UI-D-826)*
 - [x] **CASE-17**: The staff numeric badge counts active cases whose last message is the member's and unread by the team, whoever owns them; the member's dot counts only cases that are not `Fechado`; the push badge follows both; the awaiting filter equals the badge when no owner or priority filter is on *(D-809, D-237, D-238, UI-D-823)*
-- [ ] **CASE-18**: Every action and the auto-close publish an ids-only `chat.case` signal on the conversation and the support-inbox topics (payload keys pinned), and the web refetches the case header on `chat.message` and `chat.case` without moving scroll or focus *(UI-D-830, D-240)*
+- [x] **CASE-18**: Every action and the auto-close publish an ids-only `chat.case` signal on the conversation and the support-inbox topics (payload keys pinned), and the web refetches the case header on `chat.message` and `chat.case` without moving scroll or focus *(UI-D-830, D-240)*
 - [x] **CASE-19**: Resolving a case writes one bell row "Seu chamado #N foi resolvido" and sends a push to the member, with facts `{ caseId, number }` only; closing notifies nobody; a case reopened before the worker ran notifies nobody; the kind has a renderer, a catalog entry and a link to the case *(D-808, UI-D-822)*
 - [x] **CASE-20**: The team is pushed (no bell row) for a new case, a case reopened by the member, a case assigned to them, and a member message (owner only when the case has a live owner, every live staff member otherwise), each with its pt-BR copy cut on a word at 100 characters and one device tag per case *(D-809, UI-D-822)*
 - [x] **CASE-21**: Every existing support conversation becomes the case of its member keeping its id, messages and participant rows, numbered per tenant by first-message date (ties by id), `Aberto` when the last message is the member's and unread by the team and `Fechado` otherwise, category `Outro`, priority `Normal`, no subject, with the counter set to the tenant maximum; the e2e seed conversation stays a valid case; the backfill is re-runnable *(D-814)*
@@ -1116,7 +1116,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-15 | Phase 12.4 | Complete |
 | CASE-16 | Phase 12.4 | Gaps Found |
 | CASE-17 | Phase 12.4 | Complete |
-| CASE-18 | Phase 12.4 | Gaps Found |
+| CASE-18 | Phase 12.4 | Complete |
 | CASE-19 | Phase 12.4 | Complete |
 | CASE-20 | Phase 12.4 | Complete |
 | CASE-21 | Phase 12.4 | Complete |
