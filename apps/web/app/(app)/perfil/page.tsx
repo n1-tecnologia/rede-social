@@ -35,7 +35,8 @@ import { ProfileEventsRail } from './ProfileEventsRail';
  * as a reference, not a copy) it is a hero, a warning and up to three sections:
  * - the hero (`ProfileHero`): the tenant's gradient band with the pencil ("Editar perfil") and the
  *   gear ("Configurações") in its corner, where the rows used to be, the photo over the band, then
- *   the name, the Instagram link, the e-mail and the bio, centred on the band (2026-10-13). The
+ *   the name, the Instagram link, the e-mail (the administrator's alone since 2026-11-17) and the
+ *   bio, centred on the band (2026-10-13). The
  *   "Membros" row is gone with them: a member no longer learns who is in the community (`/membros`
  *   is the staff's, `member-directory`);
  * - the follower and following counts (`SocialProfileBlock mode="own"`, 09-10, D-468), only for a viewer
@@ -71,6 +72,12 @@ import { ProfileEventsRail } from './ProfileEventsRail';
  * `/eventos`, it has no `PageHeader`. Its h1 "Perfil" stays for assistive tech only; the visible
  * heading is the member's name, the hero's h2.
  *
+ * **The e-mail is decided here, on the server (2026-11-17).** The page already holds the viewer's own
+ * role (D-47), and only `admin_tenant` gets the profile's e-mail handed to `ProfileHero`; for
+ * `member` and `support_tenant` the prop is absent, so the string is not in the HTML at all, which
+ * hiding it with CSS would not achieve. `support_tenant` is held back by the lowest-risk reading of
+ * the ask. `GET /v1/me/profile` still returns it: it is the owner's own data, only its display changed.
+ *
  * The platform host has no membership to show, so it lands back on `/inicio`. A refusal the
  * bootstrap map knows redirects (`requireBootstrap`, `loadOwnProfile`); a profile that cannot be
  * read renders the generic "Tentar novamente" empty state here rather than the app-level error page
@@ -99,6 +106,9 @@ export default async function ProfilePage({
   ]);
   // The viewer's OWN role: the only one this screen may know (D-47).
   const adminLabel = role === 'admin_tenant' ? tf('post.adminBadge') : null;
+  // 2026-11-17: the account e-mail under the name is the administrator's alone. `support_tenant` is
+  // held back on purpose (the lowest-risk reading of the ask: only `admin_tenant` is named).
+  const showEmail = role === 'admin_tenant';
 
   if (!profile) {
     return (
@@ -144,7 +154,7 @@ export default async function ProfilePage({
         avatarAssetId={profile.avatarAssetId}
         bio={bio || null}
         instagram={instagram === null ? null : instagramLinkView(instagram, tf)}
-        email={profile.email}
+        email={showEmail ? profile.email : undefined}
         adminLabel={adminLabel}
         adminIcon={adminIconFor(iconChoice, profile.membershipId)}
         actions={
