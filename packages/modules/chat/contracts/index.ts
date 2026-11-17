@@ -124,6 +124,8 @@ export const CHAT_ISSUES = [
   'assignee_invalid',
   'subject_too_long',
   'case_nothing_to_edit',
+  'voice_not_ready',
+  'voice_invalid',
 ] as const;
 export type ChatIssue = (typeof CHAT_ISSUES)[number];
 export const CHAT_ISSUE_SET: ReadonlySet<string> = new Set(CHAT_ISSUES);
@@ -179,6 +181,46 @@ export type SupportSendInput = z.infer<typeof supportSendInputSchema>;
 export const sendMessageInputSchema = z.object({ body: chatBodySchema }).strict();
 export type SendMessageInput = z.infer<typeof sendMessageInputSchema>;
 
+/**
+ * The longest recording a chat message carries, in seconds. It MIRRORS `VOICE_MAX_SECONDS` of the media contract
+ * (`@rede-social/contracts/media`): this index imports `zod` and nothing else so it stays client-safe, and a test
+ * of this module compares the two constants.
+ */
+export const CHAT_VOICE_MAX_SECONDS = 300;
+
+/**
+ * `POST /v1/chat/support/voice-messages` (D-866, D-861, VOICE-04, VOICE-31): the member sends ONE recording, by the
+ * id of a `ready` voice asset they own, and may carry the category and the subject of the case it opens exactly as
+ * text does. A NEW route and a NEW schema, never a union with `supportSendInputSchema` (the router's default hook
+ * lifts `body_required` and `body_too_long` from the issue message). Strict, and no duration, side or author is
+ * accepted: the duration is copied from the asset's server-measured one.
+ */
+export const voiceSendInputSchema = z
+  .object({
+    mediaId: z.uuid(),
+    category: z.enum(CHAT_CASE_CATEGORIES).optional(),
+    subject: subjectInputSchema.optional(),
+  })
+  .strict();
+export type VoiceSendInput = z.infer<typeof voiceSendInputSchema>;
+
+/** The staff reply with a recording (`POST /v1/chat/conversations/{id}/voice-messages`, plan 06): the asset id only. */
+export const voiceReplyInputSchema = z.object({ mediaId: z.uuid() }).strict();
+export type VoiceReplyInput = z.infer<typeof voiceReplyInputSchema>;
+
+/**
+ * The recording of a message, ABSENT on a text row (never null). `deleted` appears only when the asset has been
+ * retired since: the row stays (its seq is taken) and the player draws "Mensagem de voz indisponivel".
+ */
+export const messageVoiceSchema = z
+  .object({
+    mediaId: z.uuid(),
+    durationSeconds: z.int().min(1).max(CHAT_VOICE_MAX_SECONDS),
+    deleted: z.boolean().optional(),
+  })
+  .strict();
+export type MessageVoice = z.infer<typeof messageVoiceSchema>;
+
 /** Who wrote a message: the member, or anyone of the team. */
 export const CHAT_SIDES = ['member', 'staff'] as const;
 export type ChatSide = (typeof CHAT_SIDES)[number];
@@ -193,10 +235,13 @@ export const messageRowSchema = z
     id: z.uuid(),
     seq: z.int().positive(),
     side: z.enum(CHAT_SIDES),
+    /** The empty string on a voice row: `body` stays a string on the wire (the previous web parses it strictly). */
     body: z.string(),
     createdAt: z.string(),
     author: z.object({ firstName: z.string() }).strict().nullable(),
     authorIsViewer: z.boolean(),
+    /** 12.5 (D-846): present only on a recording, absent on text. Optional like every new key (fact 6). */
+    voice: messageVoiceSchema.optional(),
   })
   .strict();
 export type MessageRow = z.infer<typeof messageRowSchema>;

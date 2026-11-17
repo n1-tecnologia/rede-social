@@ -30,6 +30,7 @@ import {
   type SendResult,
   type SupportSendInput,
   type SupportThread,
+  type VoiceSendInput,
 } from '../contracts/index';
 import {
   activeMemberCase,
@@ -41,6 +42,7 @@ import {
   toInboxCase,
 } from './cases';
 import { firstNameOf } from './first-name';
+import { assertVoiceUsable, storedVoiceMessage, voiceGoneSql } from './voice-sql';
 
 const log = moduleLogger('module-chat');
 
@@ -77,7 +79,11 @@ type MessageDbRow = {
   id: string;
   seq: number;
   author_side: ChatSide;
-  body: string;
+  /** Null on a recording (D-846): `toMessage` answers the empty string. */
+  body: string | null;
+  media_asset_id: string | null;
+  voice_seconds: number | null;
+  voice_gone: boolean;
   created_at: string;
   author_is_viewer: boolean;
   staff_display_name: string | null;
@@ -94,6 +100,9 @@ const messageSource = (ctx: RequestContext) => sql`
            m.seq::int as seq,
            m.author_side,
            m.body,
+           m.media_asset_id::text as media_asset_id,
+           m.voice_seconds::int as voice_seconds,
+           ${voiceGoneSql('m')} as voice_gone,
            to_char(m.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as created_at,
            (m.author_user_id = ${ctx.userId}::uuid) as author_is_viewer,
            mp.display_name as staff_display_name
@@ -109,10 +118,20 @@ const toMessage = (row: MessageDbRow): MessageRow => ({
   id: row.id,
   seq: Number(row.seq),
   side: row.author_side,
-  body: row.body,
+  body: row.body ?? '',
   createdAt: row.created_at,
   author: row.author_side === 'staff' ? { firstName: firstNameOf(row.staff_display_name) } : null,
   authorIsViewer: row.author_is_viewer,
+  // D-846: the key exists only on a recording; `deleted` only when its asset has been retired since.
+  ...(row.media_asset_id
+    ? {
+        voice: {
+          mediaId: row.media_asset_id,
+          durationSeconds: Number(row.voice_seconds),
+          ...(row.voice_gone ? { deleted: true } : {}),
+        },
+      }
+    : {}),
 });
 
 /**
@@ -210,23 +229,49 @@ async function insertedMessage(
   return toMessage(row);
 }
 
+/** What a message holds (D-846): plain text, or ONE recording named by the id of its asset. */
+type MessageContent = { kind: 'text'; body: string } | { kind: 'voice'; mediaAssetId: string };
+
 /**
  * Inserts one message as the caller. No `seq` is sent: the column is NOT NULL, and Postgres checks
  * that AFTER the BEFORE trigger assigned it; the AFTER trigger then publishes the signals.
+ *
+ * A recording is inserted with `insert ... select` from the caller's own asset, so `voice_seconds` is the
+ * asset's SERVER-MEASURED `duration_seconds` and never a number from the request (T-12.5-16). When the asset
+ * is no longer there (retired between the validation and this statement) nothing is inserted and the answer
+ * is the same `voice_invalid` as an unknown id.
  */
 async function insertMessage(
   tx: Tx,
   ctx: RequestContext,
   conversationId: string,
   side: ChatSide,
-  body: string,
+  content: MessageContent,
 ): Promise<MessageRow> {
-  const inserted = await tx.execute<{ id: string }>(sql`
-    insert into chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
-    values (${ctx.tenantId}::uuid, ${conversationId}::uuid, ${ctx.userId}::uuid, ${side}, ${body})
-    returning id`);
+  const inserted =
+    content.kind === 'text'
+      ? await tx.execute<{ id: string }>(sql`
+          insert into chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+          values (${ctx.tenantId}::uuid, ${conversationId}::uuid, ${ctx.userId}::uuid, ${side}, ${content.body})
+          returning id`)
+      : await tx.execute<{ id: string }>(sql`
+          insert into chat_messages (tenant_id, conversation_id, author_user_id, author_side, body,
+                                     media_asset_id, voice_seconds)
+          select ${ctx.tenantId}::uuid, ${conversationId}::uuid, ${ctx.userId}::uuid, ${side}::text,
+                 null::text, a.id, a.duration_seconds
+            from media_assets a
+           where a.id = ${content.mediaAssetId}::uuid
+             and a.tenant_id = ${ctx.tenantId}::uuid
+             and a.owner_user_id = ${ctx.userId}::uuid
+             and a.deleted_at is null
+          returning id`);
   const id = inserted[0]?.id;
-  if (!id) throw new ApiError(500, 'INTERNAL');
+  if (!id) {
+    if (content.kind === 'voice') {
+      throw new ApiError(400, 'VALIDATION_FAILED', { chat: 'voice_invalid' });
+    }
+    throw new ApiError(500, 'INTERNAL');
+  }
   return insertedMessage(tx, ctx, conversationId, id);
 }
 
@@ -271,44 +316,58 @@ async function caseOfSend(
   return { id: row.id, number: Number(row.number), state: row.state };
 }
 
-/** One attempt of the member's send, in ITS OWN transaction (a raised CS004 aborts the Postgres transaction). */
-async function sendSupportMessageOnce(
+/**
+ * The member's send inside ONE transaction, for either content (D-846): the active case or its lazy creation (the
+ * category and the subject written only by the statement that creates it), the participant row, the message. A
+ * recording takes exactly the path text takes, so the case transitions, the numbering and the signals are the same.
+ */
+async function supportSendInTx(
+  tx: Tx,
   ctx: RequestContext,
-  input: SupportSendInput,
+  input: { category?: ChatCaseCategory | undefined; subject?: string | undefined },
+  content: MessageContent,
 ): Promise<SendResult> {
-  return withTenantTx(ctx, async (tx) => {
-    const existing = await activeCaseOf(tx, ctx);
-    let conversationId = existing?.id ?? null;
-    let opened = false;
-    if (!conversationId) {
-      // The category and the subject are written ONLY by the statement that creates the case (D-812, EP-031): a
-      // conflicting insert applies none of them, so two devices racing never mix fields. The priority, the state and
-      // the owner are never sent from here: the defaults trigger makes the case born open, normal and unowned.
-      const created = await tx.execute<{ id: string }>(sql`
+  const existing = await activeCaseOf(tx, ctx);
+  let conversationId = existing?.id ?? null;
+  let opened = false;
+  if (!conversationId) {
+    // The category and the subject are written ONLY by the statement that creates the case (D-812, EP-031): a
+    // conflicting insert applies none of them, so two devices racing never mix fields. The priority, the state and
+    // the owner are never sent from here: the defaults trigger makes the case born open, normal and unowned.
+    const created = await tx.execute<{ id: string }>(sql`
         insert into chat_conversations (tenant_id, kind, created_by_user_id, category, subject)
         values (${ctx.tenantId}::uuid, 'support', ${ctx.userId}::uuid,
                 ${input.category ?? 'other'}::text, ${input.subject ?? null}::text)
         on conflict (tenant_id, created_by_user_id)
           where kind = 'support' and state in (${ACTIVE_CASE_STATES}) do nothing
         returning id`);
-      opened = created.length > 0;
-      conversationId = created[0]?.id ?? (await activeCaseOf(tx, ctx))?.id ?? null;
-    }
-    if (!conversationId) throw new ApiError(500, 'INTERNAL');
-    // A message that goes to a RESOLVED case moves it back to open (the message trigger); never both flags.
-    const reopened = !opened && existing?.state === 'resolved';
-    await tx.execute(sql`
+    opened = created.length > 0;
+    conversationId = created[0]?.id ?? (await activeCaseOf(tx, ctx))?.id ?? null;
+  }
+  if (!conversationId) throw new ApiError(500, 'INTERNAL');
+  // A message that goes to a RESOLVED case moves it back to open (the message trigger); never both flags.
+  const reopened = !opened && existing?.state === 'resolved';
+  await tx.execute(sql`
       insert into chat_participants (conversation_id, tenant_id, user_id, role)
       values (${conversationId}::uuid, ${ctx.tenantId}::uuid, ${ctx.userId}::uuid, 'member')
       on conflict (conversation_id, user_id) do nothing`);
-    const message = await insertMessage(tx, ctx, conversationId, 'member', input.body);
-    const landed = await caseOfSend(tx, ctx, conversationId);
-    return {
-      conversationId,
-      message,
-      case: { id: landed.id, number: landed.number, state: landed.state, opened, reopened },
-    };
-  });
+  const message = await insertMessage(tx, ctx, conversationId, 'member', content);
+  const landed = await caseOfSend(tx, ctx, conversationId);
+  return {
+    conversationId,
+    message,
+    case: { id: landed.id, number: landed.number, state: landed.state, opened, reopened },
+  };
+}
+
+/** One attempt of the member's text send, in ITS OWN transaction (a raised CS004 aborts the Postgres transaction). */
+async function sendSupportMessageOnce(
+  ctx: RequestContext,
+  input: SupportSendInput,
+): Promise<SendResult> {
+  return withTenantTx(ctx, (tx) =>
+    supportSendInTx(tx, ctx, input, { kind: 'text', body: input.body }),
+  );
 }
 
 /**
@@ -369,6 +428,129 @@ export async function sendSupportMessage(
     },
     'chat message sent',
   );
+  return result;
+}
+
+/** The `23505` of the single-use index: another request already stored this take (VOICE-18). */
+function assetIndexViolated(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current !== null && current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as { code?: unknown; constraint_name?: unknown; cause?: unknown };
+    if (
+      candidate.code === '23505' &&
+      candidate.constraint_name === 'chat_messages_tenant_media_asset_uq'
+    ) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
+}
+
+/** The answer for a take that is ALREADY stored: the same shape, never opening or reopening anything (VOICE-18). */
+async function storedVoiceResult(
+  tx: Tx,
+  ctx: RequestContext,
+  stored: { id: string; conversationId: string },
+): Promise<SendResult> {
+  const message = await insertedMessage(tx, ctx, stored.conversationId, stored.id);
+  const landed = await caseOfSend(tx, ctx, stored.conversationId);
+  return {
+    conversationId: stored.conversationId,
+    message,
+    case: {
+      id: landed.id,
+      number: landed.number,
+      state: landed.state,
+      opened: false,
+      reopened: false,
+    },
+  };
+}
+
+/**
+ * One attempt of the member's voice send, in ITS OWN transaction. The order is the text order (D-862): the
+ * idempotent read of the caller's own message for the asset, then the asset validation (every refusal BEFORE any
+ * case write), then the unchanged case flow and the insert. `fresh` tells the caller whether THIS call stored the
+ * message, so only a stored one emits `chat.message_sent`.
+ */
+async function sendSupportVoiceOnce(
+  ctx: RequestContext,
+  input: VoiceSendInput,
+): Promise<{ result: SendResult; fresh: boolean }> {
+  return withTenantTx(ctx, async (tx) => {
+    const prior = await storedVoiceMessage(tx, ctx, input.mediaId);
+    if (prior) return { result: await storedVoiceResult(tx, ctx, prior), fresh: false };
+    await assertVoiceUsable(tx, ctx, input.mediaId);
+    const result = await supportSendInTx(tx, ctx, input, {
+      kind: 'voice',
+      mediaAssetId: input.mediaId,
+    });
+    return { result, fresh: true };
+  });
+}
+
+/**
+ * `POST /v1/chat/support/voice-messages` (D-866, D-861, D-862, VOICE-04, VOICE-05, VOICE-18, VOICE-31): the member
+ * sends ONE recording as a message. It goes through the same case flow as text (a first recording may open the
+ * case with its category and subject, one to a resolved case reopens it, one after a close opens a NEW case), gets
+ * the gapless `seq`, the signals and `chat.message_sent` with the ids-only payload of text.
+ *
+ * Idempotent per take, with no client key: a repeat answers the stored message (`opened` and `reopened` false, no
+ * second event). A concurrent double send loses on the single-use index (`23505`); that aborted the transaction,
+ * so the loser re-reads in a NEW one. A closed case that closes under the send is the CS004 retry of text.
+ */
+export async function sendSupportVoiceMessage(
+  ctx: RequestContext,
+  input: VoiceSendInput,
+): Promise<SendResult> {
+  let outcome: { result: SendResult; fresh: boolean } | undefined;
+  for (let attempt = 0; attempt < 2 && !outcome; attempt += 1) {
+    try {
+      outcome = await sendSupportVoiceOnce(ctx, input);
+    } catch (error) {
+      if (assetIndexViolated(error)) {
+        const stored = await withTenantTx(ctx, async (tx) => {
+          const prior = await storedVoiceMessage(tx, ctx, input.mediaId);
+          return prior ? storedVoiceResult(tx, ctx, prior) : null;
+        });
+        if (!stored) throw error;
+        outcome = { result: stored, fresh: false };
+        continue;
+      }
+      if (sqlstateOf(error) === 'CS004') {
+        if (attempt === 1) throw new ApiError(409, 'CONFLICT');
+        continue;
+      }
+      throw error;
+    }
+  }
+  if (!outcome) throw new ApiError(500, 'INTERNAL');
+  const { result, fresh } = outcome;
+
+  if (fresh) {
+    emit(ctx, 'chat.message_sent', {
+      tenantId: ctx.tenantId,
+      conversationId: result.conversationId,
+      messageId: result.message.id,
+      seq: result.message.seq,
+      authorUserId: ctx.userId,
+      authorSide: 'member',
+    });
+    log.info(
+      {
+        event: 'chat.message_sent',
+        tenantId: ctx.tenantId,
+        conversationId: result.conversationId,
+        seq: result.message.seq,
+        side: 'member',
+        voice: true,
+      },
+      'chat message sent',
+    );
+  }
   return result;
 }
 
@@ -498,7 +680,7 @@ export async function replyToConversation(
       if (conversation.member_state === 'removed') {
         throw new ApiError(409, 'CONFLICT', { chat: 'member_removed' });
       }
-      const message = await insertMessage(tx, ctx, conversationId, 'staff', body);
+      const message = await insertMessage(tx, ctx, conversationId, 'staff', { kind: 'text', body });
       return { conversationId, message };
     });
   } catch (error) {

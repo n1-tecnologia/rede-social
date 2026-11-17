@@ -24,6 +24,7 @@ import {
   staffRosterSchema,
   supportSendInputSchema,
   supportThreadSchema,
+  voiceSendInputSchema,
 } from '../contracts/index';
 import { getCaseHistory, getMyCases, getStaffRoster, runCaseAction, runCaseEdit } from './cases';
 import {
@@ -34,6 +35,7 @@ import {
   markConversationRead,
   replyToConversation,
   sendSupportMessage,
+  sendSupportVoiceMessage,
 } from './service';
 
 /**
@@ -124,6 +126,34 @@ const supportSendRoute = createRoute({
     },
     400: bodyRefusal,
     403: { description: '`FORBIDDEN` for staff: they never own a support conversation.' },
+  },
+});
+
+const supportVoiceSendRoute = createRoute({
+  method: 'post',
+  path: '/support/voice-messages',
+  middleware: [requirePermission('chat.support.contact')] as const,
+  request: {
+    body: {
+      required: true,
+      content: { 'application/json': { schema: voiceSendInputSchema } },
+    },
+  },
+  responses: {
+    201: {
+      description:
+        "VOICE-04, D-866: the member sends ONE recording, by the id of a `ready` voice asset of their own, with the optional `category` and `subject` of the case it opens (applied only by the statement that creates the case, as for text). The duration is the asset's server-measured one: no client duration is accepted. Same case flow, `seq`, signals and answer shape as `POST /support/messages`; `message.body` is the empty string and `message.voice` carries the asset id and the duration. Idempotent per take: the same `mediaId` again answers the stored message with `case.opened` and `case.reopened` false and emits nothing.",
+      content: { 'application/json': { schema: sendResultSchema } },
+    },
+    400: {
+      description:
+        "`VALIDATION_FAILED`: `details.chat = voice_invalid` for ONE answer to every unusable asset (unknown, another member's, another tenant's, soft-deleted, not an `audio`/`voice` asset, `failed` or `rejected`), `subject_too_long` above 80 code points; any other key or a malformed id is a plain `VALIDATION_FAILED`. Nothing is written.",
+    },
+    403: { description: '`FORBIDDEN` for staff: they never own a support conversation.' },
+    409: {
+      description:
+        "`CONFLICT` with `details.chat = voice_not_ready` while the caller's own recording is still `pending` or `processing` (retriable), and a bare `CONFLICT` when the case closed under the send twice in a row.",
+    },
   },
 });
 
@@ -401,6 +431,9 @@ export const chatRoutes = chat
   .openapi(supportThreadRoute, async (c) => c.json(await getSupportThread(c.get('ctx')), 200))
   .openapi(supportSendRoute, async (c) =>
     c.json(await sendSupportMessage(c.get('ctx'), c.req.valid('json')), 201),
+  )
+  .openapi(supportVoiceSendRoute, async (c) =>
+    c.json(await sendSupportVoiceMessage(c.get('ctx'), c.req.valid('json')), 201),
   )
   .openapi(myCasesRoute, async (c) =>
     c.json(await getMyCases(c.get('ctx'), c.req.valid('query')), 200),
