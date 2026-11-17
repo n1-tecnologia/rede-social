@@ -122,6 +122,8 @@ export const chatConversations = pgTable(
     uniqueIndex('chat_conversations_one_support_per_member')
       .on(t.tenantId, t.createdByUserId)
       .where(sql`kind = 'support'`),
+    // D-804: a case number is unique per tenant. NULLs (direct and group rows, legacy rows) never collide.
+    uniqueIndex('chat_conversations_case_number_uniq').on(t.tenantId, t.caseNumber),
     index('chat_conversations_tenant_last_message_idx').on(t.tenantId, t.lastMessageAt.desc()),
     // CHAT-03: the staff inbox keyset, `last_message_at desc, id desc` over support threads only.
     // `nullsFirst` matches the default null ordering of a plain `desc` in the query (the 07-01 rule).
@@ -133,6 +135,58 @@ export const chatConversations = pgTable(
       'chat_conversations_last_side_chk',
       sql`${t.lastMessageSide} is null or ${t.lastMessageSide} in ('member','staff')`,
     ),
+    // D-836, D-811: the closed value lists of the case columns. Every CHECK of this block is VALID at
+    // creation because every existing row (all seven columns null) satisfies it.
+    check(
+      'chat_conversations_state_chk',
+      sql`${t.state} is null or ${t.state} in ('open','in_progress','resolved','closed')`,
+    ),
+    check(
+      'chat_conversations_category_chk',
+      sql`${t.category} is null or ${t.category} in ('check_in','events','payment','account','other')`,
+    ),
+    check(
+      'chat_conversations_priority_chk',
+      sql`${t.priority} is null or ${t.priority} in ('low','normal','high')`,
+    ),
+    // EP-001: the first number is 1, never 0.
+    check(
+      'chat_conversations_case_number_chk',
+      sql`${t.caseNumber} is null or ${t.caseNumber} > 0`,
+    ),
+    // D-839: a typed SUPPORT subject is 1 to 80 CODE POINTS (`char_length` counts code points, like the
+    // API); scoped to support rows so a V2 group subject is not capped.
+    check(
+      'chat_conversations_subject_chk',
+      sql`${t.kind} <> 'support' or ${t.subject} is null or char_length(${t.subject}) between 1 and 80`,
+    ),
+    // The LEGACY-SAFE half of the shape rule (checker B1). A row that is not `support` carries none of
+    // the case columns (CASE-25). The other half, "a support row has a state", is NOT stated here: it
+    // is plan 02's, added NOT VALID after the backfill, because a NOT VALID constraint is still
+    // evaluated on the new version of every updated row and would fail every message on a conversation
+    // that predates the backfill (the message trigger UPDATEs the conversation counters).
+    check(
+      'chat_conversations_case_shape_chk',
+      sql`${t.kind} = 'support' or (${t.state} is null and ${t.caseNumber} is null and ${t.ownerUserId} is null and ${t.category} is null and ${t.priority} is null and ${t.resolvedAt} is null and ${t.closedAt} is null)`,
+    ),
+    // D-805, D-806: what each non-null state implies. A null state (a legacy support row) passes.
+    check(
+      'chat_conversations_case_coherence_chk',
+      sql`${t.state} is null or (${t.state} = 'open' and ${t.ownerUserId} is null and ${t.resolvedAt} is null and ${t.closedAt} is null) or (${t.state} = 'in_progress' and ${t.ownerUserId} is not null and ${t.resolvedAt} is null and ${t.closedAt} is null) or (${t.state} = 'resolved' and ${t.resolvedAt} is not null and ${t.closedAt} is null) or (${t.state} = 'closed' and ${t.closedAt} is not null and ${t.resolvedAt} is null)`,
+    ),
+    // CASE-17: the team inbox default tab (open and in-progress cases), so closed cases that pile up
+    // forever are never scanned. Same key order and null ordering as `chat_conversations_inbox_idx`.
+    index('chat_conversations_open_inbox_idx')
+      .on(t.tenantId, t.lastMessageAt.desc().nullsFirst(), t.id.desc().nullsFirst())
+      .where(sql`kind = 'support' and state in ('open','in_progress')`),
+    // CASE-14: "Meus chamados", one member's cases newest number first.
+    index('chat_conversations_member_cases_idx')
+      .on(t.tenantId, t.createdByUserId, t.caseNumber.desc().nullsFirst())
+      .where(sql`kind = 'support'`),
+    // CASE-13: the auto-close sweep of plan 04 reads resolved cases across every tenant, so this index is
+    // deliberately NOT tenant-first: the documented exception to the tenant-first rule, like
+    // `notifications_created_idx`.
+    index('chat_conversations_resolved_sweep_idx').on(t.resolvedAt).where(sql`state = 'resolved'`),
     // Fact 7: staff see every SUPPORT thread of their tenant; anyone else only what they created or
     // take part in. Per command (07 review A-CR-01 / A-WR-01 / B-WR-04): a lane may create only its
     // OWN conversation with untouched counters, only staff may UPDATE (and only the column the
@@ -146,7 +200,10 @@ export const chatConversations = pgTable(
     pgPolicy('chat_conversations_insert', {
       for: 'insert',
       to: authenticatedRole,
-      withCheck: sql`tenant_id = app.tenant_id() and created_by_user_id = app.user_id() and last_seq = 0 and last_staff_seq = 0 and staff_last_read_seq = 0 and last_message_side is null and last_message_at is null`,
+      // D-836, T-12.4-01: a lane may create ONLY a born-open case of its own: no number, no owner, no
+      // instants, a priority of null or normal and a state of null or open (the defaults trigger fills
+      // them before this check runs). A row that is not `support` carries no case column at all.
+      withCheck: sql`tenant_id = app.tenant_id() and created_by_user_id = app.user_id() and last_seq = 0 and last_staff_seq = 0 and staff_last_read_seq = 0 and last_message_side is null and last_message_at is null and case_number is null and owner_user_id is null and resolved_at is null and closed_at is null and ((kind = 'support' and (priority is null or priority = 'normal') and (state is null or state = 'open')) or (kind <> 'support' and state is null and category is null and priority is null))`,
     }),
     pgPolicy('chat_conversations_staff_update', {
       for: 'update',
@@ -283,28 +340,45 @@ export const chatCaseCounters = pgTable('chat_case_counters', {
  * BEFORE the message row exists. The conversation cascades (the shipped suites delete conversations
  * directly) and the two users are set null (a deleted account must not erase the history).
  */
-export const chatCaseEvents = pgTable('chat_case_events', {
-  id: uuid().primaryKey().defaultRandom(),
-  tenantId: uuid('tenant_id')
-    .notNull()
-    .references(() => tenants.id),
-  conversationId: uuid('conversation_id')
-    .notNull()
-    .references(() => chatConversations.id, { onDelete: 'cascade' }),
-  /** `opened`, `taken`, `assigned`, `resolved`, `closed`, `reopened` or `edited`. */
-  kind: text().notNull(),
-  actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
-  targetUserId: uuid('target_user_id').references(() => users.id, { onDelete: 'set null' }),
-  fromState: text('from_state'),
-  toState: text('to_state'),
-  /** For `edited`: the field that changed. */
-  field: text(),
-  fromValue: text('from_value'),
-  toValue: text('to_value'),
-  /** The message that caused the event, when one did; no foreign key (see the docblock). */
-  messageId: uuid('message_id'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-}).enableRLS();
+export const chatCaseEvents = pgTable(
+  'chat_case_events',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => chatConversations.id, { onDelete: 'cascade' }),
+    /** `opened`, `taken`, `assigned`, `resolved`, `closed`, `reopened` or `edited`. */
+    kind: text().notNull(),
+    actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+    targetUserId: uuid('target_user_id').references(() => users.id, { onDelete: 'set null' }),
+    fromState: text('from_state'),
+    toState: text('to_state'),
+    /** For `edited`: the field that changed. */
+    field: text(),
+    fromValue: text('from_value'),
+    toValue: text('to_value'),
+    /** The message that caused the event, when one did; no foreign key (see the docblock). */
+    messageId: uuid('message_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      'chat_case_events_kind_chk',
+      sql`${t.kind} in ('opened','taken','assigned','resolved','closed','reopened','edited')`,
+    ),
+    // EP-004: one case's events read in (created_at, id) order; the id breaks a tie of one instant.
+    index('chat_case_events_conv_idx').on(t.tenantId, t.conversationId, t.createdAt, t.id),
+    // CASE-23: the staff of the tenant read the history; nobody writes it from a lane (no write policy).
+    pgPolicy('chat_case_events_select', {
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`tenant_id = app.tenant_id() and ${STAFF_ROLE}`,
+    }),
+  ],
+).enableRLS();
 
 export type ChatConversation = typeof chatConversations.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;

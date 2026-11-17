@@ -1373,6 +1373,13 @@
       "when": 1794903835498,
       "tag": "20261117082355_chat_cases_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "7",
+      "when": 1794904017701,
+      "tag": "20261117082657_chat_cases_constraints",
+      "breakpoints": true
     }
   ]
 }
