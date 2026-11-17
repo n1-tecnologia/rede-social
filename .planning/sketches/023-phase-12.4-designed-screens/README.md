@@ -66,11 +66,11 @@ screens:
   - painel-fila-chamados
   - leitor-de-tela
   - defaults-a-confirmar
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: igor.vboas (word "aprovado" in the session, recorded by Claude)
+approved_at: 2026-11-16
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-12.4, design-review, D-33, D-365, D-417, UI-04, support-cases, chat, owner-panel]
@@ -210,6 +210,17 @@ Esta revisão só pergunta se o **desenho** as cumpre, e confirma ou derruba os 
    revisão se repete. Se o Igor dispensar o portão, ele registra a dispensa como decisão no `12.4-CONTEXT.md`, e os
    planos de tela largam a guarda; o mínimo que ainda vale olhar são os quadros do passo 2.
 
-Enquanto este arquivo disser `approved: false`, **todas as tarefas de tela da Fase 12.4 param na precondição**
+## Registro da aprovação (2026-11-16)
+
+O Igor respondeu "aprovado" ao pedido de revisão (a lista de pontos e a tabela `defaults-a-confirmar`), sem responder
+linha por linha. A leitura registrada: **manter tudo como está desenhado**. Valem como decididas as quatro suposições do
+CONTEXT (A-UI-1 a A-UI-4), as demais A-UI-5 a A-UI-28 no padrão desenhado, e, para os pontos 1 a 11 acima, o que o
+quadro mostra como recomendado (a quebra da barra do membro com o link recuado, a lista de atendentes com
+esqueleto e nova tentativa, o 12px como geometria entregue, e assim por diante). A aprovação é **provisional**: quem
+olhar o aparelho real ou o Amarelo pode reabrir qualquer linha, e mudanças pedidas depois reabrem só as telas, não o
+servidor. O `12.4-UI-SPEC.md` recebeu a seção "Sketch 023 review outcome" com as correções numéricas que o desenho
+trouxe.
+
+Enquanto este arquivo dizia \`approved: false\`, **todas as tarefas de tela da Fase 12.4 param na precondição**
 (`grep -q '^approved: true'` neste arquivo). Os planos de banco, contrato, API, worker do fechamento automático,
 avisos e modelos de leitura não dependem desta aprovação e seguem.
