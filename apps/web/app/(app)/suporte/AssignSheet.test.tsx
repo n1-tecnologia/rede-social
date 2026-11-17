@@ -256,6 +256,7 @@ describe('the tracer: the admin assigns from the sheet (CASE-08)', () => {
     expect(mocks.run).toHaveBeenCalledWith(CONVERSATION_ID, {
       action: 'assign',
       expectedState: 'in_progress',
+      expectedOwnerId: CARLA,
       assigneeUserId: ANA,
     });
     expect(mocks.toast.show).toHaveBeenCalledWith({
@@ -355,6 +356,36 @@ describe('the tracer: the admin assigns from the sheet (CASE-08)', () => {
       expectedState: 'open',
       assigneeUserId: ANA,
     });
+    // An unowned case sends no owner key at all, never null (WR-04).
+    const sent = mocks.run.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(Object.hasOwn(sent, 'expectedOwnerId')).toBe(false);
+  });
+
+  it('WR-04: the owner sent is the one the sheet opened on, so a live re-read that moves the owner is refused as stale', async () => {
+    mocks.run.mockResolvedValue({ ok: false, error: 'stale' });
+    const { rerender, tree, onStale, onClose } = renderSheet({
+      header: header({ ownerUserId: CARLA }),
+    });
+    await ready();
+    fireEvent.click(screen.getByRole('radio', { name: /Ana/ }));
+    // The live re-read says Bruno took the case while the sheet was open.
+    rerender(tree(true, header({ ownerUserId: BRUNO, ownerName: 'Bruno Lima' })));
+    await act(async () => {
+      fireEvent.click(confirm());
+    });
+    expect(mocks.run).toHaveBeenCalledWith(CONVERSATION_ID, {
+      action: 'assign',
+      expectedState: 'in_progress',
+      expectedOwnerId: CARLA,
+      assigneeUserId: ANA,
+    });
+    expect(mocks.toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Este chamado mudou enquanto você olhava. A tela foi atualizada.',
+    });
+    expect(onStale).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('radio', { name: /Ana/ }).getAttribute('aria-checked')).toBe('true');
   });
 });
 

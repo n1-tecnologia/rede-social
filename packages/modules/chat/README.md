@@ -38,7 +38,8 @@ owner is refused), `memberCaseSchema` (no priority, owner or history), `staffCas
 - `chat.support`: answer support (the inbox, the staff reply, the case actions). Both staff roles.
 - `chat.support.contact`: write to the team. Members only.
 - `chat.support.assign`: hand a case to a colleague. `admin_tenant` only; the case definer repeats
-  the role once and the drift test compares both.
+  the role once and the drift test compares both. Assigning an in-progress case needs `expectedOwnerId`
+  naming the owner the caller saw; any other value, or none, is `case_stale` (409) and nothing is written.
 
 All three come from this manifest, so turning chat off revokes them.
 

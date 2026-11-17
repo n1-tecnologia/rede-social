@@ -488,6 +488,7 @@ describe('the assign sheet is mounted from the menu (12.4-19 tracer, key link on
     expect(mocks.run).toHaveBeenCalledWith(CONVERSATION_ID, {
       action: 'assign',
       expectedState: 'in_progress',
+      expectedOwnerId: OWNER_ID,
       assigneeUserId: ANA_ID,
     });
     await waitFor(() => expect(screen.getByText('Pagamento · Normal · Com Ana')).toBeTruthy());

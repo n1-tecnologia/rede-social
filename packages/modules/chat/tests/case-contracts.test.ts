@@ -281,6 +281,38 @@ describe('caseActionInputSchema and caseAssignInputSchema', () => {
     ).toBe(false);
   });
 
+  it('WR-04: the assign body accepts a uuid expected owner beside the assignee, refuses null, a non-uuid and an unknown key', () => {
+    expect(
+      caseAssignInputSchema.safeParse({
+        expectedState: 'in_progress',
+        expectedOwnerId: ID,
+        assigneeUserId: ID2,
+      }).success,
+    ).toBe(true);
+    expect(
+      caseAssignInputSchema.safeParse({
+        expectedState: 'in_progress',
+        expectedOwnerId: null,
+        assigneeUserId: ID2,
+      }).success,
+    ).toBe(false);
+    expect(
+      caseAssignInputSchema.safeParse({
+        expectedState: 'in_progress',
+        expectedOwnerId: 'x',
+        assigneeUserId: ID2,
+      }).success,
+    ).toBe(false);
+    expect(
+      caseAssignInputSchema.safeParse({
+        expectedState: 'in_progress',
+        expectedOwnerId: ID,
+        assigneeUserId: ID2,
+        owner: ID,
+      }).success,
+    ).toBe(false);
+  });
+
   it('the assign body adds the assignee and refuses a missing or foreign-shaped one', () => {
     expect(
       caseAssignInputSchema.safeParse({ expectedState: 'open', assigneeUserId: ID2 }).success,

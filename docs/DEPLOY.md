@@ -4959,10 +4959,10 @@ below, and it changes on the day of the release for every member who HAS a suppo
 
 ### What ships
 
-- **Eleven migrations, applied in timestamp order** (the order `ls supabase/migrations` prints, all after
+- **Twelve migrations, applied in timestamp order** (the order `ls supabase/migrations` prints, all after
   `20261113231417_event_opening_grant.sql` and its 10.2 siblings). The first ten are expand-only apart from the one
-  allowed statement of the activation; the eleventh is the dashboard's second `create or replace`. Each applies on an
-  EMPTY tenant project and on an existing one.
+  allowed statement of the activation; the last two are `create or replace` of one function each (the dashboard's
+  second builder and the support action definer). Each applies on an EMPTY tenant project and on an existing one.
   1. `20261117082348_chat_cases.sql` (generated): the seven nullable case columns of `chat_conversations`
      (`case_number`, `state`, `owner_user_id`, `category`, `priority`, `resolved_at`, `closed_at`), the tables
      `chat_case_counters` (one row per tenant) and `chat_case_events` (the append-only history), the legacy-safe CHECKs
@@ -4986,7 +4986,8 @@ below, and it changes on the day of the release for every member who HAS a suppo
   6. `20261117085644_chat_cases_actions.sql` (hand-written): the signal helper `app.chat_case_signal` and the first
      version of `app.chat_case_act` (the take branch only).
   7. `20261117085928_chat_cases_actions_matrix.sql` (hand-written): `app.chat_case_act` redefined whole with every
-     action (take, assign, resolve, close, reopen) and the transition table; this is the final definition.
+     action (take, assign, resolve, close, reopen) and the transition table; the twelfth file (item 12) holds the final
+     definition.
   8. `20261117090105_chat_cases_edit.sql` (hand-written): `app.chat_case_edit`, the category, subject and priority
      edit, one history row per changed field.
   9. `20261117090857_chat_cases_sweep.sql` (hand-written): `app.chat_cases_auto_close(batch)`, executable by the service
@@ -4996,6 +4997,12 @@ below, and it changes on the day of the release for every member who HAS a suppo
       (`app.dashboard_area_support`, with the new `bySubject` key) and the snapshot builder at version 9.
   11. `20261117092952_dashboard_cases_first_response.sql` (hand-written, expand-only): the first response per case; it
       redefines `app.dashboard_area_support` whole and holds its final definition.
+  12. `20261117161348_chat_cases_assign_expected_owner.sql` (hand-written, expand-only, WR-04): `app.chat_case_act`
+      redefined whole; the assign branch now refuses, under the row lock and before the assignee check, an in-progress
+      case whose owner is not the expected one (or none was sent) with CS002 (the route answers 409 `case_stale`), so a
+      second admin's concurrent assignment no longer overwrites the first. One `create or replace`, same signature and
+      grants; it holds the FINAL definition of the function and opens no failing window: no web earlier than this
+      phase has an assign control, and this phase's `AssignSheet` sends the owner it opened on.
 - **The web.** The case opener (category and subject on the first message), the case bar and the polite region, `Meus
   chamados` and the bell row of a resolved case, the team's inbox (tabs, owner, priority and awaiting filters, kept in
   the URL), the staff bar with its dialogs and sheets (take, assign, resolve, close, reopen, edit, details), and the
@@ -5023,7 +5030,7 @@ select table_name, column_name from information_schema.columns
 select version from supabase_migrations.schema_migrations
  where version in ('20261117082348', '20261117082355', '20261117082657', '20261117084153', '20261117084235',
                    '20261117085644', '20261117085928', '20261117090105', '20261117090857', '20261117092714',
-                   '20261117092952')
+                   '20261117092952', '20261117161348')
  order by version;
 -- C. How big is the table the activation locks? (judge that the lock lasts seconds)
 select (select count(*) from public.chat_conversations) as conversations,
@@ -5034,7 +5041,7 @@ select (select count(*) from public.chat_conversations) as conversations,
 Then, from the repository, the two local checks that need no project:
 
 - `pnpm db:migrate-all -- --dry-run` lists the pending versions per project and writes nothing; on a project that
-  already has the Phase 10.2 release the eleven files above are the pending ones.
+  already has the Phase 10.2 release the twelve files above are the pending ones.
 - The expand-only grep over the phase's files prints nothing except the one allowed statement:
   `grep -inE 'drop (table|column)|rename|set not null|alter column .* type' supabase/migrations/*_chat_cases*.sql
   supabase/migrations/*_dashboard_cases*.sql`. The one destructive statement of the phase is
@@ -5044,7 +5051,7 @@ Then, from the repository, the two local checks that need no project:
 
 ### Order
 
-1. **Migrations** on every tenant database first, through the ledgered fan-out (the Phase 09.2 Cloud Run Job `migrateAll`, databases before the services); the eleven files apply in the order of their names, the runner is serialised per database and idempotent, so a re-run is safe and reports nothing pending. Locally, `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole tenant set to an empty second local database.
+1. **Migrations** on every tenant database first, through the ledgered fan-out (the Phase 09.2 Cloud Run Job `migrateAll`, databases before the services); the twelve files apply in the order of their names, the runner is serialised per database and idempotent, so a re-run is safe and reports nothing pending. Locally, `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole tenant set to an empty second local database.
 2. **Web** second, once every project is current, and in the SAME sitting as step 3.
 3. **API and worker** last and together, from a REBUILT image (the image bakes the migrations manifest built by `scripts/build-migrations-manifest.mjs`; an image built before these files does not know them, and a production boot without the manifest stops with `migrations manifest empty`).
 

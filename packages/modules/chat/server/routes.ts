@@ -366,7 +366,7 @@ const assignRoute = createRoute({
   request: caseAssignRequest,
   responses: {
     200: caseOk(
-      'D-806: a holder of `chat.support.assign` (`admin_tenant` only) hands an open or in-progress case to a live staff member who is not already its owner. Answers the fresh case and emits the ids-only `chat.case_assigned` after the commit (the assignee’s notice, D-809).',
+      'D-806: a holder of `chat.support.assign` (`admin_tenant` only) hands an open or in-progress case to a live staff member who is not already its owner. On an in-progress case `expectedOwnerId` must name the owner the caller saw: any other value, or none, is `case_stale` (409) with nothing written (WR-04, D-842). Answers the fresh case and emits the ids-only `chat.case_assigned` after the commit (the assignee’s notice, D-809).',
     ),
     ...caseActionResponses,
     400: {

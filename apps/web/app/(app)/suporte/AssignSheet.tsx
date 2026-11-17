@@ -21,9 +21,11 @@ import { useStaffRoster } from './useStaffRoster';
  * disabled, so "Atribuir" is enabled only for a DIFFERENT person. The viewer is always a live staff member
  * and is in the list, so the list is never empty.
  *
- * **What it sends** is the intent and nothing else: `assign`, the state the sheet opened on and the id the
- * admin picked. It names no owner and no state transition; the server decides and answers the fresh case or
- * a refusal. A stale or failed answer toasts as the bar does and KEEPS the sheet open with the picked row.
+ * **What it sends** is the intent and what the admin SAW, nothing else: `assign`, the state AND the owner the
+ * sheet opened on (`expectedOwnerId`, only when the case had an owner, never null) and the id the admin picked
+ * (WR-04, D-806). It decides no state transition; the server compares the owner under the row lock and
+ * answers the fresh case or a refusal, so a second admin's concurrent assignment is refused as stale instead
+ * of overwritten. A stale or failed answer toasts as the bar does and KEEPS the sheet open with the picked row.
  *
  * The body is mounted only while the sheet is open, so the roster hook (forgotten when its last consumer
  * leaves) and the pick are fresh on every opening. The list scrolls inside the sheet and the footer stays in
@@ -103,6 +105,8 @@ function AssignBody({
   const mounted = useRef(true);
   /** The state the sheet opened on: a case that moved while it was open is refused as stale (UI-D-830). */
   const [openedOn] = useState(header.state.state);
+  /** The owner the sheet opened on (null when unowned), never the live one: a re-read must not erase the protection (WR-04). */
+  const [openedOwner] = useState(header.ownerUserId);
 
   useEffect(() => {
     mounted.current = true;
@@ -124,6 +128,7 @@ function AssignBody({
       const result = await runCaseActionAction(conversationId, {
         action: 'assign',
         expectedState: openedOn,
+        ...(openedOwner ? { expectedOwnerId: openedOwner } : {}),
         assigneeUserId: picked,
       });
       if (result.ok) {
