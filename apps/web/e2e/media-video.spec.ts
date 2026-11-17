@@ -386,14 +386,14 @@ test.describe('MEDIA-03 — the upload and the player', () => {
     await expect(page.locator('[data-testid="video-ready"]')).not.toContainText(/error|401|403/i);
   });
 
-  test('2026-10-20: the player has no bar, plays by itself never paused, and a click pauses it under the badge', async ({
+  test('2026-11-17: the library preview shows the vendor bar, with no cover button or sound button, and plays by itself', async ({
     page,
     context,
   }) => {
     await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
       status: 'ready',
-      filename: 'sem-barra.mp4',
-      playbackId: 'fake-playback-chromeless',
+      filename: 'com-barra.mp4',
+      playbackId: 'fake-playback-bar',
     });
     // The stream stays loading (no local stack decodes it): the element never errors. On the
     // CONTEXT: this spec keeps the dev service worker, which fetches the stream itself (NetworkOnly),
@@ -407,33 +407,21 @@ test.describe('MEDIA-03 — the upload and the player', () => {
     const ready = page.locator('[data-testid="video-ready"]');
     const player = ready.locator('mux-player');
     await expect(player).toBeAttached({ timeout: 20_000 });
-    // No bar: the vendor's controls are hidden by `--controls: none`, and none is visible.
+    // The bar is on: `--controls` is no longer `none` and the hotkeys are not switched off. The bar
+    // autohides and the stream never loads here, so its visibility and geometry are not asserted.
     expect(
       await player.evaluate((node) => getComputedStyle(node).getPropertyValue('--controls').trim()),
-    ).toBe('none');
-    await expect(ready.locator('media-control-bar').filter({ visible: true })).toHaveCount(0);
+    ).not.toBe('none');
+    expect(await player.evaluate((node) => node.hasAttribute('nohotkeys'))).toBe(false);
 
-    // It plays by itself, never left paused: with sound, or muted when the browser holds the
-    // sound back, and the sound button says which.
-    const sound = ready.locator('[data-video-sound]');
-    await expect(sound).toBeVisible();
-    await expect.poll(() => playerProperty(player, 'paused')).toBe(false);
-    const muted = await playerProperty(player, 'muted');
-    await expect(sound).toHaveAccessibleName(muted ? M.feedVideo.unmute : M.feedVideo.mute);
-
-    // A click on the frame pauses it under the badge (on a held-back video the first click turns
-    // the sound on instead); another resumes it.
-    const toggle = ready.getByTestId('video-player-toggle');
-    if (muted) {
-      await toggle.click();
-      await expect(sound).toHaveAccessibleName(M.feedVideo.mute);
-    }
-    await toggle.click();
-    await expect.poll(() => playerProperty(player, 'paused')).toBe(true);
-    await expect(ready.getByTestId('video-player-badge')).toBeVisible();
-    await toggle.click();
-    await expect.poll(() => playerProperty(player, 'paused')).toBe(false);
+    // The vendor bar owns play, pause and volume: no cover button, badge or corner sound button.
+    await expect(ready.locator('[data-video-sound]')).toHaveCount(0);
+    await expect(ready.getByTestId('video-player-toggle')).toHaveCount(0);
     await expect(ready.getByTestId('video-player-badge')).toHaveCount(0);
+    await expect(ready.getByRole('group', { name: M.player.label })).toBeVisible();
+
+    // It still plays by itself, never left paused.
+    await expect.poll(() => playerProperty(player, 'paused')).toBe(false);
   });
 
   test('2026-10-20: a player error is the catalog line and "Tentar novamente", never the vendor dialog', async ({

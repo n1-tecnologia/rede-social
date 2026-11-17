@@ -307,7 +307,7 @@ export function MediaLibrary({
         desktopCard={isDesktop}
         className={isDesktop ? 'max-w-[680px]' : undefined}
       >
-        {playing ? <VideoPlayer assetId={playing.id} status={playing.status} /> : null}
+        {playing ? <VideoPlayer assetId={playing.id} status={playing.status} controls /> : null}
       </BottomSheet>
 
       <ConfirmDialog
