@@ -108,6 +108,8 @@ export {
   type OwnerPastEvent,
   type OwnerUpcomingEvent,
   type OwnerWaitlistRow,
+  ownerBySubjectMeasured,
+  ownerBySubjectNotMeasured,
   type SupportSubject,
   type TenantOwnerAttention,
   type TenantOwnerPanel,

@@ -56,7 +56,7 @@ All `security definer set search_path = ''`, pinned to `app.tenant_id()`, except
 
 | Function | Migration | What it does |
 |---|---|---|
-| `app.dashboard_build_snapshot(date)` | `20261018215342` (final: `20261019035403`, payload version 8) | Builds day D for the lane's tenant: the member rows, then every area key, in one transaction. Executable by `authenticated` but refuses every caller but the zero user (T-08.7-03), refuses a day that is not complete yet (22023), and skips a day already built at the current version |
+| `app.dashboard_build_snapshot(date)` | `20261018215342` (final: `20261117092714`, payload version 9) | Builds day D for the lane's tenant: the member rows, then every area key, in one transaction. Executable by `authenticated` but refuses every caller but the zero user (T-08.7-03), refuses a day that is not complete yet (22023), and skips a day already built at the current version |
 | `app.dashboard_member_actions(date, date)` | `20261018222405` | The counted-action stream (like, live comment, post, RSVP "vou", check-in or walk-in, paid order) per membership, the bands' only input |
 | `app.dashboard_member_rows(date)` | `20261018222405` | The member rows: band today, D-30 and D-60, insights, per-community bands |
 | `app.dashboard_area_members(date)` | `20261018222405` | Membros: bands, movement, growth, per-community and per-event bands |
@@ -64,7 +64,7 @@ All `security definer set search_path = ''`, pinned to `app.tenant_id()`, except
 | `app.dashboard_area_content(date)` | `20261019003131` | Conteúdo: KPIs, by kind, trend, heatmap (tenant-local weekday and slot), by community, associations |
 | `app.dashboard_area_events(date)` | `20261019014815` | Eventos: upcoming, attendance by event and by the band of the day before, `attendanceTotals` |
 | `app.dashboard_area_finance(date)` | `20261019022117` | Financeiro: primary and secondary revenue, by product and band, the ladder, associations, VIP |
-| `app.dashboard_area_support(date)` | `20261019032741` | Atendimento: queue, first-response medians per week, conversations per week, staff, moderation |
+| `app.dashboard_area_support(date)` | `20261019032741` (final: `20261117092952`) | Atendimento per CASE (12.4-10): the queue of active cases, the first response of each case per week, cases opened per week and by category (`bySubject`), staff, moderation |
 | `app.dashboard_area_overview(date)` | `20261018215342` (final: `20261019035403`) | Visão geral: `enteredAtRisk` and the account; the other cards compose the area keys |
 | `app.dashboard_snapshots_prune(int)` | `20261019035403` | Retention: deletes at most `least(p_batch, 500)` tenant rows older than 8 days before their tenant's local today, oldest first; `security invoker`, executable by `service_role` only |
 
@@ -191,7 +191,7 @@ written):
 | Toques no story (avançaram, voltaram, saíram) | "Em breve" | Story taps per viewer (`needs_story_taps`) |
 | Lista de espera | "Em breve" | Only `events.capacity` exists; a waiting list per full event: who joined it, who got a seat, who came (`needs_waitlist`) |
 | Acessos que vencem em 7 dias | "Em breve" | `store_entitlements.expires_at` is never written (D-465): fill it when a time-limited access is granted (`needs_access_expiry`) |
-| Atendimentos por assunto | "Em breve" | `chat_conversations.subject` is never written (D-465): a subject on each support conversation (`needs_support_subject`) |
+| Atendimentos por assunto | "Em breve" only until the first v9 build | Measured since builder v9 (12.4-10, D-813): the cases opened in the last 30 days per category. A snapshot built before v9 has no `bySubject` key and keeps answering `needs_support_subject` until its tenant's next build |
 | Receita do cartão de evento | "Em breve" | No ticket sale is recorded: the ticket price and sales of each event (`needs_event_tickets`) |
 | Ofertas (composição e preço, entrada ou adicional) | "Em breve" | No offer table, no `offer_id` on the order (`needs_offers`); the ladder and every list are keyed by product |
 | Tempo médio diário, horários de pico (both panels) | "Em breve" | Usage sessions (`needs_usage_sessions`) |

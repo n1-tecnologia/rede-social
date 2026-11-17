@@ -98,8 +98,12 @@ export interface OwnerWaitlistRow {
 
 export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 
-/** What a support conversation is about (not recorded yet: the subject block is an example). */
-export type SupportSubject = 'access' | 'payment' | 'events' | 'content' | 'other';
+/**
+ * What a support case is about: the five category codes of a case (12.4, D-813). The panel's own
+ * `bySubject` below stays a fictional example; the REAL answer carries the counts per code (builder
+ * v9) or, for an older snapshot, "Em breve" (`ownerBySubjectMeasured` / `ownerBySubjectNotMeasured`).
+ */
+export type SupportSubject = 'check_in' | 'events' | 'payment' | 'account' | 'other';
 
 export interface TenantOwnerPanel {
   attention: TenantOwnerAttention[];
@@ -229,7 +233,7 @@ export interface TenantOwnerPanel {
     firstResponse: { delta: Delta; weeklyMedianMinutes: number[] };
     /** Support conversations opened per week, the last 8 weeks, oldest first. */
     weeklyConversations: number[];
-    /** Example: the conversations of the last 30 days by subject (no subject is recorded yet). */
+    /** Example: the cases of the last 30 days by category (the real answer is measured since builder v9). */
     bySubject: ReportValue<{ subject: SupportSubject; conversations: number }[]>;
     /**
      * Conversations answered per staff member in 30 days (`chat_messages.author_user_id`). Names of
@@ -637,10 +641,10 @@ export const tenantOwnerPanel: TenantOwnerPanel = {
       example: true,
       reason: 'needs_support_subject',
       value: [
-        { subject: 'access', conversations: 26 },
+        { subject: 'check_in', conversations: 26 },
         { subject: 'payment', conversations: 19 },
         { subject: 'events', conversations: 15 },
-        { subject: 'content', conversations: 9 },
+        { subject: 'account', conversations: 9 },
         { subject: 'other', conversations: 5 },
       ],
     },
@@ -666,3 +670,22 @@ export const tenantOwnerPanel: TenantOwnerPanel = {
     billing: 'coming_soon',
   },
 };
+
+/**
+ * The real `bySubject` of the owner's support answer in its two forms (12.4-10, D-813, CASE-22): the
+ * counts of the cases opened in the last 30 days per category once the builder is at version 9, and
+ * the "Em breve" branch an older snapshot keeps answering. Literals typed here (this file cannot
+ * import the contracts), proved equal to the contract by `tests/support-contract.test.ts`.
+ */
+export const ownerBySubjectMeasured = {
+  measured: true,
+  check_in: 26,
+  events: 15,
+  payment: 19,
+  account: 9,
+  other: 5,
+} as const;
+export const ownerBySubjectNotMeasured = {
+  measured: false,
+  reason: 'needs_support_subject',
+} as const;

@@ -37,6 +37,8 @@ export const NOT_MEASURED_REASONS = [
   'needs_story_view_time',
   'needs_waitlist',
   'needs_access_expiry',
+  // Kept after builder v9 (12.4-10): the support answer's `bySubject` is measured once the snapshot
+  // carries the counts, and answers this reason for a snapshot built before v9.
   'needs_support_subject',
   'needs_event_tickets',
   'needs_gallery_swipes',

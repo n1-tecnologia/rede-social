@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   ownerSupportAnswerSchema,
+  SUPPORT_SUBJECT_KEYS,
   SUPPORT_WEEKS,
   supportPayloadSchema,
 } from '../contracts/support';
+import { ownerBySubjectMeasured, ownerBySubjectNotMeasured } from '../fixtures';
 
 /**
- * The owner's Atendimento contract (08.7-11, D-455, D-460, D-465, INSIGHT-13, EP-42, EP-43): what
- * the stored `payload.support` and the area answer may and may not carry. Counts, minutes and staff
- * user ids in the payload; the answer adds the staff's live names and `bySubject`, which is never
- * data (D-465). No member identity, no message text anywhere. No database.
+ * The owner's Atendimento contract (08.7-11, D-455, D-460, INSIGHT-13, EP-42, EP-43; 12.4-10, D-813,
+ * CASE-22, EP-072, EP-073): what the stored `payload.support` and the area answer may and may not
+ * carry. Counts, minutes and staff user ids in the payload; the answer adds the staff's live names.
+ * `bySubject` is the five category counts once the builder is at version 9 (optional in the stored
+ * payload so a v8 snapshot still parses) and "Em breve" otherwise. No member identity, no message
+ * text, no subject anywhere. No database.
  */
 
 const STAFF_A = '11111111-1111-4111-8111-111111111111';
@@ -32,6 +36,9 @@ const SNAPSHOT = {
 
 const MODERATION = { removedComments: 2, blocks: 1, unblocks: 0, comments30: 40 };
 
+const BY_SUBJECT = { check_in: 4, events: 2, payment: 1, account: 0, other: 3 };
+
+/** The stored payload of a snapshot built BEFORE version 9: no `bySubject` key (T-12.4-49). */
 const PAYLOAD = {
   awaiting: { count: 1, oldestHours: 26 },
   weeklyMedianMinutes: [null, 45, null, 30, 20, null, 60, 30],
@@ -60,6 +67,26 @@ const READY = {
 describe('08.7 support contract', () => {
   it('reads eight weeks of seven days', () => {
     expect(SUPPORT_WEEKS).toBe(8);
+  });
+
+  it('EP-073: the category keys are the five exact lowercase codes, in the fixtures too', () => {
+    expect([...SUPPORT_SUBJECT_KEYS]).toEqual([
+      'check_in',
+      'events',
+      'payment',
+      'account',
+      'other',
+    ]);
+    expect(Object.keys(ownerBySubjectMeasured).sort()).toEqual(
+      ['measured', ...SUPPORT_SUBJECT_KEYS].sort(),
+    );
+    expect(
+      ownerSupportAnswerSchema.safeParse({ ...READY, bySubject: ownerBySubjectMeasured }).success,
+    ).toBe(true);
+    expect(
+      ownerSupportAnswerSchema.safeParse({ ...READY, bySubject: ownerBySubjectNotMeasured })
+        .success,
+    ).toBe(true);
   });
 
   describe('supportPayloadSchema (the stored payload.support)', () => {
@@ -120,11 +147,24 @@ describe('08.7 support contract', () => {
       ).toBe(false);
     });
 
-    it('refuses a subject breakdown in the stored payload (D-465)', () => {
-      expect(
-        supportPayloadSchema.safeParse({ ...PAYLOAD, bySubject: [{ subject: 'access', n: 1 }] })
-          .success,
-      ).toBe(false);
+    it('accepts the five category counts (builder v9) and still accepts a payload without them (v8)', () => {
+      expect(supportPayloadSchema.safeParse({ ...PAYLOAD, bySubject: BY_SUBJECT }).success).toBe(
+        true,
+      );
+      expect(supportPayloadSchema.safeParse(PAYLOAD).success).toBe(true);
+    });
+
+    it('refuses a subject breakdown that is not exactly the five counts (EP-073, EP-43)', () => {
+      for (const bySubject of [
+        [{ subject: 'access', n: 1 }],
+        { ...BY_SUBJECT, subject: 'Preciso de ajuda com o ingresso' },
+        { check_in: 1, events: 0, payment: 0, account: 0 },
+        { ...BY_SUBJECT, other: -1 },
+        { ...BY_SUBJECT, other: 1.5 },
+        { ...BY_SUBJECT, CHECK_IN: 1 },
+      ]) {
+        expect(supportPayloadSchema.safeParse({ ...PAYLOAD, bySubject }).success).toBe(false);
+      }
     });
   });
 
@@ -137,12 +177,34 @@ describe('08.7 support contract', () => {
       expect(ownerSupportAnswerSchema.safeParse({ state: 'preparing' }).success).toBe(true);
     });
 
-    it('rejects bySubject as data (D-465: only { measured: false, reason })', () => {
+    it('accepts bySubject measured with the five counts, and still the not-measured branch of an older snapshot', () => {
+      expect(
+        ownerSupportAnswerSchema.safeParse({
+          ...READY,
+          bySubject: { measured: true, ...BY_SUBJECT },
+        }).success,
+      ).toBe(true);
+      expect(
+        ownerSupportAnswerSchema.safeParse({
+          ...READY,
+          bySubject: { measured: false, reason: 'needs_support_subject' },
+        }).success,
+      ).toBe(true);
+    });
+
+    it('rejects bySubject as a free-form list, a partial set of counts or one with a subject text', () => {
       const asData = {
         ...READY,
         bySubject: { measured: true, value: [{ subject: 'access', conversations: 26 }] },
       };
       expect(ownerSupportAnswerSchema.safeParse(asData).success).toBe(false);
+      const partial = { ...READY, bySubject: { measured: true, check_in: 1 } };
+      expect(ownerSupportAnswerSchema.safeParse(partial).success).toBe(false);
+      const withText = {
+        ...READY,
+        bySubject: { measured: true, ...BY_SUBJECT, subject: 'Preciso de ajuda' },
+      };
+      expect(ownerSupportAnswerSchema.safeParse(withText).success).toBe(false);
       const withExample = {
         ...READY,
         bySubject: {

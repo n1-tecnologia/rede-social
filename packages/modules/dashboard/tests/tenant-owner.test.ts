@@ -447,7 +447,7 @@ describe('support (Atendimento)', () => {
     expect(lastFour).toBeLessThanOrEqual(channel('support') ?? 0);
   });
 
-  it('splits the 74 conversations by subject, as an example', () => {
+  it('splits the 74 cases by the five categories, as an example', () => {
     expect(support.bySubject).toMatchObject({ example: true, reason: 'needs_support_subject' });
     expect(sumOf(support.bySubject.value, (row) => row.conversations)).toBe(channel('support'));
   });
