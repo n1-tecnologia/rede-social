@@ -22,7 +22,8 @@ begin;
 --    payload keys exactly `conversationId`, `id`, `seq` (T-07-53: the body never travels; the `id` is
 --    the one `realtime.send` injects). FAILS with a named reason when no partition covers now()
 --    (07 review A-WR-06: never a vacuous skip; CI waits for Realtime's partition first).
--- 7. `chat_conversations_inbox_idx` serves the inbox statement BY NAME on an ANALYZEd 400-row fixture.
+-- 7. the inbox statement is served BY NAME on an ANALYZEd 400-row fixture: the open tab by the partial
+--    `chat_conversations_open_inbox_idx`, the closed tab by `chat_conversations_inbox_idx` (12.4-07, CASE-17).
 -- 8. The per-command policies and column grants (07 review A-CR-01, A-WR-01, B-WR-04): no lane can
 --    enrol itself (or anyone) into another member's thread, by INSERT or by moving its own participant
 --    row; no lane can post on a side its role does not own, rewrite or delete a message, rewind
@@ -31,7 +32,7 @@ begin;
 --
 -- Fixture ids use the `15200000-…` prefix, used by no other file. Like its siblings, this file ROLLS
 -- BACK.
-select plan(74);
+select plan(76);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-chat-a', 'Chat A', '15200000-0000-4000-8000-000000000001');
@@ -609,14 +610,19 @@ select results_eq(
   'fact 8: after every refused write, M1''s conversation still counts six messages'
 );
 
--- ── 7. the inbox statement rides chat_conversations_inbox_idx, by name ─────────────────────────
+-- ── 7. the inbox statement is served by name: the open tab by its partial index, the others by the inbox one ──
 -- 400 support conversations in A (created_by null, so the one-per-member index does not bind them)
--- and 400 in B, their `last_message_at` spread over 400 minutes, then `analyze`.
+-- and 400 in B, their `last_message_at` spread over 400 minutes. The older half of each tenant is then closed, so
+-- the closed tab has rows to find and the open tab a partial index smaller than the table; then `analyze`.
 insert into public.chat_conversations (tenant_id, kind, last_message_at, last_seq, last_message_side)
 select t.id, 'support', now() - make_interval(mins => g), 1, 'member'
   from (values ('15200000-0000-4000-8000-000000000001'::uuid),
                ('15200000-0000-4000-8000-000000000011'::uuid)) as t(id),
        generate_series(1, 400) g;
+update public.chat_conversations
+   set state = 'closed', closed_at = now()
+ where kind = 'support' and state = 'open' and created_by_user_id is null
+   and last_message_at < now() - interval '200 minutes';
 analyze public.chat_conversations;
 
 create temporary table chat_plans (name text primary key, plan text);
@@ -624,6 +630,7 @@ do $$
 declare
   v_plan text;
 begin
+  -- The OPEN tab: the literal predicate `state in ('open','in_progress')` restates the partial index predicate.
   execute $q$
     explain (format json)
     select c.id,
@@ -635,23 +642,53 @@ begin
       from public.chat_conversations c
      where c.tenant_id = '15200000-0000-4000-8000-000000000001'::uuid
        and c.kind = 'support'
+       and c.state in ('open','in_progress')
        and (
          null::timestamptz is null
          or (c.last_message_at, c.id) < (null::timestamptz, null::uuid)
        )
      order by c.last_message_at desc, c.id desc
      limit 21 $q$ into v_plan;
-  insert into chat_plans values ('inbox', v_plan);
+  insert into chat_plans values ('inbox_open', v_plan);
+  -- The CLOSED tab: no partial index covers it, the whole-support inbox index serves it.
+  execute $q$
+    explain (format json)
+    select c.id,
+           c.created_by_user_id,
+           c.last_seq,
+           c.staff_last_read_seq,
+           c.last_message_side,
+           to_char(c.last_message_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as last_message_at
+      from public.chat_conversations c
+     where c.tenant_id = '15200000-0000-4000-8000-000000000001'::uuid
+       and c.kind = 'support'
+       and c.state = 'closed'
+       and (
+         null::timestamptz is null
+         or (c.last_message_at, c.id) < (null::timestamptz, null::uuid)
+       )
+     order by c.last_message_at desc, c.id desc
+     limit 21 $q$ into v_plan;
+  insert into chat_plans values ('inbox_closed', v_plan);
 end
 $$;
 select matches(
-  (select plan from chat_plans where name = 'inbox'),
-  'chat_conversations_inbox_idx',
-  'fact 7: the inbox page is served by chat_conversations_inbox_idx, BY NAME'
+  (select plan from chat_plans where name = 'inbox_open'),
+  'chat_conversations_open_inbox_idx',
+  'fact 7: the open-tab inbox page is served by chat_conversations_open_inbox_idx, BY NAME'
 );
 select ok(
-  (select plan from chat_plans where name = 'inbox') not like '%Seq Scan%',
-  'fact 7: …and it is not a sequential scan'
+  (select plan from chat_plans where name = 'inbox_open') not like '%Seq Scan%',
+  'fact 7: …and the open tab is not a sequential scan'
+);
+select matches(
+  (select plan from chat_plans where name = 'inbox_closed'),
+  'chat_conversations_inbox_idx',
+  'fact 7: the closed-tab inbox page is served by chat_conversations_inbox_idx, BY NAME'
+);
+select ok(
+  (select plan from chat_plans where name = 'inbox_closed') not like '%Seq Scan%',
+  'fact 7: …and the closed tab is not a sequential scan'
 );
 
 select * from finish();

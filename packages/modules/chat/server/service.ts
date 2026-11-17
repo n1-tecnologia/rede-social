@@ -15,6 +15,8 @@ import {
   CHAT_PAGE_SIZE,
   CHAT_PERMISSIONS,
   CHAT_PREVIEW_GRAPHEMES,
+  type ChatCaseCategory,
+  type ChatCasePriority,
   type ChatCaseState,
   type ChatSide,
   type ConversationDetail,
@@ -29,7 +31,14 @@ import {
   type SupportSendInput,
   type SupportThread,
 } from '../contracts/index';
-import { activeMemberCase, hasAnyCaseOf, memberCaseOf } from './cases';
+import {
+  activeMemberCase,
+  firstMessageJoin,
+  hasAnyCaseOf,
+  memberCaseOf,
+  ownerJoins,
+  toInboxCase,
+} from './cases';
 import { firstNameOf } from './first-name';
 
 const log = moduleLogger('module-chat');
@@ -711,9 +720,16 @@ export async function markConversationRead(
  */
 const CURSOR_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?Z$/;
 
+/**
+ * A cursor of a thread that has no message yet (`last_message_at` null, which sorts FIRST): the instant slot carries
+ * this literal instead of an instant, so a walk can continue PAST such a row without skipping or repeating (EP-053).
+ */
+const CURSOR_NO_INSTANT = 'none';
+
 function decodeInstantCursor(raw: string | undefined) {
   const decoded = decodeCursor(raw);
   if (!decoded) return null;
+  if (decoded.n === CURSOR_NO_INSTANT) return decoded;
   const match = CURSOR_INSTANT.exec(decoded.n);
   if (!match) return null;
   const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number) as [
@@ -744,40 +760,94 @@ type InboxDbRow = MemberIdentityRow & {
   lm_body: string | null;
   lm_side: ChatSide | null;
   lm_author_name: string | null;
+  case_number: number | null;
+  case_state: ChatCaseState | null;
+  case_subject: string | null;
+  case_category: ChatCaseCategory | null;
+  case_priority: ChatCasePriority | null;
+  first_body: string | null;
+  owner_name: string | null;
+  owner_is_viewer: boolean;
 };
 
-const toInboxRow = (row: InboxDbRow): InboxRow => ({
-  conversationId: row.id,
-  member: toMember(row),
-  lastMessage:
-    row.lm_seq === null || row.lm_side === null
-      ? null
-      : {
-          seq: Number(row.lm_seq),
-          preview: cutOnWord(row.lm_body ?? '', CHAT_PREVIEW_GRAPHEMES),
-          side: row.lm_side,
-          authorFirstName: row.lm_side === 'staff' ? firstNameOf(row.lm_author_name) : null,
-        },
-  lastMessageAt: row.last_message_at,
-  awaiting: row.awaiting,
-});
+const toInboxRow = (row: InboxDbRow): InboxRow => {
+  const caseFacts = toInboxCase({
+    case_number: row.case_number,
+    state: row.case_state,
+    subject: row.case_subject,
+    first_body: row.first_body,
+    category: row.case_category,
+    priority: row.case_priority,
+    owner_name: row.owner_name,
+    owner_is_viewer: row.owner_is_viewer,
+  });
+  return {
+    conversationId: row.id,
+    member: toMember(row),
+    lastMessage:
+      row.lm_seq === null || row.lm_side === null
+        ? null
+        : {
+            seq: Number(row.lm_seq),
+            preview: cutOnWord(row.lm_body ?? '', CHAT_PREVIEW_GRAPHEMES),
+            side: row.lm_side,
+            authorFirstName: row.lm_side === 'staff' ? firstNameOf(row.lm_author_name) : null,
+          },
+    lastMessageAt: row.last_message_at,
+    awaiting: row.awaiting,
+    ...(caseFacts ? { case: caseFacts } : {}),
+  };
+};
 
 /**
- * `GET /v1/chat/inbox?cursor=&limit=` (CHAT-03, D-221, D-224): every support conversation of the
- * tenant, most recent activity first (`last_message_at desc, id desc`, so an exact tie on the instant
- * is broken by id and a `limit=1` walk visits each thread once), over `chat_conversations_inbox_idx`
- * (pgTAP 152 fact 7 explains this predicate by name). There are no open/resolved sections (D-221).
+ * `GET /v1/chat/inbox?tab=&owner=&priority=&awaiting=&cursor=&limit=` (CHAT-03, CASE-16, D-221, D-224, D-805, D-809):
+ * the support cases of the tenant, most recent activity first (`last_message_at desc, id desc`, so an exact tie on the
+ * instant is broken by id and a `limit=1` walk visits each thread once). The ORDER never depends on a filter.
  *
- * Per row: the member (membership id, display name, avatar, state), the latest message as a
- * one-line preview of `CHAT_PREVIEW_GRAPHEMES` graphemes with its side and, for a team message, the
- * author's first name, the instant, and `awaiting` (the latest message is the member's and the team
- * has not read up to it). Over-fetch by one: `nextCursor` is non-null exactly when another row exists.
+ * The tab is a COMPLETE literal predicate chosen in TypeScript, never a bound value (the `pageOf` rule): `open` is
+ * `state in ('open','in_progress')` so the partial index `chat_conversations_open_inbox_idx` can serve it, `resolved`
+ * and `closed` read `chat_conversations_inbox_idx` (pgTAP 152 fact 7 explains each by name). The owner, priority and
+ * awaiting filters are bound values the closed query schema already validated; a bad value degraded to its default
+ * there. `awaiting` (the latest message is the member's and the team has not read up to it) only applies on the open
+ * tab, so with no other filter it counts the same as the staff badge (UI-D-823).
+ *
+ * Per row: the member, the latest message as a one-line preview, the instant, `awaiting` and the case facts (number,
+ * state, label, category, priority, the owner's NAME). Over-fetch by one decides `nextCursor`.
  */
 export async function listInbox(ctx: RequestContext, query: InboxQuery): Promise<InboxPage> {
   const limit = query.limit;
   const after = decodeInstantCursor(query.cursor);
-  const afterAt = after?.n ?? null;
+  const afterAt = after?.n === CURSOR_NO_INSTANT ? null : (after?.n ?? null);
   const afterId = after?.id ?? null;
+  const afterNoInstant = after?.n === CURSOR_NO_INSTANT;
+
+  const tabPredicate =
+    query.tab === 'resolved'
+      ? sql`c.state = 'resolved'`
+      : query.tab === 'closed'
+        ? sql`c.state = 'closed'`
+        : sql`c.state in ('open','in_progress')`;
+  const ownerPredicate =
+    query.owner === 'me'
+      ? sql`and c.owner_user_id = ${ctx.userId}::uuid`
+      : query.owner === 'none'
+        ? sql`and c.owner_user_id is null`
+        : query.owner !== undefined
+          ? sql`and c.owner_user_id = ${query.owner}::uuid`
+          : sql``;
+  const priorityPredicate =
+    query.priority !== undefined ? sql`and c.priority = ${query.priority}::text` : sql``;
+  const awaitingPredicate =
+    query.awaiting && query.tab === 'open'
+      ? sql`and c.last_message_side = 'member' and c.last_seq > c.staff_last_read_seq`
+      : sql``;
+  const keysetPredicate = afterNoInstant
+    ? sql`and ((c.last_message_at is null and c.id < ${afterId}::uuid) or c.last_message_at is not null)`
+    : sql`and (
+           ${afterAt}::timestamptz is null
+           or (c.last_message_at, c.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )`;
+
   const rows = await withTenantTx(ctx, (tx) =>
     tx.execute<InboxDbRow>(sql`
       select c.id,
@@ -787,9 +857,19 @@ export async function listInbox(ctx: RequestContext, query: InboxQuery): Promise
              lm.seq::int as lm_seq,
              lm.body as lm_body,
              lm.author_side as lm_side,
-             lmp.display_name as lm_author_name
+             lmp.display_name as lm_author_name,
+             c.case_number::int as case_number,
+             c.state as case_state,
+             c.subject as case_subject,
+             c.category as case_category,
+             c.priority as case_priority,
+             fm.body as first_body,
+             omp.display_name as owner_name,
+             (c.owner_user_id is not null and c.owner_user_id = ${ctx.userId}::uuid) as owner_is_viewer
         from chat_conversations c
         ${memberJoins}
+        ${ownerJoins}
+        ${firstMessageJoin}
         left join lateral (
           select m.seq, m.body, m.author_side, m.author_user_id
             from chat_messages m
@@ -807,18 +887,19 @@ export async function listInbox(ctx: RequestContext, query: InboxQuery): Promise
         left join member_profiles lmp on lmp.membership_id = lms.id
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.kind = 'support'
-         and (
-           ${afterAt}::timestamptz is null
-           or (c.last_message_at, c.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
-         )
+         and ${tabPredicate}
+         ${ownerPredicate}
+         ${priorityPredicate}
+         ${awaitingPredicate}
+         ${keysetPredicate}
        order by c.last_message_at desc, c.id desc
        limit ${limit + 1}`),
   );
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   const nextCursor =
-    rows.length > limit && last?.last_message_at
-      ? encodeCursor({ n: last.last_message_at, id: last.id })
+    rows.length > limit && last
+      ? encodeCursor({ n: last.last_message_at ?? CURSOR_NO_INSTANT, id: last.id })
       : null;
   log.info(
     {

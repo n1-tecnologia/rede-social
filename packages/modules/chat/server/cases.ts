@@ -9,8 +9,10 @@ import {
   CHAT_PREVIEW_GRAPHEMES,
   CHAT_SUBJECT_MAX,
   type ChatCaseCategory,
+  type ChatCasePriority,
   type ChatCaseState,
   type ChatSide,
+  type InboxRow,
   type MemberCase,
   type MyCasesPage,
   type MyCasesQuery,
@@ -67,7 +69,7 @@ const toMemberCase = (row: MemberCaseDbRow): MemberCase => ({
 });
 
 /** The first (lowest `seq`) message of a case that is still visible: the fallback of the subject label. */
-const firstMessageJoin = sql`
+export const firstMessageJoin = sql`
         left join lateral (
           select m.body
             from chat_messages m
@@ -254,4 +256,51 @@ export async function getMyCases(ctx: RequestContext, query: MyCasesQuery): Prom
       nextCursor,
     };
   });
+}
+
+/* ── Phase 12.4, plan 07: the team's side of the case read API ───────────────────────────────────── */
+
+/**
+ * The staff roles of the tenant, spelled as the SQL literal the definers and the policies spell (RESEARCH Pitfall 4;
+ * `chat.test.ts` compares the lists). Only an owner, an assignee or a roster entry is judged by it, and always inside
+ * the same statement that pins the tenant.
+ */
+const STAFF_ROLES = sql.raw(`'admin_tenant', 'support_tenant'`);
+
+/**
+ * The owner of a case as a LIVE staff member (D-843): an active, unblocked, undeleted membership of this tenant with a
+ * staff role. An owner who left the staff matches no row, so `owner_name` is null (the screens say "Sem responsavel")
+ * while `owner_user_id` still carries the stored id. Alias `c` is the conversation.
+ */
+export const ownerJoins = sql`
+        left join memberships oms
+               on oms.tenant_id = c.tenant_id
+              and oms.user_id = c.owner_user_id
+              and oms.deleted_at is null
+              and oms.blocked_at is null
+              and oms.status = 'active'
+              and oms.role in (${STAFF_ROLES})
+        left join member_profiles omp on omp.membership_id = oms.id`;
+
+/** The inbox row's case facts (the owner is a name, never an id), from the columns both statements select. */
+export function toInboxCase(row: {
+  case_number: number | null;
+  state: ChatCaseState | null;
+  subject: string | null;
+  first_body: string | null;
+  category: ChatCaseCategory | null;
+  priority: ChatCasePriority | null;
+  owner_name: string | null;
+  owner_is_viewer: boolean;
+}): NonNullable<InboxRow['case']> | null {
+  if (row.case_number === null || row.state === null || row.category === null) return null;
+  return {
+    number: Number(row.case_number),
+    state: row.state,
+    subjectLabel: subjectLabelOf(row.subject, row.first_body),
+    category: row.category,
+    priority: row.priority ?? 'normal',
+    ownerName: row.owner_name,
+    ownerIsViewer: row.owner_is_viewer,
+  };
 }

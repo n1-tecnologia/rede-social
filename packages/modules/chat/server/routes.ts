@@ -216,7 +216,7 @@ const inboxRoute = createRoute({
   responses: {
     200: {
       description:
-        "CHAT-03: every support conversation of the tenant, latest activity first (`last_message_at desc, id desc`), with the member, a one-line preview of the latest message, its side and the team author's first name, the instant and `awaiting`. No open/resolved sections (D-221). `nextCursor` is opaque; `limit` clamps.",
+        "CHAT-03, CASE-16: the support cases of the tenant, latest activity first (`last_message_at desc, id desc`, a thread with no message first), with the member, a one-line preview of the latest message, its side and the team author's first name, the instant, `awaiting` and the case facts (number, state, label, category, priority, the owner's name). `tab` is `open` (open plus in progress, the default), `resolved` or `closed`; `owner` is `me`, `none` or a user id; `priority` is `low`, `normal` or `high`; `awaiting` keeps the cases whose last message is the member's and unread by the team (open tab only). A bad value of any key degrades to its default. `nextCursor` is opaque; `limit` clamps.",
       content: { 'application/json': { schema: inboxPageSchema } },
     },
     403: { description: '`FORBIDDEN` without `chat.support`.' },
