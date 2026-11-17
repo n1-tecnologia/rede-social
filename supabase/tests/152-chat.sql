@@ -3,8 +3,9 @@ begin;
 -- 54/58). Numbered 152 after 150 (Realtime authorisation) and 151 (notifications).
 --
 -- 0. Both chat trigger functions are `prosecdef` and pin `search_path=""`; both triggers exist.
--- 1. `chat_conversations_one_support_per_member` refuses a second support conversation for M1, while
---    M2's first one is accepted (positive control).
+-- 1. `chat_conversations_one_active_case_per_member` (Phase 12.4, D-802: it REPLACED the one-per-member
+--    index) refuses a second ACTIVE support conversation for M1, while M2's first one is accepted
+--    (positive control) and a member whose case is closed gets the next one.
 -- 2. `chat_messages_body_chk` refuses '', ' ', two newlines and 2,001 characters; 'a', 2,000
 --    characters and 2,000 emoji (code points, not bytes) are accepted.
 -- 3. The seq trigger assigns 1, 2, 3 whatever `seq` the writer supplied, and maintains `last_seq`,
@@ -30,7 +31,7 @@ begin;
 --
 -- Fixture ids use the `15200000-…` prefix, used by no other file. Like its siblings, this file ROLLS
 -- BACK.
-select plan(72);
+select plan(74);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-chat-a', 'Chat A', '15200000-0000-4000-8000-000000000001');
@@ -96,18 +97,37 @@ select has_trigger('public', 'chat_messages', 'chat_messages_seq_trg',
 select has_trigger('public', 'chat_messages', 'chat_messages_signal_trg',
   'fact 0: chat_messages carries the AFTER INSERT signal trigger');
 
--- ── 1. one support conversation per member ─────────────────────────────────────────────────────
+-- ── 1. one ACTIVE support case per member (D-802; was one conversation per member until Phase 12.4) ─
 select throws_like(
   $$ insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
      values ('15200000-0000-4000-8000-000000000001', 'support', '15200000-0000-4000-8000-0000000000a1') $$,
-  '%chat_conversations_one_support_per_member%',
-  'fact 1: a second support conversation for M1 is refused by chat_conversations_one_support_per_member'
+  '%chat_conversations_one_active_case_per_member%',
+  'fact 1: a second ACTIVE support conversation for M1 is refused by chat_conversations_one_active_case_per_member'
 );
 select lives_ok(
   $$ insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
      values ('15200000-0000-4000-8000-0000000000c2', '15200000-0000-4000-8000-000000000001', 'support',
              '15200000-0000-4000-8000-0000000000a2') $$,
   'fact 1 positive control: M2''s first support conversation is accepted'
+);
+-- A member whose case is closed gets the next one (D-801); X lives in a tenant of its own (C) so no count of tenant A moves.
+select tests.tenant('pgtap-chat-c', 'Chat C', '15200000-0000-4000-8000-000000000021');
+select tests.auth_user('m5@chat-c.local', '15200000-0000-4000-8000-0000000000a5');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('15200000-0000-4000-8000-0000000000c5', '15200000-0000-4000-8000-000000000021', 'support',
+        '15200000-0000-4000-8000-0000000000a5');
+select throws_like(
+  $$ insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+     values ('15200000-0000-4000-8000-000000000021', 'support', '15200000-0000-4000-8000-0000000000a5') $$,
+  '%chat_conversations_one_active_case_per_member%',
+  'fact 1: X''s second ACTIVE conversation is refused while the first is open'
+);
+update public.chat_conversations set state = 'closed', closed_at = now()
+ where id = '15200000-0000-4000-8000-0000000000c5';
+select lives_ok(
+  $$ insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+     values ('15200000-0000-4000-8000-000000000021', 'support', '15200000-0000-4000-8000-0000000000a5') $$,
+  'fact 1: ...and accepted once the first is closed (D-801)'
 );
 
 -- ── 2. the body CHECK (as the migration role, so only the CHECK can refuse) ──────────────────────

@@ -1,4 +1,10 @@
-import type { SendResult, SupportThread } from '@rede-social/module-chat/contracts';
+import { readFileSync } from 'node:fs';
+import {
+  CASE_ACTIVE_STATES,
+  type SendResult,
+  type SupportThread,
+} from '@rede-social/module-chat/contracts';
+import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   caseKit,
@@ -149,6 +155,41 @@ describe('case activation', () => {
     const thread = await request('/v1/chat/support', member.token);
     expect(thread.status).toBe(200);
     expect(((await thread.json()) as SupportThread).conversation?.id).toBe(two.conversationId);
+  });
+
+  it('the member send repeats the index predicate to the letter (EP-012, EP-013)', async () => {
+    const [index] = await adminSql<{ indexdef: string }[]>`
+      select indexdef from pg_indexes
+       where schemaname = 'public' and indexname = 'chat_conversations_one_active_case_per_member'`;
+    const listed = /ARRAY\[([^\]]+)\]/.exec(index?.indexdef ?? '')?.[1] ?? '';
+    const states = [...listed.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]);
+    // Exact lowercase literals, in the contract's order: no folding, no trimming (EP-012).
+    expect(states).toEqual([...CASE_ACTIVE_STATES]);
+    expect(index?.indexdef).toContain("kind = 'support'");
+
+    // The service spells the list ONCE, from the same constant, and nowhere as a second literal (EP-013).
+    const source = readFileSync(
+      new URL('../../../../packages/modules/chat/server/service.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toMatch(/where kind = 'support' and state in \(\$\{ACTIVE_CASE_STATES\}\)/);
+    expect(source).toContain('CASE_ACTIVE_STATES.map');
+    expect(source).not.toMatch(/'open'\s*,\s*'in_progress'/);
+  });
+
+  it('the same body sent twice writes two messages in ONE case: messages are not deduplicated (EP-014)', async () => {
+    const { ids } = await caseKit();
+    const member = await throwawayMember('twice');
+    const first = await post('/v1/chat/support/messages', member.token, { body: 'Igual' });
+    const second = await post('/v1/chat/support/messages', member.token, { body: 'Igual' });
+    expect([first.status, second.status]).toEqual([201, 201]);
+    const [a, b] = [(await first.json()) as SendResult, (await second.json()) as SendResult];
+    expect(b.conversationId).toBe(a.conversationId);
+    expect([a.message.seq, b.message.seq]).toEqual([1, 2]);
+    const [count] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.chat_conversations
+       where tenant_id = ${ids.demo}::uuid and kind = 'support' and created_by_user_id = ${member.id}::uuid`;
+    expect(count?.n).toBe(1);
   });
 
   it('no support conversation has a null state after the activation', async () => {
@@ -303,5 +344,141 @@ describe('case transitions', () => {
     expect(after).toEqual(before);
     expect((await stateOf(conversationId))?.state).toBe('closed');
     expect(await eventsOf(conversationId)).toEqual([]);
+  });
+});
+
+describe('case concurrency', () => {
+  const range = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, index) => from + index);
+
+  const sendTwenty = (token: string) =>
+    Promise.all(
+      range(1, 20).map((n) => post('/v1/chat/support/messages', token, { body: `Mensagem ${n}` })),
+    );
+
+  const casesOf = (memberId: string, tenantId: string) =>
+    adminSql<{ id: string; case_number: number; state: string; last_seq: number }[]>`
+      select id::text as id, case_number, state, last_seq::int as last_seq
+        from public.chat_conversations
+       where tenant_id = ${tenantId}::uuid and kind = 'support'
+         and created_by_user_id = ${memberId}::uuid
+       order by case_number`;
+
+  it('20 simultaneous first messages make ONE case with seqs 1..20, and after it is closed 20 more make exactly ONE next case (D-802, EP-015)', async () => {
+    const { ids } = await caseKit();
+    const member = await throwawayMember('twenty');
+
+    const first = await sendTwenty(member.token);
+    expect(first.map((res) => res.status)).toEqual(Array(20).fill(201));
+    const firstBodies = (await Promise.all(first.map((res) => res.json()))) as SendResult[];
+    const firstCases = await casesOf(member.id, ids.demo);
+    expect(firstCases).toHaveLength(1);
+    const one = firstCases[0];
+    expect(new Set(firstBodies.map((body) => body.conversationId))).toEqual(new Set([one?.id]));
+    expect(firstBodies.map((body) => body.message.seq).sort((a, b) => a - b)).toEqual(range(1, 20));
+    expect(one?.last_seq).toBe(20);
+
+    await adminSql`
+      update public.chat_conversations
+         set state = 'closed', closed_at = now(), staff_last_read_seq = last_seq
+       where id = ${one?.id ?? ''}::uuid`;
+
+    const second = await sendTwenty(member.token);
+    expect(second.map((res) => res.status)).toEqual(Array(20).fill(201));
+    const secondBodies = (await Promise.all(second.map((res) => res.json()))) as SendResult[];
+    const cases = await casesOf(member.id, ids.demo);
+    expect(cases).toHaveLength(2);
+    const next = cases[1];
+    // One higher than the FIRST case's number, never a literal: the counter is never reset.
+    expect(next?.case_number).toBe((one?.case_number ?? 0) + 1);
+    expect(new Set(secondBodies.map((body) => body.conversationId))).toEqual(new Set([next?.id]));
+    expect(secondBodies.map((body) => body.message.seq).sort((a, b) => a - b)).toEqual(
+      range(1, 20),
+    );
+    expect(cases.map((c) => c.state)).toEqual(['closed', 'open']);
+  });
+
+  it('20 different members of one tenant opening together get 20 distinct consecutive numbers (EP-009)', async () => {
+    const { ids } = await caseKit();
+    const base = await highestNumber(ids.demo);
+    const members: { id: string; token: string }[] = [];
+    for (const n of range(1, 20)) members.push(await throwawayMember(`fan-${n}`));
+
+    const results = await Promise.all(
+      members.map((member) =>
+        post('/v1/chat/support/messages', member.token, { body: 'Abrindo um chamado' }),
+      ),
+    );
+    expect(results.map((res) => res.status)).toEqual(Array(20).fill(201));
+
+    const rows = await adminSql<{ case_number: number }[]>`
+      select case_number from public.chat_conversations
+       where tenant_id = ${ids.demo}::uuid and kind = 'support'
+         and created_by_user_id in ${adminSql(members.map((member) => member.id))}
+       order by case_number`;
+    expect(rows.map((row) => row.case_number)).toEqual(range(base + 1, base + 20));
+  });
+
+  it('a member message racing a staff close lands in a NEW case and never in the closed one (D-801, T-12.4-06)', async () => {
+    const { ids } = await caseKit();
+    const member = await throwawayMember('race');
+    const sent = await post('/v1/chat/support/messages', member.token, { body: 'Primeira' });
+    expect(sent.status).toBe(201);
+    const one = (await sent.json()) as SendResult;
+
+    // A SECOND connection plays the staff close: it takes the conversation row lock and holds it.
+    const closer = postgres('postgres://postgres:postgres@127.0.0.1:54322/postgres', {
+      prepare: false,
+      max: 1,
+    });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked: () => void = () => undefined;
+    const lockTaken = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    const closing = closer.begin(async (tx) => {
+      await tx`
+        update public.chat_conversations
+           set state = 'closed', closed_at = now(), staff_last_read_seq = last_seq
+         where id = ${one.conversationId}::uuid`;
+      locked();
+      await held;
+    });
+
+    try {
+      await lockTaken;
+      const racing = post('/v1/chat/support/messages', member.token, {
+        body: 'Chegou na hora do fechamento',
+      });
+      // No sleep: poll the lock table until the member's insert is queued behind the close, then let it commit.
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const [waiting] = await adminSql<{ n: number }[]>`
+          select count(*)::int as n from pg_stat_activity
+           where datname = current_database() and wait_event_type = 'Lock'`;
+        if ((waiting?.n ?? 0) > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      release();
+      await closing;
+      const answer = await racing;
+      expect(answer.status).toBe(201);
+      const two = (await answer.json()) as SendResult;
+      expect(two.conversationId).not.toBe(one.conversationId);
+      expect(two.message.seq).toBe(1);
+
+      const cases = await casesOf(member.id, ids.demo);
+      expect(cases.map((c) => [c.id, c.state, c.last_seq])).toEqual([
+        [one.conversationId, 'closed', 1],
+        [two.conversationId, 'open', 1],
+      ]);
+      expect(cases[1]?.case_number).toBe((cases[0]?.case_number ?? 0) + 1);
+    } finally {
+      release();
+      await closing.catch(() => undefined);
+      await closer.end();
+    }
   });
 });
