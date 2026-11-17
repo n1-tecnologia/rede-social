@@ -19,12 +19,15 @@ begin;
 -- 5. The cancel-versus-anonymise pair in both orders resolves to exactly one outcome.
 -- 6. `app.account_anonymise`: the profile reads the constant, answers and push rows are gone, retained purchase
 --    and grant rows lose the e-mail, posts, comments, orders and the membership stay, a second call returns false.
+--    Phase 12.5 plan 08 (VOICE-37, D-868): the member's chat recordings (sent or not) are soft-deleted with the file name
+--    blanked, the voice and the text messages stay, and a live member's, the same person's other tenant's and tenant B's
+--    recordings are untouched.
 -- 7. Two-tenant negative with a positive control: the same operations for a due member of A leave B's rows
 --    identical (a hash of every touched table), and anonymising B's member afterwards changes B and not A.
 --
 -- Fixture ids use the `22200000-…` prefix, used by no other file. Like its siblings, this file ROLLS BACK.
 -- The literal `Membro removido` is the constant `REMOVED_MEMBER_NAME` in packages/contracts/src/native.ts (plan 03).
-select plan(97);
+select plan(104);
 
 -- ── helpers (session-local) ───────────────────────────────────────────────────────────────────
 -- u('a3') a user id, m('a3') that user's membership id, t('a') a tenant id, mail('a3') the e-mail.
@@ -117,6 +120,21 @@ update public.member_profiles set display_name = 'Pessoa Oito', bio = 'Sobre a p
   avatar_asset_id = '22200000-0000-4000-8000-0000000002a8' where membership_id = pg_temp.m('a8');
 update public.member_profiles set display_name = 'Pessoa B Dois', bio = 'Sobre a pessoa b dois',
   avatar_asset_id = '22200000-0000-4000-8000-0000000002b2' where membership_id = pg_temp.m('b2');
+
+-- Phase 12.5 plan 08 (VOICE-37, D-868): chat recordings. a3 sent ONE voice message (asset 12a3) and holds one unsent
+-- ready take (13a3) in tenant A, and owns a recording in tenant B (14a3: the same person, ANOTHER tenant, never touched);
+-- a8 (a live member of A) and b3 (a live member of B) own a recording each. a3's thread also holds a TEXT message.
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds, filename) values
+  ('22200000-0000-4000-8000-0000000012a3', pg_temp.t('a'), pg_temp.u('a3'), 'audio', 'voice', 'ready', 'audio/mp4', 8000, 5, 'voz-enviada-a3.m4a'),
+  ('22200000-0000-4000-8000-0000000013a3', pg_temp.t('a'), pg_temp.u('a3'), 'audio', 'voice', 'ready', 'audio/mp4', 8000, 5, 'voz-rascunho-a3.m4a'),
+  ('22200000-0000-4000-8000-0000000014a3', pg_temp.t('b'), pg_temp.u('a3'), 'audio', 'voice', 'ready', 'audio/mp4', 8000, 5, 'voz-a3-em-b.m4a'),
+  ('22200000-0000-4000-8000-0000000012a8', pg_temp.t('a'), pg_temp.u('a8'), 'audio', 'voice', 'ready', 'audio/mp4', 8000, 5, 'voz-a8.m4a'),
+  ('22200000-0000-4000-8000-0000000012b3', pg_temp.t('b'), pg_temp.u('b3'), 'audio', 'voice', 'ready', 'audio/mp4', 8000, 5, 'voz-b3.m4a');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values ('22200000-0000-4000-8000-00000000c0a3', pg_temp.t('a'), 'support', pg_temp.u('a3'));
+insert into public.chat_messages (id, tenant_id, conversation_id, author_user_id, author_side, body, media_asset_id, voice_seconds) values
+  ('22200000-0000-4000-8000-00000000d1a3', pg_temp.t('a'), '22200000-0000-4000-8000-00000000c0a3', pg_temp.u('a3'), 'member', null, '22200000-0000-4000-8000-0000000012a3', 5),
+  ('22200000-0000-4000-8000-00000000d2a3', pg_temp.t('a'), '22200000-0000-4000-8000-00000000c0a3', pg_temp.u('a3'), 'member', 'texto da pessoa tres', null, null);
 
 insert into public.profile_form_questions
   (id, tenant_id, type, title, required, show_on_profile, allow_other, options, position, archived_at, created_by_user_id) values
@@ -558,6 +576,42 @@ select is(
      from public.media_assets where id = '22200000-0000-4000-8000-0000000002a3'),
   'deleted|true|null',
   'fact 7: the avatar asset is marked deleted and its file name is blanked (the storage object is the job''s)'
+);
+select is(
+  (select count(*)::int from public.media_assets
+    where tenant_id = pg_temp.t('a') and owner_user_id = pg_temp.u('a3') and purpose = 'voice'
+      and status = 'deleted' and deleted_at is not null and filename is null),
+  2,
+  'fact 7 (VOICE-37, D-868): BOTH of a3''s recordings in tenant A (the sent one and the unsent take) are deleted, with the file name blanked'
+);
+select is(
+  (select media_asset_id::text || '|' || voice_seconds::text from public.chat_messages where id = '22200000-0000-4000-8000-00000000d1a3'),
+  '22200000-0000-4000-8000-0000000012a3|5',
+  'fact 7 (D-868): the voice message row stays with its media_asset_id and voice_seconds (the thread reads "Mensagem de voz apagada")'
+);
+select is(
+  (select count(*)::int from public.chat_messages where id = '22200000-0000-4000-8000-00000000d2a3' and body = 'texto da pessoa tres' and author_user_id = pg_temp.u('a3')),
+  1,
+  'fact 7 (D-868): a3''s TEXT message is unchanged (the chat bodies of the earlier plans are not this step''s business)'
+);
+select is(
+  (select status || '|' || (deleted_at is null)::text || '|' || filename from public.media_assets where id = '22200000-0000-4000-8000-0000000012a8'),
+  'ready|true|voz-a8.m4a',
+  'fact 7 (VOICE-34): a8, a live member of the same tenant, keeps the recording'
+);
+select is(
+  (select status || '|' || (deleted_at is null)::text || '|' || filename from public.media_assets where id = '22200000-0000-4000-8000-0000000014a3'),
+  'ready|true|voz-a3-em-b.m4a',
+  'fact 7 (VOICE-34): the same person''s recording in the OTHER tenant is untouched (the locked row''s tenant is the scope)'
+);
+select is(
+  (select status || '|' || (deleted_at is null)::text || '|' || filename from public.media_assets where id = '22200000-0000-4000-8000-0000000012b3'),
+  'ready|true|voz-b3.m4a',
+  'fact 7 (VOICE-34): tenant B''s live member keeps the recording'
+);
+select ok(
+  coalesce((select prosrc like '%purpose = ''voice''%' from pg_proc where oid = to_regprocedure('app.account_anonymise(uuid)')), false),
+  'fact 7 (VOICE-37): the function source names the voice purpose'
 );
 select is((select count(*)::int from public.profile_form_answers where membership_id = pg_temp.m('a3')), 0,
   'fact 7 (NATIVE-21): the answers (Instagram and the rest) are gone');

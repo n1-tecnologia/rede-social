@@ -1485,6 +1485,13 @@
       "when": 1794956710976,
       "tag": "20261117230510_chat_voice_orphans_sweep",
       "breakpoints": true
+    },
+    {
+      "idx": 212,
+      "version": "7",
+      "when": 1794956798764,
+      "tag": "20261117230638_chat_voice_account_deletion",
+      "breakpoints": true
     }
   ]
 }
