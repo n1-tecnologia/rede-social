@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { tenantBuildSchema } from '@rede-social/contracts/native';
+import { STORE_NAME_MAX, tenantBuildSchema } from '@rede-social/contracts/native';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   deriveBuildRecord,
@@ -128,6 +128,43 @@ describe('the build record comes from the tenant record only (NATIVE-02, D-607)'
   it('permissionStrings replaces {tenant} with the store name in all four texts', () => {
     const strings = permissionStrings('Ação 🌱');
     expect(Object.values(strings).every((text) => text.startsWith('Ação 🌱 '))).toBe(true);
+  });
+
+  it('the microphone text covers the videos and the voice messages (VOICE-33, UI-D-856)', () => {
+    expect(permissionStrings('Comunidade').microphone).toBe(
+      'Comunidade usa o microfone para gravar o som dos seus vídeos e as suas mensagens de voz.',
+    );
+  });
+
+  it('the microphone text of the longest store name stays inside the 200 character schema limit', () => {
+    const longest = 'W'.repeat(STORE_NAME_MAX);
+    const strings = permissionStrings(longest);
+    expect(strings.microphone.length).toBeLessThanOrEqual(200);
+    expect(strings.microphone).toContain('mensagens de voz');
+    const build = tenantBuildSchema.safeParse({
+      slug: 'comunidade',
+      host: 'comunidade.cliente.test',
+      hosts: [],
+      env: 'hml',
+      storeName: longest,
+      shortName: 'Comunidade',
+      bundleId: 'test.cliente.comunidade',
+      applicationId: 'test.cliente.comunidade',
+      version: '1.0.0',
+      buildNumber: 1,
+      teamId: null,
+      colors: {
+        primary: '#112233',
+        onPrimary: '#ffffff',
+        primaryDark: '#223344',
+        onPrimaryDark: '#ffffff',
+      },
+      logoUrl: null,
+      strings,
+      storeUrls: { ios: null, android: null },
+      googleServicesFile: null,
+    });
+    expect(build.success).toBe(true);
   });
 });
 

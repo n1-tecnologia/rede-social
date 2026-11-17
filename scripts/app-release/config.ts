@@ -52,7 +52,8 @@ export type LogoReader = (logoUrl: string, context: { primaryHost: string }) => 
 const PERMISSION_TEMPLATES = {
   camera: '{tenant} usa a câmera para você fotografar e gravar vídeos para as suas publicações.',
   photos: '{tenant} acessa suas fotos e vídeos para você escolher o que publicar.',
-  microphone: '{tenant} usa o microfone para gravar o som dos seus vídeos.',
+  microphone:
+    '{tenant} usa o microfone para gravar o som dos seus vídeos e as suas mensagens de voz.',
   faceId: '{tenant} usa o Face ID para proteger o acesso ao app quando você ligar o bloqueio.',
 } as const;
 

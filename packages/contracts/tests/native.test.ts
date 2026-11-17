@@ -346,6 +346,16 @@ describe('tenantBuildSchema', () => {
     expect(parsed.colors.onPrimary).toBe('#ffffff');
   });
 
+  it('keeps the 200 character limit of the microphone text (12.5-10: the voice sentence fits, the limit is unchanged)', () => {
+    const strings = (microphone: string) => ({ ...build.strings, microphone });
+    expect(
+      tenantBuildSchema.safeParse({ ...build, strings: strings('x'.repeat(200)) }).success,
+    ).toBe(true);
+    expect(
+      tenantBuildSchema.safeParse({ ...build, strings: strings('x'.repeat(201)) }).success,
+    ).toBe(false);
+  });
+
   it('refuses a missing host, a bad bundle id, an extra key and a long store name', () => {
     const { host: _host, ...withoutHost } = build;
     expect(tenantBuildSchema.safeParse(withoutHost).success).toBe(false);

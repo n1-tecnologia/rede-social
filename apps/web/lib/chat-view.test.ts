@@ -1172,3 +1172,166 @@ describe('12.5-10 voice previews and rates (D-860, D-868, D-854)', () => {
     expect(playbackRateLabel(0.75, t)).toBe('1x');
   });
 });
+
+describe('12.5-10 voice catalog guard rails (UI-D-840, UI-D-856, D-850, D-852, D-868)', () => {
+  const messages = loadMessages(catalogDir) as { chat: { voice: Record<string, unknown> } };
+  const voice = messages.chat.voice;
+
+  const leaves = (node: unknown, path: string): [string, string][] => {
+    if (typeof node === 'string') return [[path, node]];
+    if (node && typeof node === 'object') {
+      return Object.entries(node).flatMap(([key, child]) => leaves(child, `${path}.${key}`));
+    }
+    return [[path, String(node)]];
+  };
+  const all = leaves(voice, 'voice');
+
+  it('1. every leaf of the voice subtree is a non-empty string', () => {
+    expect(all.length).toBe(44);
+    for (const [path, text] of all) {
+      expect(typeof text, path).toBe('string');
+      expect(text.trim().length, path).toBeGreaterThan(0);
+    }
+  });
+
+  it('2. none of the forbidden words appears, and "áudio" only in the unsupported sentence', () => {
+    const forbidden = [
+      /nota de voz/i,
+      /\bPTT\b/i,
+      /segure/i,
+      /arraste/i,
+      /ouvir antes/i,
+      /transcri[çc][ãa]o/i,
+      /\blido\b/i,
+      /\bouvido\b/i,
+    ];
+    for (const [path, text] of all) {
+      for (const word of forbidden) expect(text, `${path} ${word}`).not.toMatch(word);
+    }
+    const withAudio = all.filter(([, text]) => /[áa]udio/i.test(text)).map(([path]) => path);
+    expect(withAudio).toEqual(['voice.player.unsupported']);
+  });
+
+  it('3. every placeholder is one of the documented set', () => {
+    const documented = new Set([
+      'minutes',
+      'seconds',
+      'count',
+      'percent',
+      'rate',
+      'duration',
+      'current',
+      'total',
+      'spoken',
+    ]);
+    for (const [path, text] of all) {
+      for (const match of text.matchAll(/\{(\w+)(?:,|\})/g)) {
+        expect(documented.has(match[1] ?? ''), `${path} {${match[1]}}`).toBe(true);
+      }
+    }
+  });
+
+  it('4. the plurals read 0, 1 and many right (the pt-BR plural rule reads zero as singular)', () => {
+    expect(t('voice.spokenSeconds', { seconds: 0 })).toBe('0 segundos');
+    expect(t('voice.spokenSeconds', { seconds: 1 })).toBe('1 segundo');
+    expect(t('voice.spokenSeconds', { seconds: 42 })).toBe('42 segundos');
+    expect(t('voice.spokenMinutes', { minutes: 1 })).toBe('1 minuto');
+    expect(t('voice.spokenMinutes', { minutes: 5 })).toBe('5 minutos');
+    expect(t('voice.spoken', { minutes: 1, seconds: 1 })).toBe('1 minuto e 1 segundo');
+    expect(t('voice.spoken', { minutes: 2, seconds: 5 })).toBe('2 minutos e 5 segundos');
+    expect(t('voice.spoken', { minutes: 0, seconds: 42 })).toBe('42 segundos');
+    expect(t('voice.live.minute', { count: 1 })).toBe('1 minuto de gravação.');
+    expect(t('voice.live.minute', { count: 2 })).toBe('2 minutos de gravação.');
+    expect(t('voice.live.minute', { count: 4 })).toBe('4 minutos de gravação.');
+  });
+
+  it('5. the group name, the live rate, the seek value and the upload progress fill their placeholders', () => {
+    expect(t('voice.group', { spoken: '42 segundos' })).toBe('Mensagem de voz, 42 segundos');
+    expect(t('voice.live.rate', { rate: '1,5x' })).toBe('Velocidade 1,5x.');
+    expect(t('voice.player.speed', { rate: '2x' })).toBe('Velocidade de reprodução: 2x');
+    expect(t('voice.player.seekValue', { current: '0:12', total: '4:59' })).toBe('0:12 de 4:59');
+    expect(t('voice.upload.progress', { percent: 62 })).toBe('Enviando… 62%');
+  });
+
+  it('6. the microphone problems, the notices and the recording words equal the UI-SPEC copy table', () => {
+    expect({
+      message: t('voice.message'),
+      deleted: t('voice.deleted'),
+      mic: [t('voice.mic.label'), t('voice.mic.requesting')],
+      recording: [
+        t('voice.recording.status'),
+        t('voice.recording.timer'),
+        t('voice.recording.discard'),
+        t('voice.recording.send'),
+        t('voice.recording.sendNew'),
+        t('voice.recording.limitWord'),
+        t('voice.recording.interruptedWord'),
+      ],
+      notice: [
+        t('voice.notice.warning'),
+        t('voice.notice.limit'),
+        t('voice.notice.interrupted'),
+        t('voice.notice.tooShort'),
+      ],
+      problem: [
+        t('voice.problem.blocked'),
+        t('voice.problem.missing'),
+        t('voice.problem.busy'),
+        t('voice.problem.failed'),
+      ],
+      live: [t('voice.live.started'), t('voice.live.discarded')],
+      player: [
+        t('voice.player.play'),
+        t('voice.player.pause'),
+        t('voice.player.seek'),
+        t('voice.player.loading'),
+        t('voice.player.error'),
+        t('voice.player.unsupported'),
+      ],
+      rate: [t('voice.rate.one'), t('voice.rate.oneHalf'), t('voice.rate.two')],
+      upload: t('voice.upload.label'),
+      failed: [t('voice.failed.retriable'), t('voice.failed.permanent'), t('voice.failed.discard')],
+    }).toEqual({
+      message: 'Mensagem de voz',
+      deleted: 'Mensagem de voz apagada',
+      mic: ['Gravar mensagem de voz', 'Aguardando permissão do microfone'],
+      recording: [
+        'Gravando',
+        'Tempo de gravação',
+        'Descartar gravação',
+        'Enviar mensagem de voz',
+        'Abrir chamado com a mensagem de voz',
+        'Limite atingido',
+        'Interrompida',
+      ],
+      notice: [
+        'Faltam 30 segundos para o limite de 5 minutos.',
+        'Você chegou ao limite de 5 minutos. Envie ou descarte a gravação.',
+        'A gravação foi interrompida. Envie o que foi gravado ou descarte.',
+        'A gravação ficou muito curta e foi descartada. Toque no microfone e fale de novo.',
+      ],
+      problem: [
+        'O acesso ao microfone está bloqueado. Libere nas configurações e toque no microfone de novo. Você também pode escrever sua mensagem.',
+        'Não encontramos um microfone neste aparelho. Você pode escrever sua mensagem.',
+        'O microfone está em uso por outro app. Feche-o e tente de novo.',
+        'Não foi possível gravar. Tente de novo.',
+      ],
+      live: ['Gravando.', 'Gravação descartada.'],
+      player: [
+        'Tocar mensagem de voz',
+        'Pausar mensagem de voz',
+        'Posição da mensagem de voz',
+        'Carregando mensagem de voz',
+        'Não foi possível carregar a mensagem de voz.',
+        'Este aparelho não toca este tipo de áudio.',
+      ],
+      rate: ['1x', '1,5x', '2x'],
+      upload: 'Enviando mensagem de voz',
+      failed: [
+        'Não foi possível enviar.',
+        'Não foi possível enviar esta mensagem de voz. Escreva sua mensagem.',
+        'Descartar',
+      ],
+    });
+  });
+});
