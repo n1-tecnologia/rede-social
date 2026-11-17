@@ -996,17 +996,34 @@ describe('chat suporte', () => {
       select policyname, coalesce(qual, with_check) as qual from pg_policies
        where schemaname = 'public'
          and policyname in ('chat_conversations_select', 'chat_conversations_staff_update',
-                            'chat_participants_select', 'chat_messages_insert')`;
-    expect(policies).toHaveLength(4);
+                            'chat_participants_select', 'chat_messages_insert',
+                            'chat_case_events_select')`;
+    expect(policies).toHaveLength(5);
     const [definer] = await adminSql<{ body: string }[]>`
       select pg_get_functiondef('app.realtime_topic_allowed(text)'::regprocedure) as body`;
+    // The two case definers of 12.4 (plan 03) spell the staff literal as `app.tenant_role() in (...)`.
+    const [actDefiner] = await adminSql<{ body: string }[]>`
+      select pg_get_functiondef('app.chat_case_act(uuid,text,text,uuid,uuid)'::regprocedure) as body`;
+    const [editDefiner] = await adminSql<{ body: string }[]>`
+      select pg_get_functiondef('app.chat_case_edit(uuid,text,text,text,boolean,text)'::regprocedure) as body`;
+    const definerLiteral = /tenant_role\(\) in \(([^)]+)\)/;
     const sources = [
       ...policies.map((policy) =>
         literalRoles(policy.qual, /tenant_role\(\) = ANY \(ARRAY\[(.+?)\]\)/),
       ),
       literalRoles(definer?.body ?? '', /v_role in \(([^)]+)\)/),
+      literalRoles(actDefiner?.body ?? '', definerLiteral),
+      literalRoles(editDefiner?.body ?? '', definerLiteral),
     ];
+    expect(sources).toHaveLength(8);
     for (const roles of sources) expect(roles).toEqual([...typescriptRoles].sort());
+    // The assignee of an assign must be a live member of the same staff list (T-12.4-14), spelled as `m.role in (...)`.
+    expect(literalRoles(actDefiner?.body ?? '', /m\.role in \(([^)]+)\)/)).toEqual(
+      [...typescriptRoles].sort(),
+    );
+    // Only `admin_tenant` assigns (T-12.4-11): the guard is spelled exactly once, never as a list.
+    expect(actDefiner?.body.match(/tenant_role\(\) = 'admin_tenant'/g)).toHaveLength(1);
+    expect(editDefiner?.body).not.toMatch(/tenant_role\(\) = 'admin_tenant'/);
     expect([...typescriptRoles].sort()).toEqual(['admin_tenant', 'support_tenant']);
   });
 });
