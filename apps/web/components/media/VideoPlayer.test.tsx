@@ -515,4 +515,127 @@ describe('VideoPlayer — controls mode (2026-11-17)', () => {
     await player();
     expect(recorded.at(-1)?.loop).toBeUndefined();
   });
+
+  /** What the vendor's bar, hotkeys and gesture layer dispatch: bubbling and composed. */
+  const request = async (element: HTMLElement, name: string) => {
+    await act(async () => {
+      element.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true }));
+    });
+  };
+  /** The vendor acting on a pause request (the bar's own handler runs in the real element). */
+  const vendorPauses = async (element: StandInElement) => {
+    await act(async () => {
+      element.paused = true;
+      element.dispatchEvent(new Event('pause'));
+    });
+  };
+  const vendorPlays = async (element: StandInElement) => {
+    await act(async () => {
+      element.paused = false;
+      element.dispatchEvent(new Event('playing'));
+    });
+  };
+
+  it('a pause made on the bar sticks: scrolling away and back does not resume it', async () => {
+    show(withControls());
+    const element = await player();
+    await scrollTo(1);
+    expect(element.paused).toBe(false);
+    expect(media.play).toHaveBeenCalledTimes(1);
+
+    await request(element, 'mediapauserequest');
+    await vendorPauses(element);
+    await scrollTo(0);
+    await scrollTo(1);
+    expect(element.paused).toBe(true);
+    expect(media.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('a play made on the bar after a pause makes autoplay in view honest again', async () => {
+    show(withControls());
+    const element = await player();
+    await scrollTo(1);
+    await request(element, 'mediapauserequest');
+    await vendorPauses(element);
+
+    await request(element, 'mediaplayrequest');
+    await vendorPlays(element);
+    await scrollTo(0);
+    expect(element.paused).toBe(true);
+    await scrollTo(1);
+    expect(element.paused).toBe(false);
+    // Once for the first view, once when the request flips `choice` (idempotent on a playing
+    // element), once on re-entry.
+    expect(media.play).toHaveBeenCalledTimes(3);
+  });
+
+  it("mute and unmute requests set the visit's sound", async () => {
+    show(withControls());
+    const element = await player();
+    await scrollTo(1);
+
+    await request(element, 'mediamuterequest');
+    expect(videoSoundWanted()).toBe(false);
+    expect(element.muted).toBe(true);
+
+    await request(element, 'mediaunmuterequest');
+    expect(videoSoundWanted()).toBe(true);
+    expect(element.muted).toBe(false);
+  });
+
+  it('our own pause (scrolling out) is not a pause intent: it plays again on return', async () => {
+    show(withControls());
+    const element = await player();
+    await scrollTo(1);
+    expect(element.paused).toBe(false);
+    await scrollTo(0);
+    expect(element.paused).toBe(true);
+    await scrollTo(1);
+    expect(element.paused).toBe(false);
+    expect(media.play).toHaveBeenCalledTimes(2);
+  });
+
+  it('an error hides the bar and shows the catalog line; the retry brings the bar back', async () => {
+    const lastStyle = () => (recorded.at(-1)?.style ?? {}) as Record<string, string>;
+    show(withControls());
+    const first = await player();
+    expect(lastStyle()['--controls']).toBeUndefined();
+    await act(async () => {
+      first.dispatchEvent(new Event('error'));
+    });
+    expect(lastStyle()['--controls']).toBe('none');
+    expect(lastStyle()['--dialog']).toBe('none');
+    expect(screen.getByText(m('feedVideo.error'))).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: m('retry') }));
+    await flush(10);
+    await player();
+    expect(screen.queryByText(m('feedVideo.error'))).toBeNull();
+    expect('--controls' in lastStyle()).toBe(false);
+  });
+
+  it('seeking writes a true place: playing ticks report, paused ticks do not, pause reports the place', async () => {
+    const onProgress = vi.fn();
+    show(withControls({ startTime: 120, onProgress }));
+    await player();
+    const props = () => recorded.at(-1) as Record<string, (event: unknown) => void>;
+    const at = (currentTime: number, paused: boolean) => ({
+      target: { currentTime, duration: 3600, paused },
+    });
+
+    props().onTimeUpdate?.(at(3301.9, false));
+    expect(onProgress).toHaveBeenLastCalledWith(3301, 3600, 'tick');
+
+    // A seek back after 90 percent: the client sends the real place, the server keeps completion.
+    props().onTimeUpdate?.(at(600.4, false));
+    expect(onProgress).toHaveBeenLastCalledWith(600, 3600, 'tick');
+
+    onProgress.mockClear();
+    props().onTimeUpdate?.(at(1200, true));
+    expect(onProgress).not.toHaveBeenCalled();
+
+    props().onPause?.(at(600, true));
+    expect(onProgress).toHaveBeenLastCalledWith(600, 3600, 'pause');
+    expect(recorded.at(-1)).toMatchObject({ startTime: 120 });
+  });
 });

@@ -57,7 +57,9 @@ export interface VideoPlayerProps {
    * 08.5-08 (D-427, R-Pattern 6): the element's integer position and length on every `timeupdate`
    * (`tick`), on `pause` and on `ended`. The player owns NO cadence: the lesson player throttles the
    * ticks (`lib/progress-reporter.ts`). Absent → no listener at all (feed, stories, the admin
-   * preview, which writes nothing — D-422).
+   * preview, which writes nothing — D-422). With `controls`, a seek while playing reports the new
+   * place as a tick, a seek while paused reports nothing (a paused tick is dropped), and the server
+   * keeps completion one-way.
    */
   onProgress?: (
     positionSeconds: number,
@@ -145,6 +147,23 @@ function stopVendorClick(event: MouseEvent<HTMLDivElement>) {
  *  - the sound button in the corner turns the visit's sound on or off inside its click;
  *  - a player error is this component's own catalog line over the frame (`feedVideo.error`) with
  *    "Tentar novamente" below it, which mints afresh and remounts the player (`mints` is its key).
+ *
+ * **Controls mode (`controls`, 2026-11-17: lessons, live replays, the media library preview).** The
+ * vendor's own bar shows: back and forward 10 s, the speed menu (0.5 to 2), a time bar to drag to any
+ * minute, volume and fullscreen. Its hotkeys (space, k, m, f, arrows) work and are scoped to the
+ * focused player by media-controller's own keydown listener. There is NO cover button and NO corner
+ * sound button: the vendor's gesture layer already gives click-to-play on desktop and tap-to-show-bar
+ * on touch, and the bar owns play, pause and volume, so a second click target would double-toggle.
+ * The frame is a `role="group"` named by `player.label` and no longer swallows clicks. What the member
+ * does on the bar is carried into the rules above through `mediapauserequest`, `mediaplayrequest`,
+ * `mediamuterequest` and `mediaunmuterequest` (a pause sticks across scrolling and tab changes; a
+ * mute or unmute is the visit's sound); `mediavolumerequest` (the slider) and the seek requests are
+ * NOT bridged. Autoplay in view, reduced motion and loop (`onProgress` absent) are unchanged. The
+ * vendor error dialog stays hidden (`--dialog: none`) and in the error state the bar is hidden too,
+ * so the catalog line and "Tentar novamente" are the whole state. The vendor's own labels stay in
+ * English: media-chrome's pt dictionary (`media-chrome/dist/lang/pt.js`) is not bundled by mux-player
+ * and media-chrome is not a direct dependency of this app, so closing the gap needs a dependency
+ * decision.
  *
  * **`failed`** — the danger pill and the catalog line, with NO player frame rendered at all.
  *
@@ -381,6 +400,33 @@ export function VideoPlayer({
     return () => observer.disconnect();
   }, [status]);
 
+  // Controls mode only: the member's own actions on the vendor bar, hotkeys and gesture layer are
+  // carried into the autoplay rules through the vendor's bubbling, composed request events. Only
+  // those three dispatch them; our own `pauseVideo`, `playVideo` and `muted` assignment do not, so a
+  // scroll-out pause never reads as the member's intent. The slider's `mediavolumerequest` and the
+  // seek requests express no play, pause or sound intent and are deliberately not bridged.
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!controls || status !== 'ready' || !frame) return;
+    const onPauseRequest = () => setChoice('pause');
+    const onPlayRequest = () => {
+      setChoice('play');
+      setBlocked(false);
+    };
+    const onMuteRequest = () => setVideoSoundWanted(false);
+    const onUnmuteRequest = () => setVideoSoundWanted(true);
+    frame.addEventListener('mediapauserequest', onPauseRequest);
+    frame.addEventListener('mediaplayrequest', onPlayRequest);
+    frame.addEventListener('mediamuterequest', onMuteRequest);
+    frame.addEventListener('mediaunmuterequest', onUnmuteRequest);
+    return () => {
+      frame.removeEventListener('mediapauserequest', onPauseRequest);
+      frame.removeEventListener('mediaplayrequest', onPlayRequest);
+      frame.removeEventListener('mediamuterequest', onMuteRequest);
+      frame.removeEventListener('mediaunmuterequest', onUnmuteRequest);
+    };
+  }, [controls, status]);
+
   const wants =
     element !== null &&
     !failed &&
@@ -521,7 +567,8 @@ export function VideoPlayer({
               noVolumePref
               poster={poster}
               style={{
-                ...(controls ? {} : { '--controls': 'none' }),
+                // The error state hides the bar too: the catalog line is the whole state.
+                ...(controls && !failed ? {} : { '--controls': 'none' }),
                 '--dialog': 'none',
                 '--media-background-color': 'transparent',
                 height: '100%',

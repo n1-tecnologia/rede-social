@@ -88,6 +88,16 @@ describe('createProgressReporter (D-427, UI-D-433)', () => {
     expect(send).toHaveBeenLastCalledWith(0, 'ended');
   });
 
+  it('a seek back after a position near the end is sent as is on a pause and becomes the beacon place', () => {
+    const { send, r } = reporter();
+    r.onProgress(3301, 'tick');
+    expect(r.lastPosition()).toBe(3301);
+    vi.advanceTimersByTime(1000);
+    r.onProgress(600, 'pause');
+    expect(send).toHaveBeenLastCalledWith(600, 'pause');
+    expect(r.lastPosition()).toBe(600);
+  });
+
   it('wholePosition floors and refuses NaN, Infinity and negatives', () => {
     expect(wholePosition(12.7)).toBe(12);
     expect(wholePosition(-1)).toBe(0);
