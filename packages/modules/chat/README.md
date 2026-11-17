@@ -59,6 +59,7 @@ grant lives in this manifest rather than in the kernel.
 - `@rede-social/core/server/notifications/source`
 - `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
+- `@rede-social/core/server/safety/sqlstate`
 
 ## Navigation
 
