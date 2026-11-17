@@ -236,6 +236,12 @@ export interface InboxRowView {
   avatar: string | null;
   preview: string;
   time: string;
+  /**
+   * The API's own UTC microsecond instant of the last message (`null` for a case with none), kept ONLY as the
+   * order key of the keyset list so `reconcileInboxPage` can tell which loaded rows a fresh page 1 covers.
+   * Never drawn, never formatted (WR-01).
+   */
+  lastMessageAt: string | null;
   awaiting: boolean;
   state: InboxRowState;
   /** 12.4: the case facts as finished strings (UI-D-824). `null` when the API sent none (the previous API). */
@@ -290,10 +296,60 @@ export function inboxRowView(
     time: row.lastMessageAt
       ? inboxTime(row.lastMessageAt, keys, timeZone, { yesterday: t('day.yesterday') })
       : '',
+    lastMessageAt: row.lastMessageAt,
     awaiting: row.awaiting,
     state: row.member.state,
     case: row.case ? inboxCaseView(row.case, t) : null,
   };
+}
+
+/**
+ * True when row `a` sorts strictly BEFORE row `b` in the server order of `listInbox`:
+ * `last_message_at desc, id desc`, the Postgres default for a descending sort (a null instant comes first).
+ * The two instants and the ids are compared as the API's own strings with no normalisation (A-12.4-GAP-ENC):
+ * instants are the fixed-width UTC microsecond text one `to_char` format produces and ids are the lowercase
+ * canonical uuid text, so the text order is the chronological and the byte order of the database.
+ */
+function sortsBefore(
+  a: { lastMessageAt: string | null; conversationId: string },
+  b: { lastMessageAt: string | null; conversationId: string },
+): boolean {
+  if (a.lastMessageAt !== b.lastMessageAt) {
+    if (a.lastMessageAt === null) return true;
+    if (b.lastMessageAt === null) return false;
+    return a.lastMessageAt > b.lastMessageAt;
+  }
+  return a.conversationId > b.conversationId;
+}
+
+/**
+ * What a fresh page 1 of the CURRENT view does to the staff list (WR-01, T7, UI-D-830, A-UI-12, D-805): the
+ * pure rule behind "a case that left the tab leaves on the next refetch". It reads no case state, no label
+ * and no owner; the only fact it uses is the server's own order key (`lastMessageAt`, then the id).
+ *
+ * - **Whole** (`holdsOnlyPage1`, or the answer ends the view, `hasMore` false, or it is empty): the fresh page
+ *   IS the view, so the list becomes exactly `fresh` in its order (a row absent from it is gone, a row in
+ *   both takes the fresh facts, once). The caller then takes the answer's cursor and resets the page count.
+ * - **Not whole** (more than one page loaded and the fresh page is not the whole view): `fresh` covers the
+ *   window of the server order down to its LAST row. A loaded row not in `fresh` that sorts before or at that
+ *   row was inside the window and is not listed any more: dropped. A loaded row that sorts strictly after it
+ *   lies deeper than the fresh page can see and stays, in its loaded order, after the fresh rows
+ *   (A-12.4-GAP-DEEP). The cursor and the page count are left alone by the caller.
+ *
+ * The inputs are never mutated.
+ */
+export function reconcileInboxPage<
+  T extends { conversationId: string; lastMessageAt: string | null },
+>(
+  current: readonly T[],
+  fresh: readonly T[],
+  { holdsOnlyPage1, hasMore }: { holdsOnlyPage1: boolean; hasMore: boolean },
+): { items: T[]; whole: boolean } {
+  const tail = fresh.at(-1);
+  if (holdsOnlyPage1 || !hasMore || tail === undefined) return { items: [...fresh], whole: true };
+  const ids = new Set(fresh.map((row) => row.conversationId));
+  const deeper = current.filter((row) => !ids.has(row.conversationId) && sortsBefore(tail, row));
+  return { items: [...fresh, ...deeper], whole: false };
 }
 
 /**

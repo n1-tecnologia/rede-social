@@ -25,6 +25,7 @@ import {
   firstNameOf,
   inboxRowView,
   inboxTime,
+  reconcileInboxPage,
   tenantDayKeys,
 } from './chat-view';
 
@@ -269,6 +270,17 @@ describe('inboxTime / inboxRowView — the staff inbox row (UI-D-262)', () => {
     const manausKeys = tenantDayKeys(now, MANAUS);
     expect(inboxTime('2026-10-01T01:10:00Z', manausKeys, MANAUS, ontem)).toBe('21:10');
     expect(inboxTime('2026-09-30T03:30:00Z', manausKeys, MANAUS, ontem)).toBe('Ontem');
+  });
+
+  it('15b. the API instant rides along unchanged as the order key (WR-01), null when the API sent null', () => {
+    const withInstant = inboxRowView(inboxRow(), { timeZone: SP, keys, t });
+    expect(withInstant.lastMessageAt).toBe('2026-09-30T17:02:00.000000Z');
+    const none = inboxRowView(inboxRow({ lastMessage: null, lastMessageAt: null }), {
+      timeZone: SP,
+      keys,
+      t,
+    });
+    expect(none.lastMessageAt).toBeNull();
   });
 
   it('16. a member message previews as-is; a team message is prefixed with the first name', () => {
@@ -857,5 +869,96 @@ describe('12.4-11 — the inbox row gains the case facts as finished strings (UI
     const view = inboxRowView(base(), { timeZone: SP, keys, t });
     expect(view.case).toBeNull();
     expect(view).toMatchObject({ name: 'Ana Souza', preview: 'Quero trocar meu e-mail.' });
+  });
+});
+
+describe('reconcileInboxPage (WR-01): what a fresh page 1 replaces', () => {
+  const ID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const instant = (minute: number) => `2026-09-30T17:${String(minute).padStart(2, '0')}:00.000000Z`;
+  const r = (n: number, minute: number | null, preview = `p${n}`) => ({
+    conversationId: ID(n),
+    lastMessageAt: minute === null ? null : instant(minute),
+    preview,
+  });
+  const ids = (rows: readonly { conversationId: string }[]) =>
+    rows.map((row) => Number(row.conversationId.slice(-12)));
+
+  it('holding only page 1: the list is exactly the fresh page, in its order, a row in both once', () => {
+    const current = [r(1, 50), r(2, 40), r(3, 30)];
+    const fresh = [r(1, 55, 'novo'), r(3, 30, 'novo3')];
+    const out = reconcileInboxPage(current, fresh, { holdsOnlyPage1: true, hasMore: true });
+    expect(out.whole).toBe(true);
+    expect(ids(out.items)).toEqual([1, 3]);
+    expect(out.items[0]?.preview).toBe('novo');
+  });
+
+  it('the answer ends the view: whole, even with several pages loaded', () => {
+    const current = [r(1, 50), r(2, 40), r(3, 30), r(4, 20)];
+    const fresh = [r(2, 41)];
+    const out = reconcileInboxPage(current, fresh, { holdsOnlyPage1: false, hasMore: false });
+    expect(out.whole).toBe(true);
+    expect(ids(out.items)).toEqual([2]);
+  });
+
+  it('an empty fresh answer empties the list and is whole', () => {
+    const out = reconcileInboxPage([r(1, 50), r(2, 40)], [], {
+      holdsOnlyPage1: false,
+      hasMore: true,
+    });
+    expect(out).toEqual({ items: [], whole: true });
+  });
+
+  it('an empty current returns the fresh page', () => {
+    const fresh = [r(1, 50), r(2, 40)];
+    const out = reconcileInboxPage([], fresh, { holdsOnlyPage1: false, hasMore: true });
+    expect(ids(out.items)).toEqual([1, 2]);
+  });
+
+  it('several pages, the page does not end the view: rows the fresh page covers but lacks are dropped, deeper ones stay', () => {
+    // Loaded r1..r6 (newest first). Fresh page 1: r2 (moved up), r1, r4. r3 sorts before r4 (the tail): gone.
+    const current = [r(1, 60), r(2, 50), r(3, 40), r(4, 30), r(5, 20), r(6, 10)];
+    const fresh = [r(2, 61, 'novo2'), r(1, 60), r(4, 30)];
+    const out = reconcileInboxPage(current, fresh, { holdsOnlyPage1: false, hasMore: true });
+    expect(out.whole).toBe(false);
+    expect(ids(out.items)).toEqual([2, 1, 4, 5, 6]);
+    expect(out.items[0]?.preview).toBe('novo2');
+  });
+
+  it('equal instants: a smaller id sorts after the tail and is kept, a larger id sorts before and is dropped', () => {
+    const tail = r(5, 30);
+    const smaller = r(4, 30);
+    const larger = r(6, 30);
+    const out = reconcileInboxPage([larger, tail, smaller], [tail], {
+      holdsOnlyPage1: false,
+      hasMore: true,
+    });
+    expect(ids(out.items)).toEqual([5, 4]);
+  });
+
+  it('a null instant sorts first: an absent null row is dropped, two null instants order by id descending', () => {
+    const tail = r(2, 30);
+    const out = reconcileInboxPage([r(7, null), r(1, null), tail, r(3, 20)], [r(9, null), tail], {
+      holdsOnlyPage1: false,
+      hasMore: true,
+    });
+    expect(ids(out.items)).toEqual([9, 2, 3]);
+    // Two null instants: the larger id sorts first, so with the tail null the smaller id is kept.
+    const nullTail = r(5, null);
+    const out2 = reconcileInboxPage([r(6, null), nullTail, r(4, null)], [nullTail], {
+      holdsOnlyPage1: false,
+      hasMore: true,
+    });
+    expect(ids(out2.items)).toEqual([5, 4]);
+  });
+
+  it('never mutates its inputs', () => {
+    const current = [r(1, 50), r(2, 40), r(3, 30)];
+    const fresh = [r(2, 41), r(1, 50)];
+    const a = JSON.stringify(current);
+    const b = JSON.stringify(fresh);
+    reconcileInboxPage(current, fresh, { holdsOnlyPage1: false, hasMore: true });
+    reconcileInboxPage(current, fresh, { holdsOnlyPage1: true, hasMore: true });
+    expect(JSON.stringify(current)).toBe(a);
+    expect(JSON.stringify(fresh)).toBe(b);
   });
 });

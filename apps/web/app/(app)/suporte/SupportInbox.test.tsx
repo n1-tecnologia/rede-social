@@ -84,6 +84,10 @@ function view(over: Partial<InboxRowView> = {}, kase: Partial<InboxCaseView> | n
     time: '10:00',
     awaiting: false,
     state: 'active',
+    // The order key: descends with the creation index, so a list built in creation order is in server order.
+    lastMessageAt: new Date(Date.UTC(2026, 8, 30, 17, 0, 0) - seq * 60_000)
+      .toISOString()
+      .replace('.000Z', '.000000Z'),
     case:
       kase === null
         ? null
@@ -157,6 +161,10 @@ const hasClass = (element: Element | null | undefined, ...names: string[]) =>
   element !== undefined &&
   names.every((name) => element.classList.contains(name));
 const text = (element: Element | null | undefined) => element?.textContent ?? '';
+const rowNames = () =>
+  Array.from(document.querySelectorAll('[data-inbox-list] a')).map(
+    (a) => a.querySelector('[data-inbox-name]')?.textContent,
+  );
 
 afterEach(() => {
   cleanup();
@@ -334,7 +342,7 @@ describe('live: the refetch is for the current tab and filters (UI-D-830, T-12.4
     );
   });
 
-  it('a signal, a (re)subscribe and a refocus read page 1 with the current query and merge at the top', async () => {
+  it('a signal, a (re)subscribe and a refocus read page 1 with the current query and replace the window it covers', async () => {
     mocks.search.current = 'aba=resolvidos&resp=eu';
     const kept = view({ name: 'Antigo' });
     inboxAnswer = () => Response.json({ items: [kept], nextCursor: null });
@@ -349,10 +357,8 @@ describe('live: the refetch is for the current tab and filters (UI-D-830, T-12.4
     });
     await screen.findByRole('link', { name: /Novo/ });
     expect(inboxUrls()).toEqual(['/api/chat/inbox?tab=resolved&owner=me']);
-    const names = screen
-      .getAllByRole('link')
-      .map((a) => a.querySelector('[data-inbox-name]')?.textContent);
-    expect(names).toEqual(['Novo', 'Antigo']);
+    // WR-01: 'Antigo' is not in the fresh page, so it left the tab; it is not kept under 'Novo'.
+    expect(rowNames()).toEqual(['Novo']);
 
     await act(async () => {
       realtime().options.onSubscribed?.();
@@ -362,6 +368,22 @@ describe('live: the refetch is for the current tab and filters (UI-D-830, T-12.4
     });
     await waitFor(() => expect(inboxUrls().length).toBe(3));
     expect(new Set(inboxUrls())).toEqual(new Set(['/api/chat/inbox?tab=resolved&owner=me']));
+  });
+
+  it('a row still in the fresh page is merged at the top by case id, once', async () => {
+    mocks.search.current = 'aba=resolvidos&resp=eu';
+    const kept = view({ name: 'Antigo' });
+    inboxAnswer = () => Response.json({ items: [kept], nextCursor: null });
+    renderInbox({ initialItems: [view()] });
+    await screen.findByRole('link', { name: /Antigo/ });
+
+    const fresh = view({ name: 'Novo' });
+    inboxAnswer = () => Response.json({ items: [fresh, kept], nextCursor: null });
+    await act(async () => {
+      realtime().onSignal(REALTIME_EVENTS.chatCase, { id: 'x' });
+    });
+    await screen.findByRole('link', { name: /Novo/ });
+    expect(rowNames()).toEqual(['Novo', 'Antigo']);
   });
 
   it('coalesces: signals during a read produce exactly one more read', async () => {
@@ -402,6 +424,116 @@ describe('live: the refetch is for the current tab and filters (UI-D-830, T-12.4
     gates[1]?.(Response.json({ items: [view({ name: 'Fechado 1' })], nextCursor: null }));
     await screen.findByRole('link', { name: /Fechado 1/ });
     expect(screen.queryByRole('link', { name: /Intruso/ })).toBeNull();
+  });
+});
+
+describe('WR-01 / T7: a row that left the tab leaves on the next refetch (UI-D-830, A-UI-12)', () => {
+  const links = (name: string) =>
+    screen.queryAllByRole('link').filter((a) => a.textContent?.includes(name));
+  const signal = () =>
+    act(async () => {
+      realtime().onSignal(REALTIME_EVENTS.chatCase, { id: 'whatever' });
+    });
+
+  it('tracer: case #42 resolved by a colleague leaves "Em aberto" on the next refetch, the others stay', async () => {
+    const a = view({ name: 'Alice' });
+    const b = view({ name: 'Bruno' }, { number: 42 });
+    const c = view({ name: 'Carla' });
+    renderInbox({ initialItems: [a, b, c] });
+    expect(rowNames()).toEqual(['Alice', 'Bruno', 'Carla']);
+
+    inboxAnswer = () =>
+      Response.json({ items: [{ ...a, preview: 'preview novo' }, c], nextCursor: null });
+    await signal();
+    await waitFor(() => expect(links('Bruno')).toHaveLength(0));
+    expect(links('Alice')).toHaveLength(1);
+    expect(links('Alice')[0]?.textContent).toContain('preview novo');
+    expect(rowNames()).toEqual(['Alice', 'Carla']);
+  });
+
+  it("only page 1 loaded with a cursor: the list is the fresh page and the cursor is the answer's", async () => {
+    const a = view({ name: 'Alice' });
+    const b = view({ name: 'Bruno' });
+    const c = view({ name: 'Carla' });
+    renderInbox({ initialItems: [a, b, c], initialCursor: 'c0' });
+    inboxAnswer = () => Response.json({ items: [a, c], nextCursor: 'c1' });
+    await signal();
+    await waitFor(() => expect(rowNames()).toEqual(['Alice', 'Carla']));
+    mocks.loadMore.mockResolvedValue({ ok: true, items: [], nextCursor: null });
+    fireEvent.click(screen.getByTestId('load-more'));
+    await waitFor(() => expect(mocks.loadMore).toHaveBeenCalled());
+    expect(mocks.loadMore.mock.calls[0]?.[0]).toBe('c1');
+  });
+
+  it('several pages loaded: the fresh window replaces what it covers, deeper rows stay, the cursor stays', async () => {
+    const [r1, r2, r3] = [view({ name: 'R1' }), view({ name: 'R2' }), view({ name: 'R3' })];
+    const [r4, r5, r6] = [view({ name: 'R4' }), view({ name: 'R5' }), view({ name: 'R6' })];
+    renderInbox({ initialItems: [r1, r2, r3], initialCursor: 'c1' });
+    mocks.loadMore.mockResolvedValueOnce({ ok: true, items: [r4, r5, r6], nextCursor: 'c2' });
+    fireEvent.click(screen.getByTestId('load-more'));
+    await waitFor(() => expect(rowNames()).toHaveLength(6));
+
+    const newer = '2026-09-30T18:00:00.000000Z';
+    inboxAnswer = () =>
+      Response.json({
+        items: [{ ...r2, lastMessageAt: newer, preview: 'r2 novo' }, r1, r4],
+        nextCursor: 'cX',
+      });
+    await signal();
+    await waitFor(() => expect(rowNames()).toEqual(['R2', 'R1', 'R4', 'R5', 'R6']));
+    expect(links('R2')).toHaveLength(1);
+    expect(links('R2')[0]?.textContent).toContain('r2 novo');
+
+    mocks.loadMore.mockResolvedValueOnce({ ok: true, items: [], nextCursor: null });
+    fireEvent.click(screen.getByTestId('load-more'));
+    await waitFor(() => expect(mocks.loadMore).toHaveBeenCalledTimes(2));
+    expect(mocks.loadMore.mock.calls[1]?.[0]).toBe('c2');
+  });
+
+  it('an answer that ends the view after a failed page: the list is the answer, no load-more, no page error', async () => {
+    const r1 = view({ name: 'R1' });
+    const r2 = view({ name: 'R2' });
+    renderInbox({ initialItems: [r1, r2], initialCursor: 'c1' });
+    mocks.loadMore.mockResolvedValueOnce({ ok: false });
+    fireEvent.click(screen.getByTestId('load-more'));
+    await waitFor(() => expect(document.querySelector('[data-inbox-page-error]')).not.toBeNull());
+
+    inboxAnswer = () => Response.json({ items: [r1], nextCursor: null });
+    await signal();
+    await waitFor(() => expect(rowNames()).toEqual(['R1']));
+    expect(document.querySelector('[data-inbox-page-error]')).toBeNull();
+    expect(screen.queryByTestId('load-more')).toBeNull();
+  });
+
+  it('an empty answer empties the list and the view shows its own empty sentence', async () => {
+    renderInbox({ initialItems: [view({ name: 'Alice' })] });
+    inboxAnswer = () => Response.json({ items: [], nextCursor: null });
+    await signal();
+    await waitFor(() => expect(document.querySelector('[data-inbox-empty]')).not.toBeNull());
+    expect(rowNames()).toEqual([]);
+    expect(text(document.querySelector('[data-inbox-empty]'))).toContain(
+      'Nenhum chamado em aberto',
+    );
+  });
+
+  it('a FAILED read keeps every row on screen', async () => {
+    renderInbox({ initialItems: [view({ name: 'Alice' }), view({ name: 'Bruno' })] });
+    inboxAnswer = () => new Response('boom', { status: 500 });
+    await signal();
+    await waitFor(() => expect(inboxUrls().length).toBe(1));
+    await act(async () => {});
+    expect(rowNames()).toEqual(['Alice', 'Bruno']);
+  });
+
+  it('the payload is never read: any payload refetches', async () => {
+    renderInbox({ initialItems: [view({ name: 'Alice' })] });
+    for (const payload of [null, undefined, 'texto', { id: 1 }, { conversationId: 'outro' }]) {
+      fetchMock.mockClear();
+      await act(async () => {
+        realtime().onSignal(REALTIME_EVENTS.chatMessage, payload);
+      });
+      await waitFor(() => expect(inboxUrls().length).toBe(1));
+    }
   });
 });
 

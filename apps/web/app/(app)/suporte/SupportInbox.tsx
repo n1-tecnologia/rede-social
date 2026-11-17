@@ -30,7 +30,12 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { CaseStateGlyph, InboxCaseView, InboxRowView } from '@/lib/chat-view';
+import {
+  type CaseStateGlyph,
+  type InboxCaseView,
+  type InboxRowView,
+  reconcileInboxPage,
+} from '@/lib/chat-view';
 import {
   anyInboxFilter,
   INBOX_DEFAULTS,
@@ -88,12 +93,6 @@ export interface SupportInboxProps {
 interface InboxAnswer {
   items: InboxRowView[];
   nextCursor: string | null;
-}
-
-/** `fresh` on top (latest activity first), then every loaded row it does not replace (by id). */
-function mergeTop(current: readonly InboxRowView[], fresh: readonly InboxRowView[]) {
-  const ids = new Set(fresh.map((row) => row.conversationId));
-  return [...fresh, ...current.filter((row) => !ids.has(row.conversationId))];
 }
 
 /** The glyph of a case state (named by the view layer, drawn here: the view stays client-safe data). */
@@ -167,9 +166,11 @@ async function fetchPage1(apiQuery: string): Promise<InboxAnswer | null> {
  *   tab: the server filters and lists.
  * - **Live, never dependent on Realtime** (UI-D-830, D-240): a `chat.message`, `chat.read` or `chat.case`
  *   signal on `tenant:<t>:support-inbox`, every (re)subscribe and every refocus refetch page 1 FOR THE
- *   CURRENT VIEW and merge it by case id AT THE TOP, so a case with news moves up and a team read clears
- *   its dot for every staff member (D-225); a row whose state no longer belongs to the tab leaves on the
- *   next refetch, with no animation (A-UI-12). Refetches are coalesced: one in flight, at most one more
+ *   CURRENT VIEW. The fresh page REPLACES the window of the server order it covers (`reconcileInboxPage`): a
+ *   case with news moves up and a team read clears its dot for every staff member (D-225), and a row the
+ *   server no longer lists for the view (resolved, taken, assigned or closed by anyone) leaves on that
+ *   refetch, with no animation and no reload (A-UI-12, WR-01); rows deeper than that window stay until a
+ *   read reaches them (A-12.4-GAP-DEEP). Refetches are coalesced: one in flight, at most one more
  *   queued (T-07-71), and a read for a view the staff already left is discarded. No polling.
  * - **Paging:** `InfiniteScroll` by keyset through `loadMoreInboxAction(cursor, filters)` with the same
  *   filters the first page was read with; a failed page keeps the rows and shows the inline line with a
@@ -261,7 +262,7 @@ export function SupportInbox({
 
   const refreshing = useRef<{ busy: boolean; again: boolean }>({ busy: false, again: false });
 
-  /** Page 1 of the CURRENT view again, merged at the top; one run at a time, one more queued (T-07-71). */
+  /** Page 1 of the CURRENT view again, reconciled into the list; one run at a time, one more queued (T-07-71). */
   const refreshPage1 = useCallback(async () => {
     const state = refreshing.current;
     if (state.busy) {
@@ -282,8 +283,19 @@ export function SupportInbox({
           if (itemsRef.current.length === 0) setFirstLoadFailed(true);
           continue;
         }
-        setItems((current) => mergeTop(current, page.items));
-        if (pagesRef.current <= 1) setCursor(page.nextCursor);
+        // The fresh page replaces the window of the server order it covers (WR-01): a case that left the
+        // tab leaves here, a row still listed is updated in place once. Only the server's order key is used.
+        const { items: next, whole } = reconcileInboxPage(itemsRef.current, page.items, {
+          holdsOnlyPage1: pagesRef.current <= 1,
+          hasMore: page.nextCursor !== null,
+        });
+        itemsRef.current = next;
+        setItems(next);
+        if (whole) {
+          pagesRef.current = 1;
+          setCursor(page.nextCursor);
+          if (page.nextCursor === null) setPageFailed(false);
+        }
         setFirstLoadFailed(false);
       } while (state.again);
     } finally {
