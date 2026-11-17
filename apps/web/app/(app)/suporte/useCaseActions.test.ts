@@ -62,7 +62,7 @@ const header = (
 });
 
 const wrapper = ({ children }: { children: ReactNode }) =>
-  createElement(NextIntlClientProvider, { locale: 'pt-BR', messages }, children);
+  createElement(NextIntlClientProvider, { locale: 'pt-BR', messages, children });
 
 function setup(current: StaffCaseHeaderView) {
   const onHeader = vi.fn();

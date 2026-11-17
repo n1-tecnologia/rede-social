@@ -7,6 +7,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import type { StaffCaseHeaderView } from '@/lib/chat-view';
+import type { StaffSheetKind } from './CaseActionSheet';
 import type { CaseDialogRequest } from './useCaseActions';
 
 /**
@@ -85,7 +86,10 @@ const OWNER_LEFT = staffHeader('in_progress', {
 const RESOLVED = staffHeader('resolved', { actions: ['reopen', 'close', 'edit'] });
 
 function renderBar(header: StaffCaseHeaderView) {
-  const calls = { onHeader: vi.fn(), onRefresh: vi.fn() };
+  const calls = {
+    onHeader: vi.fn<(header: StaffCaseHeaderView) => void>(),
+    onRefresh: vi.fn<() => void>(),
+  };
   render(
     <NextIntlClientProvider locale="pt-BR" messages={messages}>
       <StaffCaseBar
@@ -93,7 +97,7 @@ function renderBar(header: StaffCaseHeaderView) {
         header={header}
         onHeader={calls.onHeader}
         onRefresh={calls.onRefresh}
-        onOpenSheet={vi.fn()}
+        onOpenSheet={vi.fn<(kind: StaffSheetKind) => void>()}
       />
     </NextIntlClientProvider>,
   );
@@ -136,7 +140,11 @@ describe('the dialog words and tones (UI-D-827)', () => {
   function renderDialogs(dialogRequest: CaseDialogRequest | null) {
     return render(
       <NextIntlClientProvider locale="pt-BR" messages={messages}>
-        <CaseDialogs dialog={dialogRequest} onConfirm={vi.fn()} onClose={vi.fn()} />
+        <CaseDialogs
+          dialog={dialogRequest}
+          onConfirm={vi.fn<() => void>()}
+          onClose={vi.fn<() => void>()}
+        />
       </NextIntlClientProvider>,
     );
   }

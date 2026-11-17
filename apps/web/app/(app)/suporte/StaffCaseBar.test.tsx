@@ -5,9 +5,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MotionGlobalConfig } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { useState } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import type { StaffCaseHeaderView } from '@/lib/chat-view';
+import type { StaffSheetKind } from './CaseActionSheet';
 
 /**
  * 12.4-15 (UI-D-825, UI-D-826, UI-D-827, D-806, D-845; UC S09, S10, S12): the team's case bar and its action
@@ -91,16 +92,16 @@ const RESOLVED = staffHeader('resolved', { actions: ['reopen', 'close', 'edit'] 
 const CLOSED = staffHeader('closed', { actions: [] });
 
 interface Calls {
-  onHeader: ReturnType<typeof vi.fn>;
-  onRefresh: ReturnType<typeof vi.fn>;
-  onOpenSheet: ReturnType<typeof vi.fn>;
+  onHeader: Mock<(header: StaffCaseHeaderView) => void>;
+  onRefresh: Mock<() => void>;
+  onOpenSheet: Mock<(kind: StaffSheetKind) => void>;
 }
 
 function renderBar(header: StaffCaseHeaderView, calls?: Partial<Calls>) {
   const all: Calls = {
-    onHeader: vi.fn(),
-    onRefresh: vi.fn(),
-    onOpenSheet: vi.fn(),
+    onHeader: vi.fn<(header: StaffCaseHeaderView) => void>(),
+    onRefresh: vi.fn<() => void>(),
+    onOpenSheet: vi.fn<(kind: StaffSheetKind) => void>(),
     ...calls,
   };
   render(

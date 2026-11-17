@@ -80,7 +80,7 @@ export function StaffCaseBar({
 }: StaffCaseBarProps) {
   const t = useTranslations('chat');
   const [menuOpen, setMenuOpen] = useState(false);
-  const primaryRef = useRef<HTMLButtonElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
   /** Which control opened the dialog, so focus goes back to it when the dialog settles. */
   const openerRef = useRef<'primary' | 'menu'>('menu');
@@ -99,7 +99,10 @@ export function StaffCaseBar({
   const closeDialog = () => {
     dismiss();
     // The menu row that opened the dialog left with its sheet: hand the focus to a control that is still here.
-    const target = openerRef.current === 'primary' ? primaryRef.current : null;
+    const target =
+      openerRef.current === 'primary'
+        ? barRef.current?.querySelector<HTMLElement>('[data-case-primary]')
+        : null;
     setTimeout(
       () => (target?.isConnected ? target : menuRef.current)?.focus({ preventScroll: true }),
       0,
@@ -109,6 +112,7 @@ export function StaffCaseBar({
   return (
     <>
       <div
+        ref={barRef}
         data-case-bar
         data-case-staff
         className="shrink-0 border-b border-border bg-bg-secondary px-4 py-2"
@@ -143,7 +147,7 @@ export function StaffCaseBar({
           </p>
           {primary ? (
             <Button
-              ref={primaryRef}
+              data-case-primary
               size="sm"
               hitArea
               variant={primary.variant}
