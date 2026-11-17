@@ -1464,6 +1464,20 @@
       "when": 1794953359745,
       "tag": "20261117220919_chat_voice_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 209,
+      "version": "7",
+      "when": 1794955064384,
+      "tag": "20261117223744_chat_asset_gate_seam",
+      "breakpoints": true
+    },
+    {
+      "idx": 210,
+      "version": "7",
+      "when": 1794955067454,
+      "tag": "20261117223747_chat_voice_gate",
+      "breakpoints": true
     }
   ]
 }

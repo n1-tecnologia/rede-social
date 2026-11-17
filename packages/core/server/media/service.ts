@@ -15,6 +15,7 @@ import {
 } from '@rede-social/contracts/media';
 import { and, desc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
+import { chatAssetHidden } from '../../db/chat-gate';
 import { mediaAssetHidden } from '../../db/community-gate';
 import { courseAssetHidden } from '../../db/course-gate';
 import { withPlatformTx } from '../../db/platform-tx';
@@ -895,6 +896,15 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
  * remembered asset id no longer reads a locked lesson's material. Image width variants keep zero
  * reads, and the feed gate is deliberately NOT asked here: the 08.2 residual A6 (image variants of
  * a hidden post stay id-capabilities) is now "image variants only" and stays out of this phase.
+ *
+ * 12.5-07 (VOICE-24, VOICE-25; D-858, D-867, D-868): the chat voice case is a SECOND kernel seam,
+ * `app.chat_asset_hidden` (`chatAssetHidden`), ORed into the SAME single read, so it is still ONE round
+ * trip and the answer is still fail-closed (null on either side is not a plain `false`, so it is a miss).
+ * The chat body is SECURITY INVOKER, so the chat tables' own policies decide: a recording is hidden from
+ * a same-tenant non-participant and, once it is retired (soft-deleted), from every caller, the uploader
+ * included, at once rather than after the hourly purge; it is NOT hidden from its uploader (who plays a
+ * take back before sending it) nor from anyone who can read a message that carries it. Another tenant's
+ * id finds no row and no object, so it is the same bare 404 as an unknown id.
  */
 export async function serveVariant(
   ctx: Ctx,
@@ -907,7 +917,9 @@ export async function serveVariant(
   assertTenantKey(key, ctx.tenantId);
   if (variant === 'original') {
     const [gate] = await withTenantTx(ctx, (tx) =>
-      tx.execute<{ hidden: boolean }>(sql`select ${courseAssetHidden(assetId)} as hidden`),
+      tx.execute<{ hidden: boolean }>(
+        sql`select (${courseAssetHidden(assetId)} or ${chatAssetHidden(assetId)}) as hidden`,
+      ),
     );
     // Fail closed: an answer that is not a plain `false` is a miss.
     if (gate?.hidden !== false) throw new ApiError(404, 'NOT_FOUND');

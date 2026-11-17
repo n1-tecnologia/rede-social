@@ -1,7 +1,7 @@
 begin;
 -- 236-chat-voice.sql — Phase 12.5 plan 04 (VOICE-01..06, VOICE-34; D-846, D-847, D-859, D-861, D-865;
 -- T-12.5-10..14), executed inside Postgres. Later plans of the phase append numbered sections in ONE continuous
--- sequence (plans 07 and 08 start at section 7).
+-- sequence (plan 07 appends sections 7 and 8, plan 08 starts at section 9).
 --
 -- 1. THE PATH (plan 04 task 2, VOICE-01, VOICE-03, VOICE-05; D-846, D-861): a member's voice message is stored as the
 --    member lane, with its gapless seq; it reopens a resolved case, a staff voice message takes an unowned open case,
@@ -26,8 +26,15 @@ begin;
 -- 6. CROSS-TENANT (VOICE-34; T-12.5-10): tenant B cannot back a message with tenant A's asset nor read A's voice rows,
 --    and the same shape from tenant A is accepted beside it (the positive control).
 --
+-- 7. THE READ GATE (plan 07 task 1, VOICE-24, VOICE-25; D-858, D-867, D-868; T-12.5-24..27): `app.chat_asset_hidden` is
+--    a SECURITY INVOKER function, so the chat policies decide: the sender, the case's staff and the participants of a
+--    direct or group conversation are not hidden, anyone else of the tenant is; a retired recording is hidden from every
+--    caller; other kinds are ignored; tenant B sees nothing of tenant A and the answer is the same for an unknown id.
+--
+-- 8. THE STUB (plan 07 task 1, D-867): the migration order is checked, then the kernel stub answers false.
+--
 -- Fixture ids use the `1e360000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(61);
+select plan(98);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-voice-a', 'Voz A', '1e360000-0000-4000-8000-000000000001');
@@ -438,6 +445,109 @@ select is(
   (select count(*)::int from public.chat_messages where media_asset_id = '1e360000-0000-4000-8000-000000000c02'),
   0, 'VOICE-34: tenant A reads none of tenant B''s voice rows');
 reset role;
+
+
+-- ── 7. the read gate (VOICE-24, VOICE-25; D-858, D-867, D-868; T-12.5-24..27) ─────────────────
+-- `app.chat_asset_hidden` is the kernel's SECOND asset seam (the 08.5 shape): a stub that answers false in the kernel
+-- migration, given its body by the chat module as a SECURITY INVOKER function, so the chat tables' own policies decide.
+-- `app.voice_asset_retired` is the small definer that sees a soft-deleted recording the tenant select policy hides.
+-- Both helpers run the gate in a lane exactly as `withTenantTx` builds it and return to the owner afterwards.
+create function tests.gate_as(p_tenant uuid, p_user uuid, p_role text, p_asset uuid) returns boolean
+language plpgsql as $$
+declare v boolean;
+begin
+  perform tests.as_tenant(p_tenant, p_user, p_role);
+  v := app.chat_asset_hidden(p_asset);
+  reset role;
+  return v;
+end
+$$;
+create function tests.retired_as(p_tenant uuid, p_user uuid, p_asset uuid) returns boolean
+language plpgsql as $$
+declare v boolean;
+begin
+  perform tests.as_tenant(p_tenant, p_user, 'member');
+  v := app.voice_asset_retired(p_asset);
+  reset role;
+  return v;
+end
+$$;
+
+-- Function properties.
+select is((select prosecdef from pg_proc where oid = 'app.chat_asset_hidden(uuid)'::regprocedure), false,
+  'D-858: app.chat_asset_hidden is SECURITY INVOKER, so the chat policies decide');
+select is((select prosecdef from pg_proc where oid = 'app.voice_asset_retired(uuid)'::regprocedure), true,
+  'D-868: app.voice_asset_retired is SECURITY DEFINER (it reads a row the tenant select policy hides)');
+select ok((select array_to_string(proconfig, ',') like '%search_path=""%' from pg_proc where oid = 'app.chat_asset_hidden(uuid)'::regprocedure),
+  'D-867: app.chat_asset_hidden has an empty search_path');
+select ok((select array_to_string(proconfig, ',') like '%search_path=""%' from pg_proc where oid = 'app.voice_asset_retired(uuid)'::regprocedure),
+  'D-867: app.voice_asset_retired has an empty search_path');
+select ok(has_function_privilege('authenticated', 'app.chat_asset_hidden(uuid)', 'execute')
+      and has_function_privilege('authenticated', 'app.voice_asset_retired(uuid)', 'execute'),
+  'D-867: EXECUTE is granted to authenticated on both functions');
+select ok(not has_function_privilege('anon', 'app.chat_asset_hidden(uuid)', 'execute')
+      and not has_function_privilege('anon', 'app.voice_asset_retired(uuid)', 'execute'),
+  'D-867: anon holds EXECUTE on neither function');
+select is((select count(*)::int from pg_proc p, aclexplode(p.proacl) x
+            where p.oid in ('app.chat_asset_hidden(uuid)'::regprocedure, 'app.voice_asset_retired(uuid)'::regprocedure) and x.grantee = 0),
+  0, 'D-867: EXECUTE is not held by PUBLIC on either function');
+
+-- Fixtures (owner). The unsent takes (f01 of member 1), tenant B's recording (c02) and the sent ones (e1 in a support
+-- case, b01 in the direct conversation, b02 in the group one) come from the sections above. 071 is a recording of
+-- member 1 that WAS sent in case 1 and then retired (soft-deleted), as the account-deletion step and the orphan sweep
+-- of plan 08 will do.
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds, deleted_at) values
+  ('1e360000-0000-4000-8000-000000000071', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'deleted', 'audio/mp4', 8000, 7, now());
+select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000071', 7);
+
+-- A recording sent in a SUPPORT case (e1, member 1, case 1): its sender and the tenant's staff open it, another member does not.
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-0000000000e1'), false, 'VOICE-24: the member who sent the recording is not hidden from it (302 beside the 404s)');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a3', 'support_tenant', '1e360000-0000-4000-8000-0000000000e1'), false, 'VOICE-24: the support staff of the tenant read the support case, so the recording is not hidden');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a3', 'admin_tenant', '1e360000-0000-4000-8000-0000000000e1'), false, 'VOICE-24: the admin_tenant is not hidden from a support recording either');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'member', '1e360000-0000-4000-8000-0000000000e1'), true, 'T-12.5-24: a same-tenant member who is not in the case is hidden from the recording (the bare 404)');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000002', '1e360000-0000-4000-8000-0000000000b1', 'member', '1e360000-0000-4000-8000-0000000000e1'), false, 'T-12.5-25: tenant Bs user sees nothing of tenant As recording, so the gate adds nothing (the route 404s from the missing object)');
+-- Tenant B's own recording (c02, sent in B's case) beside the negative: its sender is not hidden, tenant A's member sees nothing of it.
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000002', '1e360000-0000-4000-8000-0000000000b1', 'member', '1e360000-0000-4000-8000-000000000c02'), false, 'VOICE-34: tenant Bs sender opens tenant Bs own recording (positive control)');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'member', '1e360000-0000-4000-8000-000000000c02'), false, 'VOICE-34: tenant As member sees nothing of tenant Bs recording, so the gate adds nothing (404 from the key)');
+-- An UNSENT take (f01, member 1): the uploader opens it (to play it back before sending), nobody else.
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000f01'), false, 'D-858: the uploader of an unsent take is not hidden from it (the preview before sending)');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'member', '1e360000-0000-4000-8000-000000000f01'), true, 'D-858: another member is hidden from an unsent take');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a3', 'support_tenant', '1e360000-0000-4000-8000-000000000f01'), true, 'D-858: staff are hidden from a members unsent take');
+-- A DIRECT conversation (d1: members 1 and 2) and a GROUP one (d2: members 1, 2 and 3): only participants.
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000b01'), false, 'VOICE-24: a participant of the direct conversation is not hidden from a recording sent in it');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'member', '1e360000-0000-4000-8000-000000000b01'), false, 'VOICE-24: the other participant of the direct conversation is not hidden either');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a3', 'support_tenant', '1e360000-0000-4000-8000-000000000b01'), true, 'T-12.5-27: staff who are not participants of a direct conversation are hidden from its recording');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a3', 'admin_tenant', '1e360000-0000-4000-8000-000000000b01'), true, 'T-12.5-27: the admin_tenant who is not a participant of a direct conversation is hidden too');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a4', 'member', '1e360000-0000-4000-8000-000000000b01'), true, 'T-12.5-24: a member outside the direct conversation is hidden from its recording');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000b02'), false, 'VOICE-24: a participant of the group conversation is not hidden from its recording');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a4', 'member', '1e360000-0000-4000-8000-000000000b02'), false, 'VOICE-24: another participant of the group conversation is not hidden either');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a5', 'member', '1e360000-0000-4000-8000-000000000b02'), true, 'T-12.5-24: a member outside the group conversation is hidden from its recording');
+-- A RETIRED recording (071, soft-deleted after it was sent): every caller is hidden at once (D-868), before the hourly purge.
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000071'), true, 'T-12.5-26: a retired recording is hidden from the member who sent it');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a3', 'support_tenant', '1e360000-0000-4000-8000-000000000071'), true, 'T-12.5-26: ... from the support staff');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'member', '1e360000-0000-4000-8000-000000000071'), true, 'T-12.5-26: ... and from every other member');
+select is(tests.retired_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', '1e360000-0000-4000-8000-000000000071'), true, 'D-868: app.voice_asset_retired is true for a soft-deleted voice asset of the callers tenant');
+select is(tests.retired_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', '1e360000-0000-4000-8000-0000000000e1'), false, 'D-868: ... and false for a live one');
+select is(tests.retired_as('1e360000-0000-4000-8000-000000000002', '1e360000-0000-4000-8000-0000000000b1', '1e360000-0000-4000-8000-000000000071'), false, 'D-868: ... and false for another tenants caller (the tenant predicate)');
+-- Other kinds and unknown ids: the gate ignores them (an avatar image of member 1, and an id that does not exist).
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000000a09'), false, 'D-858: an image asset is never hidden by this gate (its owner)');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'member', '1e360000-0000-4000-8000-000000000a09'), false, 'D-858: ... and not for another member either');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a3', 'support_tenant', '1e360000-0000-4000-8000-000000000a09'), false, 'D-858: ... nor for staff');
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'member', '1e360000-0000-4000-8000-000000000bad'), false, 'D-858: an unknown id is not hidden by this gate (the route answers the 404 from the missing object)');
+
+-- ── 8. the stub (VOICE-25; D-867) ──────────────────────────────────────────────────────────────
+-- The kernel stub answers false and reads no table, so a project that has the media kernel and no chat module hides
+-- nothing. Put the stub body back (owner, inside this rolled-back transaction) and ask the gate that hid e1 above.
+-- Keep this LAST: the stub stays in place until the rollback.
+select is((select count(*)::int from supabase_migrations.schema_migrations
+            where name = 'chat_asset_gate_seam'
+              and version < (select version from supabase_migrations.schema_migrations where name = 'chat_voice_gate')
+              and version > (select version from supabase_migrations.schema_migrations where name = 'chat_voice_messages')),
+  1, 'D-867: the kernel seam migration sorts after the message table and BEFORE the chat gate body');
+create or replace function app.chat_asset_hidden(p_asset uuid) returns boolean
+language sql stable security invoker set search_path = '' as $$ select false $$;
+select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'member', '1e360000-0000-4000-8000-0000000000e1'), false,
+  'D-867: the neutral stub answers false for the caller the chat body hid (no chat module, nothing hidden)');
 
 select * from finish();
 rollback;
