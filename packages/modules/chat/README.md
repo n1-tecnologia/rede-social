@@ -15,7 +15,7 @@ assignments, a bell row plus a push for the member's resolved case.
 | `./module` | `chatModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
 | `./server` | `chatRoutes`, the service functions, `chatCounters`, `chatNotificationSources` |
-| `./ui` | `ChatComposer`, `MessageList`, `MessageBubble`, `DaySeparator`, `InboxRow`, `ThreadHeader` |
+| `./ui` | `ChatComposer` (opt-in `voice` bundle), `useVoiceRecorder`, `MessageList`, `MessageBubble`, `DaySeparator`, `InboxRow`, `ThreadHeader` |
 | `./db` | Drizzle tables `chatConversations`, `chatParticipants`, `chatMessages` with their RLS policies |
 
 Main contract names (`./contracts`): `chatBodySchema`, `sendMessageInputSchema`, `sendResultSchema`,

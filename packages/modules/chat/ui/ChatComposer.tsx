@@ -1,7 +1,7 @@
 'use client';
 
 import { cn, Textarea } from '@rede-social/ui';
-import { LoaderCircle, Mic, Send, Trash2 } from 'lucide-react';
+import { Info, LoaderCircle, Mic, MicOff, Send, Trash2 } from 'lucide-react';
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -10,7 +10,12 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useVoiceRecorder, type VoiceTake } from './useVoiceRecorder';
+import {
+  useVoiceRecorder,
+  type VoiceProblem,
+  type VoiceRecorderEvent,
+  type VoiceTake,
+} from './useVoiceRecorder';
 
 /**
  * The thread composer (UI-D-260): the prototype's reply bar with the V2 extras removed (sketch 007
@@ -108,6 +113,31 @@ function finePointer(): boolean {
   return typeof window !== 'undefined' && window.matchMedia?.('(pointer: fine)').matches === true;
 }
 
+/** The sentence a problem earns: four microphone sentences plus the too-short discard (UI-D-842, UI-D-845). */
+function problemSentence(voice: ChatComposerVoice, problem: VoiceProblem): string {
+  return problem === 'tooShort' ? voice.notices.tooShort : voice.problems[problem];
+}
+
+/** What the polite status region says for each recorder event (UI-D-855, A-UI-17). */
+function spokenSentence(voice: ChatComposerVoice, event: VoiceRecorderEvent): string {
+  switch (event.type) {
+    case 'started':
+      return voice.live.started;
+    case 'minute':
+      return voice.live.minute(event.count);
+    case 'warning':
+      return voice.notices.warning;
+    case 'limit':
+      return voice.notices.limit;
+    case 'interrupted':
+      return voice.notices.interrupted;
+    case 'discarded':
+      return voice.live.discarded;
+    case 'problem':
+      return problemSentence(voice, event.problem);
+  }
+}
+
 export function ChatComposer({
   id = 'chat-composer-field',
   label,
@@ -125,12 +155,19 @@ export function ChatComposer({
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const slotRef = useRef<HTMLButtonElement>(null);
   const voiceOn = voice !== undefined;
+  // The polite status region: one persistent node, its content replaced (and re-keyed so an identical sentence
+  // is spoken again). Visible notice lines carry no live role of their own.
+  const [live, setLive] = useState({ count: 0, text: '' });
   const recorder = useVoiceRecorder({
     active: voiceOn && !disabled,
     maxSeconds: voice?.maxSeconds,
     minSeconds: voice?.minSeconds,
     warnAtSeconds: voice?.warnAtSeconds,
     onRecordingStart: voice?.onRecordingStart,
+    onEvent: (event) => {
+      if (voice)
+        setLive((before) => ({ count: before.count + 1, text: spokenSentence(voice, event) }));
+    },
   });
   const phase = recorder.state.phase;
 
@@ -153,6 +190,18 @@ export function ChatComposer({
   }, [value]);
 
   const trimmed = value.trim();
+  const { problem, stopReason, warned } = recorder.state;
+  const noticeText = !voice
+    ? null
+    : problem
+      ? problemSentence(voice, problem)
+      : phase === 'stopped'
+        ? stopReason === 'limit'
+          ? voice.notices.limit
+          : voice.notices.interrupted
+        : phase === 'recording' && warned
+          ? voice.notices.warning
+          : null;
   const recording = voiceOn && (phase === 'recording' || phase === 'stopped');
   const requesting = voiceOn && phase === 'requesting';
   const slotMode: 'mic' | 'recording' | 'text' = recording
@@ -232,6 +281,19 @@ export function ChatComposer({
           {counterTemplate(length)}
         </p>
       ) : null}
+      {noticeText && voice ? (
+        <p
+          data-chat-voice-notice
+          className="flex items-start gap-2 pb-2 text-sm font-normal text-text-secondary"
+        >
+          {problem && problem !== 'tooShort' ? (
+            <MicOff size={16} aria-hidden className="mt-0.5 shrink-0 text-text-tertiary" />
+          ) : (
+            <Info size={16} aria-hidden className="mt-0.5 shrink-0 text-text-tertiary" />
+          )}
+          <span className="min-w-0">{noticeText}</span>
+        </p>
+      ) : null}
       <form onSubmit={onSubmit} className="flex items-end gap-2">
         {recording && voice ? (
           <button
@@ -257,6 +319,7 @@ export function ChatComposer({
           onChange={(event) => {
             setValue(event.target.value);
             if (failed) setFailed(false);
+            if (problem) recorder.clearProblem();
           }}
           onKeyDown={onKeyDown}
           containerClassName={cn('min-w-0 flex-1 gap-0', recording && 'hidden')}
@@ -328,6 +391,11 @@ export function ChatComposer({
           )}
         </button>
       </form>
+      {voice ? (
+        <div data-chat-voice-status role="status" aria-live="polite" className="sr-only">
+          <span key={live.count}>{live.text}</span>
+        </div>
+      ) : null}
     </div>
   );
 }
