@@ -26,9 +26,11 @@ import { ApiError } from '../http/api-error';
 import { enqueueInTx } from '../jobs/boss';
 import { moduleLogger } from '../logging';
 import { decodeCursor, encodeCursor } from '../paging';
+import { permissionsForRequest } from '../rbac/permissions';
 import { MEDIA_DERIVE_QUEUE, MEDIA_SWEEP_QUEUE, MEDIA_SWEEP_SINGLETON } from './index';
 import {
   fileSignaturePrefixBytes,
+  inspectAudioSignature,
   inspectFile,
   inspectMediaImage,
   MediaImageError,
@@ -76,6 +78,7 @@ import { deriveVariants, probeSize } from './variants';
 import { videoProvider } from './video/index';
 import { reconcileVideoAsset } from './video/reconcile';
 import { dropVideoRoute, recordVideoRoute, setVideoRouteProviderId } from './video/routes';
+import { normalizeVoice, VoiceNormalizeError } from './voice';
 
 /**
  * The media broker (MEDIA-01, MEDIA-02, TENANT-04) — a tenant-lane service that returns upload
@@ -422,6 +425,22 @@ async function startVideoUpload(
 }
 
 /**
+ * D-847 (12.5-02): the permissions that let a caller start a VOICE upload. No new permission exists:
+ * whoever may write in a chat may record into it. `chat.support.contact` is what a member holds,
+ * `chat.support` is what `support_tenant` and `admin_tenant` hold, and both are granted by the chat
+ * module only while it is on for the tenant. The kernel names the strings and never imports the module
+ * (MOD-02); the composed set comes through the same seam every route guard reads.
+ */
+const VOICE_UPLOAD_PERMISSIONS = ['chat.support.contact', 'chat.support'] as const;
+
+async function assertMayStartVoice(ctx: Ctx): Promise<void> {
+  const granted = await permissionsForRequest(ctx);
+  if (!VOICE_UPLOAD_PERMISSIONS.some((permission) => granted.includes(permission))) {
+    throw new ApiError(403, 'FORBIDDEN');
+  }
+}
+
+/**
  * `POST /v1/media/uploads` (MEDIA-01): validates the DECLARED facts, charges the tenant's storage
  * ceiling, records a `pending` row and mints a signed Storage target. Nothing is decoded here — the
  * declared mime buys a fast refusal, `complete` is where the bytes are judged.
@@ -445,6 +464,10 @@ export async function startUpload(
   // Checked FIRST for the video kind, before any limit lookup, so a refused caller never learns which
   // video mimes or caps exist (T-03-44). The policy is read through the kernel seam (MOD-02) BEFORE
   // any transaction opens.
+  // D-847: a VOICE upload is gated the same way, and FIRST, before any limit lookup, so a refused
+  // caller never learns which audio mimes or caps exist.
+  if (body.kind === 'audio') await assertMayStartVoice(ctx);
+
   let memberPolicy: MemberMediaPolicy | null = null;
   if (body.kind === 'video' && ctx.role !== 'admin_tenant') {
     if (ctx.role === 'member' && memberVideoPurposeAllowed(body.purpose)) {
@@ -783,7 +806,9 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
   // already ran against Storage's own record, which is why the prefix path needs a known size; an
   // image (or an image attachment) still needs every byte for the sharp decode, bounded by the
   // per-purpose cap and the pixel limits.
-  const prefixBytes = row.kind === 'file' ? fileSignaturePrefixBytes(row.mime) : null;
+  // 12.5-02: a voice take is judged the same way (EBML, `ftyp` at 4, `OggS`), never decoded here.
+  const prefixBytes =
+    row.kind === 'file' || row.kind === 'audio' ? fileSignaturePrefixBytes(row.mime) : null;
   const prefixOnly = prefixBytes !== null && typeof info.size === 'number';
   const buf = prefixOnly ? await downloadObjectPrefix(key, prefixBytes) : await downloadObject(key);
   if (!buf) throw new ApiError(404, 'NOT_FOUND', { media: 'object_missing' });
@@ -806,7 +831,8 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
     throw error;
   }
 
-  // A `file` needs no ladder, so it is `ready` right here; an image goes to the worker.
+  // A `file` needs no ladder, so it is `ready` right here; an image goes to the worker, and so does a
+  // voice take: the worker's ffmpeg normalizes it before it is `ready` (D-863).
   const isFile = row.kind === 'file';
   const bytes = typeof info.size === 'number' ? info.size : buf.length;
 
@@ -1110,7 +1136,10 @@ export async function listAssets(ctx: Ctx, query: MediaListQuery): Promise<Media
   return { items: page.map(assetView), nextCursor };
 }
 
-export type DeriveOutcome = { outcome: 'derived' | 'skipped' | 'gone'; widths: number[] };
+export type DeriveOutcome = {
+  outcome: 'derived' | 'skipped' | 'gone' | 'rejected';
+  widths: number[];
+};
 
 /**
  * The worker's half (MEDIA-02): download the original, derive the purpose's WebP ladder under
@@ -1135,6 +1164,7 @@ export async function deriveAssetVariants(
   if (!row || row.deletedAt || row.status === 'deleted' || row.status === 'rejected') {
     return { outcome: 'gone', widths: [] };
   }
+  if (row.kind === 'audio') return deriveVoice(row);
   if (row.kind !== 'image') return { outcome: 'skipped', widths: [] };
 
   const t0 = Date.now();
@@ -1195,6 +1225,120 @@ export async function deriveAssetVariants(
     'media variants derived',
   );
   return { outcome: 'derived', widths: producedWidths };
+}
+
+/**
+ * The audio branch of the worker's derivation (12.5-02, D-863): download the take, normalize it with
+ * ffmpeg to ONE mono AAC `audio/mp4` object, OVERWRITE the same `original` key (the variant param only
+ * knows `original` and `w<width>`, and nobody can read a not-ready voice asset but its owner), then
+ * record the facts and flip the row to `ready`.
+ *
+ * Two outcomes the job must tell apart:
+ *  - the FILE is wrong (`VoiceNormalizeError`: undecodable, no audio stream, over 301 s): the row turns
+ *    `rejected` with the reason, the object is removed, and `rejected` is RETURNED so the job logs it
+ *    and does not retry;
+ *  - the MACHINE is wrong (no ffmpeg, a timeout, Storage down): the error propagates, so the job's
+ *    bounded retry and its terminal `failed` state apply unchanged.
+ *
+ * Re-running is safe. A `ready` row is skipped. A crash between the overwrite and the row update
+ * leaves an `audio/mp4` object under a row that still declares another mime; the signature check below
+ * recognizes our own output and normalizes it again instead of rejecting it.
+ */
+async function deriveVoice(row: AssetRow): Promise<DeriveOutcome> {
+  const { tenantId, id: assetId } = row;
+  if (row.status === 'ready') return { outcome: 'skipped', widths: [] };
+
+  const t0 = Date.now();
+  const originalKey = mediaOriginalKey(tenantId, assetId);
+  assertTenantKey(originalKey, tenantId);
+  const buf = await downloadObject(originalKey);
+  if (!buf) return { outcome: 'gone', widths: [] };
+
+  const rejectVoice = async (reason: string): Promise<DeriveOutcome> => {
+    await removeQuietly([originalKey], log, 'media.voice_remove_failed');
+    await withAdminTx({ tenantId }, async (tx) => {
+      await tx
+        .update(mediaAssets)
+        .set({ status: 'rejected', failureReason: reason })
+        .where(
+          and(
+            eq(mediaAssets.id, assetId),
+            eq(mediaAssets.tenantId, tenantId),
+            inArray(mediaAssets.status, ['processing']),
+          ),
+        );
+    });
+    log.warn(
+      { event: 'media.voice_rejected', tenantId, assetId, reason },
+      'a voice take was rejected by the worker',
+    );
+    return { outcome: 'rejected', widths: [] };
+  };
+
+  let declared = row.mime;
+  try {
+    inspectAudioSignature(buf, declared);
+  } catch {
+    // Our own earlier output (see the docblock) is the one other thing the object can legitimately be.
+    try {
+      inspectAudioSignature(buf, 'audio/mp4');
+      declared = 'audio/mp4';
+    } catch {
+      return rejectVoice('format_mismatch');
+    }
+  }
+
+  let normalized: Awaited<ReturnType<typeof normalizeVoice>>;
+  try {
+    normalized = await normalizeVoice(buf, declared);
+  } catch (error) {
+    if (error instanceof VoiceNormalizeError) return rejectVoice(error.reason);
+    throw error;
+  }
+
+  await putObject(originalKey, normalized.body, {
+    contentType: 'audio/mp4',
+    // NOT the immutable year an image rung gets: this key was written once as the upload and is now
+    // overwritten, so a long-lived cache of the first bytes would outlive them.
+    cacheControl: '3600',
+  });
+  invalidateSignedUrl(originalKey);
+
+  const updated = await withAdminTx({ tenantId }, async (tx) =>
+    tx
+      .update(mediaAssets)
+      .set({
+        mime: 'audio/mp4',
+        bytes: normalized.body.length,
+        durationSeconds: normalized.durationSeconds,
+        status: 'ready',
+        readyAt: new Date(),
+        failureReason: null,
+      })
+      .where(
+        and(
+          eq(mediaAssets.id, assetId),
+          eq(mediaAssets.tenantId, tenantId),
+          isNull(mediaAssets.deletedAt),
+          inArray(mediaAssets.status, ['processing', 'ready']),
+        ),
+      )
+      .returning({ id: mediaAssets.id }),
+  );
+  if (updated.length === 0) return { outcome: 'skipped', widths: [] };
+
+  log.info(
+    {
+      event: 'media.voice_normalized',
+      tenantId,
+      assetId,
+      bytes: normalized.body.length,
+      durationSeconds: normalized.durationSeconds,
+      ms: Date.now() - t0,
+    },
+    'a voice take was normalized',
+  );
+  return { outcome: 'derived', widths: [] };
 }
 
 /**

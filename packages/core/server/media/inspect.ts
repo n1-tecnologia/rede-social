@@ -58,6 +58,33 @@ const FILE_SIGNATURES: Record<string, Buffer> = {
 };
 
 /**
+ * Declared mime of an `audio`-kind object -> where its signature sits and what it is (12.5-02, D-863,
+ * VOICE-15). Unlike the `file` table these are NOT all at offset 0: an MP4 starts with a box size, and
+ * the four bytes `ftyp` follow at offset 4. WebM is the EBML header `1A 45 DF A3`, Ogg is `OggS`.
+ * Signature only, on purpose: the request path never runs a decoder on audio bytes (T-03-04); the
+ * worker's ffmpeg decode is what proves the stream.
+ */
+const AUDIO_SIGNATURES: Record<string, { offset: number; magic: Buffer }> = {
+  'audio/webm': { offset: 0, magic: Buffer.from([0x1a, 0x45, 0xdf, 0xa3]) },
+  'audio/mp4': { offset: 4, magic: Buffer.from('ftyp', 'latin1') },
+  'audio/ogg': { offset: 0, magic: Buffer.from('OggS', 'latin1') },
+};
+
+/**
+ * The signature check an `audio` upload takes at `complete`: `buf` must carry, at the offset the
+ * DECLARED mime demands, the magic bytes of that container. A WebM declared as MP4, a short buffer, an
+ * empty buffer and any unlisted mime are all `format_mismatch`.
+ */
+export function inspectAudioSignature(buf: Buffer, declaredMime: string): void {
+  const signature = AUDIO_SIGNATURES[declaredMime];
+  if (!signature) throw new MediaImageError('format_mismatch');
+  const end = signature.offset + signature.magic.length;
+  if (buf.length < end || !buf.subarray(signature.offset, end).equals(signature.magic)) {
+    throw new MediaImageError('format_mismatch');
+  }
+}
+
+/**
  * The decoded truth about `buf`, or `MediaImageError` with the machine code the API answers.
  *
  * ORDER MATTERS (RESEARCH Pitfall 2, VERIFIED against this repo's sharp 0.35.4 / libvips 8.18.6):
@@ -105,6 +132,10 @@ export async function inspectMediaImage(
 export async function inspectFile(buf: Buffer, declaredMime: string): Promise<void> {
   if (declaredMime in MIME_TO_FORMAT) {
     await inspectMediaImage(buf, declaredMime);
+    return;
+  }
+  if (declaredMime in AUDIO_SIGNATURES) {
+    inspectAudioSignature(buf, declaredMime);
     return;
   }
   const signature = FILE_SIGNATURES[declaredMime];
