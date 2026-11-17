@@ -37,6 +37,7 @@ import {
   hasAnyCaseOf,
   memberCaseOf,
   ownerJoins,
+  staffCaseOf,
   toInboxCase,
 } from './cases';
 import { firstNameOf } from './first-name';
@@ -580,7 +581,8 @@ export async function getConversation(
   ctx: RequestContext,
   conversationId: string,
 ): Promise<ConversationDetail> {
-  const staff = await isStaff(ctx);
+  const permissions = await permissionsForRequest(ctx);
+  const staff = permissions.includes(CHAT_PERMISSIONS.answer);
   return withTenantTx(ctx, async (tx) => {
     if (staff) {
       const rows = await tx.execute<
@@ -597,12 +599,15 @@ export async function getConversation(
            and c.kind = 'support'`);
       const row = rows[0];
       if (!row) throw new ApiError(404, 'NOT_FOUND');
+      // 12.4: the case with the list of actions THIS viewer may take, decided from the viewer's permissions (D-842).
+      const staffCase = await staffCaseOf(tx, ctx, row.id, permissions);
       return {
         viewer: 'staff',
         id: row.id,
         member: toMember(row),
         lastSeq: Number(row.last_seq),
         staffLastReadSeq: Number(row.staff_last_read_seq),
+        ...(staffCase ? { case: staffCase } : {}),
       };
     }
     const rows = await tx.execute<{

@@ -1,13 +1,20 @@
 import { cutOnWord } from '@rede-social/contracts/text';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { ApiError } from '@rede-social/core/server/http/api-error';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { sql } from 'drizzle-orm';
 import {
   CASE_ACTIVE_STATES,
   type CaseCard,
+  type CaseEvent,
+  type CaseHistory,
+  CHAT_CASE_ACTIONS,
+  CHAT_EARLIER_CASES_MAX,
+  CHAT_PERMISSIONS,
   CHAT_PREVIEW_GRAPHEMES,
   CHAT_SUBJECT_MAX,
+  type ChatCaseAction,
   type ChatCaseCategory,
   type ChatCasePriority,
   type ChatCaseState,
@@ -16,6 +23,8 @@ import {
   type MemberCase,
   type MyCasesPage,
   type MyCasesQuery,
+  type StaffCase,
+  type StaffRoster,
 } from '../contracts/index';
 
 /**
@@ -282,6 +291,37 @@ export const ownerJoins = sql`
               and oms.role in (${STAFF_ROLES})
         left join member_profiles omp on omp.membership_id = oms.id`;
 
+/**
+ * The list of legal actions of a case for ONE viewer, decided here and drawn as-is by the screens (D-842, D-806, UI-D-826).
+ * It reads the viewer's composed PERMISSIONS, never a role literal, and a closed case lists none of the mutating actions.
+ * The answer keeps the order of `CHAT_CASE_ACTIONS`. The definers re-enforce every pair (plan 03), so this list is a
+ * convenience for the UI and never the only guard.
+ */
+export function actionsFor(
+  row: { state: ChatCaseState; ownerUserId: string | null },
+  viewer: { userId: string; permissions: readonly string[] },
+): ChatCaseAction[] {
+  const active = row.state === 'open' || row.state === 'in_progress';
+  const allowed: Record<ChatCaseAction, boolean> = {
+    take:
+      row.state === 'open' || (row.state === 'in_progress' && row.ownerUserId !== viewer.userId),
+    assign: active && viewer.permissions.includes(CHAT_PERMISSIONS.assign),
+    resolve: active,
+    close: row.state !== 'closed',
+    reopen: row.state === 'resolved',
+    edit: row.state !== 'closed',
+  };
+  return CHAT_CASE_ACTIONS.filter((action) => allowed[action]);
+}
+
+type StaffCaseDbRow = MemberCaseDbRow & {
+  priority: ChatCasePriority | null;
+  owner_user_id: string | null;
+  owner_name: string | null;
+  resolved_at: string | null;
+  closed_at: string | null;
+};
+
 /** The inbox row's case facts (the owner is a name, never an id), from the columns both statements select. */
 export function toInboxCase(row: {
   case_number: number | null;
@@ -303,4 +343,186 @@ export function toInboxCase(row: {
     ownerName: row.owner_name,
     ownerIsViewer: row.owner_is_viewer,
   };
+}
+
+/**
+ * The case of ONE support conversation as the TEAM reads it, with the list of legal actions for this viewer, or null
+ * when it is not a numbered support case of this tenant. One tenant-pinned select (D-842).
+ */
+export async function staffCaseOf(
+  tx: Tx,
+  ctx: RequestContext,
+  conversationId: string,
+  permissions: readonly string[],
+): Promise<StaffCase | null> {
+  const rows = await tx.execute<StaffCaseDbRow>(sql`
+    select c.id,
+           c.case_number::int as case_number,
+           c.state,
+           c.subject,
+           c.category,
+           c.priority,
+           c.owner_user_id::text as owner_user_id,
+           omp.display_name as owner_name,
+           to_char(c.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as opened_at,
+           to_char(c.resolved_at at time zone 'utc', ${ISO_MICROSECONDS}) as resolved_at,
+           to_char(c.closed_at at time zone 'utc', ${ISO_MICROSECONDS}) as closed_at,
+           fm.body as first_body
+      from chat_conversations c
+      ${firstMessageJoin}
+      ${ownerJoins}
+     where c.id = ${conversationId}::uuid
+       and c.tenant_id = ${ctx.tenantId}::uuid
+       and c.kind = 'support'
+       and c.state is not null
+       and c.case_number is not null`);
+  const row = rows[0];
+  if (!row) return null;
+  const member = toMemberCase(row);
+  return {
+    ...member,
+    priority: row.priority ?? 'normal',
+    ownerUserId: row.owner_user_id,
+    ownerName: row.owner_name,
+    ownerIsViewer: row.owner_user_id !== null && row.owner_user_id === ctx.userId,
+    resolvedAt: row.resolved_at,
+    closedAt: row.closed_at,
+    actions: actionsFor(
+      { state: member.state, ownerUserId: row.owner_user_id },
+      { userId: ctx.userId, permissions },
+    ),
+  };
+}
+
+type EventDbRow = {
+  kind: CaseEvent['kind'];
+  at: string;
+  actor_name: string | null;
+  target_name: string | null;
+  from_state: ChatCaseState | null;
+  to_state: ChatCaseState | null;
+  field: NonNullable<CaseEvent['field']> | null;
+  from_value: string | null;
+  to_value: string | null;
+};
+
+/** A history row as the schema states it: an absent value is an ABSENT key, and `from`/`to` exist for an edit only. */
+const toCaseEvent = (row: EventDbRow): CaseEvent => ({
+  kind: row.kind,
+  at: row.at,
+  ...(row.actor_name !== null ? { actorName: row.actor_name } : {}),
+  ...(row.target_name !== null ? { targetName: row.target_name } : {}),
+  ...(row.from_state !== null ? { fromState: row.from_state } : {}),
+  ...(row.to_state !== null ? { toState: row.to_state } : {}),
+  ...(row.field !== null ? { field: row.field } : {}),
+  ...(row.kind === 'edited' ? { from: row.from_value, to: row.to_value } : {}),
+});
+
+type EarlierDbRow = {
+  id: string;
+  case_number: number;
+  state: ChatCaseState;
+  subject: string | null;
+  opened_at: string;
+  first_body: string | null;
+};
+
+/**
+ * `GET /v1/chat/conversations/{id}/case/history` (D-810, CASE-12): the events of one case oldest first by
+ * `(created_at, id)` with the actor's and the target's display name, then at most `CHAT_EARLIER_CASES_MAX` earlier cases
+ * of the SAME member (a case number below the current one, newest first) and `hasMoreEarlier` from a sixth-row probe.
+ * An actor or target who left the tenant has no name (the key is absent, never an id). An id that is not a numbered
+ * support case of the caller's tenant is one bare 404. A GET: nothing is written or marked read.
+ */
+export async function getCaseHistory(
+  ctx: RequestContext,
+  conversationId: string,
+): Promise<CaseHistory> {
+  return withTenantTx(ctx, async (tx) => {
+    const current = await tx.execute<{ created_by_user_id: string; case_number: number }>(sql`
+      select c.created_by_user_id::text as created_by_user_id, c.case_number::int as case_number
+        from chat_conversations c
+       where c.id = ${conversationId}::uuid
+         and c.tenant_id = ${ctx.tenantId}::uuid
+         and c.kind = 'support'
+         and c.case_number is not null`);
+    const head = current[0];
+    if (!head) throw new ApiError(404, 'NOT_FOUND');
+
+    const events = await tx.execute<EventDbRow>(sql`
+      select e.kind,
+             to_char(e.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as at,
+             amp.display_name as actor_name,
+             tmp.display_name as target_name,
+             e.from_state,
+             e.to_state,
+             e.field,
+             e.from_value,
+             e.to_value
+        from chat_case_events e
+        left join memberships ams
+               on ams.tenant_id = e.tenant_id
+              and ams.user_id = e.actor_user_id
+              and ams.deleted_at is null
+        left join member_profiles amp on amp.membership_id = ams.id
+        left join memberships tms
+               on tms.tenant_id = e.tenant_id
+              and tms.user_id = e.target_user_id
+              and tms.deleted_at is null
+        left join member_profiles tmp on tmp.membership_id = tms.id
+       where e.tenant_id = ${ctx.tenantId}::uuid
+         and e.conversation_id = ${conversationId}::uuid
+       order by e.created_at asc, e.id asc`);
+
+    const earlier = await tx.execute<EarlierDbRow>(sql`
+      select c.id,
+             c.case_number::int as case_number,
+             c.state,
+             c.subject,
+             to_char(c.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as opened_at,
+             fm.body as first_body
+        from chat_conversations c
+        ${firstMessageJoin}
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.kind = 'support'
+         and c.created_by_user_id = ${head.created_by_user_id}::uuid
+         and c.case_number < ${head.case_number}::int
+         and c.state is not null
+       order by c.case_number desc, c.id desc
+       limit ${CHAT_EARLIER_CASES_MAX + 1}`);
+
+    return {
+      events: events.map(toCaseEvent),
+      earlierCases: earlier.slice(0, CHAT_EARLIER_CASES_MAX).map((row) => ({
+        id: row.id,
+        number: Number(row.case_number),
+        state: row.state,
+        subjectLabel: subjectLabelOf(row.subject, row.first_body),
+        openedAt: row.opened_at,
+      })),
+      hasMoreEarlier: earlier.length > CHAT_EARLIER_CASES_MAX,
+    };
+  });
+}
+
+/**
+ * `GET /v1/chat/staff` (D-806): the live team of this tenant, names only: active, unblocked, undeleted members with a
+ * staff role, sorted by name then id. It is the one list behind the owner filter and the assign sheet; no email, role or
+ * any other field leaves here.
+ */
+export async function getStaffRoster(ctx: RequestContext): Promise<StaffRoster> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<{ user_id: string; name: string }>(sql`
+      select ms.user_id::text as user_id,
+             coalesce(mp.display_name, '') as name
+        from memberships ms
+        left join member_profiles mp on mp.membership_id = ms.id
+       where ms.tenant_id = ${ctx.tenantId}::uuid
+         and ms.role in (${STAFF_ROLES})
+         and ms.status = 'active'
+         and ms.blocked_at is null
+         and ms.deleted_at is null
+       order by name asc, ms.user_id asc`),
+  );
+  return { items: rows.map((row) => ({ userId: row.user_id, name: row.name })) };
 }

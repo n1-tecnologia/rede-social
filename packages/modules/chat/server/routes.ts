@@ -6,6 +6,7 @@ import { requireModule } from '@rede-social/core/server/modules/require-module';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 import {
   CHAT_ISSUE_SET,
+  caseHistorySchema,
   conversationDetailSchema,
   inboxPageSchema,
   inboxQuerySchema,
@@ -16,10 +17,11 @@ import {
   readInputSchema,
   sendMessageInputSchema,
   sendResultSchema,
+  staffRosterSchema,
   supportSendInputSchema,
   supportThreadSchema,
 } from '../contracts/index';
-import { getMyCases } from './cases';
+import { getCaseHistory, getMyCases, getStaffRoster } from './cases';
 import {
   getConversation,
   getSupportThread,
@@ -184,7 +186,7 @@ const detailRoute = createRoute({
   responses: {
     200: {
       description:
-        "D-224: `viewer: 'staff'` answers the member behind the thread (membership id, display name, avatar, state `active` | `blocked` | `removed`) and the team's shared read position; `viewer: 'member'` answers the member's own position and, for ANY case of theirs (a closed one reads read-only), the member-shaped `case` (D-803, UI-D-835).",
+        "D-224: `viewer: 'staff'` answers the member behind the thread (membership id, display name, avatar, state `active` | `blocked` | `removed`), the team's shared read position and the staff `case` with the `actions[]` this viewer may take (D-842); `viewer: 'member'` answers the member's own position and, for ANY case of theirs (a closed one reads read-only), the member-shaped `case` (D-803, UI-D-835).",
       content: { 'application/json': { schema: conversationDetailSchema } },
     },
     404: { description: 'A bare `NOT_FOUND` for anyone who may not read the thread.' },
@@ -220,6 +222,39 @@ const inboxRoute = createRoute({
       content: { 'application/json': { schema: inboxPageSchema } },
     },
     403: { description: '`FORBIDDEN` without `chat.support`.' },
+  },
+});
+
+const historyRoute = createRoute({
+  method: 'get',
+  path: '/conversations/{conversationId}/case/history',
+  middleware: [requirePermission('chat.support')] as const,
+  request: { params: conversationParamSchema },
+  responses: {
+    200: {
+      description:
+        "D-810, CASE-12: the events of one case oldest first by `(created_at, id)` with the actor's and the target's display name (absent for someone who left the tenant), then up to five earlier cases of the same member, newest first, and `hasMoreEarlier`. Staff only; a GET that writes nothing and marks nothing read.",
+      content: { 'application/json': { schema: caseHistorySchema } },
+    },
+    403: { description: '`FORBIDDEN` without `chat.support`: a member never reads the history.' },
+    404: {
+      description:
+        'A bare `NOT_FOUND` for an unknown conversation, a non-support one or another tenant’s.',
+    },
+  },
+});
+
+const staffRoute = createRoute({
+  method: 'get',
+  path: '/staff',
+  middleware: [requirePermission('chat.support')] as const,
+  responses: {
+    200: {
+      description:
+        'D-806: the live team of the tenant (active, unblocked, undeleted members with a staff role), names only, sorted by name then id. The one list behind the owner filter and the assign sheet.',
+      content: { 'application/json': { schema: staffRosterSchema } },
+    },
+    403: { description: '`FORBIDDEN` without `chat.support`: a member never reads the roster.' },
   },
 });
 
@@ -264,4 +299,8 @@ export const chatRoutes = chat
   })
   .openapi(inboxRoute, async (c) =>
     c.json(await listInbox(c.get('ctx'), c.req.valid('query')), 200),
-  );
+  )
+  .openapi(historyRoute, async (c) =>
+    c.json(await getCaseHistory(c.get('ctx'), c.req.valid('param').conversationId), 200),
+  )
+  .openapi(staffRoute, async (c) => c.json(await getStaffRoster(c.get('ctx')), 200));
