@@ -34,6 +34,7 @@ import {
 import type { StaffSheetKind } from './CaseActionSheet';
 import { CaseBar, CaseOpenedRow, ClosedStrip, ResolvedStrip } from './CaseBar';
 import { CaseOpener, type CaseOpenerValue } from './CaseOpener';
+import { EditCaseSheet } from './EditCaseSheet';
 import { StaffCaseBar, StaffClosedStrip, StaffTakeHint } from './StaffCaseBar';
 import { useBarHeightAnchor } from './useBarHeightAnchor';
 
@@ -717,6 +718,16 @@ export function ThreadPane({
           {staffCase.actions.includes('assign') ? (
             <AssignSheet
               open={openSheet === 'assign'}
+              onClose={closeSheet}
+              conversationId={conversationId}
+              header={staffCase}
+              onHeader={setStaffCase}
+              onStale={() => void refreshCase()}
+            />
+          ) : null}
+          {staffCase.actions.includes('edit') ? (
+            <EditCaseSheet
+              open={openSheet === 'edit'}
               onClose={closeSheet}
               conversationId={conversationId}
               header={staffCase}

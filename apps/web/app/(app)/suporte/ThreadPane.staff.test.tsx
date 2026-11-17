@@ -507,6 +507,62 @@ describe('the assign sheet is mounted from the menu (12.4-19 tracer, key link on
   });
 });
 
+describe('the edit sheet is mounted from the menu (12.4-19, key link onOpenSheet, UI-D-827)', () => {
+  const openMenuRow = (name: string) => {
+    fireEvent.click(screen.getByRole('button', { name: 'Mais ações' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name }));
+  };
+
+  it('a tap on "Editar categoria, assunto e prioridade" mounts the edit sheet on the typed subject', async () => {
+    renderPane({ initialStaffCase: mine() });
+    openMenuRow('Editar categoria, assunto e prioridade');
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: 'Editar chamado #42' })).toBeTruthy(),
+    );
+    expect((screen.getByLabelText('Assunto') as HTMLInputElement).value).toBe('Meu ingresso');
+  });
+
+  it('saving from the thread calls the edit action and the bar takes the answered header', async () => {
+    mocks.edit.mockResolvedValue({
+      ok: true,
+      header: staffHeader('in_progress', {
+        meta: 'Pagamento · Alta · Com você',
+        priority: 'high',
+        ownerUserId: OWNER_ID,
+        ownerName: 'Carla Souza',
+        ownerIsViewer: true,
+        actions: ACTIONS.in_progress,
+      }),
+    });
+    renderPane({ initialStaffCase: mine() });
+    openMenuRow('Editar categoria, assunto e prioridade');
+    const group = await screen.findByRole('group', { name: 'Prioridade' });
+    fireEvent.click(within(group).getByRole('button', { name: 'Alta' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar alterações' }));
+    });
+    expect(mocks.edit).toHaveBeenCalledWith(CONVERSATION_ID, {
+      expectedState: 'in_progress',
+      priority: 'high',
+    });
+    await waitFor(() => expect(screen.getByText('Pagamento · Alta · Com você')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /Editar chamado/ })).toBeNull(),
+    );
+  });
+
+  it('a closed case lists no edit row and mounts no edit sheet', () => {
+    renderPane({ initialStaffCase: staffHeader('closed') });
+    fireEvent.click(screen.getByRole('button', { name: 'Mais ações' }));
+    expect(
+      within(screen.getByRole('dialog')).queryByRole('button', {
+        name: 'Editar categoria, assunto e prioridade',
+      }),
+    ).toBeNull();
+    expect(screen.queryByRole('dialog', { name: /Editar chamado/ })).toBeNull();
+  });
+});
+
 describe('a member viewer never renders the team surfaces (checker W10, T-12.4-72)', () => {
   const staffShapedAsMember = (): MemberCaseHeaderView =>
     staffHeader('open', {
