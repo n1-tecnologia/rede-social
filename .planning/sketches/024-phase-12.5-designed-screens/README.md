@@ -43,11 +43,11 @@ screens:
   - previas-e-push-voz
   - leitor-de-tela-voz
   - defaults-a-confirmar-voz
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: igor.vboas (word "aprovado" in the session, recorded by Claude)
+approved_at: 2026-11-17
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-12.5, design-review, D-33, D-365, D-417, UI-04, voice-messages, chat]
@@ -201,3 +201,13 @@ revisão só pergunta se o **desenho** as cumpre, e confirma ou derruba os padr�
 - Sketch 023 (a casca, as quatro marcas, as primitivas do chat) e `packages/ui/src/styles/tokens.css`.
 - Peças de origem do desenho, não versionadas: `parts/` desta pasta (casca, `voice.css`, `voice-guide.md`, os
   fragmentos de cada grupo e as ferramentas de montagem).
+
+## Registro da aprovação
+
+**2026-11-17, aprovado de forma provisória.** O Igor respondeu "aprovado" na conversa, sem responder linha a linha; o
+Claude registrou a aprovação no frontmatter acima, como foi feito no sketch 023. Lido como: manter todos os padrões
+A-UI-1 a A-UI-26 como estão desenhados, incluindo A-UI-1 e A-UI-2. As correções que o desenho forçou e os três pontos
+que ficaram em aberto (contraste sob o Amarelo, o vermelho da linha de falha e a frase do membro bloqueado) estão na seção
+"Sketch 024 review outcome" do `12.5-UI-SPEC.md`. Uma mudança pedida depois das provas em celular real reabre só as
+telas, não o servidor.
+
