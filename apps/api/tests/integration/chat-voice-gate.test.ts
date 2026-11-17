@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { MEDIA_TENANT_BYTES_CEILING } from '@rede-social/core/server/media/limits';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { caseKit, post, removeThrowaways, sweepCases, throwawayMember } from './chat-case-fixtures';
@@ -290,6 +291,62 @@ describe('voice media guards', () => {
       expect(body.error.details?.media).toBe('quota_exceeded');
     } finally {
       await adminSql`delete from public.media_assets where id = ${padId}::uuid`;
+    }
+  });
+});
+
+describe('voice media isolation', () => {
+  it("tenant B's member and staff get the bare 404 of an unknown id for tenant A's recording, tenant A's uploader gets the 302 beside it, and the wrong host is refused (VOICE-34, T-12.5-25)", async () => {
+    const { ids } = await caseKit();
+    const sender = await voiceMember('iso-voice');
+    const take = await readyVoiceAsset(sender.token, 'voice-2s.webm');
+    expect((await sendVoice(sender.token, take)).status).toBe(201);
+    const labMember = await signInAs('member@rede-lab.local', SEED_PASSWORD);
+    const labSupport = await signInAs('support@rede-lab.local', SEED_PASSWORD);
+
+    // The positive control first: tenant A's own uploader opens it.
+    expectSigned302(await original(take, sender.token), ids.demo, take);
+
+    // The negatives: tenant B's member and staff, on tenant B's own host, look under tenant B's own prefix.
+    await expectBare404(await original(take, labMember, HOSTS.lab), labMember, HOSTS.lab);
+    await expectBare404(await original(take, labSupport, HOSTS.lab), labSupport, HOSTS.lab);
+
+    // The wrong host: tenant A's session on tenant B's host is refused before the route, with the code the
+    // neighbouring isolation blocks assert.
+    const wrongHost = await original(take, sender.token, HOSTS.lab);
+    expect(wrongHost.status).toBe(403);
+    expect(((await wrongHost.json()) as ErrorBody).error.code).toBe('TENANT_HOST_MISMATCH');
+  });
+
+  it("the other way round: tenant B's own recording opens for tenant B's uploader and is the bare 404 for tenant A's member (VOICE-34)", async () => {
+    // rede-lab has `chat` OFF in the seed and a voice upload needs it, so it is turned on here and restored.
+    const { ids } = await caseKit();
+    const [flag] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${ids.lab}::uuid and module_key = 'chat'`;
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${ids.lab}::uuid, 'chat', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(ids.lab);
+      const labMember = await signInAs('member@rede-lab.local', SEED_PASSWORD);
+      const labTake = await readyVoiceAsset(labMember, 'voice-2s.webm', HOSTS.lab);
+      const demoMember = await voiceMember('iso-voice-demo');
+
+      expectSigned302(await original(labTake, labMember, HOSTS.lab), ids.lab, labTake);
+      await expectBare404(await original(labTake, demoMember.token), demoMember.token);
+    } finally {
+      if (flag) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${flag.enabled}
+           where tenant_id = ${ids.lab}::uuid and module_key = 'chat'`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${ids.lab}::uuid and module_key = 'chat'`;
+      }
+      moduleFlags.invalidate(ids.lab);
     }
   });
 });
