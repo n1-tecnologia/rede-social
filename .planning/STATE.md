@@ -2,12 +2,12 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 21
+current_plan: 22
 status: executing
-stopped_at: Completed 12.4-22-PLAN.md
+stopped_at: Completed 12.4-22-PLAN.md; re-verification gaps_found (WR-06), phase not closed
 last_updated: "2026-11-17T16:19:32.771Z"
 last_activity: 2026-11-17
-last_activity_desc: Phase 12.4 execution started
+last_activity_desc: Phase 12.4 gap round 21 and 22 executed; re-verification found WR-06
 state_head: 78b81b54a46afb4a2b1c89a038c0663fbf19bae3
 progress:
   total_phases: 34
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 12.4 (Abertura de chamado no suporte) — READY TO EXECUTE
-Current Plan: 21
+Phase: 12.4 (Abertura de chamado no suporte) — EXECUTED 22/22, re-verification gaps_found (WR-06), not closed
+Current Plan: 22
 Total Plans in Phase: 22
-Plan: 21 of 20
-Status: Ready to execute
-Last activity: 2026-11-17 — Phase 12.4 execution started
+Plan: 22 of 22
+Status: Gap round (plans 21, 22) executed; one new gap WR-06 (SupportInbox load-more race) left to close
+Last activity: 2026-11-17 — Phase 12.4 gap round executed, re-verified (10/11)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
