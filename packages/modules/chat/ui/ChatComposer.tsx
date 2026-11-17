@@ -1,8 +1,16 @@
 'use client';
 
 import { cn, Textarea } from '@rede-social/ui';
-import { Send } from 'lucide-react';
-import { type FormEvent, type KeyboardEvent, useLayoutEffect, useRef, useState } from 'react';
+import { LoaderCircle, Mic, Send, Trash2 } from 'lucide-react';
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { useVoiceRecorder, type VoiceTake } from './useVoiceRecorder';
 
 /**
  * The thread composer (UI-D-260): the prototype's reply bar with the V2 extras removed (sketch 007
@@ -22,8 +30,53 @@ import { type FormEvent, type KeyboardEvent, useLayoutEffect, useRef, useState }
  *   and shows the inline error, which the next keystroke clears (the shipped `CommentInput` rule): a
  *   network blip never costs the member what they wrote. Focus stays in the field.
  *
+ * - **Voice (12.5-13, opt-in):** a host that passes the `voice` bundle gets the shared microphone slot: ONE
+ *   button owns the send slot and is the microphone while the field is empty after `trim()`, the usual send
+ *   while it has text, and the recording's send while a voice message is being recorded (the same element, so
+ *   focus is kept). A host that passes no bundle gets exactly the composer above.
+ *
  * Props-only: this component ships no words.
  */
+
+/**
+ * The finished strings and the hand-off of the voice recorder (UI-D-856): every word, every `m:ss` and every
+ * spoken sentence arrives here from the host's catalog, never from this package.
+ */
+export interface ChatComposerVoice {
+  /** Name of the microphone, e.g. "Gravar mensagem de voz". */
+  micLabel: string;
+  /** Name of the slot while the permission prompt is open. */
+  micRequestingLabel: string;
+  /** The live word in the pill, e.g. "Gravando". */
+  recordingLabel: string;
+  /** Name of the elapsed counter. */
+  timerLabel: string;
+  /** Name of the trash button. */
+  discardLabel: string;
+  /** Name of the recording's send button (the host picks the opener's longer name when the opener shows). */
+  sendLabel: string;
+  /** The pill's word after the 5:00 stop. */
+  limitWord: string;
+  /** The pill's word after an interruption. */
+  interruptedWord: string;
+  notices: { warning: string; limit: string; interrupted: string; tooShort: string };
+  problems: { blocked: string; missing: string; busy: string; failed: string };
+  /** What the polite status region speaks. */
+  live: { started: string; minute: (count: number) => string; discarded: string };
+  /** Builds `m:ss` from whole seconds. */
+  formatClock: (seconds: number) => string;
+  /**
+   * Hands the host the finished take. The composer is idle the moment the tap lands, so the answer is not
+   * awaited for state: the host owns the optimistic bubble, the retry and every refusal (UI-D-846, UI-D-847).
+   */
+  onSendVoice: (take: VoiceTake) => Promise<boolean>;
+  /** Called when a recording starts so every playing voice message pauses (A-UI-9). */
+  onRecordingStart?: () => void;
+  /** Defaults: 300, 1 and 270 seconds. */
+  maxSeconds?: number;
+  minSeconds?: number;
+  warnAtSeconds?: number;
+}
 
 export interface ChatComposerProps {
   /** Field id (label, counter and error agree on it). */
@@ -44,6 +97,8 @@ export interface ChatComposerProps {
    * restores the draft. A rejection is treated as `false`.
    */
   onSend: (body: string) => Promise<boolean>;
+  /** Opt-in voice messages (12.5-13). Absent: the composer is the text composer it always was. */
+  voice?: ChatComposerVoice;
 }
 
 export const CHAT_COMPOSER_MAX_LENGTH = 2000;
@@ -62,11 +117,31 @@ export function ChatComposer({
   errorText,
   disabled = false,
   onSend,
+  voice,
 }: ChatComposerProps) {
   const [value, setValue] = useState('');
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const slotRef = useRef<HTMLButtonElement>(null);
+  const voiceOn = voice !== undefined;
+  const recorder = useVoiceRecorder({
+    active: voiceOn && !disabled,
+    maxSeconds: voice?.maxSeconds,
+    minSeconds: voice?.minSeconds,
+    warnAtSeconds: voice?.warnAtSeconds,
+    onRecordingStart: voice?.onRecordingStart,
+  });
+  const phase = recorder.state.phase;
+
+  // After any ending (send, trash, a refusal, too short) focus lands on the microphone (UI-D-843). The
+  // button is the same element all along, so this only matters when it had lost focus.
+  const previousPhase = useRef(phase);
+  useEffect(() => {
+    const before = previousPhase.current;
+    previousPhase.current = phase;
+    if (before !== 'idle' && phase === 'idle') slotRef.current?.focus();
+  }, [phase]);
 
   // Auto-grow: measure from `auto` so the field also shrinks when lines are deleted.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the measurement must rerun when the text changes.
@@ -78,6 +153,13 @@ export function ChatComposer({
   }, [value]);
 
   const trimmed = value.trim();
+  const recording = voiceOn && (phase === 'recording' || phase === 'stopped');
+  const requesting = voiceOn && phase === 'requesting';
+  const slotMode: 'mic' | 'recording' | 'text' = recording
+    ? 'recording'
+    : voiceOn && recorder.supported && trimmed === ''
+      ? 'mic'
+      : 'text';
   const canSend = !disabled && !pending && trimmed.length > 0;
   const length = value.length;
   const showCounter = length >= CHAT_COMPOSER_COUNTER_FROM;
@@ -111,6 +193,19 @@ export function ChatComposer({
     void send();
   };
 
+  const sendVoice = async () => {
+    const take = await recorder.send();
+    if (take && voice) {
+      // The composer is already idle: the host owns the bubble and every refusal, so a rejection is its own.
+      void Promise.resolve(voice.onSendVoice(take)).catch(() => {});
+    }
+  };
+
+  const onSlotClick = () => {
+    if (slotMode === 'mic') void recorder.start();
+    else if (slotMode === 'recording') void sendVoice();
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
     if (!finePointer()) return;
@@ -138,12 +233,24 @@ export function ChatComposer({
         </p>
       ) : null}
       <form onSubmit={onSubmit} className="flex items-end gap-2">
+        {recording && voice ? (
+          <button
+            type="button"
+            data-chat-voice-discard
+            aria-label={voice.discardLabel}
+            onClick={recorder.discard}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-bg-secondary text-text-secondary transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+          >
+            <Trash2 size={20} aria-hidden />
+          </button>
+        ) : null}
         <Textarea
           ref={fieldRef}
           id={id}
           rows={1}
           value={value}
           disabled={disabled}
+          hidden={recording}
           maxLength={CHAT_COMPOSER_MAX_LENGTH}
           aria-label={label}
           placeholder={placeholder}
@@ -152,17 +259,73 @@ export function ChatComposer({
             if (failed) setFailed(false);
           }}
           onKeyDown={onKeyDown}
-          containerClassName="min-w-0 flex-1 gap-0"
+          containerClassName={cn('min-w-0 flex-1 gap-0', recording && 'hidden')}
           className="max-h-30 overflow-y-auto rounded-2xl px-4 py-2"
         />
+        {recording && voice ? (
+          <div
+            data-chat-voice-pill
+            className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-2xl border border-border bg-bg-secondary px-4"
+          >
+            {phase === 'recording' ? (
+              <span
+                data-chat-voice-dot
+                aria-hidden
+                className="size-2 shrink-0 rounded-full bg-danger motion-safe:animate-pulse"
+              />
+            ) : null}
+            <span className="truncate text-sm font-normal text-text-secondary">
+              {phase === 'recording'
+                ? voice.recordingLabel
+                : recorder.state.stopReason === 'limit'
+                  ? voice.limitWord
+                  : voice.interruptedWord}
+            </span>
+            <span
+              role="timer"
+              aria-live="off"
+              aria-label={voice.timerLabel}
+              className="ml-auto shrink-0 text-sm font-bold tabular-nums text-text"
+            >
+              {voice.formatClock(recorder.state.elapsedSeconds)}
+            </span>
+          </div>
+        ) : null}
         <button
-          type="submit"
+          ref={slotRef}
+          type={slotMode === 'text' ? 'submit' : 'button'}
           data-chat-send
-          aria-label={sendLabel}
-          disabled={!canSend}
+          data-chat-voice-slot={voiceOn ? slotMode : undefined}
+          aria-label={
+            voice && slotMode === 'mic'
+              ? requesting
+                ? voice.micRequestingLabel
+                : voice.micLabel
+              : voice && slotMode === 'recording'
+                ? voice.sendLabel
+                : sendLabel
+          }
+          aria-busy={requesting || undefined}
+          disabled={slotMode === 'text' ? !canSend : slotMode === 'mic' ? disabled : false}
+          onClick={slotMode === 'text' ? undefined : onSlotClick}
           className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-button bg-(image:--button-image) text-on-button transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
         >
-          <Send size={20} aria-hidden />
+          {slotMode === 'mic' ? (
+            requesting ? (
+              <>
+                <LoaderCircle
+                  size={20}
+                  aria-hidden
+                  className="hidden motion-safe:block motion-safe:animate-spin"
+                />
+                <Mic size={20} aria-hidden className="opacity-50 motion-safe:hidden" />
+              </>
+            ) : (
+              <Mic size={20} aria-hidden />
+            )
+          ) : (
+            <Send size={20} aria-hidden />
+          )}
         </button>
       </form>
     </div>
