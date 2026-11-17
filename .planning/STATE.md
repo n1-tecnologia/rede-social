@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 5
+current_plan: 6
 status: executing
-stopped_at: Completed 12.4-04-PLAN.md
-last_updated: "2026-11-17T09:14:28.782Z"
+stopped_at: Completed 12.4-05-PLAN.md
+last_updated: "2026-11-17T09:22:45.291Z"
 last_activity: 2026-11-17
 last_activity_desc: Phase 12.4 execution started
-state_head: a8ba483371f430468e31750191d148f7e7970574
+state_head: 711d155b97853b50c04d5cbb7ef2ffd5953bac5e
 progress:
   total_phases: 34
   completed_phases: 0
   total_plans: 471
-  completed_plans: 427
+  completed_plans: 428
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
-Current Plan: 5
+Current Plan: 6
 Total Plans in Phase: 20
-Plan: 5 of 20
+Plan: 6 of 20
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.4 execution started
 
@@ -376,6 +376,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12.4 P02 | 14 min | 4 tasks | 11 files |
 | Phase 12.4 P03 | 8 min | 4 tasks | 10 files |
 | Phase 12.4 P04 | 8min | 3 tasks | 8 files |
+| Phase 12.4 P05 | 6 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -1160,6 +1161,8 @@ Recent decisions affecting current work:
 - [Phase 12.4]: 12.4-02: the activation is ONE do block (atomic under the local CLI and the ledgered runner); a second CS004 on the member send is a bare 409; CASE_ACTIVE_STATES is the single spelling of the active-case predicate — the local CLI does not wrap a migration file in a transaction (bare lock table fails 25P01)
 - [Phase 12.4]: 12.4-03: app.chat_case_act in 20261117085928_chat_cases_actions_matrix.sql is the final definition; staff check = claim literal plus a live membership whose role equals the claim; case and history instants use clock_timestamp() — The earlier actions file is already in local history so it is never edited; a blocked staff member with a stale token must be refused; two actions in one transaction must still order by (created_at, id)
 - [Phase 12.4]: 12.4-04: the auto-close publishes through app.chat_case_signal (conversation, support-inbox and member topics); the 7 days are one SQL literal pinned by a test constant
+- [Phase 12.4]: 12.4-05: a case is identified by its conversation id; the member case schema is a separate strict shape with no priority, owner or history
+- [Phase 12.4]: 12.4-05: chat.case_resolved and chat.case_assigned are declared on the EventMap but named in plain prose in the chat README until the routes emit them (README drift test)
 
 ### Pending Todos
 
@@ -1294,6 +1297,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-17T09:14:28.469Z
-Stopped at: Completed 12.4-04-PLAN.md
+Last session: 2026-11-17T09:22:44.972Z
+Stopped at: Completed 12.4-05-PLAN.md
 Resume file: None
