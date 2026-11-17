@@ -424,12 +424,12 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **CASE-11**: A case without a typed subject shows the start of its first message, one line cut on a word at 80 characters with `…` only when it cut; a migrated case has no stored subject and shows the same fallback *(D-812, D-814, UI-D-819)*
 - [x] **CASE-12**: Every step (opened, taken, assigned, resolved, closed, reopened, a field changed) is an append-only, tenant-scoped row with actor, instant and states; the automatic close has no actor; no lane can update or delete it; only staff read it; a member never does *(D-810, UI-D-829, UI-D-835)*
 - [x] **CASE-13**: A case that stayed `Resolvido` for 7 days (fixed in code) is closed by the hourly worker sweep, idempotently, skipping a row a member message is changing, with a history row with no actor and a live signal, never a notice, for every tenant of the project and only through its own tenant's rows *(D-807, D-808)*
-- [ ] **CASE-14**: The member's thread read answers the active case (null when none, which shows the opener) and whether any case exists; "Meus chamados" answers the current case and the closed ones newest first, 20 per page by keyset, own cases only; a closed case opens read-only and a foreign id is the bare 404 *(D-803, UI-D-818, UI-D-821)*
+- [x] **CASE-14**: The member's thread read answers the active case (null when none, which shows the opener) and whether any case exists; "Meus chamados" answers the current case and the closed ones newest first, 20 per page by keyset, own cases only; a closed case opens read-only and a foreign id is the bare 404 *(D-803, UI-D-818, UI-D-821)*
 - [x] **CASE-15**: The first-message route returns the case (id, number, whether it opened or reopened it) as optional keys; every existing response shape of the chat routes is unchanged and every new key is `.optional()` *(D-812, UI-D-820)*
-- [ ] **CASE-16**: The team's inbox has the tabs `Em aberto` (default), `Resolvidos`, `Fechados` and the filters owner, priority and "Aguardando resposta", sorted by latest activity with a stable keyset, rows carrying the case facts and the list of legal actions; a roster route answers live staff names only *(D-805, D-806, D-809, UI-D-823, UI-D-824, UI-D-826)*
+- [x] **CASE-16**: The team's inbox has the tabs `Em aberto` (default), `Resolvidos`, `Fechados` and the filters owner, priority and "Aguardando resposta", sorted by latest activity with a stable keyset, rows carrying the case facts and the list of legal actions; a roster route answers live staff names only *(D-805, D-806, D-809, UI-D-823, UI-D-824, UI-D-826)*
 - [x] **CASE-17**: The staff numeric badge counts active cases whose last message is the member's and unread by the team, whoever owns them; the member's dot counts only cases that are not `Fechado`; the push badge follows both; the awaiting filter equals the badge when no owner or priority filter is on *(D-809, D-237, D-238, UI-D-823)*
-- [ ] **CASE-18**: Every action and the auto-close publish an ids-only `chat.case` signal on the conversation and the support-inbox topics (payload keys pinned), and the web refetches the case header on `chat.message` and `chat.case` without moving scroll or focus *(UI-D-830, D-240)*
-- [ ] **CASE-19**: Resolving a case writes one bell row "Seu chamado #N foi resolvido" and sends a push to the member, with facts `{ caseId, number }` only; closing notifies nobody; a case reopened before the worker ran notifies nobody; the kind has a renderer, a catalog entry and a link to the case *(D-808, UI-D-822)*
+- [x] **CASE-18**: Every action and the auto-close publish an ids-only `chat.case` signal on the conversation and the support-inbox topics (payload keys pinned), and the web refetches the case header on `chat.message` and `chat.case` without moving scroll or focus *(UI-D-830, D-240)*
+- [x] **CASE-19**: Resolving a case writes one bell row "Seu chamado #N foi resolvido" and sends a push to the member, with facts `{ caseId, number }` only; closing notifies nobody; a case reopened before the worker ran notifies nobody; the kind has a renderer, a catalog entry and a link to the case *(D-808, UI-D-822)*
 - [x] **CASE-20**: The team is pushed (no bell row) for a new case, a case reopened by the member, a case assigned to them, and a member message (owner only when the case has a live owner, every live staff member otherwise), each with its pt-BR copy cut on a word at 100 characters and one device tag per case *(D-809, UI-D-822)*
 - [x] **CASE-21**: Every existing support conversation becomes the case of its member keeping its id, messages and participant rows, numbered per tenant by first-message date (ties by id), `Aberto` when the last message is the member's and unread by the team and `Fechado` otherwise, category `Outro`, priority `Normal`, no subject, with the counter set to the tenant maximum; the e2e seed conversation stays a valid case; the backfill is re-runnable *(D-814)*
 - [x] **CASE-22**: The owner's Atendimento counts per case: awaiting active cases, first response per case, cases opened per week, cases answered per staff member (names only), and "Atendimentos por assunto" by category over 30 days (counts only); the overview alert and the member detail line read the same rules; the builder payload version is 9 and an older snapshot still parses *(D-813, D-815, UI-D-831, EP-43)*
@@ -1112,12 +1112,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-11 | Phase 12.4 | Complete |
 | CASE-12 | Phase 12.4 | Complete |
 | CASE-13 | Phase 12.4 | Complete |
-| CASE-14 | Phase 12.4 | Pending |
+| CASE-14 | Phase 12.4 | Complete |
 | CASE-15 | Phase 12.4 | Complete |
-| CASE-16 | Phase 12.4 | Pending |
+| CASE-16 | Phase 12.4 | Complete |
 | CASE-17 | Phase 12.4 | Complete |
-| CASE-18 | Phase 12.4 | Pending |
-| CASE-19 | Phase 12.4 | Pending |
+| CASE-18 | Phase 12.4 | Complete |
+| CASE-19 | Phase 12.4 | Complete |
 | CASE-20 | Phase 12.4 | Complete |
 | CASE-21 | Phase 12.4 | Complete |
 | CASE-22 | Phase 12.4 | Complete |

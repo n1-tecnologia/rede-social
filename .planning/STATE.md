@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.4"
 current_phase_name: Abertura de chamado no suporte
-current_plan: 17
+current_plan: 18
 status: executing
-stopped_at: Completed 12.4-19-PLAN.md
-last_updated: "2026-11-17T12:18:12.255Z"
+stopped_at: Completed 12.4-17-PLAN.md
+last_updated: "2026-11-17T12:36:19.996Z"
 last_activity: 2026-11-17
 last_activity_desc: Phase 12.4 execution started
-state_head: d067633ee81cf2f84882135f0662ace2395853fc
+state_head: 2ab244401ce4e0f72b5bb8216c33068dcdd4d81b
 progress:
   total_phases: 34
   completed_phases: 0
   total_plans: 471
-  completed_plans: 441
+  completed_plans: 442
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.4 (Abertura de chamado no suporte) — EXECUTING
-Current Plan: 17
+Current Plan: 18
 Total Plans in Phase: 20
-Plan: 17 of 20
+Plan: 18 of 20
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.4 execution started
 
@@ -390,6 +390,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12.4 P14 | 13 min | 3 tasks | 11 files |
 | Phase 12.4 P15 | 11 min | 3 tasks | 12 files |
 | Phase 12.4 P19 | 12min | 3 tasks | 16 files |
+| Phase 12.4 P17 | 55 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -1190,6 +1191,7 @@ Recent decisions affecting current work:
 - [Phase 12.4]: 12.4-14: an owner or priority filter earns the filtered empty copy even with the awaiting toggle on — A subset is never described as everyone answered
 - [Phase 12.4]: 12.4-15: stale, closed and not_allowed refusals toast the stale sentence and re-read; a take sends the stored owner id; the closed strip is drawn by the pane from live state with the blocked or removed notice winning
 - [Phase 12.4]: 12.4-19: the sheets' facts (category, priority, typed subject, opening instant) ride on the staff header view; each sheet captures the case state when it opens and sends that as the expected state
+- [Phase 12.4]: 12.4-17: the scroll check asserts an anchored message and scrollTop moving by the bar delta (the shipped hook's contract), not scrollTop unchanged
 
 ### Pending Todos
 
@@ -1325,6 +1327,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-17T12:18:11.884Z
-Stopped at: Completed 12.4-19-PLAN.md
+Last session: 2026-11-17T12:36:19.649Z
+Stopped at: Completed 12.4-17-PLAN.md
 Resume file: None
