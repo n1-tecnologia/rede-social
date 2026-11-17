@@ -2151,7 +2151,7 @@ Plans:
 
 **UI hint**: yes. The composer's microphone and recording states and the bubble's player are drawn before they are built; the native shell's microphone permission text (`packages/contracts/src/native.ts`, today worded for video sound only) changes with it, for Phase 13 to ship.
 
-**Plans:** 6/18 plans executed (planned 2026-11-17: 18 plans in 14 waves; the database, kernel, API, gate, sweep, previews and view-function plans (01 to 11) run before the sketch gate and are not gated; plan 12 stops until Igor approves sketch 024; plans 13 to 17 are the web plans and carry the approval precondition; plan 04 stops at the D-865 decision checkpoint; plan 18 holds the release, the ledger and the exit gate)
+**Plans:** 7/18 plans executed (planned 2026-11-17: 18 plans in 14 waves; the database, kernel, API, gate, sweep, previews and view-function plans (01 to 11) run before the sketch gate and are not gated; plan 12 stops until Igor approves sketch 024; plans 13 to 17 are the web plans and carry the approval precondition; plan 04 stops at the D-865 decision checkpoint; plan 18 holds the release, the ledger and the exit gate)
 
 Plans:
 
@@ -2172,7 +2172,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 12.5-06-PLAN.md — The staff voice reply route (one refusal order, take-on-reply, README)
+- [x] 12.5-06-PLAN.md — The staff voice reply route (one refusal order, take-on-reply, README)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -2342,7 +2342,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 12.4. Abertura de chamado no suporte (INSERTED) | 22/22 | In Progress|  |
-| 12.5. Mensagem de voz no chat (INSERTED) | 6/18 | In Progress|  |
+| 12.5. Mensagem de voz no chat (INSERTED) | 7/18 | In Progress|  |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |
 
 ---
