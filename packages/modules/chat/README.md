@@ -33,6 +33,41 @@ owner is refused), `memberCaseSchema` (no priority, owner or history), `staffCas
 `staffRosterSchema`, and the closed lists `CHAT_CASE_STATES`, `CHAT_CASE_CATEGORIES`,
 `CHAT_CASE_PRIORITIES` and `CHAT_CASE_ACTIONS`.
 
+### Voice messages (Phase 12.5)
+
+A message can carry ONE recording instead of text. Contracts: `voiceSendInputSchema` (the member's
+`{ mediaId, category?, subject? }`), `voiceReplyInputSchema` (the staff's `{ mediaId }`, strict),
+`messageVoiceSchema` and the optional `voice` key of `messageRowSchema` (`mediaId`, `durationSeconds`, and
+`deleted` only once the asset is retired; absent on text, `body` stays the empty string on the wire), and two
+more issues appended to `CHAT_ISSUES`: `voice_not_ready` and `voice_invalid`.
+
+Two routes, one per side, beside the unchanged text routes:
+
+- `POST /v1/chat/support/voice-messages` (permission `chat.support.contact`): the member's recording, with the same
+  case flow as text (it opens the case with its category and subject, a recording to a resolved case reopens it,
+  one after a close opens a new case).
+- `POST /v1/chat/conversations/{conversationId}/voice-messages` (permission `chat.support`): the team's recording.
+  A member holds no `chat.support`, so a member calling it is 403; no new permission or module toggle exists.
+
+The asset is the sender's own, `audio`/`voice`, `ready`, with a duration measured by the server at derive time:
+`voice_seconds` is copied from the asset inside the insert and no client duration is accepted. A take is single-use
+per tenant (a unique index), and the send is idempotent per take with no client key: a repeat or a concurrent
+double send answers the stored message and stores one row; only the call that stored it emits the message event.
+
+One refusal order for the staff route, the same codes as the text reply and asserted by the tests: 1. the support
+conversation of the caller's tenant locked `for update` (a bare 404 for an unknown, foreign, direct or group id),
+2. `member_blocked` (409), 3. `member_removed` (409), 4. the asset (`voice_not_ready` 409, one `voice_invalid` 400
+for every other unusable asset, including one already used in another conversation), 5. the insert, where a closed
+case refuses (`case_closed` 409). So blocked and removed win over everything below them, and an asset refusal wins
+over a closed case. The member route keeps the same relative rule: every asset refusal precedes any case write.
+
+Take on reply: a staff recording to an unowned open case takes it for the author (in progress, a `taken` history
+row carrying the message id), a reply to a case owned by someone else changes nothing, and a reply to a resolved
+case does not reopen it, because the transition trigger never reads the body.
+
+This adds no kernel import, no emitted event and no job: the recording is read and written through the tenant lane
+with the module's own SQL, and the message event the module already emits carries ids only.
+
 ## Permissions
 
 - `chat.support`: answer support (the inbox, the staff reply, the case actions). Both staff roles.
@@ -43,7 +78,7 @@ owner is refused), `memberCaseSchema` (no priority, owner or history), `staffCas
 
 All three come from this manifest, so turning chat off revokes them.
 
-Main server names (`./server`): `chatRoutes`, `sendSupportMessage`, `replyToConversation`,
+Main server names (`./server`): `chatRoutes`, `sendSupportMessage`, `sendSupportVoiceMessage`, `replyToConversation`, `replyVoiceToConversation`,
 `getSupportThread`, `getConversation`, `getMyCases`, `memberCaseOf`, `staffCaseOf`, `actionsFor`,
 `getCaseHistory`, `getStaffRoster`, `runCaseAction`, `runCaseEdit`, `mapCaseError`, `subjectLabelOf`, `listMessages`, `listInbox`, `markConversationRead`, `isStaff`, `chatCounters`,
 `chatNotificationSources`.

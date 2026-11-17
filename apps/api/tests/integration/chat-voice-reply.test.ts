@@ -187,7 +187,7 @@ describe('voice reply refusals', () => {
        where tenant_id = ${ids.lab}::uuid and role = 'member' limit 1`;
     const [labCase] = await adminSql<{ id: string }[]>`
       insert into public.chat_conversations (tenant_id, kind, created_by_user_id, state)
-      values (${ids.lab}::uuid, 'support', ${labUser?.user_id}::uuid, 'open')
+      values (${ids.lab}::uuid, 'support', ${labUser?.user_id ?? ''}::uuid, 'open')
       returning id::text as id`;
     const foreign = await replyVoice(tokens.demoSupport, labCase?.id ?? '', { mediaId });
     expect(foreign.status).toBe(404);
@@ -323,7 +323,7 @@ describe('voice reply refusals', () => {
        where tenant_id = ${ids.lab}::uuid and role = 'member' limit 1`;
     const [labAsset] = await adminSql<{ id: string }[]>`
       insert into public.media_assets (tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds)
-      values (${ids.lab}::uuid, ${labUser?.user_id}::uuid, 'audio', 'voice', 'ready', 'audio/mp4', 1000, 2)
+      values (${ids.lab}::uuid, ${labUser?.user_id ?? ''}::uuid, 'audio', 'voice', 'ready', 'audio/mp4', 1000, 2)
       returning id::text as id`;
     foreignAssetIds.push(labAsset?.id ?? '');
 

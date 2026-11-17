@@ -2155,7 +2155,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it("chat voice: tenant B's member cannot send tenant A's recording (the same voice_invalid as an unknown id), nothing is created, tenant A's own member sends it, and the wrong host is refused (12.5-05, VOICE-34, T-12.5-15)", async () => {
+  it("chat voice: tenant B's member cannot send tenant A's recording (the same voice_invalid as an unknown id), nothing is created, tenant A's own member sends it, the staff route refuses tenant B's staff and a member beside its positive controls, and the wrong host is refused (12.5-05, 12.5-06, VOICE-34, T-12.5-15, T-12.5-20, T-12.5-21)", async () => {
     // `POST /v1/chat/support/voice-messages`. rede-lab has `chat` OFF in the seed, so it is turned on here and restored
     // in `finally`. The recordings are written directly in the `seedVideo` shape: what matters is what the route does
     // with an id from the other tenant, not how a take becomes ready (plan 02 proves that end to end).
@@ -2193,6 +2193,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     let demoTake = '';
     let labTake = '';
     let demoOwnerId = '';
+    let demoStaffTake = '';
+    let labStaffTake = '';
     try {
       await adminSql`
         insert into public.tenant_modules (tenant_id, module_key, enabled)
@@ -2228,15 +2230,123 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       // Positive controls beside every negative: each member sends THEIR OWN recording on THEIR OWN host.
       const own = await asHost(demoToken, HOSTS.demo, demoTake);
       expect(own.status).toBe(201);
-      const ownBody = (await own.json()) as { message: { voice?: { mediaId: string } } };
+      const ownBody = (await own.json()) as {
+        conversationId: string;
+        message: { voice?: { mediaId: string } };
+      };
       expect(ownBody.message.voice?.mediaId).toBe(demoTake);
       const labOwn = await asHost(tokens.labMember, HOSTS.lab, labTake);
       expect(labOwn.status).toBe(201);
+      const labConversationId = ((await labOwn.json()) as { conversationId: string })
+        .conversationId;
+
+      // The STAFF route (`POST /v1/chat/conversations/{id}/voice-messages`, 12.5-06): each tenant's admin owns a
+      // ready take of their own; every negative runs BEFORE the positive controls below spend a take.
+      const [staffUsers] = await adminSql<{ demo: string; lab: string }[]>`
+        select (select id::text from auth.users where email = 'admin@rede-demo.local') as demo,
+               (select id::text from auth.users where email = 'admin@rede-lab.local') as lab`;
+      demoStaffTake = await readyTake(tenantIds.demo, staffUsers?.demo ?? '');
+      labStaffTake = await readyTake(tenantIds.lab, staffUsers?.lab ?? '');
+      const staffReply = (token: string, host: string, conversationId: string, mediaId: string) =>
+        api.request(`/v1/chat/conversations/${conversationId}/voice-messages`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${token}`,
+            [TENANT_HOST_HEADER]: host,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ mediaId }),
+        });
+      const messagesIn = async (conversationId: string) => {
+        const [row] = await adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.chat_messages where conversation_id = ${conversationId}::uuid`;
+        return row?.n ?? 0;
+      };
+      const demoBefore = await messagesIn(ownBody.conversationId);
+      const labBefore = await messagesIn(labConversationId);
+
+      // Tenant B's staff on tenant A's conversation id is the bare 404 of an unknown id.
+      const foreignConversation = await staffReply(
+        tokens.labAdmin,
+        HOSTS.lab,
+        ownBody.conversationId,
+        labStaffTake,
+      );
+      const unknownConversation = await staffReply(
+        tokens.labAdmin,
+        HOSTS.lab,
+        '8e5e81a3-93c3-4c5d-a06f-6e6a8e3f4d44',
+        labStaffTake,
+      );
+      expect(foreignConversation.status).toBe(404);
+      expect(unknownConversation.status).toBe(404);
+      expect(await bodyOf(foreignConversation)).toEqual(await bodyOf(unknownConversation));
+      // Tenant B's staff names tenant A's asset on tenant B's own conversation: the same voice_invalid as an unknown id.
+      const foreignAsset = await staffReply(
+        tokens.labAdmin,
+        HOSTS.lab,
+        labConversationId,
+        demoStaffTake,
+      );
+      const unknownAsset = await staffReply(tokens.labAdmin, HOSTS.lab, labConversationId, unknown);
+      expect(foreignAsset.status).toBe(400);
+      expect(unknownAsset.status).toBe(400);
+      expect(((await foreignAsset.clone().json()) as Envelope).error.details).toEqual({
+        chat: 'voice_invalid',
+      });
+      expect(await bodyOf(foreignAsset)).toEqual(await bodyOf(unknownAsset));
+      // Tenant A's staff names tenant B's asset (the other way round).
+      const reverseAsset = await staffReply(
+        tokens.demoAdmin,
+        HOSTS.demo,
+        ownBody.conversationId,
+        labStaffTake,
+      );
+      expect(reverseAsset.status).toBe(400);
+      expect(((await reverseAsset.json()) as Envelope).error.details).toEqual({
+        chat: 'voice_invalid',
+      });
+      // A member of the conversation holds no chat.support: 403.
+      const memberOnStaffRoute = await staffReply(
+        demoToken,
+        HOSTS.demo,
+        ownBody.conversationId,
+        demoStaffTake,
+      );
+      expect(memberOnStaffRoute.status).toBe(403);
+      // The wrong host: tenant A's staff on tenant B's host is refused before the route.
+      const staffWrongHost = await staffReply(
+        tokens.demoAdmin,
+        HOSTS.lab,
+        ownBody.conversationId,
+        demoStaffTake,
+      );
+      expect(staffWrongHost.status).toBe(403);
+      expect(await code(staffWrongHost)).toBe('TENANT_HOST_MISMATCH');
+      expect(await messagesIn(ownBody.conversationId)).toBe(demoBefore);
+      expect(await messagesIn(labConversationId)).toBe(labBefore);
+
+      // Positive controls beside every staff negative: each tenant's staff sends THEIR OWN take on THEIR OWN host.
+      const demoStaffOwn = await staffReply(
+        tokens.demoAdmin,
+        HOSTS.demo,
+        ownBody.conversationId,
+        demoStaffTake,
+      );
+      expect(demoStaffOwn.status).toBe(201);
+      const demoStaffBody = (await demoStaffOwn.json()) as {
+        message: { side: string; voice?: { mediaId: string } };
+      };
+      expect(demoStaffBody.message.side).toBe('staff');
+      expect(demoStaffBody.message.voice?.mediaId).toBe(demoStaffTake);
+      expect(
+        (await staffReply(tokens.labAdmin, HOSTS.lab, labConversationId, labStaffTake)).status,
+      ).toBe(201);
     } finally {
       await adminSql`
         delete from public.chat_conversations
          where created_by_user_id in (${labUserId}::uuid, ${demoOwnerId || labUserId}::uuid)`;
-      for (const id of [demoTake, labTake]) {
+      for (const id of [demoTake, labTake, demoStaffTake, labStaffTake]) {
         if (id) await adminSql`delete from public.media_assets where id = ${id}::uuid`;
       }
       if (labFlag) {
