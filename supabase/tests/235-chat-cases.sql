@@ -29,8 +29,14 @@ begin;
 --    on legacy-shaped rows, then the support-state constraint added NOT VALID and validated, then the active-case
 --    index that replaces the one-per-member one.
 --
+-- 7. MESSAGE-DRIVEN MOVES (plan 02, CASE-05, CASE-06, CASE-07, D-805, D-806, D-845, T-12.4-06, T-12.4-07, EP-021..EP-023):
+--    the transition matrix of the message trigger, one assertion per row, as the real lane.
+--
+-- 8. CHECK COHERENCE (plan 02, CASE-04, EP-016): every illegal combination refused 23514 with the coherence constraint
+--    name, and every CHECK of the table VALID.
+--
 -- Fixture ids use the `1e350000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(137);
+select plan(174);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-case-a', 'Chamado A', '1e350000-0000-4000-8000-000000000001');
@@ -824,6 +830,266 @@ select throws_ok(
      on conflict (tenant_id, created_by_user_id) where kind = 'support' do nothing $$,
   '42P10', 'there is no unique or exclusion constraint matching the ON CONFLICT specification',
   'D-800: the previous member send (the old on conflict text) answers 42P10 after the swap, the release window of plan 18');
+
+-- ── 7. message-driven moves ────────────────────────────────────────────────────────────────────
+-- Plan 02 (CASE-05, CASE-06, CASE-07; D-805, D-806, D-845; EP-021..EP-023; T-12.4-06, T-12.4-07). Every row of the
+-- transition table that a MESSAGE drives, written as the real lane (the member lane as a participant, the staff lane as
+-- support_tenant), so the policies and the trigger are exercised together. Cases are born open by the insert and moved to
+-- the starting state by the table owner, setting every column the coherence CHECK reads.
+
+alter table public.chat_conversations drop constraint if exists chat_conversations_support_state_chk;
+select tests.tenant('pgtap-case-g', 'Chamado G', '1e350000-0000-4000-8000-000000000006');
+select tests.auth_user('s1@case-g.local', '1e350000-0000-4000-8000-000000000201');
+select tests.auth_user('s2@case-g.local', '1e350000-0000-4000-8000-000000000202');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000201', 'support_tenant');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000202', 'support_tenant');
+select tests.auth_user('m1@case-g.local', '1e350000-0000-4000-8000-000000000211');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000211');
+select tests.auth_user('m2@case-g.local', '1e350000-0000-4000-8000-000000000212');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000212');
+select tests.auth_user('m3@case-g.local', '1e350000-0000-4000-8000-000000000213');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000213');
+select tests.auth_user('m4@case-g.local', '1e350000-0000-4000-8000-000000000214');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000214');
+select tests.auth_user('m5@case-g.local', '1e350000-0000-4000-8000-000000000215');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000215');
+select tests.auth_user('m6@case-g.local', '1e350000-0000-4000-8000-000000000216');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000216');
+select tests.auth_user('m7@case-g.local', '1e350000-0000-4000-8000-000000000217');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000217');
+select tests.auth_user('m8@case-g.local', '1e350000-0000-4000-8000-000000000218');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000218');
+select tests.auth_user('m9@case-g.local', '1e350000-0000-4000-8000-000000000219');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000219');
+select tests.auth_user('m10@case-g.local', '1e350000-0000-4000-8000-00000000021a');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-00000000021a');
+select tests.auth_user('m11@case-g.local', '1e350000-0000-4000-8000-00000000021b');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-00000000021b');
+select tests.auth_user('m12@case-g.local', '1e350000-0000-4000-8000-00000000021c');
+select tests.member('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-00000000021c');
+
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id) values
+  ('1e350000-0000-4000-8000-000000000301', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-000000000211'),
+  ('1e350000-0000-4000-8000-000000000302', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-000000000212'),
+  ('1e350000-0000-4000-8000-000000000303', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-000000000213'),
+  ('1e350000-0000-4000-8000-000000000304', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-000000000214'),
+  ('1e350000-0000-4000-8000-000000000305', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-000000000215'),
+  ('1e350000-0000-4000-8000-000000000306', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-000000000216'),
+  ('1e350000-0000-4000-8000-000000000307', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-000000000217'),
+  ('1e350000-0000-4000-8000-000000000308', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-000000000218'),
+  ('1e350000-0000-4000-8000-000000000309', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-000000000219'),
+  ('1e350000-0000-4000-8000-00000000030a', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-00000000021a'),
+  ('1e350000-0000-4000-8000-00000000030b', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-00000000021b'),
+  ('1e350000-0000-4000-8000-00000000030c', '1e350000-0000-4000-8000-000000000006', 'support', '1e350000-0000-4000-8000-00000000021c');
+insert into public.chat_participants (conversation_id, tenant_id, user_id, role) values
+  ('1e350000-0000-4000-8000-000000000301', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000211', 'member'),
+  ('1e350000-0000-4000-8000-000000000302', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000212', 'member'),
+  ('1e350000-0000-4000-8000-000000000303', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000213', 'member'),
+  ('1e350000-0000-4000-8000-000000000304', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000214', 'member'),
+  ('1e350000-0000-4000-8000-000000000305', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000215', 'member'),
+  ('1e350000-0000-4000-8000-000000000306', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000216', 'member'),
+  ('1e350000-0000-4000-8000-000000000307', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000217', 'member'),
+  ('1e350000-0000-4000-8000-000000000308', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000218', 'member'),
+  ('1e350000-0000-4000-8000-000000000309', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000219', 'member'),
+  ('1e350000-0000-4000-8000-00000000030a', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-00000000021a', 'member'),
+  ('1e350000-0000-4000-8000-00000000030b', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-00000000021b', 'member'),
+  ('1e350000-0000-4000-8000-00000000030c', '1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-00000000021c', 'member');
+-- starting states (every column of the coherence CHECK set together)
+update public.chat_conversations set state = 'resolved', resolved_at = now(), owner_user_id = '1e350000-0000-4000-8000-000000000201' where id in ('1e350000-0000-4000-8000-000000000301', '1e350000-0000-4000-8000-000000000305', '1e350000-0000-4000-8000-000000000309');
+update public.chat_conversations set state = 'in_progress', owner_user_id = '1e350000-0000-4000-8000-000000000202' where id in ('1e350000-0000-4000-8000-000000000303', '1e350000-0000-4000-8000-000000000307');
+update public.chat_conversations set state = 'in_progress', owner_user_id = '1e350000-0000-4000-8000-000000000201' where id = '1e350000-0000-4000-8000-000000000304';
+update public.chat_conversations set state = 'closed', closed_at = now() where id = '1e350000-0000-4000-8000-000000000308';
+
+select tests.as_tenant('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000211');
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000301', '1e350000-0000-4000-8000-000000000211', 'member', chr(128512));
+reset role;
+select results_eq(
+  $$ select state, owner_user_id is null, resolved_at is null, closed_at is null from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000301' $$,
+  $$ values ('open'::text, true, true, true) $$,
+  'D-805/D-845: a member message on a resolved case moves it to open, with no owner and resolved_at cleared (a body of one emoji is enough, EP-022)');
+select results_eq(
+  $$ select e.kind, e.actor_user_id::text, e.from_state, e.to_state, e.message_id = m.id
+       from public.chat_case_events e join public.chat_messages m on m.conversation_id = e.conversation_id
+      where e.conversation_id = '1e350000-0000-4000-8000-000000000301' and e.kind = 'reopened' $$,
+  $$ values ('reopened'::text, '1e350000-0000-4000-8000-000000000211'::text, 'resolved'::text, 'open'::text, true) $$,
+  'D-810/D-845: exactly one reopened event, the member as actor, carrying the id of the message that reopened it');
+
+select tests.as_tenant('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000201', 'support_tenant');
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000302', '1e350000-0000-4000-8000-000000000201', 'staff', 'Estou vendo isso agora');
+reset role;
+select results_eq(
+  $$ select state, owner_user_id::text, resolved_at is null from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000302' $$,
+  $$ values ('in_progress'::text, '1e350000-0000-4000-8000-000000000201'::text, true) $$,
+  'D-806/D-845: a staff reply on an open unowned case moves it to in_progress, owned by the author');
+select results_eq(
+  $$ select e.kind, e.actor_user_id::text, e.from_state, e.to_state, e.message_id = m.id
+       from public.chat_case_events e join public.chat_messages m on m.conversation_id = e.conversation_id
+      where e.conversation_id = '1e350000-0000-4000-8000-000000000302' and e.kind = 'taken' $$,
+  $$ values ('taken'::text, '1e350000-0000-4000-8000-000000000201'::text, 'open'::text, 'in_progress'::text, true) $$,
+  'D-810/D-845: exactly one taken event, the author as actor, carrying the message id');
+
+select tests.as_tenant('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000201', 'support_tenant');
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000303', '1e350000-0000-4000-8000-000000000201', 'staff', 'Resposta de outra pessoa');
+reset role;
+select results_eq(
+  $$ select state, owner_user_id::text from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000303' $$,
+  $$ values ('in_progress'::text, '1e350000-0000-4000-8000-000000000202'::text) $$,
+  'T-12.4-07/D-806: a staff reply on a case owned by ANOTHER person changes neither state nor owner');
+select is((select count(*)::int from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-000000000303' and kind <> 'opened'), 0,
+  'T-12.4-07: ... and writes no event');
+
+select tests.as_tenant('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000201', 'support_tenant');
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000304', '1e350000-0000-4000-8000-000000000201', 'staff', 'Segue a resposta');
+reset role;
+select results_eq(
+  $$ select state, owner_user_id::text from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000304' $$,
+  $$ values ('in_progress'::text, '1e350000-0000-4000-8000-000000000201'::text) $$,
+  'D-806: a staff reply on a case the author already owns changes nothing');
+select is((select count(*)::int from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-000000000304' and kind <> 'opened'), 0,
+  'D-806: ... and writes no event');
+
+select tests.as_tenant('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000202', 'support_tenant');
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000305', '1e350000-0000-4000-8000-000000000202', 'staff', 'Mais um detalhe');
+reset role;
+select results_eq(
+  $$ select state, owner_user_id::text, resolved_at is not null from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000305' $$,
+  $$ values ('resolved'::text, '1e350000-0000-4000-8000-000000000201'::text, true) $$,
+  'D-805: a staff reply on a resolved case does not reopen it and does not change its owner');
+select is((select count(*)::int from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-000000000305' and kind <> 'opened'), 0,
+  'D-805: ... and writes no event');
+
+select tests.as_tenant('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000216');
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000306', '1e350000-0000-4000-8000-000000000216', 'member', 'Ainda aguardo');
+reset role;
+select tests.as_tenant('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000217');
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000307', '1e350000-0000-4000-8000-000000000217', 'member', 'Alguma novidade?');
+reset role;
+select results_eq(
+  $$ select id::text, state, owner_user_id::text from public.chat_conversations where id in ('1e350000-0000-4000-8000-000000000306', '1e350000-0000-4000-8000-000000000307') order by id $$,
+  $$ values ('1e350000-0000-4000-8000-000000000306'::text, 'open'::text, null::text), ('1e350000-0000-4000-8000-000000000307', 'in_progress', '1e350000-0000-4000-8000-000000000202'::text) $$,
+  'D-805: a member message on an open or an in_progress case changes neither state nor owner');
+select is((select count(*)::int from public.chat_case_events where conversation_id in ('1e350000-0000-4000-8000-000000000306', '1e350000-0000-4000-8000-000000000307') and kind <> 'opened'), 0,
+  'D-805: ... and writes no event');
+
+select set_config('tests.g_seq8', (select last_seq::text from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000308'), true);
+select tests.as_tenant('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000218');
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000308', '1e350000-0000-4000-8000-000000000218', 'member', 'Posso falar de novo?') $$,
+  'CS004', 'case_closed', 'T-12.4-06/D-845: a MEMBER message on a closed case is refused with SQLSTATE CS004');
+reset role;
+select tests.as_tenant('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000201', 'support_tenant');
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000308', '1e350000-0000-4000-8000-000000000201', 'staff', 'Resposta tardia') $$,
+  'CS004', 'case_closed', 'T-12.4-06/D-845: a STAFF reply on a closed case is refused with SQLSTATE CS004');
+reset role;
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000308', '1e350000-0000-4000-8000-000000000201', 'staff', 'Uma sessao do banco tambem nao escreve') $$,
+  'CS004', 'case_closed', 'T-12.4-06: the refusal holds for the table owner too (a psql session, the seed, the worker)');
+select is((select last_seq::text from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000308'), current_setting('tests.g_seq8'),
+  'T-12.4-06: the refused messages consumed no sequence number');
+select is((select count(*)::int from public.chat_messages where conversation_id = '1e350000-0000-4000-8000-000000000308'), 0,
+  'T-12.4-06: ... and no message row was written');
+select is((select state from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000308'), 'closed',
+  'D-801: a closed case stays closed');
+select is((select count(*)::int from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-000000000308' and kind <> 'opened'), 0,
+  'D-801: ... and its history gained nothing');
+
+select tests.as_tenant('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000219');
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000309', '1e350000-0000-4000-8000-000000000219', 'member', E'  \n\t  ') $$,
+  '23514', 'new row for relation "chat_messages" violates check constraint "chat_messages_body_chk"',
+  'EP-021: an all-whitespace member body on a resolved case is refused by the body CHECK');
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000309', '1e350000-0000-4000-8000-000000000219', 'member', repeat('a', 2001)) $$,
+  '23514', 'new row for relation "chat_messages" violates check constraint "chat_messages_body_chk"',
+  'EP-022: 2001 code points are refused by the body CHECK');
+reset role;
+select results_eq(
+  $$ select state, resolved_at is not null, last_seq::int from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000309' $$,
+  $$ values ('resolved'::text, true, 0) $$,
+  'EP-021/EP-022: a refused body moves nothing, the trigger transition and the counters roll back with the statement');
+select is((select count(*)::int from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-000000000309' and kind <> 'opened'), 0,
+  'EP-021: ... and no event row is written');
+
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id) values ('1e350000-0000-4000-8000-000000000320', '1e350000-0000-4000-8000-000000000006', 'direct', '1e350000-0000-4000-8000-00000000021a');
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-000000000320', '1e350000-0000-4000-8000-00000000021a', 'member', 'Conversa direta');
+select results_eq(
+  $$ select last_seq::int, state, case_number from public.chat_conversations where id = '1e350000-0000-4000-8000-000000000320' $$,
+  $$ values (1, null::text, null::int) $$,
+  'CASE-25: a message on a direct conversation moves the counters only');
+select is((select count(*)::int from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-000000000320'), 0,
+  'CASE-25: ... and writes no event');
+
+update public.chat_conversations set state = null, case_number = null, priority = null, category = null where id = '1e350000-0000-4000-8000-00000000030b';
+delete from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-00000000030b';
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-00000000030b', '1e350000-0000-4000-8000-000000000201', 'staff', 'Resposta em uma conversa antiga');
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+values ('1e350000-0000-4000-8000-000000000006', '1e350000-0000-4000-8000-00000000030b', '1e350000-0000-4000-8000-00000000021b', 'member', 'Mensagem em uma conversa antiga');
+select results_eq(
+  $$ select last_seq::int, state, owner_user_id is null from public.chat_conversations where id = '1e350000-0000-4000-8000-00000000030b' $$,
+  $$ values (2, null::text, true) $$,
+  'D-845: a null state (a legacy row between the functions file and the activation file) is counters only, even for a staff reply');
+select is((select count(*)::int from public.chat_case_events where conversation_id = '1e350000-0000-4000-8000-00000000030b'), 0,
+  'D-845: ... and writes no event');
+
+
+-- ── 8. CHECK coherence ─────────────────────────────────────────────────────────────────────────
+-- Plan 02 (CASE-04, EP-016). Every illegal combination of state, owner and instants is refused 23514 with the coherence
+-- constraint name, row by row, on a case born open. The CHECKs are VALID.
+
+select throws_ok(
+  $$ update public.chat_conversations set owner_user_id = '1e350000-0000-4000-8000-000000000201' where id = '1e350000-0000-4000-8000-00000000030c' $$,
+  '23514', 'new row for relation "chat_conversations" violates check constraint "chat_conversations_case_coherence_chk"',
+  'CASE-04: an open case with an owner is refused');
+select throws_ok(
+  $$ update public.chat_conversations set state = 'in_progress' where id = '1e350000-0000-4000-8000-00000000030c' $$,
+  '23514', 'new row for relation "chat_conversations" violates check constraint "chat_conversations_case_coherence_chk"',
+  'CASE-04: an in_progress case without an owner is refused');
+select throws_ok(
+  $$ update public.chat_conversations set state = 'resolved' where id = '1e350000-0000-4000-8000-00000000030c' $$,
+  '23514', 'new row for relation "chat_conversations" violates check constraint "chat_conversations_case_coherence_chk"',
+  'CASE-04: a resolved case without resolved_at is refused');
+select throws_ok(
+  $$ update public.chat_conversations set state = 'closed' where id = '1e350000-0000-4000-8000-00000000030c' $$,
+  '23514', 'new row for relation "chat_conversations" violates check constraint "chat_conversations_case_coherence_chk"',
+  'CASE-04: a closed case without closed_at is refused');
+select throws_ok(
+  $$ update public.chat_conversations set resolved_at = now() where id = '1e350000-0000-4000-8000-00000000030c' $$,
+  '23514', 'new row for relation "chat_conversations" violates check constraint "chat_conversations_case_coherence_chk"',
+  'CASE-04: an open case with resolved_at is refused');
+select throws_ok(
+  $$ update public.chat_conversations set state = 'closed', closed_at = now(), resolved_at = now() where id = '1e350000-0000-4000-8000-00000000030c' $$,
+  '23514', 'new row for relation "chat_conversations" violates check constraint "chat_conversations_case_coherence_chk"',
+  'CASE-04: a closed case that still carries resolved_at is refused (closing clears it)');
+select throws_ok(
+  $$ update public.chat_conversations set state = 'resolved', resolved_at = now(), closed_at = now() where id = '1e350000-0000-4000-8000-00000000030c' $$,
+  '23514', 'new row for relation "chat_conversations" violates check constraint "chat_conversations_case_coherence_chk"',
+  'CASE-04: a resolved case with closed_at is refused');
+select throws_ok(
+  $$ update public.chat_conversations set closed_at = now() where id = '1e350000-0000-4000-8000-00000000030c' $$,
+  '23514', 'new row for relation "chat_conversations" violates check constraint "chat_conversations_case_coherence_chk"',
+  'CASE-04: an open case with closed_at is refused');
+select results_eq(
+  $$ select state, owner_user_id is null, resolved_at is null, closed_at is null from public.chat_conversations where id = '1e350000-0000-4000-8000-00000000030c' $$,
+  $$ values ('open'::text, true, true, true) $$,
+  'CASE-04: after the refusals the case is exactly as it was born');
+select ok(
+  (select bool_and(convalidated) from pg_constraint where conrelid = 'public.chat_conversations'::regclass and contype = 'c'),
+  'EP-016: every CHECK of chat_conversations is VALID, chat_conversations_support_state_chk included');
 
 select * from finish();
 rollback;

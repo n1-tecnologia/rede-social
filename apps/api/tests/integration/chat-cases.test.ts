@@ -163,3 +163,145 @@ describe('case activation', () => {
     expect(seed?.case_number).not.toBeNull();
   });
 });
+
+describe('case transitions', () => {
+  /** A throwaway member with a first message sent: their case, still open. */
+  async function openedCase(label: string) {
+    const member = await throwawayMember(label);
+    const sent = await post('/v1/chat/support/messages', member.token, {
+      body: 'Preciso de ajuda',
+    });
+    expect(sent.status).toBe(201);
+    const result = (await sent.json()) as SendResult;
+    return { member, conversationId: result.conversationId };
+  }
+
+  const stateOf = async (conversationId: string) => {
+    const [row] = await adminSql<
+      { state: string; owner: string | null; resolved: boolean; closed: boolean }[]
+    >`
+      select state, owner_user_id::text as owner,
+             resolved_at is not null as resolved, closed_at is not null as closed
+        from public.chat_conversations where id = ${conversationId}::uuid`;
+    return row;
+  };
+  const eventsOf = (conversationId: string) => adminSql<
+    { kind: string; actor: string | null; message_id: string | null }[]
+  >`
+      select kind, actor_user_id::text as actor, message_id::text as message_id
+        from public.chat_case_events
+       where conversation_id = ${conversationId}::uuid and kind <> 'opened'
+       order by created_at, id`;
+  const resolveAsAdmin = (conversationId: string, owner: string | null) => adminSql`
+      update public.chat_conversations
+         set state = 'resolved', resolved_at = now(), owner_user_id = ${owner}::uuid
+       where id = ${conversationId}::uuid`;
+
+  it('a member reply on a resolved case reopens it, a body of one emoji is enough (D-805, EP-022)', async () => {
+    const { ids } = await caseKit();
+    const { member, conversationId } = await openedCase('reopen');
+    await resolveAsAdmin(conversationId, ids.demoSupport);
+
+    const sent = await post('/v1/chat/support/messages', member.token, { body: '😀' });
+    expect(sent.status).toBe(201);
+    const result = (await sent.json()) as SendResult;
+    expect(result.conversationId).toBe(conversationId);
+
+    expect(await stateOf(conversationId)).toEqual({
+      state: 'open',
+      owner: null,
+      resolved: false,
+      closed: false,
+    });
+    expect(await eventsOf(conversationId)).toEqual([
+      { kind: 'reopened', actor: member.id, message_id: result.message.id },
+    ]);
+  });
+
+  it('a staff reply on an unowned open case takes it for the author (D-806)', async () => {
+    const { ids, tokens } = await caseKit();
+    const { conversationId } = await openedCase('take');
+
+    const reply = await post(
+      `/v1/chat/conversations/${conversationId}/messages`,
+      tokens.demoSupport,
+      {
+        body: 'Vou cuidar disso',
+      },
+    );
+    expect(reply.status).toBe(201);
+    const result = (await reply.json()) as SendResult;
+
+    expect(await stateOf(conversationId)).toEqual({
+      state: 'in_progress',
+      owner: ids.demoSupport,
+      resolved: false,
+      closed: false,
+    });
+    expect(await eventsOf(conversationId)).toEqual([
+      { kind: 'taken', actor: ids.demoSupport, message_id: result.message.id },
+    ]);
+
+    // A second reply by someone else changes nothing (any staff member may answer, whoever owns it).
+    const other = await post(
+      `/v1/chat/conversations/${conversationId}/messages`,
+      tokens.demoAdmin,
+      {
+        body: 'Complemento da administração',
+      },
+    );
+    expect(other.status).toBe(201);
+    expect((await stateOf(conversationId))?.owner).toBe(ids.demoSupport);
+    expect(await eventsOf(conversationId)).toHaveLength(1);
+  });
+
+  it('a whitespace-only or oversized body on a resolved case is refused before any transition (EP-021)', async () => {
+    const { ids } = await caseKit();
+    const { member, conversationId } = await openedCase('refusal');
+    await resolveAsAdmin(conversationId, ids.demoSupport);
+
+    const blank = await post('/v1/chat/support/messages', member.token, { body: '  \n\t ' });
+    expect(blank.status).toBe(400);
+    expect(((await blank.json()) as { error: { details: unknown } }).error.details).toEqual({
+      chat: 'body_required',
+    });
+    const long = await post('/v1/chat/support/messages', member.token, {
+      body: '😀'.repeat(2001),
+    });
+    expect(long.status).toBe(400);
+
+    expect((await stateOf(conversationId))?.state).toBe('resolved');
+    expect(await eventsOf(conversationId)).toEqual([]);
+  });
+
+  it('a staff reply on a closed case is refused and writes nothing (D-845, T-12.4-06)', async () => {
+    const { tokens } = await caseKit();
+    const { conversationId } = await openedCase('closed');
+    await adminSql`
+      update public.chat_conversations
+         set state = 'closed', closed_at = now(), staff_last_read_seq = last_seq
+       where id = ${conversationId}::uuid`;
+    const [before] = await adminSql<{ n: number; last_seq: number }[]>`
+      select (select count(*)::int from public.chat_messages where conversation_id = c.id) as n,
+             c.last_seq::int as last_seq
+        from public.chat_conversations c where c.id = ${conversationId}::uuid`;
+
+    const reply = await post(
+      `/v1/chat/conversations/${conversationId}/messages`,
+      tokens.demoSupport,
+      {
+        body: 'Resposta tardia',
+      },
+    );
+    // The route maps CS004 in plan 08; here it is only required to be a refusal that wrote nothing.
+    expect(reply.status).toBeGreaterThanOrEqual(400);
+
+    const [after] = await adminSql<{ n: number; last_seq: number }[]>`
+      select (select count(*)::int from public.chat_messages where conversation_id = c.id) as n,
+             c.last_seq::int as last_seq
+        from public.chat_conversations c where c.id = ${conversationId}::uuid`;
+    expect(after).toEqual(before);
+    expect((await stateOf(conversationId))?.state).toBe('closed');
+    expect(await eventsOf(conversationId)).toEqual([]);
+  });
+});
