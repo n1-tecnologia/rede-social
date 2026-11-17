@@ -306,3 +306,209 @@ describe('case resolved notice', () => {
     expect(await pushJobsFor(ids.demo, member.id, 'chat.case_resolved')).toHaveLength(1);
   });
 });
+
+/** The team kinds of D-809: push only, never a bell row. */
+const TEAM_KINDS = [
+  'chat.case_new',
+  'chat.case_reopened',
+  'chat.case_assigned',
+  'chat.member_message',
+  'chat.support_reply',
+] as const;
+
+async function teamBellRows(tenantId: string): Promise<number> {
+  const [row] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from public.notifications
+     where tenant_id = ${tenantId}::uuid and kind = any(${[...TEAM_KINDS]}::text[])`;
+  return row?.n ?? -1;
+}
+
+describe('case team notices', () => {
+  let staff2: { id: string; token: string };
+
+  beforeAll(async () => {
+    const { tokens } = await caseKit();
+    staff2 = await throwawayMember('team-second', 'support_tenant');
+    await subscribeDevice(staff2.token, newEndpoint('staff2'));
+    await subscribeDevice(tokens.demoSupport, newEndpoint('demo-support'));
+    await subscribeDevice(tokens.demoAdmin, newEndpoint('demo-admin'));
+  });
+
+  /** A member with a device and a fresh case, plus the lab bystander's counters taken before anything happens. */
+  async function openMemberCase(label: string) {
+    const member = await throwawayMember(label);
+    await subscribeDevice(member.token, newEndpoint(label));
+    await closeWaitingJobs();
+    const lab = labStaff as { id: string };
+    const labBefore = (await pushSendJobsOf((await caseKit()).ids.lab)).length;
+    const sent = await send(member.token, `Primeira mensagem (${label})`);
+    return { member, id: sent.conversationId, messageId: sent.message.id, lab, labBefore };
+  }
+
+  async function labSawNothing(labBefore: number) {
+    const { ids } = await caseKit();
+    const lab = labStaff as { id: string };
+    expect(await pushSubscriptionCount(lab.id)).toBe(1);
+    expect(await pushJobsFor(ids.lab, lab.id)).toHaveLength(0);
+    expect((await pushSendJobsOf(ids.lab)).length).toBe(labBefore);
+  }
+
+  it('new: the first message pushes every live staff member of the tenant, never the author and never tenant B (D-809, CASE-20, CASE-23)', async () => {
+    const { ids } = await caseKit();
+    const { member, id, messageId, labBefore } = await openMemberCase('new');
+    const bellBefore = await teamBellRows(ids.demo);
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+
+    const number = await caseNumberOf(id);
+    const jobs = (await pushSendJobsOf(ids.demo)).filter(
+      (job) => job.data.dedupeKey === `chat.case_new:${messageId}`,
+    );
+    expect(jobs).toHaveLength(1);
+    const userIds = jobs[0]?.data.userIds ?? [];
+    expect(userIds).toEqual(expect.arrayContaining([ids.demoSupport, ids.demoAdmin, staff2.id]));
+    expect(userIds).not.toContain(member.id);
+    expect(jobs[0]?.data.push).toMatchObject({
+      title: 'tenant',
+      body: `Novo chamado #${number} de Pessoa new: Primeira mensagem (new)`,
+      url: `/suporte/${id}`,
+      tag: id.replaceAll('-', ''),
+      topic: id.replaceAll('-', ''),
+      renotify: true,
+    });
+    // Push only: no bell row for the team (the count of staff bell rows stays where it was).
+    expect(await teamBellRows(ids.demo)).toBe(bellBefore);
+    // Tenant B's live staff user (with a device) got nothing, beside a non-zero demo staff count.
+    expect(userIds.length).toBeGreaterThan(0);
+    await labSawNothing(labBefore);
+  });
+
+  it('owner only: a member message on a case owned by live staff pushes that owner alone, while the others get none (EP-062, EP-063)', async () => {
+    const { tokens, ids } = await caseKit();
+    const { member, id } = await openMemberCase('owner');
+    expect((await reply(tokens.demoSupport, id)).status).toBe(201);
+    await closeWaitingJobs();
+    const sent = await send(member.token, 'Ainda preciso de ajuda');
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+
+    const number = await caseNumberOf(id);
+    const jobs = (await pushSendJobsOf(ids.demo)).filter(
+      (job) => job.data.dedupeKey === `chat.member_message:${sent.message.id}`,
+    );
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.data.userIds).toEqual([ids.demoSupport]);
+    expect(jobs[0]?.data.push).toMatchObject({
+      title: 'tenant',
+      body: `Nova mensagem de Pessoa owner no chamado #${number}: Ainda preciso de ajuda`,
+      url: `/suporte/${id}`,
+    });
+    // The admin and the second staff member have devices too and are NOT in the audience (the exact list above).
+    expect(jobs[0]?.data.userIds).not.toContain(ids.demoAdmin);
+    expect(jobs[0]?.data.userIds).not.toContain(staff2.id);
+  });
+
+  it('reopened: the member answering a resolved case pushes every live staff member as a reopened case (D-841)', async () => {
+    const { tokens, ids } = await caseKit();
+    const { member, id, labBefore } = await openMemberCase('reopen');
+    expect((await reply(tokens.demoSupport, id)).status).toBe(201);
+    expect(
+      (await act(tokens.demoSupport, id, 'resolve', { expectedState: 'in_progress' })).status,
+    ).toBe(200);
+    await closeWaitingJobs();
+    const sent = await send(member.token, 'Voltou a falhar');
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+
+    const number = await caseNumberOf(id);
+    const jobs = (await pushSendJobsOf(ids.demo)).filter(
+      (job) => job.data.dedupeKey === `chat.case_reopened:${sent.message.id}`,
+    );
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.data.userIds).toEqual(
+      expect.arrayContaining([ids.demoSupport, ids.demoAdmin, staff2.id]),
+    );
+    expect(jobs[0]?.data.push).toMatchObject({
+      body: `O chamado #${number} de Pessoa reopen foi reaberto: Voltou a falhar`,
+      url: `/suporte/${id}`,
+    });
+    await labSawNothing(labBefore);
+  });
+
+  it('assigned: an assignment through the route pushes only the assignee; a self-assignment and the team’s own actions push nobody (D-809, D-841, EP-062)', async () => {
+    const { tokens, ids } = await caseKit();
+    const { id } = await openMemberCase('assign');
+    await closeWaitingJobs();
+
+    // Admin hands the case to the second staff member.
+    expect(
+      (
+        await act(tokens.demoAdmin, id, 'assign', {
+          expectedState: 'open',
+          assigneeUserId: staff2.id,
+        })
+      ).status,
+    ).toBe(200);
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+    const number = await caseNumberOf(id);
+    const assigned = (await pushSendJobsOf(ids.demo)).filter(
+      (job) => job.data.kind === 'chat.case_assigned' && job.data.userIds.includes(staff2.id),
+    );
+    expect(assigned).toHaveLength(1);
+    expect(assigned[0]?.data.userIds).toEqual([staff2.id]);
+    expect(assigned[0]?.data.push).toMatchObject({
+      title: 'tenant',
+      body: `O chamado #${number} de Pessoa assign foi atribuído a você.`,
+      url: `/suporte/${id}`,
+    });
+
+    // The admin takes the case over from the second staff member: a self-assignment notifies nobody.
+    await closeWaitingJobs();
+    const before = (await pushSendJobsOf(ids.demo)).length;
+    expect(
+      (
+        await act(tokens.demoAdmin, id, 'assign', {
+          expectedState: 'in_progress',
+          expectedOwnerId: staff2.id,
+          assigneeUserId: ids.demoAdmin,
+        })
+      ).status,
+    ).toBe(200);
+    await runNotificationJobs(ids.demo);
+    expect((await pushSendJobsOf(ids.demo)).length).toBe(before);
+
+    // The team's own Resolver, Fechar and Reabrir send the team no push (only the member's resolved notice exists).
+    expect(
+      (await act(tokens.demoAdmin, id, 'resolve', { expectedState: 'in_progress' })).status,
+    ).toBe(200);
+    expect((await act(tokens.demoAdmin, id, 'reopen', { expectedState: 'resolved' })).status).toBe(
+      200,
+    );
+    expect((await act(tokens.demoAdmin, id, 'close', { expectedState: 'open' })).status).toBe(200);
+    await runNotificationJobs(ids.demo);
+    for (const teammate of [ids.demoSupport, ids.demoAdmin, staff2.id]) {
+      const jobs = (await pushSendJobsOf(ids.demo)).filter(
+        (job) => job.data.userIds.includes(teammate) && job.data.dedupeKey.includes(id),
+      );
+      expect(jobs.map((job) => job.data.kind)).not.toContain('chat.case_resolved');
+    }
+    expect(await teamBellRows(ids.demo)).toBe(0);
+  });
+
+  it('answered: a staff reply is still chat.support_reply to the member alone, url /suporte (D-235)', async () => {
+    const { tokens, ids } = await caseKit();
+    const { member, id } = await openMemberCase('answered');
+    await closeWaitingJobs();
+    const res = await reply(tokens.demoSupport, id, 'Ja estamos olhando');
+    expect(res.status).toBe(201);
+    const messageId = ((await res.json()) as SendResult).message.id;
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+    const jobs = (await pushSendJobsOf(ids.demo)).filter(
+      (job) => job.data.dedupeKey === `chat.support_reply:${messageId}`,
+    );
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.data.userIds).toEqual([member.id]);
+    expect(jobs[0]?.data.push).toMatchObject({
+      title: 'team',
+      body: 'Ja estamos olhando',
+      url: '/suporte',
+    });
+  });
+});
