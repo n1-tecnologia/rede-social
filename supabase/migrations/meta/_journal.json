@@ -1408,6 +1408,13 @@
       "when": 1794905968228,
       "tag": "20261117085928_chat_cases_actions_matrix",
       "breakpoints": true
+    },
+    {
+      "idx": 201,
+      "version": "7",
+      "when": 1794906065443,
+      "tag": "20261117090105_chat_cases_edit",
+      "breakpoints": true
     }
   ]
 }

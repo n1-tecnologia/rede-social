@@ -41,8 +41,11 @@ begin;
 -- 10. THE ACTION MATRIX (plan 03, CASE-05, CASE-08, CASE-09, CASE-12; D-805, D-806, D-842): every legal pair and every
 --    adjacent illegal pair of app.chat_case_act, stale and serial actions, assignee validity, the assign role guard.
 --
+-- 11. EDIT AND HISTORY (plan 03, CASE-10, CASE-12; D-810, D-811, D-812, D-845; EP-034..EP-036): app.chat_case_edit, one
+--    edited row per changed field, no-op edits, the closed refusal, the value bounds, the lanes and the signals.
+--
 -- Fixture ids use the `1e350000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(297);
+select plan(342);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-case-a', 'Chamado A', '1e350000-0000-4000-8000-000000000001');
@@ -1427,6 +1430,117 @@ select ok(has_function_privilege('authenticated', 'app.chat_case_act(uuid,text,t
   and not has_function_privilege('anon', 'app.chat_case_signal(uuid,uuid,uuid)', 'execute')
   and not has_function_privilege('authenticated', 'app.chat_case_signal(uuid,uuid,uuid)', 'execute'),
   'D-845/CASE-18: the grants survived the redefinition; the signal helper has no lane grant at all');
+
+
+-- ── 11. edit and history ───────────────────────────────────────────────────────────────────────
+-- Plan 03 (CASE-10, CASE-12; D-810, D-811, D-812, D-845; EP-034..EP-036; T-12.4-12, T-12.4-16). `app.chat_case_edit` moves
+-- category, subject and priority of a case that is not closed, writes ONE `edited` row per CHANGED field with its own from
+-- and to values (the rows of one call share one instant), and publishes nothing when nothing changed. A null argument leaves
+-- the field alone; `p_blank_subject` is the explicit way to clear the subject.
+create or replace function tests.edit(p_staff uuid, p_role text, p_n integer, p_expected text, p_category text default null,
+                                      p_subject text default null, p_blank boolean default false, p_priority text default null)
+returns jsonb language plpgsql as $$
+declare
+  v_id uuid := tests.cid(p_n);
+  v jsonb;
+begin
+  perform tests.as_tenant('1e350000-0000-4000-8000-000000000007', p_staff, p_role);
+  begin
+    v := app.chat_case_edit(v_id, p_expected, p_category, p_subject, p_blank, p_priority);
+  exception when others then
+    reset role;
+    raise;
+  end;
+  reset role;
+  return v;
+end
+$$;
+create or replace function tests.facts(p_n integer) returns text language sql stable as $$
+  select coalesce(c.category, '-') || '|' || coalesce(c.priority, '-') || '|' || coalesce(c.subject, '-') || '|' || c.state
+    from public.chat_conversations c where c.id = tests.cid(p_n)
+$$;
+
+select tests.mkcase(41, 'open', null, 0);
+select tests.mkcase(42, 'open', null, 0);
+select tests.mkcase(43, 'open', null, 0);
+select tests.mkcase(44, 'closed', null, 0);
+select tests.mkcase(45, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(46, 'in_progress', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(47, 'resolved', '1e350000-0000-4000-8000-000000000401', 0);
+select tests.mkcase(48, 'open', null, 0);
+select tests.mkcase(49, 'open', null, 0);
+select tests.mkcase(50, 'open', null, 0);
+select results_eq($$ select r->>'id', r->>'state', r->>'from_state' from (select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 41, 'open', 'payment', null, false, 'high') as r) x $$, $$ values (tests.cid(41)::text, 'open'::text, 'open'::text) $$, 'D-811: the edit answers the case id and its state');
+select is(tests.facts(41), 'payment|high|-|open', 'D-811: category and priority changed in one call');
+select results_eq($$ select kind, field, from_value, to_value, actor_user_id::text, from_state, to_state from public.chat_case_events where conversation_id = tests.cid(41) and kind = 'edited' order by field $$, $$ values ('edited'::text, 'category'::text, 'other'::text, 'payment'::text, '1e350000-0000-4000-8000-000000000401'::text, null::text, null::text), ('edited', 'priority', 'normal', 'high', '1e350000-0000-4000-8000-000000000401', null, null) $$, 'EP-034/D-810: two edited rows, one per field, each with its own from and to value and the actor');
+select is((select count(distinct created_at)::int from public.chat_case_events where conversation_id = tests.cid(41) and kind = 'edited'), 1, 'EP-034: the two rows of one call share one instant');
+select is((select string_agg(kind, ',' order by created_at, id) from public.chat_case_events where conversation_id = tests.cid(41)), 'opened,edited,edited', 'EP-036: the history reads oldest first by (created_at, id), the opened row before the edits');
+select lives_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 42, 'open', null, 'Dúvida sobre o ingresso', false, null) $$, 'D-811: an admin sets a subject');
+select results_eq($$ select field, from_value, to_value from public.chat_case_events where conversation_id = tests.cid(42) and kind = 'edited' $$, $$ values ('subject'::text, null::text, 'Dúvida sobre o ingresso'::text) $$, 'D-810: the subject change is one row, from null to the typed text');
+select lives_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 42, 'open', null, null, true, null) $$, 'D-812: the explicit blank clears the subject');
+select is(tests.facts(42), 'other|normal|-|open', 'D-812: ... and the row has no subject');
+select results_eq($$ select field, from_value, to_value from public.chat_case_events where conversation_id = tests.cid(42) and kind = 'edited' order by created_at, id $$, $$ values ('subject'::text, null::text, 'Dúvida sobre o ingresso'::text), ('subject', 'Dúvida sobre o ingresso', null) $$, 'D-810: ... as a second row from the text to null');
+select lives_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 42, 'open', null, null, true, null) $$, 'EP-035: blanking an already empty subject changes nothing');
+select is((select count(*)::int from public.chat_case_events where conversation_id = tests.cid(42) and kind = 'edited'), 2, 'EP-035: ... and writes no third row');
+select results_eq($$ select r->>'state', r->>'from_state' from (select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 43, 'open', 'other', null, false, 'normal') as r) x $$, $$ values ('open'::text, 'open'::text) $$, 'EP-035: an edit whose values equal the current ones answers the case unchanged');
+select lives_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 43, 'open', null, null, false, null) $$, 'EP-035: an edit with every field null is also accepted and changes nothing');
+select is((select count(*)::int from public.chat_case_events where conversation_id = tests.cid(43) and kind = 'edited'), 0, 'EP-035: ... no event is written');
+select is(tests.facts(43), 'other|normal|-|open', 'EP-035: ... and the row is as born');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 44, 'closed', 'payment', null, false, null) $$, 'CS003', null, 'EP-035/D-811: an edit refused on a closed case is CS003');
+select is(tests.facts(44), 'other|normal|-|closed', 'D-811: ... and nothing changed');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 45, 'open', 'payment', null, false, null) $$, 'CS002', null, 'D-845: an edit that expects another state is CS002');
+select is(tests.facts(45), 'other|normal|-|in_progress', 'D-845: ... and nothing changed');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 45, 'Open', 'payment', null, false, null) $$, '22023', null, 'EP-019: a capitalised expected state is 22023');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 45, null, 'payment', null, false, null) $$, '22023', null, 'EP-018: a null expected state is 22023');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', null, 'open', 'payment') $$, '22023', null, 'EP-018: a null conversation id is 22023');
+select lives_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 46, 'in_progress', 'events', null, false, null) $$, 'D-811: an in_progress case may be edited');
+select lives_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 47, 'resolved', null, null, false, 'low') $$, 'D-811: a resolved case may be edited');
+select is(tests.facts(47), 'other|low|-|resolved', 'D-811: ... and stays resolved');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 48, 'open', null, repeat('a', 81), false, null) $$, '23514', null, 'D-812: an 81-code-point subject is refused by the table CHECK');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 48, 'open', null, '', false, null) $$, '23514', null, 'D-812: an empty typed subject is refused by the table CHECK');
+select lives_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 48, 'open', null, repeat(chr(128512), 80), false, null) $$, 'D-812: an 80-code-point emoji subject is accepted (the bound counts code points, not bytes)');
+select is((select char_length(subject) from public.chat_conversations where id = tests.cid(48)), 80, 'D-812: ... and stored whole');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 49, 'open', 'billing', null, false, null) $$, '23514', null, 'D-811: a category outside the list is refused by the table CHECK');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 49, 'open', null, null, false, 'urgent') $$, '23514', null, 'D-811: a priority outside the list is refused by the table CHECK');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 49, 'open', null, 'x', true, null) $$, '22023', null, 'D-812: a typed subject together with the blank flag is 22023');
+select is(tests.facts(49), 'other|normal|-|open', 'D-811: ... and the refusals moved nothing');
+select is((select count(*)::int from public.chat_case_events where conversation_id = tests.cid(49) and kind = 'edited'), 0, 'T-12.4-16: ... and wrote no event');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000411', 'member', 50, 'open', 'payment', null, false, null) $$, '42501', null, 'CASE-23: a member lane calling the edit definer is refused 42501');
+select tests.as_tenant('1e350000-0000-4000-8000-000000000002', '1e350000-0000-4000-8000-0000000000b3', 'support_tenant');
+select throws_ok($$ select app.chat_case_edit(tests.cid(50), 'open', 'payment', null, false, null) $$, 'CS001', null, 'T-12.4-12: tenant B staff editing tenant A case is CS001');
+reset role;
+select is(tests.facts(50), 'other|normal|-|open', 'CASE-23: ... and the case did not move');
+select lives_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000403', 'admin_tenant', 50, 'open', 'account', null, false, null) $$, 'T-12.4-12: positive control, tenant As admin edits the same case');
+select throws_ok($$ select tests.edit('1e350000-0000-4000-8000-000000000401', 'support_tenant', 255, 'open', 'payment') $$, 'CS001', null, 'D-845: a DIRECT conversation is CS001');
+
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$ select topic from realtime.messages
+      where event = 'chat.case' and payload->>'conversationId' = tests.cid(41)::text
+      order by topic collate "C" $$,
+  $$ values ('tenant:1e350000-0000-4000-8000-000000000007:conv:' || tests.cid(41)::text),
+            ('tenant:1e350000-0000-4000-8000-000000000007:support-inbox'),
+            ('tenant:1e350000-0000-4000-8000-000000000007:user:' || tests.uid(41)::text) $$,
+  'CASE-18: one edit of two fields published ONE signal per topic, not one per field'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$ select count(*)::int from realtime.messages where event = 'chat.case' and payload->>'conversationId' = tests.cid(43)::text $$,
+  ARRAY[0], 'EP-035: a no-op edit published nothing'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$ select distinct array(select jsonb_object_keys(payload) order by 1)
+       from realtime.messages
+      where event = 'chat.case' and payload->>'conversationId' = tests.cid(41)::text $$,
+  $$ values (array['conversationId', 'id']) $$,
+  'T-12.4-15: the edit signal carries exactly conversationId and the injected id, never a subject'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+
+select ok((select p.prosecdef and p.proconfig @> array['search_path=""']
+             from pg_proc p where p.oid = 'app.chat_case_edit(uuid,text,text,text,boolean,text)'::regprocedure),
+  'D-845: app.chat_case_edit is a security definer with search_path pinned to ""');
+select ok(has_function_privilege('authenticated', 'app.chat_case_edit(uuid,text,text,text,boolean,text)', 'execute')
+  and not has_function_privilege('anon', 'app.chat_case_edit(uuid,text,text,text,boolean,text)', 'execute')
+  and not has_function_privilege('public', 'app.chat_case_edit(uuid,text,text,text,boolean,text)', 'execute'),
+  'D-845: authenticated can execute the edit definer; anon and public cannot');
 
 select * from finish();
 rollback;
