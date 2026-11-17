@@ -24,6 +24,7 @@ import {
   staffRosterSchema,
   supportSendInputSchema,
   supportThreadSchema,
+  voiceReplyInputSchema,
   voiceSendInputSchema,
 } from '../contracts/index';
 import { getCaseHistory, getMyCases, getStaffRoster, runCaseAction, runCaseEdit } from './cases';
@@ -34,6 +35,7 @@ import {
   listMessages,
   markConversationRead,
   replyToConversation,
+  replyVoiceToConversation,
   sendSupportMessage,
   sendSupportVoiceMessage,
 } from './service';
@@ -209,6 +211,36 @@ const replyRoute = createRoute({
     409: {
       description:
         '`CONFLICT` with `details.chat`: `member_blocked` when the member is blocked, `member_removed` when they left the tenant. The thread stays readable.',
+    },
+  },
+});
+
+const replyVoiceRoute = createRoute({
+  method: 'post',
+  path: '/conversations/{conversationId}/voice-messages',
+  middleware: [requirePermission('chat.support')] as const,
+  request: {
+    params: conversationParamSchema,
+    body: {
+      required: true,
+      content: { 'application/json': { schema: voiceReplyInputSchema } },
+    },
+  },
+  responses: {
+    201: {
+      description:
+        "VOICE-18, VOICE-32, D-866: any staff member answers a support conversation with ONE recording of their own, by the id of a `ready` voice asset. The case moves exactly as for a text reply (an unowned open case is taken by the author, a resolved one is not reopened). The duration is the asset's server-measured one. `message.body` is the empty string and `message.voice` carries the asset id and the duration. Idempotent per take: the same `mediaId` again answers the stored message and emits nothing.",
+      content: { 'application/json': { schema: sendResultSchema } },
+    },
+    400: {
+      description:
+        "`VALIDATION_FAILED`: `details.chat = voice_invalid` for ONE answer to every unusable asset (unknown, another user's, another tenant's, soft-deleted, not an `audio`/`voice` asset, `failed`, `rejected` or already used in another conversation); any other key or a malformed id is a plain `VALIDATION_FAILED`. Nothing is written.",
+    },
+    403: { description: '`FORBIDDEN` without `chat.support` (a member never holds it).' },
+    404: { description: 'A bare `NOT_FOUND` for an unknown, foreign or non-support conversation.' },
+    409: {
+      description:
+        "`CONFLICT` with `details.chat`, in this order: `member_blocked`, `member_removed`, `voice_not_ready` (the caller's own recording is still `pending` or `processing`, retriable), `case_closed` (only a ready, owned asset sent to a closed case).",
     },
   },
 });
@@ -450,6 +482,16 @@ export const chatRoutes = chat
         c.get('ctx'),
         c.req.valid('param').conversationId,
         c.req.valid('json').body,
+      ),
+      201,
+    ),
+  )
+  .openapi(replyVoiceRoute, async (c) =>
+    c.json(
+      await replyVoiceToConversation(
+        c.get('ctx'),
+        c.req.valid('param').conversationId,
+        c.req.valid('json'),
       ),
       201,
     ),

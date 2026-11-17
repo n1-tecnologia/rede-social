@@ -76,11 +76,15 @@ const pushHint = (
   };
 };
 
+/** Placeholder banner for a staff voice reply until plan 09 writes the real wording. */
+const VOICE_REPLY_PLACEHOLDER = 'Mensagem de voz';
+
 type MessageFactsRow = {
   kind: string;
   member_user_id: string | null;
   member_name: string | null;
-  body: string;
+  /** Null on a recording (12.5): the banner wording of a voice message is plan 09's. */
+  body: string | null;
   author_side: 'member' | 'staff';
   author_user_id: string;
   case_number: number | null;
@@ -142,6 +146,10 @@ async function resolveMessageSent(tx: Tx, payload: ChatMessageSent): Promise<Not
     facts: {},
   } as const;
 
+  // A recording has no body (12.5, D-846). Until the voice banner wording lands (plan 09), the staff reply banner of a
+  // recording is a neutral placeholder and the member-message previews read an empty string, so nothing crashes.
+  const text = row.body ?? '';
+
   if (row.author_side === 'staff') {
     return [
       {
@@ -151,7 +159,12 @@ async function resolveMessageSent(tx: Tx, payload: ChatMessageSent): Promise<Not
         excludeUserIds: [row.author_user_id],
         dedupeKey: `${CHAT_NOTIFICATION_KINDS.supportReply}:${payload.messageId}`,
         channels: ['push'],
-        push: pushHint(payload.conversationId, 'team', supportReplyPushCopy(row.body), '/suporte'),
+        push: pushHint(
+          payload.conversationId,
+          'team',
+          row.body === null ? VOICE_REPLY_PLACEHOLDER : supportReplyPushCopy(text),
+          '/suporte',
+        ),
       },
     ];
   }
@@ -186,11 +199,11 @@ async function resolveMessageSent(tx: Tx, payload: ChatMessageSent): Promise<Not
 
   let body: string;
   if (kind === CHAT_NOTIFICATION_KINDS.caseNew && row.case_number !== null) {
-    body = caseNewPushCopy(row.case_number, row.member_name, row.body);
+    body = caseNewPushCopy(row.case_number, row.member_name, text);
   } else if (kind === CHAT_NOTIFICATION_KINDS.caseReopened && row.case_number !== null) {
-    body = caseReopenedPushCopy(row.case_number, row.member_name, row.body);
+    body = caseReopenedPushCopy(row.case_number, row.member_name, text);
   } else {
-    body = memberMessagePushCopy(row.member_name, row.case_number, row.body);
+    body = memberMessagePushCopy(row.member_name, row.case_number, text);
   }
 
   return [

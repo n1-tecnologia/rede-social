@@ -30,6 +30,7 @@ import {
   type SendResult,
   type SupportSendInput,
   type SupportThread,
+  type VoiceReplyInput,
   type VoiceSendInput,
 } from '../contracts/index';
 import {
@@ -640,6 +641,41 @@ export async function listMessages(
 export type MemberState = 'active' | 'blocked' | 'removed';
 
 /**
+ * The lookup and the member-state refusals shared by BOTH staff replies (text and voice, D-862): the support
+ * conversation of the caller's tenant locked `for update` (an unknown, foreign, direct or group id is ONE bare 404),
+ * then `member_blocked` and `member_removed` (both 409). Everything below these refusals is the caller's own.
+ */
+async function lockSupportConversation(
+  tx: Tx,
+  ctx: RequestContext,
+  conversationId: string,
+): Promise<void> {
+  const rows = await tx.execute<{ id: string; member_state: MemberState }>(sql`
+    select c.id,
+           case
+             when ms.id is null or ms.deleted_at is not null then 'removed'
+             when ms.blocked_at is not null or ms.status = 'blocked' then 'blocked'
+             else 'active'
+           end as member_state
+      from chat_conversations c
+      left join memberships ms
+             on ms.tenant_id = c.tenant_id
+            and ms.user_id = c.created_by_user_id
+     where c.id = ${conversationId}::uuid
+       and c.tenant_id = ${ctx.tenantId}::uuid
+       and c.kind = 'support'
+       for update of c`);
+  const conversation = rows[0];
+  if (!conversation) throw new ApiError(404, 'NOT_FOUND');
+  if (conversation.member_state === 'blocked') {
+    throw new ApiError(409, 'CONFLICT', { chat: 'member_blocked' });
+  }
+  if (conversation.member_state === 'removed') {
+    throw new ApiError(409, 'CONFLICT', { chat: 'member_removed' });
+  }
+}
+
+/**
  * `POST /v1/chat/conversations/{id}/messages` (CHAT-03, D-225): any staff member replies to any
  * support conversation. Nothing is assigned or claimed; the trigger sets the team's shared read
  * position to the reply's seq, so replying clears "awaiting" for every staff member.
@@ -657,29 +693,7 @@ export async function replyToConversation(
   let result: SendResult;
   try {
     result = await withTenantTx(ctx, async (tx) => {
-      const rows = await tx.execute<{ id: string; member_state: MemberState }>(sql`
-        select c.id,
-               case
-                 when ms.id is null or ms.deleted_at is not null then 'removed'
-                 when ms.blocked_at is not null or ms.status = 'blocked' then 'blocked'
-                 else 'active'
-               end as member_state
-          from chat_conversations c
-          left join memberships ms
-                 on ms.tenant_id = c.tenant_id
-                and ms.user_id = c.created_by_user_id
-         where c.id = ${conversationId}::uuid
-           and c.tenant_id = ${ctx.tenantId}::uuid
-           and c.kind = 'support'
-           for update of c`);
-      const conversation = rows[0];
-      if (!conversation) throw new ApiError(404, 'NOT_FOUND');
-      if (conversation.member_state === 'blocked') {
-        throw new ApiError(409, 'CONFLICT', { chat: 'member_blocked' });
-      }
-      if (conversation.member_state === 'removed') {
-        throw new ApiError(409, 'CONFLICT', { chat: 'member_removed' });
-      }
+      await lockSupportConversation(tx, ctx, conversationId);
       const message = await insertMessage(tx, ctx, conversationId, 'staff', { kind: 'text', body });
       return { conversationId, message };
     });
@@ -714,6 +728,96 @@ export async function replyToConversation(
     'chat message sent',
   );
   return result;
+}
+
+/**
+ * The stored recording the caller already sent, answered in the shipped staff shape. A take is usable ONCE per
+ * tenant (single-use index), so a stored message that sits in ANOTHER conversation means the asset is spent for this
+ * one: the same `voice_invalid` as an asset another staff member owns.
+ */
+async function storedStaffVoiceResult(
+  tx: Tx,
+  ctx: RequestContext,
+  conversationId: string,
+  mediaId: string,
+): Promise<SendResult | null> {
+  const prior = await storedVoiceMessage(tx, ctx, mediaId);
+  if (!prior) return null;
+  if (prior.conversationId !== conversationId) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { chat: 'voice_invalid' });
+  }
+  return { conversationId, message: await insertedMessage(tx, ctx, conversationId, prior.id) };
+}
+
+/**
+ * `POST /v1/chat/conversations/{id}/voice-messages` (D-866, D-847, D-862, VOICE-18, VOICE-32): any staff member
+ * answers a support conversation with ONE recording of their own. The order is the text reply's, asserted by the
+ * tests: 1. the `for update` lookup of a support conversation of the tenant (bare 404), 2. `member_blocked`,
+ * 3. `member_removed`, then the idempotent read of the caller's own message for the asset, 4. the asset validation
+ * (`voice_not_ready` 409, `voice_invalid` 400), 5. the insert, which is where a closed case refuses
+ * (`409 case_closed`, the CS004 of the text path). No check of the case state runs before the insert, so an asset
+ * refusal wins over a closed case. The take-on-reply and the no-reopen rules are the message trigger's (it reads no
+ * body), so a recording moves the case exactly as text does.
+ *
+ * Idempotent per take: a repeated or concurrent send of the same asset answers the stored message and stores one
+ * row; the loser of a concurrent double send (`23505` of the single-use index) re-reads in a NEW transaction. Only
+ * the call that stored the message emits `chat.message_sent`.
+ */
+export async function replyVoiceToConversation(
+  ctx: RequestContext,
+  conversationId: string,
+  input: VoiceReplyInput,
+): Promise<SendResult> {
+  let outcome: { result: SendResult; fresh: boolean };
+  try {
+    outcome = await withTenantTx(ctx, async (tx) => {
+      await lockSupportConversation(tx, ctx, conversationId);
+      const prior = await storedStaffVoiceResult(tx, ctx, conversationId, input.mediaId);
+      if (prior) return { result: prior, fresh: false };
+      await assertVoiceUsable(tx, ctx, input.mediaId);
+      const message = await insertMessage(tx, ctx, conversationId, 'staff', {
+        kind: 'voice',
+        mediaAssetId: input.mediaId,
+      });
+      return { result: { conversationId, message }, fresh: true };
+    });
+  } catch (error) {
+    if (assetIndexViolated(error)) {
+      const stored = await withTenantTx(ctx, (tx) =>
+        storedStaffVoiceResult(tx, ctx, conversationId, input.mediaId),
+      );
+      if (!stored) throw error;
+      return stored;
+    }
+    // The message trigger refuses a message to a CLOSED case with CS004 (raised only by the insert, as for text).
+    if (sqlstateOf(error) === 'CS004') {
+      throw new ApiError(409, 'CONFLICT', { chat: 'case_closed' });
+    }
+    throw error;
+  }
+
+  if (outcome.fresh) {
+    emit(ctx, 'chat.message_sent', {
+      tenantId: ctx.tenantId,
+      conversationId,
+      messageId: outcome.result.message.id,
+      seq: outcome.result.message.seq,
+      authorUserId: ctx.userId,
+      authorSide: 'staff',
+    });
+    log.info(
+      {
+        event: 'chat.message_sent',
+        tenantId: ctx.tenantId,
+        conversationId,
+        seq: outcome.result.message.seq,
+        side: 'staff',
+        voice: true,
+      },
+      'chat message sent',
+    );
+  }
+  return outcome.result;
 }
 
 /* ── 07-08 Task 3: the staff side and the badges ────────────────────────────────────────────────── */
