@@ -33,8 +33,16 @@ begin;
 --
 -- 8. THE STUB (plan 07 task 1, D-867): the migration order is checked, then the kernel stub answers false.
 --
+-- 9. THE ORPHAN SWEEP (plan 08 task 1, VOICE-27, VOICE-34; D-844, D-856, D-869; T-12.5-31..33): `app.chat_voice_orphans_sweep`
+--    soft-deletes every `ready` or `failed` voice asset older than 24 hours that no message references, in each row's own
+--    tenant, oldest first, at most a clamped batch per call, and is executable by `service_role` only.
+--
+-- 10. THE REMOVAL PREMISES (plan 08 task 3, VOICE-37; D-868, T-12.5-34, T-12.5-36): a soft-deleted recording is `retired` for the
+--    read gate at once, and a recording a message references cannot be hard-deleted (the foreign key the purge's tombstone
+--    branch answers).
+--
 -- Fixture ids use the `1e360000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(98);
+select plan(114);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-voice-a', 'Voz A', '1e360000-0000-4000-8000-000000000001');
@@ -538,7 +546,7 @@ select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4
 -- ── 8. the stub (VOICE-25; D-867) ──────────────────────────────────────────────────────────────
 -- The kernel stub answers false and reads no table, so a project that has the media kernel and no chat module hides
 -- nothing. Put the stub body back (owner, inside this rolled-back transaction) and ask the gate that hid e1 above.
--- Keep this LAST: the stub stays in place until the rollback.
+-- Keep this the last GATE section: the stub stays in place until the rollback (sections 9 and 10 read no gate).
 select is((select count(*)::int from supabase_migrations.schema_migrations
             where name = 'chat_asset_gate_seam'
               and version < (select version from supabase_migrations.schema_migrations where name = 'chat_voice_gate')
@@ -548,6 +556,86 @@ create or replace function app.chat_asset_hidden(p_asset uuid) returns boolean
 language sql stable security invoker set search_path = '' as $$ select false $$;
 select is(tests.gate_as('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a2', 'member', '1e360000-0000-4000-8000-0000000000e1'), false,
   'D-867: the neutral stub answers false for the caller the chat body hid (no chat module, nothing hidden)');
+
+-- ── 9. the orphan sweep (VOICE-27, VOICE-34; D-844, D-856, D-869; T-12.5-31..33) ────────────────
+-- Anything already eligible in this database is drained first (inside this rolled-back transaction), so the counts below
+-- are about THIS file's fixtures only.
+select lives_ok($$ select app.chat_voice_orphans_sweep(5000) $$, 'D-869: the sweep runs for the table owner (drains whatever the local database already holds)');
+-- (a) ready 25 h unsent, (b) ready 23 h, (c) ready 25 h SENT, (d) failed 25 h, (e) an image 25 h, (f) tenant B's unsent 25 h,
+-- (g) processing 25 h, (h) already deleted 25 h ago, (i) ready 24 h minus a minute.
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds, created_at, deleted_at) values
+  ('1e360000-0000-4000-8000-000000009a01', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, now() - interval '25 hours', null),
+  ('1e360000-0000-4000-8000-000000009a02', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, now() - interval '23 hours', null),
+  ('1e360000-0000-4000-8000-000000009a03', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, now() - interval '25 hours', null),
+  ('1e360000-0000-4000-8000-000000009a04', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'failed', 'audio/mp4', 8000, 7, now() - interval '25 hours', null),
+  ('1e360000-0000-4000-8000-000000009a05', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'image', 'avatar', 'ready', 'image/png', 8000, null, now() - interval '25 hours', null),
+  ('1e360000-0000-4000-8000-000000009a06', '1e360000-0000-4000-8000-000000000002', '1e360000-0000-4000-8000-0000000000b1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, now() - interval '25 hours', null),
+  ('1e360000-0000-4000-8000-000000009a07', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'processing', 'audio/mp4', 8000, 7, now() - interval '25 hours', null),
+  ('1e360000-0000-4000-8000-000000009a08', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'deleted', 'audio/mp4', 8000, 7, now() - interval '30 hours', now() - interval '25 hours'),
+  ('1e360000-0000-4000-8000-000000009a09', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, now() - interval '24 hours' + interval '1 minute', null);
+-- (c) is referenced by a SENT message (the table owner writes it; the lane policies are proved above).
+select tests.vmsg('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000c1', '1e360000-0000-4000-8000-0000000000a1', 'member', '1e360000-0000-4000-8000-000000009a03', 7);
+
+select is(app.chat_voice_orphans_sweep(500), 3,
+  'VOICE-27/D-869: one sweep soft-deletes the three eligible unsent takes (ready a, failed d, tenant B f) and returns 3');
+select results_eq(
+  $$ select id::text, status, deleted_at is not null, tenant_id::text from public.media_assets
+      where id in ('1e360000-0000-4000-8000-000000009a01', '1e360000-0000-4000-8000-000000009a04', '1e360000-0000-4000-8000-000000009a06') order by id $$,
+  $$ values ('1e360000-0000-4000-8000-000000009a01'::text, 'deleted'::text, true, '1e360000-0000-4000-8000-000000000001'::text),
+            ('1e360000-0000-4000-8000-000000009a04'::text, 'deleted'::text, true, '1e360000-0000-4000-8000-000000000001'::text),
+            ('1e360000-0000-4000-8000-000000009a06'::text, 'deleted'::text, true, '1e360000-0000-4000-8000-000000000002'::text) $$,
+  'T-12.5-33: the three are deleted with deleted_at set and each keeps its OWN tenant (tenant B is swept in tenant B)');
+select results_eq(
+  $$ select id::text, status, deleted_at is null from public.media_assets
+      where id in ('1e360000-0000-4000-8000-000000009a02', '1e360000-0000-4000-8000-000000009a03', '1e360000-0000-4000-8000-000000009a05',
+                   '1e360000-0000-4000-8000-000000009a07', '1e360000-0000-4000-8000-000000009a09') order by id $$,
+  $$ values ('1e360000-0000-4000-8000-000000009a02'::text, 'ready'::text, true),
+            ('1e360000-0000-4000-8000-000000009a03'::text, 'ready'::text, true),
+            ('1e360000-0000-4000-8000-000000009a05'::text, 'ready'::text, true),
+            ('1e360000-0000-4000-8000-000000009a07'::text, 'processing'::text, true),
+            ('1e360000-0000-4000-8000-000000009a09'::text, 'ready'::text, true) $$,
+  'D-856/T-12.5-32: the 23-hour take, the SENT 25-hour recording, the image, the processing take and the 24-hour-minus-a-minute take are untouched');
+select is(
+  (select deleted_at from public.media_assets where id = '1e360000-0000-4000-8000-000000009a08'), now() - interval '25 hours',
+  'D-869: an asset already deleted keeps its own deleted_at (the sweep never rewrites a retired row)');
+select is(app.chat_voice_orphans_sweep(500), 0, 'D-869: a second call finds nothing (idempotent: the predicate is the state)');
+
+-- The batch: three more orphans, oldest 28 hours; a batch of 1 takes the OLDEST, 0 and null clamp to 1.
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds, created_at) values
+  ('1e360000-0000-4000-8000-000000009a11', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, now() - interval '26 hours'),
+  ('1e360000-0000-4000-8000-000000009a12', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, now() - interval '27 hours'),
+  ('1e360000-0000-4000-8000-000000009a13', '1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1', 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7, now() - interval '28 hours');
+select is(app.chat_voice_orphans_sweep(1), 1, 'EP-042: a batch of 1 soft-deletes exactly one take');
+select results_eq(
+  $$ select id::text, status from public.media_assets
+      where id in ('1e360000-0000-4000-8000-000000009a11', '1e360000-0000-4000-8000-000000009a12', '1e360000-0000-4000-8000-000000009a13') order by id $$,
+  $$ values ('1e360000-0000-4000-8000-000000009a11'::text, 'ready'::text),
+            ('1e360000-0000-4000-8000-000000009a12'::text, 'ready'::text),
+            ('1e360000-0000-4000-8000-000000009a13'::text, 'deleted'::text) $$,
+  'D-869: ... and it is the OLDEST one (oldest first)');
+select tests.as_service();
+select is(app.chat_voice_orphans_sweep(0), 1, 'D-869: a batch of 0 clamps to 1, called as service_role');
+reset role;
+select is(app.chat_voice_orphans_sweep(null), 1, 'D-869: a null batch clamps to 1');
+select is(app.chat_voice_orphans_sweep(500), 0, 'D-869: and the next call finds nothing left');
+
+-- Privileges and shape (T-12.5-31): service_role only, a definer with an empty search_path, one 24-hour literal.
+select ok(not has_function_privilege('authenticated', 'app.chat_voice_orphans_sweep(int)', 'execute')
+      and not has_function_privilege('anon', 'app.chat_voice_orphans_sweep(int)', 'execute')
+      and not has_function_privilege('public', 'app.chat_voice_orphans_sweep(int)', 'execute'),
+  'T-12.5-31: authenticated, anon and PUBLIC cannot execute the sweep function');
+select ok(has_function_privilege('service_role', 'app.chat_voice_orphans_sweep(int)', 'execute'),
+  'T-12.5-31 positive control: service_role can execute it');
+select tests.as_tenant('1e360000-0000-4000-8000-000000000001', '1e360000-0000-4000-8000-0000000000a1');
+select throws_ok($$ select app.chat_voice_orphans_sweep(500) $$, '42501', null,
+  'T-12.5-31: a tenant lane (the member role) is refused 42501');
+reset role;
+select ok((select prosecdef and array_to_string(proconfig, ',') like '%search_path=""%'
+             from pg_proc where oid = 'app.chat_voice_orphans_sweep(int)'::regprocedure),
+  'T-12.5-33: the sweep is a security definer with an empty search_path');
+select is(
+  (select count(*)::int from regexp_matches(pg_get_functiondef('app.chat_voice_orphans_sweep(int)'::regprocedure), 'interval ''24 hours''', 'g')),
+  1, 'D-869: the 24 hours are ONE literal in the function definition');
 
 select * from finish();
 rollback;

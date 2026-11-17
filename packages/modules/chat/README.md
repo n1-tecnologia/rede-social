@@ -141,7 +141,10 @@ grant lives in this manifest rather than in the kernel.
 
 - Jobs: none.
 - Sweep functions: `chat_cases_auto_close` (closes every support case left resolved for 7 days, hourly,
-  admin lane, silent for the member; it writes a history row with no actor).
+  admin lane, silent for the member; it writes a history row with no actor), and `chat_voice_orphans_sweep`
+  (soft-deletes every voice take older than 24 hours that no message references, hourly, admin lane, so an unsent
+  recording leaves the quota; a recording a message references is never touched. The kernel's hourly sweeper then
+  purges the Storage objects. No new queue and no new job name).
 - `counters`: `chatCounters` contributes `unreadConversations` to `bootstrap.counters`: for staff the active cases
   (not closed) whose last message is the member's and unread by the team, for a member a dot when a case that is not
   closed has an unread staff reply.

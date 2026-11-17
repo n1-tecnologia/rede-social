@@ -29,7 +29,10 @@ import { chatCounters } from './server/service';
  *
  * `sweepFunctions` (D-844, D-807): `chat_cases_auto_close` closes every support case left `resolved` for 7 days, run
  * by the kernel's existing hourly sweeper through the admin lane (no new queue, no new job name). The 7 days live in the
- * SQL function only, never here (D-807); the closing is silent for the member (D-808).
+ * SQL function only, never here (D-807); the closing is silent for the member (D-808). `chat_voice_orphans_sweep`
+ * (D-869, amending D-844 by one function name) soft-deletes every `voice` take older than 24 hours that no message
+ * references, so an unsent recording leaves the tenant ceiling and the member's share; a recording a message references
+ * is never touched (D-856). It rides the same hourly sweeper: no new queue and no new job name.
  */
 export const chatModule = defineModule({
   key: 'chat',
@@ -49,5 +52,5 @@ export const chatModule = defineModule({
   },
   counters: chatCounters,
   notificationSources: chatNotificationSources,
-  sweepFunctions: ['chat_cases_auto_close'],
+  sweepFunctions: ['chat_cases_auto_close', 'chat_voice_orphans_sweep'],
 });
