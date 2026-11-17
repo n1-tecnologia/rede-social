@@ -2058,7 +2058,7 @@ Plans:
 
 Decided in `/gsd-discuss-phase 12.4` (2026-11-16): (1) a new case after each close, one active at a time (about 15 to 18 plans); (2) four states Aberto, Em atendimento, Resolvido and Fechado, any staff takes and only `admin_tenant` assigns, the team closes or a 7-day sweep closes a Resolvido case, the member is told only on Resolvido; (3) subject, a fixed category list and a priority set by the staff, no attachments. The UI contract and the approved sketch 023 are `12.4-UI-SPEC.md` and `.planning/sketches/023-phase-12.4-designed-screens/`.
 
-**Plans:** 3/20 plans executed (planned 2026-11-16: 20 plans in 15 waves; the database, contract, API, notice and dashboard plans run before the gated screens, the six screen plans and the end-to-end plan wait for sketch 023, which is approved provisional; plan 02 is the one-way activation and stops at a decision checkpoint; the release, the ledger and the exit gate are plan 18)
+**Plans:** 4/20 plans executed (planned 2026-11-16: 20 plans in 15 waves; the database, contract, API, notice and dashboard plans run before the gated screens, the six screen plans and the end-to-end plan wait for sketch 023, which is approved provisional; plan 02 is the one-way activation and stops at a decision checkpoint; the release, the ledger and the exit gate are plan 18)
 
 Plans:
 **Wave 1**
@@ -2075,7 +2075,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 12.4-04-PLAN.md — The 7-day auto-close on the kernel's hourly sweeper, no new queue (pgTAP 235 sections 12 and 13)
+- [x] 12.4-04-PLAN.md — The 7-day auto-close on the kernel's hourly sweeper, no new queue (pgTAP 235 sections 12 and 13)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -2252,7 +2252,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 16/16 | In Progress|  |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
-| 12.4. Abertura de chamado no suporte (INSERTED) | 3/20 | In Progress|  |
+| 12.4. Abertura de chamado no suporte (INSERTED) | 4/20 | In Progress|  |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |
 
 ---

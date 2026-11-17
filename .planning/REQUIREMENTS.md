@@ -423,7 +423,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [ ] **CASE-10**: The member sets the category (five fixed codes, `Outro` default) and an optional subject (80 code points) only on the message that opens the case; the priority is born `Normal` and unreachable to the member; staff edit category, subject and priority of a case that is not `Fechado`; unknown or forbidden keys are `400` and write nothing *(D-811, D-812)*
 - [ ] **CASE-11**: A case without a typed subject shows the start of its first message, one line cut on a word at 80 characters with `…` only when it cut; a migrated case has no stored subject and shows the same fallback *(D-812, D-814, UI-D-819)*
 - [ ] **CASE-12**: Every step (opened, taken, assigned, resolved, closed, reopened, a field changed) is an append-only, tenant-scoped row with actor, instant and states; the automatic close has no actor; no lane can update or delete it; only staff read it; a member never does *(D-810, UI-D-829, UI-D-835)*
-- [ ] **CASE-13**: A case that stayed `Resolvido` for 7 days (fixed in code) is closed by the hourly worker sweep, idempotently, skipping a row a member message is changing, with a history row with no actor and a live signal, never a notice, for every tenant of the project and only through its own tenant's rows *(D-807, D-808)*
+- [x] **CASE-13**: A case that stayed `Resolvido` for 7 days (fixed in code) is closed by the hourly worker sweep, idempotently, skipping a row a member message is changing, with a history row with no actor and a live signal, never a notice, for every tenant of the project and only through its own tenant's rows *(D-807, D-808)*
 - [ ] **CASE-14**: The member's thread read answers the active case (null when none, which shows the opener) and whether any case exists; "Meus chamados" answers the current case and the closed ones newest first, 20 per page by keyset, own cases only; a closed case opens read-only and a foreign id is the bare 404 *(D-803, UI-D-818, UI-D-821)*
 - [ ] **CASE-15**: The first-message route returns the case (id, number, whether it opened or reopened it) as optional keys; every existing response shape of the chat routes is unchanged and every new key is `.optional()` *(D-812, UI-D-820)*
 - [ ] **CASE-16**: The team's inbox has the tabs `Em aberto` (default), `Resolvidos`, `Fechados` and the filters owner, priority and "Aguardando resposta", sorted by latest activity with a stable keyset, rows carrying the case facts and the list of legal actions; a roster route answers live staff names only *(D-805, D-806, D-809, UI-D-823, UI-D-824, UI-D-826)*
@@ -1111,7 +1111,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-10 | Phase 12.4 | Pending |
 | CASE-11 | Phase 12.4 | Pending |
 | CASE-12 | Phase 12.4 | Pending |
-| CASE-13 | Phase 12.4 | Pending |
+| CASE-13 | Phase 12.4 | Complete |
 | CASE-14 | Phase 12.4 | Pending |
 | CASE-15 | Phase 12.4 | Pending |
 | CASE-16 | Phase 12.4 | Pending |
