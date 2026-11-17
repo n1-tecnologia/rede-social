@@ -944,6 +944,24 @@ export async function serveVariant(
 export async function deleteAsset(ctx: Ctx, assetId: string): Promise<MediaAsset> {
   const row = await loadOwnAsset(ctx, assetId);
   if (!row) throw new ApiError(404, 'NOT_FOUND');
+  // D-870, VOICE-26 (12.5-07): a chat voice recording is never retired through the media API, by its uploader
+  // or by an admin, before or after it is sent. The refusal is the one `assertMayRetire` gives a caller who may
+  // not retire an asset (the bare 404, so it is not an oracle), raised before any write. The sole ways a voice
+  // asset leaves are system actions (the orphan sweep of an unsent take and the account-deletion step), which
+  // do not come through here.
+  if (row.purpose === 'voice') {
+    log.warn(
+      {
+        event: 'media.retire_refused',
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        requestId: ctx.requestId,
+        assetId: row.id,
+      },
+      'a voice recording cannot be retired through the media API',
+    );
+    throw new ApiError(404, 'NOT_FOUND');
+  }
   assertMayRetire(ctx, row);
 
   const updated = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) =>
@@ -1110,6 +1128,10 @@ export async function listAssets(ctx: Ctx, query: MediaListQuery): Promise<Media
         and(
           query.kind ? eq(mediaAssets.kind, query.kind) : undefined,
           query.purpose ? eq(mediaAssets.purpose, query.purpose) : undefined,
+          // D-870, VOICE-26 (12.5-07): the library is the admin's, and a recording is private to the
+          // conversation it was sent in, so a `voice` asset is never listed, whatever the filter. It still
+          // counts in the byte totals and the quota (those read the table, not this page).
+          ne(mediaAssets.purpose, 'voice'),
           // The tenant predicate is RLS, never the cursor (T-03-52): a tampered envelope can only
           // move the page boundary inside what this lane may already read.
           afterAt
