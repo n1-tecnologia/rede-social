@@ -534,3 +534,67 @@ describe('inboxQuerySchema (12.4 filters)', () => {
     expect(inboxQuerySchema.safeParse({ unknown: 1 }).success).toBe(false);
   });
 });
+
+describe('the voice keys of a lastMessage (Phase 12.5, D-860, D-868, VOICE-28, VOICE-04)', () => {
+  const inbox = {
+    conversationId: ID,
+    member: { membershipId: ID2, displayName: 'Ana', avatarAssetId: null, state: 'active' },
+    lastMessage: { seq: 1, preview: 'oi', side: 'member', authorFirstName: null },
+    lastMessageAt: AT,
+    awaiting: true,
+  };
+
+  const lastMessages = {
+    card: (last: Record<string, unknown>) => ({
+      ...card,
+      lastMessage: { ...card.lastMessage, ...last },
+    }),
+    inbox: (last: Record<string, unknown>) => ({
+      ...inbox,
+      lastMessage: { ...inbox.lastMessage, ...last },
+    }),
+  };
+
+  it('a text lastMessage parses with neither key, byte for byte (the previous web stays safe)', () => {
+    expect(caseCardSchema.parse(card)).toEqual(card);
+    expect(inboxRowSchema.parse(inbox)).toEqual(inbox);
+    expect(Object.keys(caseCardSchema.parse(card).lastMessage ?? {})).toEqual(['preview', 'side']);
+  });
+
+  it('a recording is an empty preview plus the stored length', () => {
+    const cardVoice = lastMessages.card({ preview: '', voiceSeconds: 42 });
+    const inboxVoice = lastMessages.inbox({ preview: '', voiceSeconds: 42 });
+    expect(caseCardSchema.parse(cardVoice)).toEqual(cardVoice);
+    expect(inboxRowSchema.parse(inboxVoice)).toEqual(inboxVoice);
+    for (const seconds of [1, 300]) {
+      expect(caseCardSchema.safeParse(lastMessages.card({ voiceSeconds: seconds })).success).toBe(
+        true,
+      );
+      expect(inboxRowSchema.safeParse(lastMessages.inbox({ voiceSeconds: seconds })).success).toBe(
+        true,
+      );
+    }
+  });
+
+  it('a deleted recording carries both keys', () => {
+    const cardGone = lastMessages.card({ preview: '', voiceSeconds: 42, voiceDeleted: true });
+    const inboxGone = lastMessages.inbox({ preview: '', voiceSeconds: 42, voiceDeleted: true });
+    expect(caseCardSchema.parse(cardGone)).toEqual(cardGone);
+    expect(inboxRowSchema.parse(inboxGone)).toEqual(inboxGone);
+  });
+
+  it('refuses a length of 0 or 301, a non-integer length, voiceDeleted false and an unknown key', () => {
+    for (const bad of [
+      { voiceSeconds: 0 },
+      { voiceSeconds: 301 },
+      { voiceSeconds: 4.5 },
+      { voiceSeconds: '42' },
+      { voiceDeleted: false },
+      { voiceUrl: 'https://example.test/a.m4a' },
+      { mediaId: ID },
+    ]) {
+      expect(caseCardSchema.safeParse(lastMessages.card(bad)).success).toBe(false);
+      expect(inboxRowSchema.safeParse(lastMessages.inbox(bad)).success).toBe(false);
+    }
+  });
+});

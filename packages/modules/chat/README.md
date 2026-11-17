@@ -68,6 +68,29 @@ case does not reopen it, because the transition trigger never reads the body.
 This adds no kernel import, no emitted event and no job: the recording is read and written through the tenant lane
 with the module's own SQL, and the message event the module already emits carries ids only.
 
+Previews and labels (plan 09, D-860, D-861, D-868). Wherever a message's text is a preview the API answers FACTS, never
+words: the two `lastMessage` objects (the inbox row of `GET /v1/chat/inbox` and the card of
+`GET /v1/chat/support/cases`) keep `preview: string` and gain two OPTIONAL keys, both absent on a text preview.
+`voiceSeconds` (1..300) is the stored length of a recording, with `preview` the empty string, and the host builds
+"Mensagem de voz · m:ss" from it; `voiceDeleted: true` appears only once the recording is gone (`voiceSeconds` stays),
+and the host reads "Mensagem de voz apagada". The length is the copy stored on the message, never a join to the
+asset, so it survives the purge. The SQL selects the length and a gone flag (`voiceGoneSql`); no SQL string builds a
+word.
+
+The case label follows one rule on every surface (the member's header on `GET /v1/chat/support` and on
+`GET /v1/chat/conversations/{id}`, closed cases included, the "Meus chamados" card, the staff inbox row, the staff
+thread header and the earlier-cases list): the typed subject, else the constant "Mensagem de voz" (no duration) when
+the case's FIRST message is a recording, else the cut start of the first text. `subjectLabelOf(subject, firstBody,
+firstIsVoice)` is that rule, fed by `fm.voice_seconds is not null as first_is_voice` in each of the six first-message
+selects.
+
+Push words: the team's three pushes read "Novo chamado #N de {member}: Mensagem de voz · 0:42", "O chamado #N de
+{member} foi reaberto: Mensagem de voz · 0:42" and "Nova mensagem de {member} no chamado #N: Mensagem de voz · 0:42",
+and the member's push for a staff recording is "Mensagem de voz · 0:42" alone. One preview string is computed from the
+stored length and handed to the unchanged builders (`formatVoiceClock`, `voicePreview` and `CHAT_VOICE_COPY` live in
+`server/notification-copy.ts`); no template changed and no bell row exists for a message. A recording whose asset is
+gone pushes nothing. This adds no kernel import, no event and no job.
+
 ## Permissions
 
 - `chat.support`: answer support (the inbox, the staff reply, the case actions). Both staff roles.

@@ -323,3 +323,79 @@ describe('voice push words', () => {
     expect(bell?.n).toBe(0);
   });
 });
+
+/* -- a deleted recording (Task 3, D-868) ------------------------------------------------------------- */
+
+/** The effect of plan 08 on the asset: soft-deleted through the admin lane. The message row stays. */
+const retireAsset = (mediaId: string) => adminSql`
+  update public.media_assets set deleted_at = now() where id = ${mediaId}::uuid`;
+
+describe('voice previews of a deleted recording', () => {
+  it('the inbox row and the card keep the length and say deleted; the label stays on every surface (D-868, VOICE-28, D-861)', async () => {
+    const { tokens } = await caseKit();
+    const { member, mediaId, conversationId } = await voiceCase('prev-gone');
+    await retireAsset(mediaId);
+
+    const row = await inboxRow(tokens.demoSupport, conversationId);
+    expect(row?.lastMessage?.preview).toBe('');
+    expect(row?.lastMessage?.voiceSeconds).toBe(2);
+    expect(row?.lastMessage?.voiceDeleted).toBe(true);
+    expect(row?.case?.subjectLabel).toBe(VOICE_LABEL);
+
+    const mine = await myCases(member.token);
+    expect(mine.current?.lastMessage?.preview).toBe('');
+    expect(mine.current?.lastMessage?.voiceSeconds).toBe(2);
+    expect(mine.current?.lastMessage?.voiceDeleted).toBe(true);
+    expect(mine.current?.subjectLabel).toBe(VOICE_LABEL);
+
+    // The member's two reads of the case header, and the staff thread header.
+    const thread = await request('/v1/chat/support', member.token);
+    expect(((await thread.json()) as SupportThread).case?.subjectLabel).toBe(VOICE_LABEL);
+    const detail = await request(`/v1/chat/conversations/${conversationId}`, member.token);
+    const read = (await detail.json()) as ConversationDetail;
+    expect(read.viewer === 'member' ? read.case?.subjectLabel : null).toBe(VOICE_LABEL);
+    const header = await request(`/v1/chat/conversations/${conversationId}`, tokens.demoSupport);
+    const staff = (await header.json()) as ConversationDetail;
+    expect(staff.viewer === 'staff' ? staff.case?.subjectLabel : null).toBe(VOICE_LABEL);
+
+    // Closed, then a second case: the earlier-cases list and the closed card still say the label.
+    await closeCase(conversationId);
+    const closed = await myCases(member.token);
+    expect(closed.items[0]?.subjectLabel).toBe(VOICE_LABEL);
+    expect(closed.items[0]?.lastMessage?.voiceDeleted).toBe(true);
+    const second = await post('/v1/chat/support/messages', member.token, { body: 'Outro assunto' });
+    const secondId = ((await second.json()) as SendResult).conversationId;
+    const history = await request(
+      `/v1/chat/conversations/${secondId}/case/history`,
+      tokens.demoSupport,
+    );
+    const earlier = ((await history.json()) as CaseHistory).earlierCases;
+    expect(earlier.find((c) => c.id === conversationId)?.subjectLabel).toBe(VOICE_LABEL);
+  });
+
+  it('a text reply after a deleted recording makes the preview text again, with no voice key', async () => {
+    const { tokens } = await caseKit();
+    const { member, mediaId, conversationId } = await voiceCase('prev-gone-text');
+    await retireAsset(mediaId);
+    const sent = await post('/v1/chat/support/messages', member.token, { body: 'Escrevo agora' });
+    expect(sent.status).toBe(201);
+    const row = await inboxRow(tokens.demoSupport, conversationId);
+    expect(row?.lastMessage?.preview).toBe('Escrevo agora');
+    expect(row?.lastMessage && 'voiceSeconds' in row.lastMessage).toBe(false);
+    expect(row?.lastMessage && 'voiceDeleted' in row.lastMessage).toBe(false);
+  });
+
+  it('no push is produced for a send whose recording is already gone, and no length leaks (T-12.5-38)', async () => {
+    const { tokens, ids } = await caseKit();
+    await subscribeDevice(tokens.demoSupport, 'support-gone');
+    await closeWaitingJobs();
+    const { mediaId, messageId } = await voiceCase('prev-gone-push');
+    await retireAsset(mediaId);
+    await runNotificationJobs(ids.demo);
+    expect(await jobsFor(ids.demo, `chat.case_new:${messageId}`)).toHaveLength(0);
+    const leaked = (await pushSendJobsOf(ids.demo)).filter((job) =>
+      JSON.stringify(job.data.push ?? {}).includes('Mensagem de voz'),
+    );
+    expect(leaked.filter((job) => job.data.dedupeKey.endsWith(messageId))).toHaveLength(0);
+  });
+});
