@@ -27,8 +27,16 @@ import { preparingSchema, snapshotMetaSchema } from './shared';
  * - **Moderação.** `moderation_log` rows of Window30 (`comment_removed`, `member_blocked`,
  *   `member_unblocked`; `role_changed` ignored) and `comments30`, the tenant's live comments of
  *   Window30, the removal rate's denominator.
- * - **Not measured (D-465).** No subject is ever written on a support conversation: `bySubject` is
- *   `{ measured: false, reason: 'needs_support_subject' }` and nothing else ("Em breve").
+ * - **Cases (12.4-10, CASE-22, D-813, D-815).** A support conversation is a numbered case with a
+ *   state and a category. The queue counts ACTIVE cases only (`state in ('open', 'in_progress')`);
+ *   the first response is measured per CASE (the first staff message after the case's first member
+ *   message), bucketed by the week of that first message; `weeklyConversations` counts cases
+ *   opened per week.
+ * - **By subject (D-813).** `bySubject` (builder v9) is the count of cases OPENED in Window30 by
+ *   category, the five exact lowercase codes always present (zero allowed). Counts only (EP-43,
+ *   EP-073): no subject text, no message, no member. A snapshot built before v9 has no such key:
+ *   the answer then stays `{ measured: false, reason: 'needs_support_subject' }` ("Em breve"), so
+ *   the key is optional in the payload and the not-measured branch of the answer is kept.
  *
  * EP-43: no message text, member name or member id travels in the payload or the answer. Every
  * object is `.strict()`, so an undeclared key fails the parse instead of travelling.
@@ -56,13 +64,35 @@ export type SupportModeration = z.infer<typeof supportModerationSchema>;
 const weeklyMediansSchema = z.array(count.nullable()).length(SUPPORT_WEEKS);
 const weeklyCountsSchema = z.array(count).length(SUPPORT_WEEKS);
 
-/** `payload.support` as the builder stores it (v7): counts, minutes and staff user ids only. */
+/**
+ * The five case categories of `bySubject`, the exact codes the chat module stores on a case
+ * (`chat_conversations_category_chk`). Kept here as a literal so this module depends on no other
+ * module; the pgTAP section 10 of `199-dashboard-areas.sql` pins the same five keys.
+ */
+export const SUPPORT_SUBJECT_KEYS = ['check_in', 'events', 'payment', 'account', 'other'] as const;
+export type SupportSubjectKey = (typeof SUPPORT_SUBJECT_KEYS)[number];
+
+/** The cases opened in Window30 by category: every key present, counts only. */
+export const supportBySubjectCountsSchema = z
+  .object({
+    check_in: count,
+    events: count,
+    payment: count,
+    account: count,
+    other: count,
+  })
+  .strict();
+export type SupportBySubjectCounts = z.infer<typeof supportBySubjectCountsSchema>;
+
+/** `payload.support` as the builder stores it (v9): counts, minutes and staff user ids only. */
 export const supportPayloadSchema = z
   .object({
     awaiting: supportAwaitingSchema,
     weeklyMedianMinutes: weeklyMediansSchema,
     weeklyConversations: weeklyCountsSchema,
     answeredByStaff: z.array(z.object({ userId: z.uuid(), conversations: count }).strict()),
+    /** Absent in a snapshot built before v9 (T-12.4-49): the answer then reads "Em breve". */
+    bySubject: supportBySubjectCountsSchema.optional(),
     moderation: supportModerationSchema,
   })
   .strict();
@@ -84,9 +114,10 @@ export const ownerSupportReadySchema = z
     weeklyMedianMinutes: weeklyMediansSchema,
     weeklyConversations: weeklyCountsSchema,
     answeredByStaff: z.array(ownerSupportStaffSchema),
-    bySubject: z
-      .object({ measured: z.literal(false), reason: z.literal('needs_support_subject') })
-      .strict(),
+    bySubject: z.union([
+      supportBySubjectCountsSchema.extend({ measured: z.literal(true) }).strict(),
+      z.object({ measured: z.literal(false), reason: z.literal('needs_support_subject') }).strict(),
+    ]),
     moderation: supportModerationSchema,
   })
   .strict();

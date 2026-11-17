@@ -189,7 +189,15 @@ describe('08.7 support', () => {
     expect(body.answeredByStaff).toEqual([]);
     expect(body.moderation).toEqual(await labModeration(day));
     expect(body.moderation).toEqual({ removedComments: 0, blocks: 0, unblocks: 0, comments30: 0 });
-    expect(body.bySubject).toEqual({ measured: false, reason: 'needs_support_subject' });
+    // EP-072: the builder writes v9, so the answer is measured, with the five categories at zero.
+    expect(body.bySubject).toEqual({
+      measured: true,
+      check_in: 0,
+      events: 0,
+      payment: 0,
+      account: 0,
+      other: 0,
+    });
   });
 
   it('INSIGHT-13 / EP-43: one answered thread and one waiting 26 hours give the queue, the last week’s median 30, the team with its live name, and no word of any conversation', async () => {
@@ -245,7 +253,15 @@ describe('08.7 support', () => {
       { userId: users.staff, name: STAFF_NAME, conversations: 1 },
     ]);
     expect(body.moderation).toEqual(await labModeration(day));
-    expect(body.bySubject).toEqual({ measured: false, reason: 'needs_support_subject' });
+    // D-813 / CASE-22: both fixture threads are cases of the default category, opened in Window30.
+    expect(body.bySubject).toEqual({
+      measured: true,
+      check_in: 0,
+      events: 0,
+      payment: 0,
+      account: 0,
+      other: 2,
+    });
     // EP-43: no message text, no member name, no member id — only the staff member's own identity.
     for (const leak of [
       UNIQUE_BODY,
@@ -259,6 +275,22 @@ describe('08.7 support', () => {
     ]) {
       expect(raw).not.toContain(leak);
     }
+  });
+
+  it('T-12.4-49: a snapshot built at version 8 (the support area has no bySubject key) still parses and still reads "Em breve"', async () => {
+    await adminSql`
+      update public.dashboard_snapshots
+         set payload_version = 8,
+             payload = jsonb_set(payload, '{support}', (payload -> 'support') - 'bySubject')
+       where tenant_id = ${tenants.lab}::uuid`;
+    const [stored] = await adminSql<{ has_key: boolean }[]>`
+      select (payload -> 'support') ? 'bySubject' as has_key
+        from public.dashboard_snapshots where tenant_id = ${tenants.lab}::uuid`;
+    expect(stored?.has_key).toBe(false);
+
+    const { body } = await supportOf(tokens.labAdmin, HOSTS.lab);
+    expect(body.bySubject).toEqual({ measured: false, reason: 'needs_support_subject' });
+    expect(body.awaiting).toEqual({ count: 1, oldestHours: 26 });
   });
 
   it('preparing before the first build of the tenant', async () => {

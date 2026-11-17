@@ -234,7 +234,7 @@ select is(
 select is(
   (select payload_version from public.dashboard_snapshots
     where tenant_id = '19800000-0000-4000-8000-000000000001' and snapshot_day = (select sp_today from d198) - 1),
-  8, 'the row carries the builder''s payload version (8 since 08.7-12: the overview''s enteredAtRisk)');
+  9, 'the row carries the builder''s payload version (9 since 12.4-10: the support area counts cases and carries bySubject; 8 since 08.7-12: the overview''s enteredAtRisk)');
 
 -- WR-01 (08.7 review): never rewind. With yesterday built, a late build of an older day (a retry, a
 -- stale job) writes nothing, so the latest-only member rows stay on the newest snapshot's day.
@@ -586,7 +586,7 @@ select is(
 select is(
   (select payload_version from public.dashboard_snapshots
     where tenant_id = '19800000-0000-4000-8000-000000000031' and snapshot_day = pg_temp.d()),
-  8, 'the builder writes payload version 8 (08.7-12; v7 added the support area)');
+  9, 'the builder writes payload version 9 (12.4-10; v8 added the overview''s enteredAtRisk, v7 the support area)');
 
 -- ── 6. movement and cohorts ────────────────────────────────────────────────────────────────────
 -- Tenant M (every member joined 400 days ago unless said): m401 engaged at D-30 (D-31..D-34) and
@@ -1087,7 +1087,7 @@ select is(
   (select s.payload_version || '/' || (s.payload -> 'overview' ? 'members')::text
      from public.dashboard_snapshots s
     where s.tenant_id = '19800000-0000-4000-8000-000000000801' and s.snapshot_day = pg_temp.d()),
-  '8/true', 'builder v8: payload version 8, the overview keeps its members KPI');
+  '9/true', 'builder v9: payload version 9, the overview keeps its members KPI');
 
 select * from finish();
 rollback;

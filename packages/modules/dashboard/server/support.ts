@@ -11,8 +11,8 @@ import { readLatestSnapshot, snapshotMetaOf } from './snapshot';
 
 type Ctx = Pick<RequestContext, 'userId' | 'tenantId' | 'role'>;
 
-/** D-465: no subject is ever written on a support conversation ("Em breve"). */
-const BY_SUBJECT = { measured: false, reason: 'needs_support_subject' } as const;
+/** A snapshot built before v9 has no `bySubject` key: "Em breve" (T-12.4-49). */
+const BY_SUBJECT_NOT_MEASURED = { measured: false, reason: 'needs_support_subject' } as const;
 
 /**
  * The snapshot's `support` key parsed with its contract, or `null` when it is missing or invalid
@@ -61,7 +61,9 @@ async function liveStaffNames(
  *
  * - No snapshot, or a snapshot whose `support` key is missing or fails its contract → `preparing`.
  * - The team's names are joined LIVE, exactly as stored; a user no longer staff is dropped.
- * - `bySubject` is always `{ measured: false, reason: 'needs_support_subject' }` (D-465).
+ * - `bySubject` is `{ measured: true, check_in, events, payment, account, other }` when the payload
+ *   carries the key (builder v9, D-813) and `{ measured: false, reason: 'needs_support_subject' }`
+ *   for an older snapshot, which still parses.
  * - Counts and minutes only: no message text, member name or member id (EP-43).
  */
 export async function getOwnerSupport(ctx: Ctx): Promise<OwnerSupportAnswer> {
@@ -90,7 +92,9 @@ export async function getOwnerSupport(ctx: Ctx): Promise<OwnerSupportAnswer> {
       weeklyMedianMinutes: support.weeklyMedianMinutes,
       weeklyConversations: support.weeklyConversations,
       answeredByStaff,
-      bySubject: BY_SUBJECT,
+      bySubject: support.bySubject
+        ? ({ measured: true, ...support.bySubject } as const)
+        : BY_SUBJECT_NOT_MEASURED,
       moderation: support.moderation,
     };
   });

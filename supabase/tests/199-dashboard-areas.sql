@@ -55,7 +55,7 @@ begin;
 --
 -- Fixture ids use the `19900000-…` prefix and the tenants `pgtap-areas-k` / `-l` / `-h` / `-z` /
 -- `-e` / `-f` / `-s`, used by no other file. Like its siblings, this file ROLLS BACK.
-select plan(86);
+select plan(99);
 
 -- ── helpers (rolled back with the file) ────────────────────────────────────────────────────────
 -- D is the São Paulo yesterday; `at(k, t)` the São Paulo local instant `t` of D-k; `k_of(dow)` the
@@ -476,7 +476,7 @@ select is(
           || '/' || (payload ? 'finance')::text || '/' || (payload ? 'support')::text
      from public.dashboard_snapshots
     where tenant_id = '19900000-0000-4000-8000-000000000001' and snapshot_day = pg_temp.d()),
-  '8/true/true/true/true', 'builder v8 writes payload version 8 with a content, an events, a finance and a support key');
+  '9/true/true/true/true', 'builder v9 writes payload version 9 with a content, an events, a finance and a support key');
 select ok(
   (select p.prosecdef and 'search_path=""' = any(p.proconfig)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -727,8 +727,8 @@ select ok(pg_temp.support_of('19900000-0000-4000-8000-000000000061')::text not l
   and pg_temp.support_of('19900000-0000-4000-8000-000000000061')::text not like '%000000000066%',
   'PR-1 / EP-43: the stored support names no message text and no member');
 select is(pg_temp.support_of('19900000-0000-4000-8000-000000000021'),
-  '{"awaiting": {"count": 0, "oldestHours": null}, "weeklyMedianMinutes": [null, null, null, null, null, null, null, null], "weeklyConversations": [0, 0, 0, 0, 0, 0, 0, 0], "answeredByStaff": [], "moderation": {"removedComments": 0, "blocks": 0, "unblocks": 0, "comments30": 0}}'::jsonb,
-  'EP-42: a tenant with no support conversation answers no queue, eight null medians, eight zero weeks, no team and moderation zeros');
+  '{"awaiting": {"count": 0, "oldestHours": null}, "weeklyMedianMinutes": [null, null, null, null, null, null, null, null], "weeklyConversations": [0, 0, 0, 0, 0, 0, 0, 0], "answeredByStaff": [], "bySubject": {"check_in": 0, "events": 0, "payment": 0, "account": 0, "other": 0}, "moderation": {"removedComments": 0, "blocks": 0, "unblocks": 0, "comments30": 0}}'::jsonb,
+  'EP-42 / EP-072: a tenant with no support conversation answers no queue, eight null medians, eight zero weeks, no team, the five categories at 0 and moderation zeros');
 select ok(
   (select p.prosecdef and 'search_path=""' = any(p.proconfig)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -736,6 +736,114 @@ select ok(
   and (select bool_and(not has_function_privilege(r, 'app.dashboard_area_support(date)', 'execute'))
          from unnest(array['anon', 'authenticated', 'service_role']) as r),
   'T-08.7-23: app.dashboard_area_support is SECURITY DEFINER with an empty search_path, executable by no lane role');
+
+-- ── 10. per case and by subject (12.4-10, `app.dashboard_area_support`, builder v9), tenant C ──────
+-- D-813 / D-815 / CASE-22: the builder counts CASES. C has six cases that are live in the window or
+-- the queue, and four closed ones (one member opens them one after another, a member holds one
+-- ACTIVE case at a time):
+--   k1 check_in, open, D-3: the member's message waits (a typed subject sits on it: PR-1).
+--   k2 events, in_progress, D-5: staff replied, then the member wrote again at 10:00 → waits.
+--   k3 payment, resolved, D-8: the staff reply is the last message, so the team has read it.
+--   k5 other, open, created at EXACTLY the window start (local 00:00 of D-29): counted; read.
+--   k8 account, open, created today: in the queue (the queue is "at build time"), not in the window.
+--   closed member: k4 account D-12 (member-last and unread, yet closed: never in the queue), k6
+--   payment one second BEFORE the window start (not counted), k7 check_in at D-40 (not counted),
+--   k9 check_in at D-2 (counted).
+-- bySubject over Window30 = check_in 2 (k1, k9), events 1, payment 1 (k6 is out), account 1 (k8 is
+-- out), other 1. A second tenant (D2) holds a check_in case and a waiting message: it changes
+-- nothing in C, and its own build counts them (positive control).
+select tests.tenant('pgtap-areas-c', 'Áreas C', '19900000-0000-4000-8000-000000000071');
+select tests.tenant('pgtap-areas-d2', 'Áreas D2', '19900000-0000-4000-8000-000000000081');
+update public.tenants set timezone = 'America/Sao_Paulo'
+ where id in ('19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000081');
+select tests.auth_user('admin@areas-c.local', '19900000-0000-4000-8000-000000000072');
+select tests.auth_user('c1@areas-c.local', '19900000-0000-4000-8000-000000000073');
+select tests.auth_user('c2@areas-c.local', '19900000-0000-4000-8000-000000000074');
+select tests.auth_user('c3@areas-c.local', '19900000-0000-4000-8000-000000000075');
+select tests.auth_user('c4@areas-c.local', '19900000-0000-4000-8000-000000000076');
+select tests.auth_user('c5@areas-c.local', '19900000-0000-4000-8000-000000000077');
+select tests.auth_user('c8@areas-c.local', '19900000-0000-4000-8000-000000000078');
+select tests.auth_user('d2@areas-d2.local', '19900000-0000-4000-8000-000000000083');
+select tests.member('19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000072', 'admin_tenant');
+select tests.member('19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000073');
+select tests.member('19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000074');
+select tests.member('19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000075');
+select tests.member('19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000076');
+select tests.member('19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000077');
+select tests.member('19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000078');
+select tests.member('19900000-0000-4000-8000-000000000081', '19900000-0000-4000-8000-000000000083');
+update public.memberships set joined_at = pg_temp.at(100, '10:00')
+ where tenant_id in ('19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000081');
+-- A case: the row (defaults trigger: open, normal, numbered) and the member's first message a minute later.
+create function pg_temp.mk_case(p_id text, p_tenant uuid, p_member uuid, p_category text,
+                                p_created timestamptz, p_subject text default null) returns void
+language sql as $$
+  insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id, category, subject, created_at)
+  values (('19900000-0000-4000-8000-' || p_id)::uuid, p_tenant, 'support', p_member, p_category, p_subject, p_created);
+  select pg_temp.say(p_id, p_tenant, p_member, 'member', p_created + interval '1 minute');
+$$;
+create function pg_temp.close_case(p_id text, p_at timestamptz) returns void
+language sql as $$
+  update public.chat_conversations set state = 'closed', closed_at = p_at
+   where id = ('19900000-0000-4000-8000-' || p_id)::uuid;
+$$;
+select pg_temp.mk_case('0000000005c1', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000073', 'check_in', pg_temp.at(3, '10:00'), 'Segredo do chamado 199');
+select pg_temp.mk_case('0000000005c2', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000074', 'events', pg_temp.at(5, '09:00'));
+select pg_temp.say('0000000005c2', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000072', 'staff', pg_temp.at(5, '09:30'));
+select pg_temp.say('0000000005c2', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000074', 'member', pg_temp.at(5, '10:00'));
+select pg_temp.mk_case('0000000005c3', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000075', 'payment', pg_temp.at(8, '10:00'));
+select pg_temp.say('0000000005c3', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000072', 'staff', pg_temp.at(8, '10:30'));
+update public.chat_conversations set state = 'resolved', resolved_at = pg_temp.at(8, '12:00')
+ where id = '19900000-0000-4000-8000-0000000005c3';
+select pg_temp.mk_case('0000000005c5', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000077', 'other', pg_temp.at(29, '00:00'));
+update public.chat_conversations set staff_last_read_seq = last_seq where id = '19900000-0000-4000-8000-0000000005c5';
+select pg_temp.mk_case('0000000005c8', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000078', 'account', now());
+select pg_temp.mk_case('0000000005c4', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000076', 'account', pg_temp.at(12, '10:00'));
+select pg_temp.close_case('0000000005c4', pg_temp.at(12, '11:00'));
+select pg_temp.mk_case('0000000005c6', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000076', 'payment', pg_temp.at(30, '23:59:59'));
+select pg_temp.close_case('0000000005c6', pg_temp.at(30, '23:59:59') + interval '1 hour');
+select pg_temp.mk_case('0000000005c7', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000076', 'check_in', pg_temp.at(40, '10:00'));
+select pg_temp.close_case('0000000005c7', pg_temp.at(40, '11:00'));
+select pg_temp.mk_case('0000000005c9', '19900000-0000-4000-8000-000000000071', '19900000-0000-4000-8000-000000000076', 'check_in', pg_temp.at(2, '10:00'));
+select pg_temp.close_case('0000000005c9', pg_temp.at(2, '11:00'));
+select pg_temp.mk_case('00000000060d', '19900000-0000-4000-8000-000000000081', '19900000-0000-4000-8000-000000000083', 'check_in', pg_temp.at(2, '09:00'));
+
+select is(pg_temp.build('19900000-0000-4000-8000-000000000071'), true, 'tenant C builds its yesterday');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000071') -> 'bySubject',
+  '{"check_in": 2, "events": 1, "payment": 1, "account": 1, "other": 1}'::jsonb,
+  'D-813 / CASE-22: cases opened in Window30 by category, all five keys: k1 and k9 check_in, k2 events, k3 payment, k4 account, k5 other; k6 (one second before the start), k7 (D-40) and k8 (today) are out');
+select is((pg_temp.support_of('19900000-0000-4000-8000-000000000071') -> 'bySubject' ->> 'other')::int, 1,
+  'window rules: a case opened exactly at local 00:00 of D-29 is counted');
+select is((pg_temp.support_of('19900000-0000-4000-8000-000000000071') -> 'bySubject' ->> 'payment')::int, 1,
+  'window rules: a case opened one second before the window start is not counted (only k3 is)');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000071') -> 'awaiting',
+  jsonb_build_object('count', 3,
+                     'oldestHours', floor(extract(epoch from now() - pg_temp.at(5, '10:00')) / 3600)::int),
+  'D-815: the queue counts ACTIVE cases whose last message is the member''s and unread: k1, k2 (waiting since 10:00 of D-5) and k8; the closed k4 (member-last, unread), the resolved k3 and the read k5 do not');
+select is(
+  (select count(*)::int from public.chat_conversations c
+    where c.tenant_id = '19900000-0000-4000-8000-000000000071' and c.kind = 'support'
+      and c.state in ('open', 'in_progress') and c.last_message_side = 'member' and c.last_seq > c.staff_last_read_seq),
+  3, 'the awaiting rule equals the staff badge rule on this fixture (open, in_progress, resolved and closed cases)');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000071') -> 'weeklyConversations',
+  '[0, 0, 1, 2, 0, 0, 2, 3]'::jsonb,
+  'weeklyConversations keeps its key and counts cases opened per week: k7 in block 2, k5 and k6 in block 3, k3 and k4 in block 6, k1, k2 and k9 in the last; k8 (today) is in no block');
+select is(pg_temp.build('19900000-0000-4000-8000-000000000081'), true, 'tenant D2 builds its yesterday');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000081') -> 'bySubject',
+  '{"check_in": 1, "events": 0, "payment": 0, "account": 0, "other": 0}'::jsonb,
+  'CASE-23 positive control: D2''s own build counts its check_in case, and C''s five cases of that category did not leak in');
+select is((pg_temp.support_of('19900000-0000-4000-8000-000000000081') -> 'awaiting' ->> 'count')::int, 1,
+  'CASE-23: D2''s queue holds its own waiting case only, never C''s three');
+select is((pg_temp.support_of('19900000-0000-4000-8000-000000000071') -> 'bySubject' ->> 'check_in')::int, 2,
+  'CASE-23: C''s check_in count stayed at its own two although D2 holds a check_in case in the window');
+select ok(pg_temp.support_of('19900000-0000-4000-8000-000000000071')::text not like '%Segredo%'
+  and pg_temp.support_of('19900000-0000-4000-8000-000000000071')::text not like '%secreta%'
+  and pg_temp.support_of('19900000-0000-4000-8000-000000000071')::text not like '%000000000073%',
+  'T-12.4-47 / EP-073: bySubject carries counts only, no subject, message text or member id');
+select is(
+  (select array_agg(k order by k) from jsonb_object_keys(pg_temp.support_of('19900000-0000-4000-8000-000000000071') -> 'bySubject') as k),
+  array['account', 'check_in', 'events', 'other', 'payment'],
+  'EP-073: the category keys are the five exact lowercase codes');
 
 select * from finish();
 rollback;
