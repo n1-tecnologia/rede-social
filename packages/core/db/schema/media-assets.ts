@@ -48,9 +48,9 @@ export const mediaAssets = pgTable(
     ownerUserId: uuid('owner_user_id')
       .notNull()
       .references(() => users.id),
-    /** 'image' | 'video' | 'file' — see the CHECK below. */
+    /** 'image' | 'video' | 'file' | 'audio' — see the CHECK below. */
     kind: text().notNull(),
-    /** 'avatar' | 'post' | 'cover' | 'story' | 'attachment' | 'lesson' — decides the derived width ladder. */
+    /** 'avatar' | 'post' | 'cover' | 'story' | 'attachment' | 'lesson' | 'voice' — decides the derived width ladder. */
     purpose: text().notNull(),
     status: text().notNull().default('pending'),
     provider: text().notNull().default('supabase'),
@@ -86,11 +86,13 @@ export const mediaAssets = pgTable(
     uniqueIndex('media_assets_provider_asset_uq')
       .on(t.provider, t.providerAssetId)
       .where(sql`provider_asset_id is not null`),
-    check('media_assets_kind_chk', sql`${t.kind} in ('image','video','file')`),
+    // 12.5 (D-864): `audio`, a chat voice message, is appended last and nothing is removed.
+    check('media_assets_kind_chk', sql`${t.kind} in ('image','video','file','audio')`),
     // 08.3 (D-409): `lesson`, a course lesson's video, rides the same provider pipeline as `post`.
+    // 12.5 (D-864): `voice`, a chat voice message, is the audio kind's only purpose.
     check(
       'media_assets_purpose_chk',
-      sql`${t.purpose} in ('avatar','post','cover','story','attachment','lesson')`,
+      sql`${t.purpose} in ('avatar','post','cover','story','attachment','lesson','voice')`,
     ),
     check(
       'media_assets_status_chk',

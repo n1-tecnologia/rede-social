@@ -17,8 +17,9 @@ import { z } from 'zod';
  * A payload NEVER carries a signed Storage URL (RESEARCH Pitfall 5): `mediaAssetSchema.url` and
  * `variants[].url` are stable `/v1/media/...` paths, so a cached payload can never outlive its URLs.
  *
- * Member uploads are jpeg/png/webp (images), mp4/quicktime (video) and, as attachments, PDF, the
- * four office document mimes and the three image mimes (`ATTACHMENT_MIMES`) ONLY.
+ * Member uploads are jpeg/png/webp (images), mp4/quicktime (video), as attachments PDF, the
+ * four office document mimes and the three image mimes (`ATTACHMENT_MIMES`), and, since 12.5, the
+ * `audio` kind's `voice` purpose (webm/mp4/ogg recordings, `VOICE_MIMES`) ONLY.
  * Vector uploads are absent from every allow-list on purpose: a member-uploaded vector rendered in
  * `<img>` is a stored-XSS surface with a far larger attacker population than the admin-only brand
  * logo path (RESEARCH §Anti-Patterns, threat T-03-09).
@@ -27,7 +28,12 @@ import { z } from 'zod';
 /** The PRIVATE Storage bucket every member upload lands in (TENANT-04). */
 export const MEDIA_BUCKET = 'media';
 
-export const MEDIA_KINDS = ['image', 'video', 'file'] as const;
+/**
+ * `audio` (12.5, D-864) is appended LAST: it holds a chat voice message and nothing else yet. The
+ * `media_assets_kind_chk` CHECK is generated from this list, so appending keeps every earlier
+ * migration's diff stable.
+ */
+export const MEDIA_KINDS = ['image', 'video', 'file', 'audio'] as const;
 export type MediaKind = (typeof MEDIA_KINDS)[number];
 
 /**
@@ -36,7 +42,16 @@ export type MediaKind = (typeof MEDIA_KINDS)[number];
  * Course, category, track and live covers and the instructor photo reuse `cover`; lesson materials
  * reuse `attachment`. There is deliberately no `image.lesson` or `file.lesson` pair.
  */
-export const MEDIA_PURPOSES = ['avatar', 'post', 'cover', 'story', 'attachment', 'lesson'] as const;
+export const MEDIA_PURPOSES = [
+  'avatar',
+  'post',
+  'cover',
+  'story',
+  'attachment',
+  'lesson',
+  // 12.5 (D-864): a chat voice message, an AUDIO-only purpose (appended last, see MEDIA_KINDS).
+  'voice',
+] as const;
 export type MediaPurpose = (typeof MEDIA_PURPOSES)[number];
 
 export const MEDIA_STATUSES = [
@@ -71,6 +86,8 @@ export const PURPOSE_WIDTHS: Record<MediaPurpose, readonly number[]> = {
   attachment: [],
   // A video purpose: the provider derives thumbnails and the HLS ladder, Storage derives nothing.
   lesson: [],
+  // An audio asset has no image ladder: the worker derives nothing for it in Storage (12.5, D-864).
+  voice: [],
 };
 
 export type MediaLimit = {
@@ -81,6 +98,21 @@ export type MediaLimit = {
 
 const IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 const VIDEO_MIMES = ['video/mp4', 'video/quicktime'] as const;
+
+/**
+ * The longest a chat voice message may be (12.5, D-848): five minutes. This is the first of the three
+ * enforcements — the recorder stops at it (plan 13) and the server refuses a longer file at the end
+ * of the upload (plan 02); the number is declared HERE once, in `MEDIA_LIMITS.audio.voice`.
+ */
+export const VOICE_MAX_SECONDS = 300;
+
+/**
+ * The container types a browser's MediaRecorder produces: WebM (Chrome, Firefox, Android), MP4
+ * (Safari, iOS) and Ogg (Firefox). BASE types only — the recorder's codec parameter
+ * (`audio/webm;codecs=opus`) is stripped by the client before the start call, so the allow-list, the
+ * bucket and the declared mime all compare equal strings (D-864).
+ */
+export const VOICE_MIMES = ['audio/webm', 'audio/mp4', 'audio/ogg'] as const;
 
 /**
  * What a `file`-kind `attachment` may be (08.3-03, D-410, COURSE-07): PDF, a spreadsheet, a slide
@@ -155,6 +187,16 @@ export const MEDIA_LIMITS: Record<MediaKind, Partial<Record<MediaPurpose, MediaL
     // (FEED-01 "PDF and similar") — are PDF, spreadsheets, slides or images at 50 MiB, the private
     // bucket's per-file cap (`file_size_limit`) and the Supabase Free ceiling.
     attachment: { mimes: ATTACHMENT_MIMES, maxBytes: 50 * 1024 * 1024 },
+  },
+  audio: {
+    // 12.5 (D-848, D-864, VOICE-13): the 'audio' kind, a chat voice message, at most five minutes. `maxBytes` equals
+    // `RESUMABLE_THRESHOLD_BYTES` on purpose — five minutes of Opus or AAC is well under 6 MiB, so a
+    // take is always ONE signed PUT and never a TUS upload.
+    voice: {
+      mimes: VOICE_MIMES,
+      maxBytes: 6 * 1024 * 1024,
+      maxDurationSeconds: VOICE_MAX_SECONDS,
+    },
   },
 };
 

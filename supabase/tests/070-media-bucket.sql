@@ -14,7 +14,7 @@ begin;
 -- a latent widening the day a token does leak. The assertion is what keeps that count at zero.
 --
 -- Runs in one transaction that rolls back, so it re-runs identically in any order.
-select plan(7);
+select plan(10);
 
 select is(
   (select count(*)::int from storage.buckets where id = 'media'),
@@ -68,6 +68,36 @@ select is(
   (select count(*)::int from pg_policy where polrelid = 'storage.objects'::regclass),
   0,
   'R-15/T-03-08: storage.objects carries ZERO policies — a policy would grant nothing that is used'
+);
+
+-- 12.5-01 (D-864, VOICE-13): the `audio` kind and the `voice` purpose are accepted by the two CHECKs
+-- of `media_assets`, a bogus kind is still refused, and both constraints are validated (the swap
+-- adds them NOT VALID and validates afterwards, so a half-applied migration would show here).
+-- The rows need a real tenant and user, so they use the helpers of 000-helpers.sql.
+select tests.tenant('voice-070', 'Voice 070', '7d5a0000-0000-4000-8000-000000000a01');
+select tests.auth_user('voice-070@example.test', '7d5a0000-0000-4000-8000-000000000b01');
+
+select lives_ok(
+  $$ insert into public.media_assets (tenant_id, owner_user_id, kind, purpose, mime, bytes)
+     values ('7d5a0000-0000-4000-8000-000000000a01', '7d5a0000-0000-4000-8000-000000000b01',
+             'audio', 'voice', 'audio/webm', 1024) $$,
+  'D-864: an audio/voice asset row is accepted by the two CHECKs'
+);
+
+select throws_ok(
+  $$ insert into public.media_assets (tenant_id, owner_user_id, kind, purpose, mime, bytes)
+     values ('7d5a0000-0000-4000-8000-000000000a01', '7d5a0000-0000-4000-8000-000000000b01',
+             'bogus', 'voice', 'audio/webm', 1024) $$,
+  '23514',
+  null,
+  'D-864: a kind outside image/video/file/audio is still refused (23514)'
+);
+
+select is(
+  (select count(*)::int from pg_constraint
+    where conname in ('media_assets_kind_chk', 'media_assets_purpose_chk') and convalidated),
+  2,
+  'D-864: both widened CHECKs are validated, not left NOT VALID'
 );
 
 select * from finish();

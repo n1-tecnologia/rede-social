@@ -3,6 +3,7 @@ import {
   ATTACHMENT_MIMES,
   attachmentKindFor,
   classifyMediaFile,
+  MEDIA_KINDS,
   MEDIA_LIMITS,
   MEDIA_PURPOSES,
   mediaAcceptFor,
@@ -12,6 +13,9 @@ import {
   PLAYBACK_TOKEN_TTL_SECONDS,
   PURPOSE_WIDTHS,
   playbackTtlSeconds,
+  RESUMABLE_THRESHOLD_BYTES,
+  VOICE_MAX_SECONDS,
+  VOICE_MIMES,
 } from '../src/media';
 
 /**
@@ -21,9 +25,16 @@ import {
  * ones the API and the ready-event job perform.
  */
 describe('media contract: the lesson purpose (08.3-01)', () => {
-  it('MEDIA_PURPOSES ends with lesson (appended LAST, the CHECK is generated from this order)', () => {
-    expect(MEDIA_PURPOSES.at(-1)).toBe('lesson');
-    expect(MEDIA_PURPOSES.slice(0, -1)).toEqual(['avatar', 'post', 'cover', 'story', 'attachment']);
+  it('MEDIA_PURPOSES keeps lesson in its place (12.5 appended voice after it, never before)', () => {
+    expect(MEDIA_PURPOSES.indexOf('lesson')).toBe(5);
+    expect(MEDIA_PURPOSES.slice(0, 6)).toEqual([
+      'avatar',
+      'post',
+      'cover',
+      'story',
+      'attachment',
+      'lesson',
+    ]);
   });
 
   it('lesson derives no WebP ladder (the provider owns thumbnails and HLS)', () => {
@@ -166,5 +177,85 @@ describe('media contract: the widened attachment (08.3-03)', () => {
     expect(attachmentKindFor('application/zip')).toBe('file');
     expect(attachmentKindFor(null)).toBe('file');
     expect(attachmentKindFor(undefined)).toBe('file');
+  });
+});
+
+/**
+ * 12.5-01 (D-848, D-864, VOICE-13): a chat voice message is an `audio` asset with the `voice`
+ * purpose. Both values are APPENDED last (the CHECKs are generated from these lists, and the order
+ * is what keeps every earlier migration's diff stable); a take is at most 300 seconds and 6 MiB so
+ * it is always ONE signed PUT, never a TUS upload; and the bucket allow-list (pinned in
+ * supabase/tests/070-media-bucket.sql) is exactly the union of the mimes below.
+ */
+describe('media contract: the audio kind and the voice purpose (12.5-01)', () => {
+  it('MEDIA_KINDS ends with audio and MEDIA_PURPOSES ends with voice (appended LAST)', () => {
+    expect(MEDIA_KINDS.at(-1)).toBe('audio');
+    expect(MEDIA_KINDS.slice(0, -1)).toEqual(['image', 'video', 'file']);
+    expect(MEDIA_PURPOSES.at(-1)).toBe('voice');
+    expect(MEDIA_PURPOSES.slice(0, -1)).toEqual([
+      'avatar',
+      'post',
+      'cover',
+      'story',
+      'attachment',
+      'lesson',
+    ]);
+  });
+
+  it('audio/voice is three base mimes, 6 MiB and 300 seconds', () => {
+    expect(VOICE_MAX_SECONDS).toBe(300);
+    expect([...VOICE_MIMES]).toEqual(['audio/webm', 'audio/mp4', 'audio/ogg']);
+    const voice = MEDIA_LIMITS.audio.voice;
+    expect(voice?.mimes).toBe(VOICE_MIMES);
+    expect(voice?.maxBytes).toBe(6 * 1024 * 1024);
+    expect(voice?.maxDurationSeconds).toBe(VOICE_MAX_SECONDS);
+  });
+
+  it('a take is always ONE signed PUT: maxBytes equals the resumable threshold', () => {
+    expect(MEDIA_LIMITS.audio.voice?.maxBytes).toBe(RESUMABLE_THRESHOLD_BYTES);
+  });
+
+  it('voice derives no image ladder and is the only audio pair', () => {
+    expect(PURPOSE_WIDTHS.voice).toEqual([]);
+    expect(Object.keys(MEDIA_LIMITS.audio)).toEqual(['voice']);
+    expect(MEDIA_LIMITS.image.voice).toBeUndefined();
+    expect(MEDIA_LIMITS.video.voice).toBeUndefined();
+    expect(MEDIA_LIMITS.file.voice).toBeUndefined();
+    expect(MEDIA_LIMITS.audio.post).toBeUndefined();
+  });
+
+  it('the union of every MEDIA_LIMITS mime is the thirteen the private bucket allows', () => {
+    const union = new Set<string>();
+    for (const purposes of Object.values(MEDIA_LIMITS)) {
+      for (const limit of Object.values(purposes)) {
+        for (const mime of limit?.mimes ?? []) union.add(mime);
+      }
+    }
+    expect([...union].sort()).toEqual(
+      [
+        'application/pdf',
+        'application/vnd.ms-excel',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'audio/mp4',
+        'audio/ogg',
+        'audio/webm',
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'video/mp4',
+        'video/quicktime',
+      ].sort(),
+    );
+  });
+
+  it('the pick-time gate judges a take: webm passes, wav is a type refusal, 6 MiB + 1 is a size one', () => {
+    expect(classifyMediaFile({ type: 'audio/webm', size: 1000 }, 'audio', 'voice')).toBeNull();
+    expect(classifyMediaFile({ type: 'audio/wav', size: 1000 }, 'audio', 'voice')).toBe('type');
+    expect(
+      classifyMediaFile({ type: 'audio/mp4', size: 6 * 1024 * 1024 + 1 }, 'audio', 'voice'),
+    ).toBe('size');
+    expect(mediaAcceptFor('audio', 'voice')).toBe('audio/webm,audio/mp4,audio/ogg');
   });
 });
