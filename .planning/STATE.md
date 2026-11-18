@@ -5,10 +5,10 @@ current_phase_name: Mensagem de voz no chat
 current_plan: 18
 status: verifying
 stopped_at: Phase 12.5 executed 18/18; verification human_needed (8/11), 34 ledger rows are Igor's; phase not closed, nothing pushed
-last_updated: "2026-11-18T01:49:42.002Z"
+last_updated: "2026-11-18T02:22:35.679Z"
 last_activity: 2026-11-17
-last_activity_desc: Phase 12.5 executed 18/18, code review (3 warnings, no blockers), verification human_needed; UAT persisted, phase not marked complete
-state_head: 6bc75f70a2290adaef2207cb234c71a0f2c50c90
+last_activity_desc: "Completed quick task 261117-w3z: WR-01..03 of the 12.5 review fixed (local only)"
+state_head: 0ec0441b91fdc30f609d49ed908b10cd3f992702
 progress:
   total_phases: 35
   completed_phases: 0
@@ -1283,6 +1283,7 @@ None yet.
 | 261117-kkx | Mail-scanner-proof /auth/confirm (prod bug, tenant igor-alves, Hotmail SafeLinks burned the signup and recovery tokens): GET /auth/confirm no longer calls verifyOtp, it hands a valid-shaped link to the new /auth/continuar interstitial, whose button POSTs back; only the POST consumes the token, writes link_return and answers 303; install gate lets /auth/continuar through; web suite 409 files / 9811 tests green, typecheck, boundaries, ui-literals, guard:lanes, biome green; Playwright e2e edits (followMailLink + scanner-first cases) NOT run, check:static-routes NOT run, no live request made; nothing pushed or deployed; tasks 1 and 2 must ship together | 2026-11-17 | ba37f69b | complete | [261117-kkx-mail-scanner-proof-auth-confirm-get-show](./quick/261117-kkx-mail-scanner-proof-auth-confirm-get-show/) |
 | 261117-mvo | Mux Player bar (back/forward 10 s, speed 0.5-2x, time bar, volume, fullscreen) on lessons, live replays and the media library preview via an opt-in `controls` prop on VideoPlayer; feed, Reels and stories keep no bar; vendor labels stay in English (media-chrome pt.js needs a dependency decision); local, not pushed or deployed | 2026-11-17 | 9c1899b2 | complete | [261117-mvo-barra-de-controles-do-mux-player-voltar-](./quick/261117-mvo-barra-de-controles-do-mux-player-voltar-/) |
 | 261117-n9r | /perfil shows the account e-mail only to the tenant administrator (`admin_tenant`; decided on the server so a member's HTML carries no e-mail; `support_tenant` held back on purpose); platform preview and e2e specs follow; API and contract untouched; local, not pushed or deployed | 2026-11-17 | ceade1c7 | complete | [261117-n9r-esconder-o-e-mail-do-perfil-perfil-mostr](./quick/261117-n9r-esconder-o-e-mail-do-perfil-perfil-mostr/) |
+| 261117-w3z | Fix WR-01..03 of the 12.5 voice code review (cancel the send on leaving, purge tombstone only for audio, toast on closed/not_found) | 2026-11-18 | 0ec0441b | — | [261117-w3z-fix-wr-01-03-of-the-12-5-voice-code-revi](./quick/261117-w3z-fix-wr-01-03-of-the-12-5-voice-code-revi/) |
 
 ### Roadmap Evolution
 
