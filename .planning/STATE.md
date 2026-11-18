@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 12.5 (Mensagem de voz no chat) — EXECUTING
+Phase: 12.5 (Mensagem de voz no chat) — EXECUTED 18/18, verification human_needed (8/11), not closed
 Current Plan: 18
 Total Plans in Phase: 18
 Plan: 18 of 18
-Status: Phase complete — ready for verification
-Last activity: 2026-11-17 — Phase 12.5 execution started
+Status: Executed and verified by code; 34 ledger rows (real devices, release, review items) are Igor's; WR-01..03 of the code review open; nothing pushed or deployed
+Last activity: 2026-11-17 — Phase 12.5 executed 18/18, code review 3 warnings no blockers, verification human_needed
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
