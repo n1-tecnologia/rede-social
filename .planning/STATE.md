@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: "12.5"
 current_phase_name: Mensagem de voz no chat
 current_plan: 18
-status: executing
+status: verifying
 stopped_at: Completed 12.4-22-PLAN.md; re-verification gaps_found (WR-06), phase not closed
-last_updated: "2026-11-18T01:15:19.612Z"
+last_updated: "2026-11-18T01:33:23.602Z"
 last_activity: 2026-11-17
-last_activity_desc: Phase 12.5 wave 13 complete (plan 17, e2e spec written and listed, not run); next wave 14 (18, release notes, ledger, exit gate)
-state_head: 3ee5e24292e55b86fbf3346e17354890d3ba54e2
+last_activity_desc: Phase 12.5 all 18 plans executed; running review, regression gate and verification
+state_head: 4dd463bbce623da196f2d521e38ae63867c55171
 progress:
   total_phases: 35
   completed_phases: 0
   total_plans: 491
-  completed_plans: 462
+  completed_plans: 463
   percent: 0
 ---
 
@@ -32,7 +32,7 @@ Phase: 12.5 (Mensagem de voz no chat) — EXECUTING
 Current Plan: 18
 Total Plans in Phase: 18
 Plan: 18 of 18
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-17 — Phase 12.5 execution started
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
