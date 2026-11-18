@@ -62,7 +62,8 @@ const SITES = [
   ],
   [
     'packages/modules/chat/ui/ChatComposer.tsx',
-    'h-11 w-11 shrink-0 items-center justify-center rounded-full',
+    // `bg-button` keeps the neutral trash button of the recording row (12.5-13) out of the match.
+    'h-11 w-11 shrink-0 items-center justify-center rounded-full bg-button',
   ],
   ['packages/modules/feed/ui/ComposeFab.tsx', 'grid h-14 w-14 place-items-center rounded-full'],
   [
