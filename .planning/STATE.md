@@ -5,10 +5,10 @@ current_phase_name: Rede Social - Direct Messages, Member Blocking and Reports
 current_plan: 0
 status: ready_to_discuss
 stopped_at: "Phase 12.5 CLOSED 2026-11-17 by developer closure (Igor approved closing, fixing WR-01..03, sketch 024 final and the account-deletion function): 18/18 plans, verification human_needed and stale (owed), UAT closed partial with 8 rows blocked, ledger P1..P34 are his; Phase 12.4 is still not closed; nothing pushed or deployed"
-last_updated: "2026-11-18T14:06:24.103Z"
+last_updated: "2026-11-18T15:20:15.816Z"
 last_activity: 2026-11-17
-last_activity_desc: "Completed quick task 261118-eti: Mux bar on every feed video (local only, not pushed)"
-state_head: 24d5a26262b493455112ff2eab8be151c391a65d
+last_activity_desc: "Completed quick task 261118-glh: oversize video message fixed, 8 GiB cap and 3 h upload window (local only, not pushed)"
+state_head: 82894cd45d5316eb5d9affe103cb7a5d4af6c9e5
 progress:
   total_phases: 35
   completed_phases: 0
@@ -1285,6 +1285,7 @@ None yet.
 | 261117-n9r | /perfil shows the account e-mail only to the tenant administrator (`admin_tenant`; decided on the server so a member's HTML carries no e-mail; `support_tenant` held back on purpose); platform preview and e2e specs follow; API and contract untouched; local, not pushed or deployed | 2026-11-17 | ceade1c7 | complete | [261117-n9r-esconder-o-e-mail-do-perfil-perfil-mostr](./quick/261117-n9r-esconder-o-e-mail-do-perfil-perfil-mostr/) |
 | 261117-w3z | Fix WR-01..03 of the 12.5 voice code review (cancel the send on leaving, purge tombstone only for audio, toast on closed/not_found) | 2026-11-18 | 0ec0441b | — | [261117-w3z-fix-wr-01-03-of-the-12-5-voice-code-revi](./quick/261117-w3z-fix-wr-01-03-of-the-12-5-voice-code-revi/) |
 | 261118-eti | Mux Player bar on every feed post video (play/pause, time bar, speed, volume, fullscreen), bridged into the feed state | 2026-11-18 | 24d5a262 | — | [261118-eti-mux-player-bar-on-every-feed-post-video](./quick/261118-eti-mux-player-bar-on-every-feed-post-video/) |
+| 261118-glh | Oversize video now says too large (was the photo-prepare error) and the temporary post-video limits go to 8 GiB with a 3 h upload window | 2026-11-18 | 82894cd4 | — | [261118-glh-oversize-video-message-and-raise-the-tem](./quick/261118-glh-oversize-video-message-and-raise-the-tem/) |
 
 ### Roadmap Evolution
 
