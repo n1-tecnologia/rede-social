@@ -5179,6 +5179,253 @@ And in the app, on a homolog tenant with the chat module on, one member account 
 
 See the ledger named at the top. A row becomes `passed` only with the evidence you paste and your own date.
 
+## Phase 12.5 release (voice messages)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them: nothing of
+Phase 12.5 has been pushed, deployed or applied to a hosted project, and no agent touches homolog or production.
+No command here prints a secret. Phase 12.5 ships ON TOP of the Phase 12.4 release (support cases) and of every
+release above it: in the same sitting as the 12.4 release or after it, never before it (the voice routes and the
+case transitions read the case columns of 12.4). The proofs only the owner can run (the phone walks on an iPhone,
+an Android phone and Firefox, the call during a recording, the seek after the link's hour, the installed app's
+service worker, the screen-reader walk, the held-out visual rows, the sketch 024 approval record, the planner
+assumptions to confirm, every hosted release step and the first-day checks, the image measurement on Cloud Run, the
+first CI run of the new apt step, the run of the end-to-end spec and the full `pnpm verify`) are in the ledger
+`.planning/phases/12.5-*/12.5-MANUAL-PROOFS.md`; it ships with every row `pending`, and a row becomes `passed` only
+with the evidence you paste and your own date.
+
+**This release changes nothing for a member who never records.** No existing message, route, case or screen changes
+for a member or a team member who only types. What changes is told in "Per-tenant effect" below; the one visible
+change on the day of the release, for every tenant with the `chat` module on, is the microphone where a disabled
+send button was.
+
+### What ships
+
+- **Seven migrations, applied in timestamp order** (the order `ls supabase/migrations` prints, all after
+  `20261117161348_chat_cases_assign_expected_owner.sql`). All seven are expand-only: this phase has no allowed
+  destructive statement (see the grep below). Each applies on an EMPTY tenant project and on an existing one. The one
+  step that cannot be undone is item 3 (D-865).
+  1. `20261117214322_media_audio_kind.sql` (generated, then reshaped by hand): the CHECKs `media_assets_kind_chk` and
+     `media_assets_purpose_chk` widened by one value each (`audio` and `voice`, appended after every value they
+     accepted before), each swap one `alter table` statement (drop plus add NOT VALID) followed by `validate
+     constraint`. Every existing row already satisfies the wider lists.
+  2. `20261117214440_media_bucket_audio.sql` (hand-written, idempotent, guarded with `to_regclass`): the private
+     `media` bucket's mime allow-list goes from ten to thirteen (the ten it held plus `audio/webm`, `audio/mp4` and
+     `audio/ogg`); `public` stays false and no `storage.objects` policy is added.
+  3. `20261117220919_chat_voice_messages.sql` (generated, with the safe swaps added by hand, **the one-way step**,
+     D-865): `chat_messages.body` becomes nullable, the row gains `media_asset_id` (a foreign key to `media_assets`,
+     added NOT VALID then validated) and `voice_seconds` (`smallint`), the CHECK `chat_messages_body_chk` keeps its name
+     and reads "null or 1 to 2000", the new CHECK `chat_messages_content_chk` requires exactly one of a text row or a
+     recording row of 1 to 300 seconds, the partial unique index `chat_messages_tenant_media_asset_uq` makes a repeated
+     send of the same take collide, and the policy `chat_messages_insert` is replaced in ONE statement (the shipped
+     author and side predicates plus the clause that accepts only the author's own `ready`, undeleted `audio`/`voice`
+     asset whose duration equals `voice_seconds`). No UPDATE or DELETE policy or grant is added. Once applied to a tenant
+     database it stays: the column, the CHECK, the index and the policy are what a recording rests on.
+  4. `20261117223744_chat_asset_gate_seam.sql` (hand-written, kernel): the stub `app.chat_asset_hidden(uuid)` (answers
+     false) and the definer `app.voice_asset_retired(uuid)`, both with an empty `search_path`, EXECUTE revoked from
+     PUBLIC and granted to `authenticated`. It sorts before the chat body of the gate on purpose.
+  5. `20261117223747_chat_voice_gate.sql` (hand-written, chat): the invoker body of `app.chat_asset_hidden` through
+     `create or replace` (D-867): a recording opens for its uploader and for whoever can read a message that references
+     it through the chat policies, and for nobody once it is retired.
+  6. `20261117230510_chat_voice_orphans_sweep.sql` (hand-written): `app.chat_voice_orphans_sweep(int)`, a definer
+     executable by `service_role` only, that soft-deletes a voice take older than 24 hours that no message references,
+     within its own tenant. It rides the kernel's EXISTING hourly sweeper through the chat manifest's `sweepFunctions`:
+     no new queue and no new job name.
+  7. `20261117230638_chat_voice_account_deletion.sql` (hand-written): `app.account_anonymise(uuid)` REPLACED by the
+     body of `20261105152916_reports_blocks_functions.sql` character for character plus one statement after the avatar
+     step (the member's `voice` assets in the locked row's tenant are soft-deleted). It is a security-relevant function
+     of the account-deletion path: read the diff by hand (the command is in "Read-only check" below) before you apply it
+     to a hosted project.
+- **The API and the worker, from a REBUILT image.** The one image (`apps/api/Dockerfile`, roles `api`, `worker` and
+  `migrate`) now contains **ffmpeg and ffprobe** (Debian 12 package `7:5.1.9-0+deb12u1` on `node:24-slim`, installed
+  in the runner stage before `USER node`). The worker normalizes every recording to one mono AAC `audio/mp4` file with
+  it. The image grew by 158,376,788 bytes (about 151 MiB; 204,116,377 bytes without, 362,493,165 with); a local
+  start-up proxy (container creation to the exit at environment validation, five runs each) read a median of 1.169 s
+  without and 1.235 s with, and **the real Cloud Run cold start of the rebuilt revision was not measured** (the API
+  needs a live database to boot; ledger row). The image also bakes the migrations manifest built by
+  `scripts/build-migrations-manifest.mjs`, so the API step is a REBUILD, never a redeploy of the old image: an image
+  built before these files does not know them, and a production boot without the manifest stops with `migrations
+  manifest empty`. Both deploy workflows (`deploy-api.yml`, `deploy-hml.yml`) already build this Dockerfile, so a normal
+  deploy carries ffmpeg with no workflow edit. The shared CI action also installs ffmpeg (its first run on a GitHub
+  runner is a ledger row).
+- **The API and worker code.** The `audio` media kind and the `voice` purpose, the two voice routes
+  (`POST /v1/chat/support/voice-messages` for the member, `POST /v1/chat/conversations/{id}/voice-messages` for the
+  team), the read gate on `GET /v1/media/{id}/original`, the refusal of `DELETE /v1/media/{id}` for a recording, the
+  exclusion of recordings from the admin media library, the optional voice keys on the message and preview reads, the
+  push words, the orphan sweep on the hourly sweeper and the recording step of the account deletion. No new table, no
+  new permission, no new queue, no new job name.
+- **The web.** The microphone in the shared composer, the recorder, the player in the bubble, the pending and failed
+  bubbles, the previews on the inbox row and on `Meus chamados`, the member-side blocked sentence, the microphone text
+  of the native shell, and the service worker rule that leaves audio and video requests to the browser (so a Range
+  request reaches the network untouched on Safari). The web reads every new key of the API as optional.
+
+### Read-only check on EVERY hosted project (run before anything else)
+
+Run these on each hosted tenant project, **including the one that holds several tenants**, in the Supabase SQL editor
+or with `psql` and a read-only role. They only read. Paste the shapes and counts in the ledger; never a project
+reference, a tenant name or a member's e-mail.
+
+```sql
+-- A. Is any of this release already on the project? (expected before the release: no row)
+select column_name from information_schema.columns
+ where table_schema = 'public' and table_name = 'chat_messages'
+   and column_name in ('media_asset_id', 'voice_seconds');
+-- B. Which of this release's versions are already recorded? (expected before the release: no row)
+select version from supabase_migrations.schema_migrations
+ where version in ('20261117214322', '20261117214440', '20261117220919', '20261117223744',
+                   '20261117223747', '20261117230510', '20261117230638')
+ order by version;
+-- C. How big are the two tables the release widens? (the swaps are quick, but read the size)
+select (select count(*) from public.chat_messages) as messages,
+       (select count(*) from public.media_assets) as media_assets;
+-- D. Does the bucket still hold the ten old mimes? (expected before the release: 10, f for the audio test)
+select cardinality(allowed_mime_types) as mimes,
+       allowed_mime_types @> array['audio/webm', 'audio/mp4', 'audio/ogg'] as has_audio,
+       public
+  from storage.buckets where id = 'media';
+```
+
+Then, from the repository, the local checks that need no project:
+
+- `pnpm db:migrate-all -- --dry-run` lists the pending versions per project and writes nothing; on a project that
+  already has the Phase 12.4 release the seven files above are the pending ones.
+- The expand-only grep over the phase's files prints NOTHING (this phase has no allowed destructive statement):
+  `grep -inE 'drop (table|column)|rename|set not null|alter column .* type' supabase/migrations/*_media_audio_kind.sql
+  supabase/migrations/*_media_bucket_audio.sql supabase/migrations/*_chat_asset_gate_seam.sql
+  supabase/migrations/*_chat_voice*.sql`. The statement that makes `body` nullable is `alter column ... drop not null`
+  (a widening: every existing row already satisfies it), which the pattern does not match, and the swaps of the
+  CHECKs and of the policy are single `alter` statements that replace a rule by a wider one.
+- The body diff of the replaced account function prints only added lines (a `<` line is a defect):
+  `diff <(awk '/function app.account_anonymise/{f=1} f&&/^\$\$;/{print; exit} f' supabase/migrations/20261105152916_reports_blocks_functions.sql) <(awk '/function app.account_anonymise/{f=1} f&&/^\$\$;/{print; exit} f' supabase/migrations/20261117230638_chat_voice_account_deletion.sql)`.
+
+### Order
+
+1. **Migrations** on every tenant database first, through the ledgered fan-out (the Phase 09.2 Cloud Run Job `migrateAll`, databases before the services); the seven files apply in the order of their names, the runner is serialised per database and idempotent, so a re-run is safe and reports nothing pending. **The whole set runs in one sitting through `pnpm db:migrate-all`, one project at a time, and never two runs at once.**
+2. **API and worker** second and together, from the REBUILT image that contains ffmpeg, once every project is current.
+3. **Web** last, in the SAME sitting as step 2.
+
+**Why this order (it differs from 12.4).** The API and the worker read the migrated columns and the kernel serves audio
+before any client can send one, so they must come after the migrations and must carry ffmpeg; the web sends voice only
+after that. The web must NOT precede the API: a voice send would reach routes and a media kind the previous API does
+not have. The previous web against the migrated database and the new API is unaffected, because no recording exists
+until the new web sends one and every new key of the API is optional.
+
+**The check of the worker comes first.** Before the web step, confirm that the new worker revision is the rebuilt
+image (`ffmpeg -version` answers in it, or the build log of the deploy prints the ffmpeg and ffprobe versions): the
+worker is the role that runs ffmpeg, and an API revision with ffmpeg beside a worker without it still leaves every
+upload `processing`.
+
+### What each window does
+
+- **Window 1: the web ahead of the API (benign only inside one sitting).** The new web's first voice upload is
+  refused by the previous API (the `audio` kind is not in its contract), and a voice send meets routes the previous API
+  does not have. So the web step and the API step run in ONE sitting and the web never stays ahead beyond it. What
+  keeps working: every read, because every new key of the API is optional; every text send; every other module.
+- **Window 2: an API or worker revision built WITHOUT ffmpeg (an image that was not rebuilt).** The upload is
+  accepted, the file is checked and the asset stays `processing`; the derive job runs, cannot start ffmpeg, retries and
+  ends `failed` with no recording ever becoming `ready`. The web gives up waiting after about 20 seconds and the member's bubble shows the retriable failure line, with a retry that cannot succeed until the worker is fixed. The
+  API and worker step MUST deploy the rebuilt image, and the worker is checked first (above). What keeps working:
+  every text message and every read.
+- **Window 3: the API before the migrations (held out, as for every phase).** The new code reads the new columns and
+  calls the new functions; a project the migrations have not reached is held out `updating` by the schema gate
+  instead of letting a member meet the error. Do not release the API before the migrations reach every project.
+- **Window 4: the previous web against the migrated database and the new API.** Unaffected. No voice row exists until
+  the new web sends one, and the previous web's strict parser is never handed one in this order.
+- **Window 5: this phase before the 12.4 release.** Never. The voice routes reuse the case flow, the case
+  columns and the transition trigger of 12.4; ship in the same sitting as 12.4 or after it.
+- **Two runs of `db:migrate-all` must never overlap.** The fan-out runs the projects one at a time, each file in its
+  own transaction; two runs at once are never the plan.
+
+### Per-tenant effect
+
+- **The first-day effect (D-868 and the rest).** Nothing changes for a member who never records. With the `chat`
+  module on, **every support composer shows the microphone where a disabled send button was**, for members and for the
+  team alike, on the day of the release. A tenant with `chat` off sees nothing.
+- **Recordings count in the tenant's storage quota and in the member's half share**, through the existing media byte
+  sums, with no separate budget. An AAC take of five minutes is about 2 to 3 MB.
+- **A deleted or anonymised member's recordings read "Mensagem de voz apagada" from then on.** The account deletion
+  soft-deletes the member's voice assets in the same step as the avatar; the message stays in the thread with no
+  player; the hourly sweeper purges the file and, for a recording a message references, keeps a tombstone row (status
+  `failed`, reason `purged_referenced`, `deleted_at` set) so the message keeps reading "apagada". It is a system
+  action: nobody has a delete button for a sent recording.
+- **The orphan sweep starts on the first hourly run.** Every voice take older than 24 hours that no message references
+  is soft-deleted and then purged by the hourly sweeper; a take recorded and not sent leaves the quota after a day.
+- **The account-deletion function's body changed by one statement** (item 7 above). Read the diff before you apply it.
+- **The team's and the member's pushes** read "Mensagem de voz · m:ss" where a text preview goes; a recording that is
+  already gone when the push is built sends no push.
+- **The bytes of a recording are private to its conversation.** Only its uploader and the people who can read the
+  message open `GET /v1/media/{id}/original`; anyone else, in the tenant or outside it, gets the same bare 404 as a
+  miss. The signed link lives one hour, so a copied link works until it expires (the accepted residual T-12.5-29).
+
+### Rollback limit
+
+- **Migrations are never rolled back** (forward-only; there is no down migration, and D-865 is one-way once applied to
+  a tenant database). Roll forward with a fix.
+- **Rolling the WEB back to the previous revision after a voice message exists** makes every thread that holds one
+  unreadable by that web until it is rolled forward: its strict message parser refuses the new `voice` key. Roll the web
+  forward, not back.
+- **Rolling the API or the worker back to a revision without ffmpeg** leaves every new upload `processing`, then
+  `failed`. Roll forward with a rebuilt image, never back to one built before this phase.
+- **The new API against an old schema is held out `updating`.** Do not release the API before the migrations reach
+  every project.
+
+### After the migration: read-only checks (every project)
+
+```sql
+-- E. The bucket now holds thirteen mimes, the audio ones included, and is still private.
+--    Expected: 13, t, f.
+select cardinality(allowed_mime_types) as mimes,
+       allowed_mime_types @> array['audio/webm', 'audio/mp4', 'audio/ogg'] as has_audio,
+       public
+  from storage.buckets where id = 'media';
+-- F. The four CHECKs exist and are validated. Expected: four rows, all t.
+select conname, convalidated from pg_constraint
+ where conname in ('media_assets_kind_chk', 'media_assets_purpose_chk', 'chat_messages_body_chk', 'chat_messages_content_chk')
+ order by conname;
+-- G. The insert policy was replaced (the asset clause is in it) and the unique index exists. Expected: t, 1.
+select (select with_check ilike '%voice%' from pg_policies
+         where schemaname = 'public' and tablename = 'chat_messages' and policyname = 'chat_messages_insert') as policy_replaced,
+       (select count(*) from pg_indexes where indexname = 'chat_messages_tenant_media_asset_uq') as unique_index;
+-- H. The three functions exist with the right grants. Expected, in this order:
+--    chat_asset_hidden        authenticated t, anon f, service_role f
+--    chat_voice_orphans_sweep authenticated f, anon f, service_role t
+--    voice_asset_retired      authenticated t, anon f, service_role f
+select p.proname,
+       has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
+       has_function_privilege('anon', p.oid, 'execute') as anon,
+       has_function_privilege('service_role', p.oid, 'execute') as service_role
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app' and p.proname in ('chat_asset_hidden', 'voice_asset_retired', 'chat_voice_orphans_sweep')
+ order by p.proname;
+-- I. The replaced account function names the voice purpose. Expected: t.
+select p.prosrc ilike '%''voice''%' as names_voice
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app' and p.proname = 'account_anonymise';
+-- J. No message row breaks the content rule (it is a validated CHECK, so 0 is the only answer). Expected: 0, 0.
+select count(*) filter (where body is null and media_asset_id is null) as neither,
+       count(*) filter (where body is not null and media_asset_id is not null) as both
+  from public.chat_messages;
+```
+
+### Smoke checks (on the homolog host once it serves this release)
+
+In the app, on a homolog tenant with the `chat` module on, one member account and one support or admin account, on a
+phone and on a desktop browser (the first real-device walks are ledger rows):
+
+- As the member, open `/suporte`: the microphone shows where the send button was. Tap it, allow the microphone,
+  speak for a few seconds, tap send. The bubble shows at once with "Enviando", then settles with the length; the case
+  opens (or the existing one takes the message).
+- As the team, find the case in the inbox: the row reads the microphone glyph and "Mensagem de voz · m:ss", and the
+  phone got the push "Mensagem de voz · m:ss". Open the thread and play the recording: it starts on the first tap. Drag
+  the bar and play again from there (a Range request).
+- As the team, reply with a recording: the member's bubble and the member's push read the same words.
+- Try the media id as another member of the same tenant (the bare 404) and as the uploader (302).
+- Delete a throwaway member and see "Mensagem de voz apagada" in the thread, with no player.
+- Record a take and do not send it; after 24 hours and the next hourly run the take is gone from the quota (ledger row).
+
+### Manual proofs (hosted)
+
+See the ledger named at the top. A row becomes `passed` only with the evidence you paste and your own date.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
