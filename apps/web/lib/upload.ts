@@ -11,11 +11,14 @@ import { isAllowedSupabaseOrigin } from '@/lib/supabase-origin';
  * straight to the API-minted signed Storage target — never through the API or the Next server, whose
  * 32 MiB body cap they would hit anyway.
  *
- * Two transfer shapes behind one `uploadBytes` router, because Supabase's plain PUT stops at 6 MiB:
- *   `file.size <= resumableThresholdBytes` → `uploadToSignedUrl` (XHR PUT, 02-14)
- *   above it                               → `uploadResumable`  (TUS, fixed 6 MiB chunks)
+ * Three transfer shapes behind one `uploadBytes` router, because Supabase's plain PUT stops at 6 MiB
+ * and a streaming provider owns its own direct-upload URL:
+ *   Supabase, `file.size <= resumableThresholdBytes` → `uploadToSignedUrl` (XHR PUT, 02-14)
+ *   Supabase, above it                               → `uploadResumable`  (TUS, fixed 6 MiB chunks)
+ *   any other provider (`mux`, `fake`)               → `uploadChunked`    (the in-repo resumable
+ *                                                      uploader: 32 MiB chunks, retry, status query)
  *
- * `normaliseImage` is the third piece: an iPhone HEIC — or any photo over the cap — is re-encoded to
+ * `normaliseImage` is the fourth piece: an iPhone HEIC — or any photo over the cap — is re-encoded to
  * JPEG in the browser BEFORE it is ever offered to the server (R-12), silently.
  *
  * `classifyFile`/`classifyMediaFile` are UX only (T-02-111): Storage enforces size/mime at PUT time
@@ -256,71 +259,333 @@ export async function uploadResumable(
 }
 
 /**
- * UpChunk's chunk size, **in kibibytes** — `@mux/upchunk@3.5.0` multiplies it by 1024 internally
- * (`chunkByteSize = chunkSize * 1024`, verified in `dist/upchunk.mjs`, not assumed from the README).
- * 5120 KiB = 5 MiB, a multiple of the 256 KiB Mux requires and inside UpChunk's own 256…524288 KiB
- * bounds. A non-multiple is rejected by `isValidChunkSize` at construction.
+ * Bytes per chunk request of the chunked direct upload. 32 MiB is a multiple of the 256 KiB the
+ * provider requires (128 of them); only the LAST chunk may be smaller. Compared with the old 5 MiB
+ * slices it is 6.4 times fewer sequential round trips, and a failed chunk re-sends at most 32 MiB. A
+ * `file.slice` Blob is a lazy reference into the file, never a copy, so the size costs no memory.
  */
-const UPCHUNK_CHUNK_SIZE_KB = 5120;
+export const CHUNKED_CHUNK_BYTES = 32 * 1024 * 1024;
 
 /**
- * Resumable, chunked upload to a streaming provider's own direct-upload URL (MEDIA-03, R-04).
- *
- * `@mux/upchunk` is what makes a 100 MB phone video survive a dropped mobile connection: it PUTs
- * 5 MiB slices with `Content-Range`, retries a failed slice, and understands the provider's
- * `308 Resume Incomplete` continue semantics — which is precisely the wheel RESEARCH §Don't
- * Hand-Roll says not to reinvent. The bytes go browser -> provider and never touch Cloud Run.
- *
- * The library is imported dynamically so every screen that never uploads a video keeps it out of
- * its bundle, exactly as `uploadResumable` does with `tus-js-client`.
+ * Wait before the next attempt after the n-th consecutive failure (n-th entry, the last entry repeats):
+ * 1, 2, 4, 8, 16 then 30 s. Twelve failures add up to about four minutes of waiting.
  */
-export async function uploadChunked(
+export const CHUNKED_BACKOFF_MS: readonly number[] = [1000, 2000, 4000, 8000, 16000, 30000];
+
+/**
+ * Consecutive failed attempts, with no newly committed byte in between, after which the upload gives
+ * up as a `transfer` failure. The counter resets whenever the committed offset passes its previous
+ * high-water mark.
+ */
+export const CHUNKED_MAX_FAILURES = 12;
+
+/**
+ * A request that makes no upload progress for this long is treated as dead (a half-open connection
+ * after a laptop sleeps or a network change never errors on its own) and retried like status 0.
+ */
+export const CHUNKED_STALL_MS = 120_000;
+
+/**
+ * Keeps the screen awake while a long upload runs (a phone that locks stops the transfer). Every call
+ * is feature-detected and guarded: the API is absent on older browsers and a request can be refused,
+ * and none of that may ever affect the upload. The browser drops the lock when the tab is hidden, so
+ * it is asked for again when the tab becomes visible. Returns the function that gives it back.
+ */
+function holdScreenAwake(): () => void {
+  const wakeLock = typeof navigator === 'undefined' ? undefined : navigator.wakeLock;
+  if (!wakeLock) return () => {};
+  let sentinel: WakeLockSentinel | null = null;
+  let pending = false;
+  let released = false;
+  const drop = (lock: WakeLockSentinel) => {
+    try {
+      Promise.resolve(lock.release()).catch(() => {});
+    } catch {}
+  };
+  const acquire = () => {
+    if (pending) return;
+    try {
+      pending = true;
+      wakeLock.request('screen').then(
+        (lock) => {
+          pending = false;
+          if (released) drop(lock);
+          else sentinel = lock;
+        },
+        () => {
+          pending = false;
+        },
+      );
+    } catch {
+      pending = false;
+    }
+  };
+  const onVisible = () => {
+    if (document.visibilityState === 'visible' && (!sentinel || sentinel.released)) acquire();
+  };
+  document.addEventListener('visibilitychange', onVisible);
+  acquire();
+  return () => {
+    released = true;
+    document.removeEventListener('visibilitychange', onVisible);
+    if (sentinel) drop(sentinel);
+  };
+}
+
+/** One request's answer: HTTP status (0 = no answer), the `Range` header if readable, a short note. */
+type ChunkAnswer = { status: number; range: string | null; detail: string };
+
+/** `bytes=0-N` of a 308 `Range` header → N, or null when absent, unreadable or malformed. */
+function parseCommittedRange(range: string | null): number | null {
+  const match = /^bytes=0-(\d+)$/i.exec((range ?? '').trim());
+  return match?.[1] === undefined ? null : Number(match[1]);
+}
+
+/**
+ * Resumable, chunked upload to a streaming provider's own direct-upload URL (MEDIA-03, R-04). The
+ * bytes go browser -> provider and never touch Cloud Run.
+ *
+ * It replaces a third-party chunk-upload library that treated any network-level failure as final
+ * (one dropped request restarted a multi-hour, multi-GB upload from zero), gave a failing request only
+ * about five seconds of retries and could not ask the server how much it had persisted.
+ *
+ * Protocol (the provider's resumable session): a PUT per chunk with `Content-Range: bytes s-e/total`,
+ * a 308 whose `Range: bytes=0-N` says N+1 bytes are persisted, a 2xx meaning the object is complete.
+ * Each request carries exactly two request headers, `Content-Type` and `Content-Range`, so the CORS
+ * preflight stays the small one the provider already answers.
+ *
+ * - Chunks are `CHUNKED_CHUNK_BYTES`; every ATTEMPT reads a FRESH `file.slice(start, end)`, a Blob is
+ *   never kept across attempts and the file is never copied into memory.
+ * - A readable `Range` of ANY 308 is trusted as the committed offset, behind or ahead of the chunk
+ *   sent. Whether the provider exposes `Range` to the browser through CORS is not verified, so a 308
+ *   with no readable `Range` on a data chunk advances by the chunk just sent (what the old library
+ *   did) and on a status query keeps the last known offset.
+ * - A network failure (status 0), a stalled request (`CHUNKED_STALL_MS`), 408, 429 and any 5xx are
+ *   retried with `CHUNKED_BACKOFF_MS`. Before re-sending, the uploader asks the server for the
+ *   committed offset (an empty PUT whose `Content-Range` is an unknown range over the total) and resumes from it; when
+ *   that answer is inconclusive it resends from the last known offset. After `CHUNKED_MAX_FAILURES`
+ *   consecutive failures with no new byte it gives up as `transfer`. A 413 is `too_large`, every
+ *   other 4xx is fatal at once.
+ * - While `navigator.onLine` is false it pauses without counting a failure and continues on the
+ *   `online` event. `signal` aborts the request and every timer and listener.
+ * - Progress is an integer percent that never walks back across a retry; 100 only at success.
+ * - The one raw log line carries a short reason only, never the URL (a bearer capability), a header
+ *   or the file name. The member sees the catalog sentence.
+ */
+export function uploadChunked(
   uploadUrl: string,
   file: File,
   opts: Pick<TransferOptions, 'onProgress' | 'signal'>,
 ): Promise<UploadOutcome> {
-  const UpChunk = await import('@mux/upchunk');
+  const total = file.size;
+  if (total <= 0) {
+    console.error('media.chunked_failed', { error: 'empty file; committed=0/0; attempts=0' });
+    return Promise.resolve({ ok: false, reason: 'transfer' });
+  }
+  if (opts.signal?.aborted) return Promise.resolve({ ok: false, reason: 'aborted' });
 
   return new Promise<UploadOutcome>((resolve) => {
     let settled = false;
+    let committed = 0;
     let highest = 0;
+    let failures = 0;
+    let sends = 0;
+    let reported = 0;
+    let needQuery = false;
+    // What the current wait (backoff timer, online wait, in-flight request) installs, so ONE abort
+    // handler can stop whatever is pending.
+    let cancel: (() => void) | null = null;
+    const releaseScreen = holdScreenAwake();
+
     const settle = (outcome: UploadOutcome) => {
       if (settled) return;
       settled = true;
+      const stop = cancel;
+      cancel = null;
+      stop?.();
       opts.signal?.removeEventListener('abort', onAbort);
+      releaseScreen();
       resolve(outcome);
     };
     function onAbort() {
-      upload.abort();
       settle({ ok: false, reason: 'aborted' });
     }
+    const giveUp = (reason: 'transfer' | 'too_large', detail: string) => {
+      console.error('media.chunked_failed', {
+        error: `${detail}; committed=${committed}/${total}; attempts=${sends}`,
+      });
+      settle({ ok: false, reason });
+    };
+    const succeed = () => {
+      reported = 100;
+      opts.onProgress?.(100);
+      settle({ ok: true });
+    };
+    // Every assignment of `committed` goes through here: a new high-water mark resets the failures.
+    const commit = (offset: number) => {
+      committed = Math.max(0, Math.min(offset, total));
+      if (committed > highest) {
+        highest = committed;
+        failures = 0;
+      }
+    };
+    // Monotonic across retries and resumes, and never 100 before success.
+    const report = (bytes: number) => {
+      const percent = Math.min(99, Math.floor((bytes / total) * 100));
+      if (percent <= reported) return;
+      reported = percent;
+      opts.onProgress?.(percent);
+    };
+    const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
 
-    const upload = UpChunk.createUpload({
-      endpoint: uploadUrl,
-      file,
-      chunkSize: UPCHUNK_CHUNK_SIZE_KB,
-    });
+    const sleep = (ms: number) =>
+      new Promise<void>((done) => {
+        const timer = setTimeout(() => {
+          cancel = null;
+          done();
+        }, ms);
+        cancel = () => {
+          clearTimeout(timer);
+          done();
+        };
+      });
+    const untilOnline = () =>
+      new Promise<void>((done) => {
+        const onOnline = () => {
+          window.removeEventListener('online', onOnline);
+          cancel = null;
+          done();
+        };
+        window.addEventListener('online', onOnline);
+        cancel = () => {
+          window.removeEventListener('online', onOnline);
+          done();
+        };
+      });
 
-    upload.on('progress', (event: CustomEvent<number>) => {
-      if (!opts.onProgress) return;
-      const percent = Math.min(100, Math.round(event.detail ?? 0));
-      // Monotonic by construction: a chunk retry re-sends bytes, and the bar must never walk back.
-      if (percent <= highest) return;
-      highest = percent;
-      opts.onProgress(percent);
-    });
-    upload.on('success', () => settle({ ok: true }));
-    upload.on('error', (event: CustomEvent<{ message?: string }>) => {
-      // The raw reason goes to the console only; the member sees the catalog string (T-02-147).
-      console.error('media.chunked_failed', { error: String(event.detail?.message ?? '') });
-      settle({ ok: false, reason: 'transfer' });
-    });
+    // One PUT. `body` null is the empty status query. Resolves exactly once.
+    const send = (contentRange: string, body: Blob | null, base: number, span: number) =>
+      new Promise<ChunkAnswer>((done) => {
+        const xhr = new XMLHttpRequest();
+        let over = false;
+        let watchdog: ReturnType<typeof setTimeout> | undefined;
+        const finish = (answer: ChunkAnswer) => {
+          if (over) return;
+          over = true;
+          clearTimeout(watchdog);
+          cancel = null;
+          done(answer);
+        };
+        const arm = () => {
+          clearTimeout(watchdog);
+          watchdog = setTimeout(() => {
+            finish({ status: 0, range: null, detail: 'stalled' });
+            xhr.abort();
+          }, CHUNKED_STALL_MS);
+        };
+        cancel = () => {
+          over = true;
+          clearTimeout(watchdog);
+          xhr.abort();
+          done({ status: 0, range: null, detail: 'aborted' });
+        };
+        try {
+          xhr.open('PUT', uploadUrl);
+          xhr.setRequestHeader('Content-Type', file.type);
+          xhr.setRequestHeader('Content-Range', contentRange);
+          xhr.upload.onprogress = (event) => {
+            arm();
+            report(base + Math.min(event.loaded, span));
+          };
+          xhr.upload.onload = arm;
+          xhr.onload = () =>
+            finish({
+              status: xhr.status,
+              range: xhr.getResponseHeader('Range'),
+              detail: `status ${xhr.status}`,
+            });
+          xhr.onerror = () => finish({ status: 0, range: null, detail: 'network error' });
+          xhr.ontimeout = () => finish({ status: 0, range: null, detail: 'timeout' });
+          xhr.onabort = () => finish({ status: 0, range: null, detail: 'aborted' });
+          arm();
+          if (body) xhr.send(body);
+          else xhr.send();
+        } catch {
+          finish({ status: 0, range: null, detail: 'send failed' });
+        }
+      });
 
-    if (opts.signal?.aborted) {
-      onAbort();
-      return;
-    }
+    // A failed attempt: count it (unless the browser is offline), give up at the budget, else back off.
+    const failed = async (detail: string) => {
+      needQuery = true;
+      if (isOffline()) return;
+      failures += 1;
+      if (failures >= CHUNKED_MAX_FAILURES) {
+        giveUp('transfer', detail);
+        return;
+      }
+      const last = CHUNKED_BACKOFF_MS.length - 1;
+      await sleep(CHUNKED_BACKOFF_MS[Math.min(failures - 1, last)] ?? 30000);
+    };
+
+    const run = async () => {
+      while (!settled) {
+        while (isOffline() && !settled) await untilOnline();
+        if (settled) return;
+
+        if (needQuery) {
+          needQuery = false;
+          const query = await send(`bytes */${total}`, null, 0, 0);
+          if (settled) return;
+          if (query.status >= 200 && query.status < 300) return succeed();
+          if (query.status === 308) {
+            const last = parseCommittedRange(query.range);
+            if (last !== null) commit(last + 1);
+          }
+          // Anything else is inconclusive: keep the last known offset and resend from it. A session
+          // that really expired answers the resend with a fatal 4xx.
+        }
+
+        if (committed >= total) {
+          // The server says everything is there but never answered 2xx: ask again after a backoff.
+          await failed('status 308 without completion');
+          continue;
+        }
+
+        const start = committed;
+        const end = Math.min(start + CHUNKED_CHUNK_BYTES, total);
+        sends += 1;
+        // A FRESH slice for every attempt, built here and never kept.
+        const answer = await send(
+          `bytes ${start}-${end - 1}/${total}`,
+          file.slice(start, end),
+          start,
+          end - start,
+        );
+        if (settled) return;
+
+        const { status } = answer;
+        if (status >= 200 && status < 300) return succeed();
+        if (status === 308) {
+          const last = parseCommittedRange(answer.range);
+          commit(last !== null ? last + 1 : end);
+          report(committed);
+          if (committed > start) continue;
+          await failed('status 308 without progress');
+          continue;
+        }
+        if (status === 413) return giveUp('too_large', 'status 413');
+        if (status !== 0 && status !== 408 && status !== 429 && status < 500 && status >= 400) {
+          return giveUp('transfer', `status ${status}`);
+        }
+        await failed(status === 0 ? `status 0 (${answer.detail})` : `status ${status}`);
+      }
+    };
+
     opts.signal?.addEventListener('abort', onAbort, { once: true });
+    run().catch((error: unknown) => {
+      giveUp('transfer', `unexpected ${error instanceof Error ? error.name : 'error'}`);
+    });
   });
 }
 
