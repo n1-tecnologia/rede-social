@@ -45,9 +45,9 @@ screens:
   - defaults-a-confirmar-voz
 status: approved
 approved: true
-approved_by: igor.vboas (word "aprovado" in the session, recorded by Claude)
+approved_by: igor.vboas (word "aprovado" in the session, made definitive by his answer in the session on the same day, recorded by Claude)
 approved_at: 2026-11-17
-approval_kind: provisional
+approval_kind: final
 changes_requested: []
 winner: null
 tags: [phase-12.5, design-review, D-33, D-365, D-417, UI-04, voice-messages, chat]
@@ -203,6 +203,10 @@ revisão só pergunta se o **desenho** as cumpre, e confirma ou derruba os padr�
   fragmentos de cada grupo e as ferramentas de montagem).
 
 ## Registro da aprovação
+
+**2026-11-17, tornada definitiva.** Depois da execução da fase, o Igor respondeu na conversa que aprova o sketch 024 "de
+vez" (resposta à pergunta do Claude, na mesma sessão); o `approval_kind` passou de `provisional` para `final`. Nada mais
+mudou no desenho. O texto abaixo é o registro original da aprovação provisória.
 
 **2026-11-17, aprovado de forma provisória.** O Igor respondeu "aprovado" na conversa, sem responder linha a linha; o
 Claude registrou a aprovação no frontmatter acima, como foi feito no sketch 023. Lido como: manter todos os padrões
