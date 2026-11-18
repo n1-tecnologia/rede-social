@@ -14,7 +14,7 @@ import {
   type StaffCaseHeaderView,
   tenantDayKeys,
 } from '@/lib/chat-view';
-import { replyToConversationAction } from '../actions';
+import { replyToConversationAction, replyVoiceToConversationAction } from '../actions';
 import { ThreadPane } from '../ThreadPane';
 
 /** A canonical uuid: anything else is the one not-found screen before any request (D-23). */
@@ -161,6 +161,7 @@ export default async function StaffThreadPage({
         initialError={false}
         viewer="staff"
         onSendAction={replyToConversationAction}
+        onSendVoiceAction={replyVoiceToConversationAction}
         readOnlyNotice={readOnlyNotice}
         raceNotices={{ member_blocked: blockedNotice, member_removed: removedNotice }}
         initialStaffCase={staffCase}

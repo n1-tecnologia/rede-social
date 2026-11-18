@@ -48,7 +48,10 @@ vi.mock('@/lib/chat', () => ({
   getConversation: (id: string) => mocks.getConversation(id),
   getMessages: (id: string, cursor: unknown) => mocks.getMessages(id, cursor),
 }));
-vi.mock('../actions', () => ({ replyToConversationAction: vi.fn() }));
+vi.mock('../actions', () => ({
+  replyToConversationAction: vi.fn(),
+  replyVoiceToConversationAction: vi.fn(),
+}));
 vi.mock('../ThreadPane', () => ({
   ThreadPane: function ThreadPane() {
     return null;
@@ -148,6 +151,8 @@ describe('the first gate: a three-way split by permission (T-12.4-56)', () => {
     const [pane] = find(tree, ThreadPane);
     expect(pane?.props.viewer).toBe('staff');
     expect(pane?.props.initialConversationId).toBe(ID);
+    // 12.5-15 (D-847): the team's recordings go through the voice reply action, bound by the page.
+    expect(typeof pane?.props.onSendVoiceAction).toBe('function');
   });
 
   it('gives a user with neither permission the one not-found screen, with zero API calls', async () => {
@@ -181,6 +186,8 @@ describe("the member's own case", () => {
     expect(pane?.props.initialConversationId).toBe(ID);
     expect(pane?.props.initialError).toBe(false);
     expect(pane?.props.hasAnyCase).toBe(true);
+    // The member pane sends its own recordings: the page hands it no team action.
+    expect(pane?.props.onSendVoiceAction).toBeUndefined();
     const header = pane?.props.initialCase as Record<string, unknown>;
     expect(header.viewer).toBe('member');
     expect(header.number).toBe(42);
