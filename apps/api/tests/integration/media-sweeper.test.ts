@@ -285,6 +285,33 @@ describe('safety — the sweeper touches ONLY what the two windows name (T-03-53
   });
 });
 
+describe('WR-02 - only a voice recording is tombstoned when a row still references it', () => {
+  it('WR-02: a retired image a link preview references is NOT tombstoned, and the run goes on past it', async () => {
+    const referenced = await seedAsset({ status: 'deleted', ageHours: 5, deletedMinutesAgo: 90 });
+    const plain = await seedAsset({ status: 'deleted', ageHours: 5, deletedMinutesAgo: 90 });
+    const urlHash = `wr02-${referenced}`;
+    await adminSql`
+      insert into public.feed_link_previews (tenant_id, url_hash, url, image_asset_id)
+      values (${demoTenantId}::uuid, ${urlHash}, 'https://wr02.example.test/page', ${referenced}::uuid)`;
+    try {
+      await sweepOrphansJob.handler({});
+
+      // The unreferenced row is gone: one refusal does not stop the batch.
+      expect(await assetStatus(plain)).toBeNull();
+      // The referenced IMAGE keeps its status and carries no failure reason: the refusal threw, the sweeper
+      // counted it failed (media.sweep.purge_failed) and the next run tries again. Only audio is tombstoned.
+      expect(await assetStatus(referenced)).toBe('deleted');
+      const rows = await adminSql<{ failure_reason: string | null }[]>`
+        select failure_reason from public.media_assets where id = ${referenced}::uuid`;
+      expect(rows[0]?.failure_reason).toBeNull();
+    } finally {
+      // The reference first, or the generic cleanup's delete is refused too.
+      await adminSql`delete from public.feed_link_previews
+                      where tenant_id = ${demoTenantId}::uuid and url_hash = ${urlHash}`;
+    }
+  });
+});
+
 describe('bounded and idempotent — one run cannot stall the worker, and re-running is free', () => {
   it(`collects exactly MEDIA_SWEEP_BATCH rows per run and the re-armed run takes the rest`, async () => {
     await drain();
