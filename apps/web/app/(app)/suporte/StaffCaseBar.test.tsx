@@ -3,11 +3,12 @@
 import { join } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
-import { NextIntlClientProvider } from 'next-intl';
+import { createTranslator, NextIntlClientProvider } from 'next-intl';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import type { StaffCaseHeaderView } from '@/lib/chat-view';
+import { caseHeaderView } from '@/lib/chat-view';
 import type { StaffSheetKind } from './CaseActionSheet';
 
 /**
@@ -497,5 +498,49 @@ describe('focus after a sheet the pane mounted closes (UI-D-833)', () => {
         screen.getByRole('button', { name: 'Ver detalhes do chamado #42' }),
       ),
     );
+  });
+});
+
+/**
+ * 12.5-16 (D-861, VOICE-30, A-UI-1): a case opened by voice with no typed subject carries the server's finished
+ * label "Mensagem de voz" (no duration). Built here through the REAL view functions and the REAL catalog.
+ */
+const voiceT = createTranslator({
+  locale: 'pt-BR',
+  messages,
+  namespace: 'chat',
+}) as unknown as Parameters<typeof caseHeaderView>[1]['t'];
+const voiceCase = {
+  id: '33333333-3333-4333-8333-333333333333',
+  number: 42,
+  state: 'open',
+  subject: null,
+  subjectLabel: 'Mensagem de voz',
+  category: 'payment',
+  openedAt: '2026-11-17T14:02:00.000Z',
+} as const;
+
+describe('12.5-16 the case label of a case opened by voice (D-861, A-UI-1)', () => {
+  it('the staff bar draws "#42" and "Mensagem de voz" with no duration, and its subject line is "#42 · Mensagem de voz"', () => {
+    const view = caseHeaderView(
+      {
+        ...voiceCase,
+        priority: 'normal',
+        ownerUserId: null,
+        ownerName: null,
+        ownerIsViewer: false,
+        resolvedAt: null,
+        closedAt: null,
+        actions: ['take', 'resolve', 'close', 'edit'],
+      } as never,
+      { viewer: 'staff', t: voiceT },
+    ) as StaffCaseHeaderView;
+    expect(view.subjectLine).toBe('#42 · Mensagem de voz');
+    expect(view.typedSubject).toBeNull();
+    renderBar(view);
+    const row = document.querySelector('[data-case-subject]') as HTMLElement;
+    expect(row.textContent).toBe('Mensagem de voz');
+    expect(row.parentElement?.textContent).toContain('#42');
+    expect(row.parentElement?.textContent).not.toMatch(/\d:\d\d/);
   });
 });

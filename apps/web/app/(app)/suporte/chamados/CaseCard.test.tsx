@@ -1,8 +1,12 @@
 // @vitest-environment happy-dom
 
+import { join } from 'node:path';
 import { cleanup, render, screen } from '@testing-library/react';
+import { createTranslator } from 'next-intl';
 import { afterEach, describe, expect, it } from 'vitest';
+import { loadMessages } from '@/i18n/messages';
 import type { CaseCardView } from '@/lib/chat-view';
+import { caseCardView, tenantDayKeys } from '@/lib/chat-view';
 import { CaseCard } from './CaseCard';
 
 /**
@@ -144,5 +148,113 @@ describe('CaseCard (UI-D-821)', () => {
     expect(row.textContent).toContain('Chamado #42');
     expect(row.textContent).toContain('Aberto');
     expect(row.textContent).not.toContain('palavra');
+  });
+});
+
+/** The real catalog through next-intl's translator, and the REAL view functions (12.5-16, D-861, A-UI-1). */
+const voiceT = createTranslator({
+  locale: 'pt-BR',
+  messages: loadMessages(join(process.cwd(), 'messages', 'pt-BR')),
+  namespace: 'chat',
+}) as unknown as Parameters<typeof caseCardView>[1]['t'];
+
+describe('12.5-16 voice previews on the "Meus chamados" card (D-860, D-868, UI-D-853, UI-D-858)', () => {
+  const keys = tenantDayKeys(Date.parse('2026-10-01T01:30:00Z'), 'America/Sao_Paulo');
+  const apiCard = (
+    lastMessage: Parameters<typeof caseCardView>[0]['lastMessage'],
+    over: Record<string, unknown> = {},
+  ) =>
+    caseCardView(
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        number: 42,
+        state: 'open',
+        subject: 'Meu ingresso',
+        subjectLabel: 'Meu ingresso',
+        category: 'events',
+        openedAt: '2026-09-30T17:00:00.000000Z',
+        lastMessage,
+        lastMessageAt: '2026-10-01T01:10:00Z',
+        ...over,
+      } as Parameters<typeof caseCardView>[0],
+      { timeZone: 'America/Sao_Paulo', keys, t: voiceT },
+    );
+  const previewEl = (container: HTMLElement) =>
+    container.querySelector('[data-case-preview]') as HTMLElement;
+
+  it("tracer: the member's own recording draws the microphone glyph then 'Você: Mensagem de voz · 0:42' on one truncated line", () => {
+    const { container } = render(
+      <CaseCard card={apiCard({ preview: '', side: 'member', voiceSeconds: 42 })} />,
+    );
+    const preview = previewEl(container);
+    const glyph = preview.querySelector('svg');
+    expect(glyph).not.toBeNull();
+    expect(glyph?.getAttribute('aria-hidden')).toBe('true');
+    expect(glyph?.classList.contains('shrink-0')).toBe(true);
+    expect(preview.firstElementChild).toBe(glyph);
+    expect(preview.textContent).toBe('Você: Mensagem de voz · 0:42');
+    expect(preview.querySelector('[data-case-preview-text]')?.className).toContain('truncate');
+    expect(preview.className).toContain('text-text-secondary');
+  });
+
+  it("the team's recording reads 'Equipe: Mensagem de voz · 0:42' with the glyph", () => {
+    const { container } = render(
+      <CaseCard card={apiCard({ preview: '', side: 'staff', voiceSeconds: 42 })} />,
+    );
+    expect(previewEl(container).querySelector('svg')).not.toBeNull();
+    expect(previewEl(container).textContent).toBe('Equipe: Mensagem de voz · 0:42');
+  });
+
+  it('a text card and a card with no message render exactly as before, with no glyph', () => {
+    const { container, rerender } = render(
+      <CaseCard card={apiCard({ preview: 'Oi', side: 'member' })} />,
+    );
+    expect(previewEl(container).querySelector('svg')).toBeNull();
+    expect(previewEl(container).querySelector('[data-case-preview-text]')).toBeNull();
+    expect(previewEl(container).className).toContain('truncate');
+    expect(previewEl(container).textContent).toBe('Você: Oi');
+    rerender(<CaseCard card={apiCard(null)} />);
+    expect(container.querySelector('[data-case-preview]')).toBeNull();
+  });
+
+  it("a deleted recording reads 'Você: Mensagem de voz apagada' with no glyph and no duration", () => {
+    const { container } = render(
+      <CaseCard card={apiCard({ preview: '', side: 'member', voiceDeleted: true })} />,
+    );
+    expect(previewEl(container).querySelector('svg')).toBeNull();
+    expect(previewEl(container).textContent).toBe('Você: Mensagem de voz apagada');
+  });
+
+  it('UI-D-857: no media id, URL, file name or size is drawn beside a recording', () => {
+    const { container } = render(
+      <CaseCard
+        card={apiCard({
+          preview: '',
+          side: 'staff',
+          voiceSeconds: 42,
+          mediaId: '7b000000-0000-4000-8000-000000000009',
+          url: 'https://x/a.webm',
+        } as never)}
+      />,
+    );
+    expect(container.textContent).not.toMatch(/7b000000|https?:|\.webm|\bKB\b|\bMB\b/);
+  });
+
+  it('D-861, A-UI-1: a case opened by voice has the label "Mensagem de voz" in the regular weight, no duration', () => {
+    const { container } = render(
+      <CaseCard
+        card={apiCard(
+          { preview: '', side: 'member', voiceSeconds: 42 },
+          { subject: null, subjectLabel: 'Mensagem de voz' },
+        )}
+      />,
+    );
+    const label = screen.getByText('Mensagem de voz');
+    expect(label.className).toContain('font-normal');
+    expect(label.className).not.toContain('font-bold');
+    expect(label.textContent).toBe('Mensagem de voz');
+    expect(container.querySelector('[data-case-preview]')?.textContent).toBe(
+      'Você: Mensagem de voz · 0:42',
+    );
   });
 });

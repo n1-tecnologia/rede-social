@@ -334,3 +334,46 @@ describe('MyCasesList first load error (UC M15)', () => {
     expect(screen.getByText('Não foi possível carregar seus chamados.')).toBeTruthy();
   });
 });
+
+describe('12.5-16 a list holding a voice card and a text card (D-860)', () => {
+  it('keeps both cards in the server order, the glyph only on the recording', () => {
+    render(
+      <MyCasesList
+        initial={page({
+          items: [
+            card({
+              subject: 'Com voz',
+              preview: 'Equipe: Mensagem de voz · 0:42',
+              previewKind: 'voice',
+            }),
+            card({ subject: 'Com texto', preview: 'Equipe: ok', previewKind: 'text' }),
+            card({
+              subject: 'Apagada',
+              preview: 'Você: Mensagem de voz apagada',
+              previewKind: 'voiceDeleted',
+            }),
+          ],
+          total: 3,
+        })}
+      />,
+    );
+    const cards = Array.from(document.querySelectorAll('a[data-case-card]'));
+    expect(cards).toHaveLength(3);
+    expect(cards.map((a) => a.querySelector('p')?.textContent)).toEqual([
+      'Com voz',
+      'Com texto',
+      'Apagada',
+    ]);
+    expect(cards.map((a) => a.querySelector('[data-case-preview] svg') !== null)).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    expect(cards[0]?.querySelector('[data-case-preview]')?.textContent).toBe(
+      'Equipe: Mensagem de voz · 0:42',
+    );
+    expect(cards[2]?.querySelector('[data-case-preview]')?.textContent).toBe(
+      'Você: Mensagem de voz apagada',
+    );
+  });
+});

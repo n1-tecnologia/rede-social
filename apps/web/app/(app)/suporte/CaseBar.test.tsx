@@ -2,10 +2,11 @@
 
 import { join } from 'node:path';
 import { cleanup, render, screen } from '@testing-library/react';
-import { NextIntlClientProvider } from 'next-intl';
+import { createTranslator, NextIntlClientProvider } from 'next-intl';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import type { MemberCaseHeaderView } from '@/lib/chat-view';
+import { caseHeaderView } from '@/lib/chat-view';
 import { CaseBar, ClosedStrip, ResolvedStrip } from './CaseBar';
 
 /**
@@ -248,5 +249,35 @@ describe('the polite live region (UI-D-830, UI-D-833; UC M09)', () => {
     rerender(wrap(<CaseBar header={header({ state: stateOf('closed') })} hasAnyCase />));
     expect(document.activeElement).toBe(input);
     input.remove();
+  });
+});
+
+/**
+ * 12.5-16 (D-861, VOICE-30, A-UI-1): a case opened by voice with no typed subject carries the server's finished
+ * label "Mensagem de voz" (no duration). Built here through the REAL view functions and the REAL catalog.
+ */
+const voiceT = createTranslator({
+  locale: 'pt-BR',
+  messages,
+  namespace: 'chat',
+}) as unknown as Parameters<typeof caseHeaderView>[1]['t'];
+const voiceCase = {
+  id: '33333333-3333-4333-8333-333333333333',
+  number: 42,
+  state: 'open',
+  subject: null,
+  subjectLabel: 'Mensagem de voz',
+  category: 'payment',
+  openedAt: '2026-11-17T14:02:00.000Z',
+} as const;
+
+describe('12.5-16 the case label of a case opened by voice (D-861, A-UI-1)', () => {
+  it('the member bar draws row 2 as "Mensagem de voz" with no duration, from the real header view', () => {
+    const view = caseHeaderView(voiceCase as never, { viewer: 'member', t: voiceT });
+    expect(view.subjectLine).toBe('#42 · Mensagem de voz');
+    const { container } = bar({ header: view as MemberCaseHeaderView, hasAnyCase: true });
+    const row2 = container.querySelector('[data-case-subject]') as HTMLElement;
+    expect(row2.textContent).toBe('Mensagem de voz');
+    expect(container.textContent).not.toMatch(/\d:\d\d/);
   });
 });

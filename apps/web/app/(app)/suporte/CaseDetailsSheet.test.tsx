@@ -3,10 +3,11 @@
 import { join } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
-import { NextIntlClientProvider } from 'next-intl';
+import { createTranslator, NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import type { CaseHistoryView, StaffCaseHeaderView } from '@/lib/chat-view';
+import { caseHistoryView } from '@/lib/chat-view';
 import { CaseDetailsSheet } from './CaseDetailsSheet';
 
 /**
@@ -358,5 +359,41 @@ describe('the sheet scrolls and closes (overflow S14)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     rerender(tree(true));
     await waitFor(() => expect(historyCalls()).toBe(2));
+  });
+});
+
+describe('12.5-16 the case label of a case opened by voice (D-861, A-UI-1)', () => {
+  it("the earlier-cases row reads '#38 · Mensagem de voz', with no duration, from the real history view", async () => {
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'chat',
+    }) as unknown as Parameters<typeof caseHistoryView>[1]['t'];
+    const finished = caseHistoryView(
+      {
+        events: [],
+        earlierCases: [
+          {
+            id: '00000038-0000-4000-8000-000000000000',
+            number: 38,
+            state: 'closed',
+            subjectLabel: 'Mensagem de voz',
+            openedAt: '2026-10-12T14:00:00.000Z',
+          },
+        ],
+        hasMoreEarlier: false,
+      },
+      { timeZone: SP, keys: KEYS, t },
+    );
+    answer = () => Response.json(finished);
+    renderSheet();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('heading', { name: 'Chamados anteriores deste membro' }),
+      ).toBeTruthy(),
+    );
+    const link = within(dialog()).getByRole('link');
+    expect(link.textContent).toContain('#38 · Mensagem de voz');
+    expect(link.textContent).not.toMatch(/\d:\d\d/);
   });
 });

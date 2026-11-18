@@ -1,5 +1,5 @@
 import { cn, Skeleton, StatusPill } from '@rede-social/ui';
-import { CircleCheck, CircleDot, Lock, UserCheck } from 'lucide-react';
+import { CircleCheck, CircleDot, Lock, Mic, UserCheck } from 'lucide-react';
 import Link from 'next/link';
 import type { CaseCardView, CaseStateGlyph } from '@/lib/chat-view';
 
@@ -15,6 +15,8 @@ import type { CaseCardView, CaseStateGlyph } from '@/lib/chat-view';
  * - **Subject:** 14/700 clamped to two lines; a case with no stored subject shows its derived label in
  *   14/400 (D-814).
  * - **Preview:** one truncated line with its "Você:" or "Equipe:" prefix, absent for a case with no message.
+ *   A recording (`previewKind` `voice`, 12.5 D-860) gets a decorative `Mic` 14 glyph before the text; a deleted
+ *   recording (`voiceDeleted`) and plain text get none. The finished string already carries the words.
  * - **Last row:** the category word, a middle dot, and the relative time at the right.
  * - **Closed:** NOT faded (a transparency would drop the text contrast): the neutral pill and the secondary
  *   text colour on the subject say it.
@@ -52,9 +54,21 @@ export function CaseCard({ card }: { card: CaseCardView }) {
         {card.subject}
       </p>
       {card.preview ? (
-        <p data-case-preview className="mt-1 truncate text-sm font-normal text-text-secondary">
-          {card.preview}
-        </p>
+        card.previewKind === 'voice' ? (
+          <p
+            data-case-preview
+            className="mt-1 flex min-w-0 items-center gap-1 text-sm font-normal text-text-secondary"
+          >
+            <Mic aria-hidden size={14} className="shrink-0" />
+            <span data-case-preview-text className="min-w-0 truncate">
+              {card.preview}
+            </span>
+          </p>
+        ) : (
+          <p data-case-preview className="mt-1 truncate text-sm font-normal text-text-secondary">
+            {card.preview}
+          </p>
+        )
       ) : null}
       <div className="mt-2 flex items-center gap-1 text-xs font-normal text-text-tertiary">
         <span className="min-w-0 truncate">{card.category}</span>
