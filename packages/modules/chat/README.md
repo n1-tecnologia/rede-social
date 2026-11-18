@@ -216,3 +216,14 @@ For the Phase 11 planner:
 For Phase 13 (the native app): the shell's microphone permission text in `scripts/app-release/config.ts` already covers
 voice messages, and Phase 13 must list "record a voice message inside the app" and the OS microphone permission as
 acceptance (the shell's WebView needs its capture permission too).
+
+### Known follow-ups of Phase 12.5
+
+- A voice take that ends "not found" shows the shipped `toast.failed` sentence ("Tente de novo"), but a dropped take
+  cannot be retried from the bubble: a dedicated sentence is a small catalog follow-up (it edits the exact-key-set
+  pins of the `chat` namespace).
+- A blocked member who reloads the page sees the composer again until the next refused voice send, because the member
+  thread answer carries no blocked state yet.
+- The six info items of the Phase 12.5 code review (ffmpeg stderr overflow reported as a timeout, the 301 s verdict
+  against the 1 s recorder timeslice, voice metadata on `GET /v1/media/{id}` for an administrator, a leftover
+  `starting` flag in the recorder, the repeated `300` constant, and the DEPLOY.md diff check ending at `$$;`) are open.
