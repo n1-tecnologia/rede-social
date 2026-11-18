@@ -16,6 +16,10 @@ export {
   MessageBubble,
   type MessageBubbleLabel,
   type MessageBubbleProps,
+  type MessageBubbleTextProps,
+  type MessageBubbleVoice,
+  type MessageBubbleVoicePlayer,
+  type MessageBubbleVoiceProps,
 } from './MessageBubble';
 export { MessageList, type MessageListItem, type MessageListProps } from './MessageList';
 export {
@@ -41,3 +45,5 @@ export {
   type VoiceTake,
   voiceRecorderReducer,
 } from './useVoiceRecorder';
+export { VoicePlayer, type VoicePlayerLabels, type VoicePlayerProps } from './VoicePlayer';
+export { pauseAllVoice } from './voice-playback-controller';
