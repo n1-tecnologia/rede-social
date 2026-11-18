@@ -9,6 +9,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import type { ChatMessageView, MemberCaseHeaderView, StaffCaseHeaderView } from '@/lib/chat-view';
+import { VOICE_READY_POLL_MS } from '@/lib/voice-send';
 import type { ThreadPaneProps } from './ThreadPane';
 
 /**
@@ -665,6 +666,22 @@ describe('voice send queue and failures', () => {
     });
     await settle();
     expect(mocks.start).toHaveBeenCalledTimes(1);
+    expect(mocks.sendVoice).toHaveBeenCalledTimes(1);
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  it('WR-01: a send that keeps answering not_ready is not repeated once the pane is gone', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.sendVoice.mockResolvedValue({ ok: false, error: 'not_ready' });
+    const { unmount } = inCase();
+    await recordAndSend();
+    await waitFor(() => expect(mocks.sendVoice).toHaveBeenCalledTimes(1));
+
+    unmount();
+    // The 700 ms wait is a real timer: outlast it, so a stray second send would show and no timer leaks.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, VOICE_READY_POLL_MS + 250));
+    });
     expect(mocks.sendVoice).toHaveBeenCalledTimes(1);
     expect(errors).not.toHaveBeenCalled();
   });

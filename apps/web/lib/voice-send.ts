@@ -9,6 +9,13 @@
  * SAME send is repeated every {@link VOICE_READY_POLL_MS} while the API answers `not_ready` (`complete` leaves
  * the asset `processing` until the worker derives it), for at most {@link VOICE_READY_TIMEOUT_MS}.
  *
+ * LEAVING THE SCREEN (WR-01, UI-D-847): the host may hand a `cancelled()` hook. It is read at the entry, between
+ * the three stages, at the top of every send iteration and right after a `not_ready` answer (before the wait is
+ * armed), so once it answers true no further stage, send or timer starts. It stops the NEXT step only: a request
+ * already on the wire is not aborted (the deps take no signal). An asset a cancelled take already uploaded and
+ * completed is never sent; the 24 hour orphan sweep collects it (D-856). The cancelled outcome reuses the
+ * `retriable` word as a carrier; the host that cancelled returns before it ever reads it.
+ *
  * Nothing here names a file, a URL, a mime, a byte count or a limit in any string it returns: the failures are
  * closed words the bubble maps to its own catalog sentences.
  */
@@ -71,6 +78,11 @@ export interface VoiceSendDeps<T> {
   sleep(ms: number): Promise<void>;
   /** The real clock, when the host has one: a slow send then counts against the 20 seconds too. */
   now?: () => number;
+  /**
+   * True once the caller no longer wants this take sent (the pane unmounted, the take was discarded or cleared
+   * by a refusal). Read before every stage and every send; a request already on the wire is not aborted.
+   */
+  cancelled?: () => boolean;
 }
 
 export type VoiceSendProgress = { phase: 'uploading'; percent: number } | { phase: 'finishing' };
@@ -157,7 +169,11 @@ export async function runVoiceSend<T>(
   const failed = (kind: VoiceFailureKind): VoiceSendOutcome<T> =>
     mediaId ? { ok: false, kind, resume: { mediaId } } : { ok: false, kind };
 
+  // Only a true answer cancels: a hook that is absent, or answers anything else, never stops a take.
+  const gone = () => deps.cancelled?.() === true;
+
   try {
+    if (gone()) return failed('retriable');
     if (!mediaId) {
       const file = voiceFileOf(take);
       const mime = file.type;
@@ -165,12 +181,14 @@ export async function runVoiceSend<T>(
       report({ phase: 'uploading', percent: 0 });
       const started = await deps.start({ kind: 'audio', purpose: 'voice', mime, size: file.size });
       if (!started.ok) return failed(classifyVoiceFailure(started.code));
+      if (gone()) return failed('retriable');
 
       const put = await deps.put(started.upload, file, {
         mime,
         onProgress: (percent) => report({ phase: 'uploading', percent }),
       });
       if (!put.ok) return failed(put.reason === 'too_large' ? 'permanent' : 'retriable');
+      if (gone()) return failed('retriable');
 
       const completed = await deps.complete(started.upload.assetId);
       if (!completed.ok) return failed(classifyVoiceFailure(completed.code));
@@ -183,9 +201,12 @@ export async function runVoiceSend<T>(
     const startedAt = deps.now?.() ?? 0;
     let waited = 0;
     for (;;) {
+      if (gone()) return failed('retriable');
       const answer = await deps.send(mediaId);
       if (answer.ok) return { ok: true, sent: answer.sent };
       if (answer.error !== 'not_ready') return failed(classifyVoiceFailure(answer.error));
+      // No wait is armed for a caller that is gone.
+      if (gone()) return failed('retriable');
       const elapsed = deps.now ? Math.max(waited, deps.now() - startedAt) : waited;
       if (elapsed + VOICE_READY_POLL_MS > VOICE_READY_TIMEOUT_MS) return failed('retriable');
       await deps.sleep(VOICE_READY_POLL_MS);

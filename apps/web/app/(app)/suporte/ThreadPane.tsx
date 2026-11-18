@@ -441,7 +441,9 @@ export function ThreadPane({
     aliveRef.current = true;
     const takes = voiceTakesRef.current;
     return () => {
-      // Leaving the screen loses every take and starts no further send (UI-D-847, A-UI-10).
+      // Leaving the screen loses every take and starts no further send (UI-D-847, A-UI-10): runVoiceSend reads
+      // `alive()` as its `cancelled` hook (WR-01). A request already on the wire is not aborted, and an asset a
+      // cancelled take already uploaded and completed stays unsent for the 24 hour orphan sweep (D-856).
       aliveRef.current = false;
       takes.clear();
     };
@@ -828,7 +830,9 @@ export function ThreadPane({
     const { voiceSendDeps } = await import('./voice-deps');
     if (!alive()) return;
     const outcome = await runVoiceSend(
-      voiceSendDeps<VoiceSentOk>(sendAction),
+      // Leaving the screen starts no further stage or send (WR-01): `alive()` is false after an unmount, a
+      // discard and a refusal that cleared the queue, and runVoiceSend reads it before every step.
+      { ...voiceSendDeps<VoiceSentOk>(sendAction), cancelled: () => !alive() },
       record.take,
       {
         onProgress: (progress) => {

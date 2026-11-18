@@ -319,3 +319,119 @@ describe('runVoiceSend failures (12.5-11 task 2)', () => {
     spy.mockRestore();
   });
 });
+
+/**
+ * WR-01 (quick 261117-w3z): leaving the screen starts no further stage and no further send. The host hands
+ * a `cancelled()` hook; it is read at the entry, between the stages, at the top of every send iteration and
+ * right after a not_ready answer (before the 700 ms sleep is armed).
+ */
+describe('runVoiceSend cancellation (WR-01)', () => {
+  it('WR-01: cancelled from the start runs no stage, no send and no sleep', async () => {
+    const f = fakes([{ ok: true, sent: { view: VIEW } }], { cancelled: () => true });
+    const outcome = await runVoiceSend(f.deps, take());
+    expect(outcome.ok).toBe(false);
+    expect(f.start).not.toHaveBeenCalled();
+    expect(f.put).not.toHaveBeenCalled();
+    expect(f.complete).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.sleep).not.toHaveBeenCalled();
+  });
+
+  it('WR-01: the flag flipping after start stops before the PUT', async () => {
+    let gone = false;
+    const f = fakes([{ ok: true, sent: { view: VIEW } }]);
+    const realStart = f.start.getMockImplementation();
+    f.start.mockImplementation(async (input: unknown) => {
+      const answer = await realStart?.(input);
+      gone = true;
+      return answer as never;
+    });
+    f.deps.cancelled = () => gone;
+    const outcome = await runVoiceSend(f.deps, take());
+    expect(outcome.ok).toBe(false);
+    expect(f.start).toHaveBeenCalledTimes(1);
+    expect(f.put).not.toHaveBeenCalled();
+    expect(f.complete).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+  });
+
+  it('WR-01: the flag flipping after the PUT stops before complete', async () => {
+    let gone = false;
+    const f = fakes([{ ok: true, sent: { view: VIEW } }]);
+    f.put.mockImplementation(async () => {
+      gone = true;
+      return { ok: true as const };
+    });
+    f.deps.cancelled = () => gone;
+    const outcome = await runVoiceSend(f.deps, take());
+    expect(outcome.ok).toBe(false);
+    expect(f.put).toHaveBeenCalledTimes(1);
+    expect(f.complete).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+  });
+
+  it('WR-01: the flag flipping after complete never sends, and the unsent asset is the resume', async () => {
+    let gone = false;
+    const f = fakes([{ ok: true, sent: { view: VIEW } }]);
+    f.complete.mockImplementation(async () => {
+      gone = true;
+      return { ok: true as const };
+    });
+    f.deps.cancelled = () => gone;
+    const outcome = await runVoiceSend(f.deps, take());
+    expect(outcome).toEqual({ ok: false, kind: 'retriable', resume: { mediaId: MEDIA } });
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.sleep).not.toHaveBeenCalled();
+  });
+
+  it('WR-01: the flag flipping on a not_ready answer arms no sleep and sends no more', async () => {
+    let gone = false;
+    const f = fakes([
+      { ok: false, error: 'not_ready' },
+      { ok: false, error: 'not_ready' },
+      { ok: true, sent: { view: VIEW } },
+    ]);
+    const realSend = f.send.getMockImplementation();
+    f.send.mockImplementation(async (mediaId: string) => {
+      const answer = await realSend?.(mediaId);
+      if (f.send.mock.calls.length === 2) gone = true;
+      return answer as never;
+    });
+    f.deps.cancelled = () => gone;
+    const outcome = await runVoiceSend(f.deps, take());
+    expect(outcome).toEqual({ ok: false, kind: 'retriable', resume: { mediaId: MEDIA } });
+    expect(f.send).toHaveBeenCalledTimes(2);
+    // Only the wait between send 1 and send 2 was armed; none after the second answer.
+    expect(f.sleep).toHaveBeenCalledTimes(1);
+  });
+
+  it('WR-01: the flag flipping inside the sleep stops before the next send', async () => {
+    let gone = false;
+    const f = fakes([
+      { ok: false, error: 'not_ready' },
+      { ok: true, sent: { view: VIEW } },
+    ]);
+    f.sleep.mockImplementation(async () => {
+      gone = true;
+    });
+    f.deps.cancelled = () => gone;
+    const outcome = await runVoiceSend(f.deps, take());
+    expect(outcome).toEqual({ ok: false, kind: 'retriable', resume: { mediaId: MEDIA } });
+    expect(f.send).toHaveBeenCalledTimes(1);
+    expect(f.sleep).toHaveBeenCalledTimes(1);
+  });
+
+  it('WR-01: a hook that is always false changes nothing', async () => {
+    const f = fakes(
+      [
+        { ok: false, error: 'not_ready' },
+        { ok: true, sent: { view: VIEW } },
+      ],
+      { cancelled: () => false },
+    );
+    const outcome = await runVoiceSend(f.deps, take());
+    expect(outcome).toEqual({ ok: true, sent: { view: VIEW } });
+    expect(f.calls).toEqual(['start', 'put', 'complete', 'send', 'send']);
+    expect(f.sleep).toHaveBeenCalledTimes(1);
+  });
+});
