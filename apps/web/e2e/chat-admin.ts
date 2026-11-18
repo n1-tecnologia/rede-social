@@ -231,9 +231,7 @@ export async function resolveCase(conversationId: string): Promise<void> {
 }
 
 /** What the database says about a case right now: for a spec to confirm what the screens drew. */
-export async function caseRowOf(
-  conversationId: string,
-): Promise<{
+export async function caseRowOf(conversationId: string): Promise<{
   number: number;
   state: CaseState;
   ownerEmail: string | null;
