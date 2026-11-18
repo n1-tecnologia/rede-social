@@ -171,12 +171,17 @@ export function useSignedUpload({
       if (capOverride !== undefined && verdict !== 'heic' && file.size > capOverride) {
         return fail(messageFor('too_large'));
       }
+      // Quick 261118-glh: only an IMAGE can be rescued by a re-encode (scaling to 2048 px). A video
+      // or a file over its table cap has no such rescue; sending it to the photo decoder ended in
+      // "could not prepare this image". It is refused here with the shared size sentence at the cap.
+      if (verdict === 'size' && kind !== 'image') return fail(messageFor('too_large'));
 
       busy.current = true;
       let payload = file;
 
       // `'heic'` is a SIGNAL, not an error: the re-encode below is what makes an iPhone photo work,
-      // silently. `'size'` enters the same branch because scaling to 2048 px is what rescues it.
+      // silently. `'size'` reaches this branch for the image kind only, because scaling to 2048 px is
+      // what rescues a photo; a video or a file over its cap was refused above.
       if (verdict === 'heic' || verdict === 'size') {
         setState('preparing');
         try {

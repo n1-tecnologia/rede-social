@@ -145,3 +145,116 @@ describe('useSignedUpload - the member cap (09-09)', () => {
     expect(start).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Quick 261118-glh: the pick-time gate routes a 'size' verdict BY KIND. Only an image may enter the
+ * photo re-encode (scaling to 2048 px is what rescues a photo); a video or a file over its cap is
+ * refused with the shared too-large sentence at the table cap. The old routing fed a 7 GB video to
+ * the <img> decoder and the person read the photo-prepare sentence.
+ *
+ * A multi-GiB buffer cannot be allocated, so the file is a one-byte File whose `size` is overridden:
+ * `classifyMediaFile` and `pick` read only `type` and `size`. Every expected sentence is computed from
+ * the table so the cases survive the later revert of the TEMPORARY post cap.
+ */
+const { formatMediaLimit } = await import('./useSignedUpload');
+const { MEDIA_LIMITS } = await import('@rede-social/contracts/media');
+
+const sizedFile = (bytes: number, name: string, type: string): File => {
+  const file = new File([new Uint8Array(1)], name, { type });
+  Object.defineProperty(file, 'size', { value: bytes });
+  return file;
+};
+const capOf = (kind: 'video' | 'file', purpose: string): number => {
+  const pair = (MEDIA_LIMITS[kind] as Record<string, { maxBytes: number } | undefined>)[purpose];
+  if (!pair) throw new Error(`no ${kind}/${purpose} pair`);
+  return pair.maxBytes;
+};
+
+describe('useSignedUpload - the pick-time gate by kind (quick 261118-glh)', () => {
+  it('G1: a post video over the cap is refused with the too-large sentence, no request, no re-encode, no console error', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cap = capOf('video', 'post');
+    const { result } = renderHook(() =>
+      useSignedUpload({ kind: 'video', purpose: 'post', onCompleted: vi.fn() }),
+    );
+    await act(async () => {
+      await result.current.pick(sizedFile(cap + 1, 'video.mp4', 'video/mp4'));
+    });
+
+    expect(result.current.error).toBe(`errors.size:${formatMediaLimit(cap)}`);
+    expect(result.current.state).toBe('error');
+    expect(start).not.toHaveBeenCalled();
+    expect(normalise).not.toHaveBeenCalled();
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('G2: a lesson video over its cap is refused the same way', async () => {
+    const cap = capOf('video', 'lesson');
+    const { result } = renderHook(() =>
+      useSignedUpload({ kind: 'video', purpose: 'lesson', onCompleted: vi.fn() }),
+    );
+    await act(async () => {
+      await result.current.pick(sizedFile(cap + 1, 'aula.mp4', 'video/mp4'));
+    });
+
+    expect(result.current.error).toBe(`errors.size:${formatMediaLimit(cap)}`);
+    expect(start).not.toHaveBeenCalled();
+    expect(normalise).not.toHaveBeenCalled();
+  });
+
+  it('G3: a PDF attachment over 50 MiB is refused the same way', async () => {
+    const cap = capOf('file', 'attachment');
+    const { result } = renderHook(() =>
+      useSignedUpload({ kind: 'file', purpose: 'attachment', onCompleted: vi.fn() }),
+    );
+    await act(async () => {
+      await result.current.pick(sizedFile(cap + 1, 'doc.pdf', 'application/pdf'));
+    });
+
+    expect(result.current.error).toBe(`errors.size:${formatMediaLimit(cap)}`);
+    expect(start).not.toHaveBeenCalled();
+    expect(normalise).not.toHaveBeenCalled();
+  });
+
+  it('G4: a video EXACTLY at the cap passes the gate and reaches the broker', async () => {
+    const cap = capOf('video', 'post');
+    const { result } = renderHook(() =>
+      useSignedUpload({ kind: 'video', purpose: 'post', onCompleted: vi.fn() }),
+    );
+    await act(async () => {
+      await result.current.pick(sizedFile(cap, 'video.mp4', 'video/mp4'));
+    });
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(normalise).not.toHaveBeenCalled();
+  });
+
+  it('G5: an image over its cap is still re-encoded once at the cap and goes on to the broker', async () => {
+    const cap = MEDIA_LIMITS.image.post?.maxBytes ?? 0;
+    normalise.mockResolvedValue(photo(1 * MIB));
+    const { result } = renderHook(() =>
+      useSignedUpload({ kind: 'image', purpose: 'post', onCompleted: vi.fn() }),
+    );
+    await act(async () => {
+      await result.current.pick(photo(cap + 1 * MIB));
+    });
+
+    expect(normalise).toHaveBeenCalledTimes(1);
+    expect(normalise.mock.calls[0]?.[1]).toEqual({ maxBytes: cap });
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it('G6: a HEIC photo is still re-encoded once and goes on to the broker', async () => {
+    normalise.mockResolvedValue(photo(1 * MIB));
+    const { result } = renderHook(() =>
+      useSignedUpload({ kind: 'image', purpose: 'post', onCompleted: vi.fn() }),
+    );
+    await act(async () => {
+      await result.current.pick(photo(3 * MIB, 'image/heic'));
+    });
+
+    expect(normalise).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+});
