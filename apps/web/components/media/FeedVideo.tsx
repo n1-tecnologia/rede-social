@@ -266,6 +266,8 @@ function ReadyFeedVideo({
   const [failed, setFailed] = useState(false);
   /** Pressed and held: paused on that frame until the release, the member's choice untouched. */
   const [held, setHeld] = useState(false);
+  /** The frame's video is in browser fullscreen: it is contained there, never cropped. */
+  const [fullscreen, setFullscreen] = useState(false);
 
   const audible = useVideoSoundAudible();
   const turn = useSyncExternalStore(subscribeTurn, readTurn, readTurnOnServer);
@@ -413,6 +415,51 @@ function ReadyFeedVideo({
     );
     observer.observe(frame);
     return () => observer.disconnect();
+  }, []);
+
+  /**
+   * What the member asks of the vendor's bar (and its hotkeys) joins the feed's own state. The
+   * vendor's composed request events are dispatched only by the bar, the hotkeys and its gesture
+   * layer, never by a programmatic `play()`, `pause()` or `muted` write, so our own scroll-out and
+   * tab-hidden pauses are never read as intent. The vendor has already acted on the element when the
+   * event reaches the frame; this only tells the feed so it does not undo it: a bar pause sticks
+   * across scrolling, a bar play takes the turn and plays while any of the frame is in view, and a
+   * mute or unmute is the visit's sound. Not bridged: `mediavolumerequest` (the slider only adjusts
+   * the element) and the seek requests (no play, pause or sound intent).
+   */
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) return;
+    const onPause = () => setMemberPaused(true);
+    const onPlay = () => {
+      setMemberPaused(false);
+      setClaims((count) => count + 1);
+    };
+    const onMute = () => setVideoSoundWanted(false);
+    const onUnmute = () => setVideoSoundWanted(true);
+    frame.addEventListener('mediapauserequest', onPause);
+    frame.addEventListener('mediaplayrequest', onPlay);
+    frame.addEventListener('mediamuterequest', onMute);
+    frame.addEventListener('mediaunmuterequest', onUnmute);
+    return () => {
+      frame.removeEventListener('mediapauserequest', onPause);
+      frame.removeEventListener('mediaplayrequest', onPlay);
+      frame.removeEventListener('mediamuterequest', onMute);
+      frame.removeEventListener('mediaunmuterequest', onUnmute);
+    };
+  }, []);
+
+  // The vendor fullscreens its own controller inside its shadow tree, so the document reports the
+  // `mux-player` host, which the frame contains. (iPhone uses the native video fullscreen instead,
+  // which contains already.)
+  useEffect(() => {
+    const frame = frameRef.current;
+    const sync = () => {
+      const current = document.fullscreenElement;
+      setFullscreen(Boolean(current && frame?.contains(current)));
+    };
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
   }, []);
 
   // Autoplay needs most of the frame on screen; a video the member played keeps playing while any
@@ -579,7 +626,7 @@ function ReadyFeedVideo({
                   // The vendor draws its bar; a player in the error state hides it again.
                   ...(failed ? { '--controls': 'none' } : {}),
                   '--dialog': 'none',
-                  '--media-object-fit': 'cover',
+                  '--media-object-fit': fullscreen ? 'contain' : 'cover',
                   '--media-background-color': 'transparent',
                   height: '100%',
                   width: '100%',

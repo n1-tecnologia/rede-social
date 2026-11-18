@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { isVendorBarEvent } from './vendor-bar';
 
 /**
  * 2026-10-20 — ONE playback rule for every video of the app (the client's "FRONT.pdf"): stories,
@@ -82,12 +83,17 @@ export function forgetVendorSoundPrefs(): void {
   }
 }
 
-/** Every held-back element (and every blocked one that asked to) replays with sound in the gesture. */
+/**
+ * Every held-back element (and every blocked one that asked to) replays with sound in the gesture.
+ * A touch or click on the vendor's own bar is the bar's, never a sound gesture: its mute button would
+ * otherwise toggle straight back what the gesture just turned on.
+ */
 function onGesture(event: Event): void {
   if (!wanted) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
   if (!target.closest('[data-video-surface]') || target.closest('[data-video-sound]')) return;
+  if (isVendorBarEvent(event)) return;
   if (!activationAllows()) return;
   for (const [element, entry] of [...entries]) {
     if (!entry.options.stillWanted()) {

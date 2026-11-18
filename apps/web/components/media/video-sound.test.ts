@@ -150,6 +150,41 @@ describe('video-sound', () => {
     expect(videoSoundAudible()).toBe(true);
   });
 
+  it('a touch or click on the vendor bar is the bar’s, never a sound gesture (2026-11-18)', async () => {
+    const stage = document.createElement('div');
+    stage.setAttribute('data-video-surface', '');
+    const player = document.createElement('mux-player');
+    const barButton = document.createElement('button');
+    player.append(barButton);
+    const plain = document.createElement('span');
+    stage.append(player, plain);
+    document.body.append(stage);
+    const video = fakeVideo('NotAllowedError');
+    playVideo(video, { stillWanted: wanted });
+    await settle();
+    expect(video.mutedAtPlay).toEqual([false, true]);
+
+    click(barButton);
+    touchEnd(barButton);
+    await settle();
+    expect(video.mutedAtPlay).toEqual([false, true]);
+    expect(video.muted).toBe(true);
+
+    // The same touch on the player itself (the video) or on a plain child still turns it on.
+    touchEnd(player);
+    await settle();
+    expect(video.mutedAtPlay).toEqual([false, true, false]);
+    expect(video.muted).toBe(false);
+
+    const second = fakeVideo('NotAllowedError');
+    playVideo(second, { stillWanted: wanted });
+    await settle();
+    expect(second.muted).toBe(true);
+    click(plain);
+    await settle();
+    expect(second.muted).toBe(false);
+  });
+
   it('reports a refusal even muted as blocked, retried at the next touch only when asked', async () => {
     const { inside } = surface();
     const retried = fakeVideo('NotAllowedError', 'NotAllowedError');

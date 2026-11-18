@@ -184,6 +184,10 @@ function barControl(player: Element): HTMLButtonElement {
   return control;
 }
 
+/** The vendor style of the newest render, as recorded. */
+const vendorStyle = (): Record<string, string> =>
+  (recorded.at(-1)?.style as Record<string, string> | undefined) ?? {};
+
 const frames = () => screen.getAllByTestId('feed-video-frame');
 const frame = () => screen.getByTestId('feed-video-frame');
 const soundButton = () => screen.queryByTestId('feed-video-sound');
@@ -603,6 +607,262 @@ describe('FeedVideo — a press on the bar is never a gesture of the card (2026-
     // The same pointer now taps the video twice: the like is back.
     await doubleTap(frame());
     expect(like).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** The vendor's own request event, composed and bubbling, as the bar and the hotkeys dispatch it. */
+async function ask(player: Element, name: string) {
+  await act(async () => {
+    player.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true }));
+  });
+}
+
+/** The bar's pause: the vendor controller pauses the element, then the request reaches the frame. */
+async function barPause(player: StandInElement) {
+  media.pause(player);
+  await ask(player, 'mediapauserequest');
+}
+
+/** The bar's play: the vendor controller starts the element, then the request reaches the frame. */
+async function barPlay(player: StandInElement) {
+  media.play(player);
+  await ask(player, 'mediaplayrequest');
+}
+
+describe('FeedVideo — what the bar asks for joins the feed’s own state (2026-11-18)', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'fullscreenElement');
+    Reflect.deleteProperty(document, 'visibilityState');
+  });
+
+  it('a pause made on the bar sticks: scrolling away and back does not resume it', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(false);
+
+    await barPause(player as StandInElement);
+    expect(player?.paused).toBe(true);
+    const plays = media.play.mock.calls.length;
+
+    await scrollTo(frame(), 0);
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(true);
+    expect(media.play.mock.calls.length).toBe(plays);
+  });
+
+  it('a pause made on the bar sticks across a tab change too', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    await barPause(player as StandInElement);
+
+    for (const state of ['hidden', 'visible']) {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    }
+    expect(player?.paused).toBe(true);
+  });
+
+  it('a play made on the bar clears the pause and plays while any of the frame is in view', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    await barPause(player as StandInElement);
+    await barPlay(player as StandInElement);
+    expect(player?.paused).toBe(false);
+
+    // Only 30% in view: below the autoplay line, yet it keeps playing, like a tapped video.
+    await scrollTo(frame(), 0.3);
+    expect(player?.paused).toBe(false);
+
+    await scrollTo(frame(), 0);
+    expect(player?.paused).toBe(true);
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(false);
+  });
+
+  it('one at a time with the bar: a pause hands the turn back, a play takes it again', async () => {
+    show(
+      <>
+        {video({ assetId: '0e000000-0000-4000-8000-0000000000e1' })}
+        {video({ assetId: '0e000000-0000-4000-8000-0000000000e2' })}
+      </>,
+    );
+    const [first, second] = await players(2);
+    const [frameA, frameB] = frames();
+    await scrollTo(frameA as Element, 1);
+    await scrollTo(frameB as Element, 1);
+    expect(second?.paused).toBe(false);
+    expect(first?.paused).toBe(true);
+
+    await barPause(second as StandInElement);
+    expect(second?.paused).toBe(true);
+    expect(first?.paused).toBe(false);
+
+    await barPlay(second as StandInElement);
+    expect(second?.paused).toBe(false);
+    expect(first?.paused).toBe(true);
+  });
+
+  it('the bar’s mute and unmute are the visit’s sound, and the next autoplay keeps it', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    expect(player?.muted).toBe(false);
+
+    (player as StandInElement).muted = true;
+    await ask(player as Element, 'mediamuterequest');
+    expect(videoSoundWanted()).toBe(false);
+    expect(player?.muted).toBe(true);
+
+    await scrollTo(frame(), 0);
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(false);
+    expect(player?.muted).toBe(true);
+
+    (player as StandInElement).muted = false;
+    await ask(player as Element, 'mediaunmuterequest');
+    expect(videoSoundWanted()).toBe(true);
+    expect(player?.muted).toBe(false);
+  });
+
+  it('our own pauses are never read as intent: scrolling away and back plays again', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    await scrollTo(frame(), 0);
+    expect(player?.paused).toBe(true);
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(false);
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(player?.paused).toBe(true);
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(player?.paused).toBe(false);
+  });
+
+  it('under reduced motion nothing plays by itself, and a play on the bar plays it', async () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) =>
+        ({
+          matches: query.includes('reduce'),
+          media: query,
+          addEventListener() {},
+          removeEventListener() {},
+        }) as unknown as MediaQueryList,
+    );
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(true);
+
+    await barPlay(player as StandInElement);
+    expect(player?.paused).toBe(false);
+    await scrollTo(frame(), 0);
+    expect(player?.paused).toBe(true);
+  });
+
+  it('a player in the error state hides the bar, and the retry brings it back', async () => {
+    show(video());
+    const [player] = await players();
+    expect(vendorStyle()['--controls']).toBeUndefined();
+
+    await act(async () => {
+      player?.dispatchEvent(new Event('error'));
+    });
+    expect(vendorStyle()['--controls']).toBe('none');
+    expect(vendorStyle()['--dialog']).toBe('none');
+    expect(screen.getByText(m('feedVideo.error'))).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: m('retry') }));
+    await flush(10);
+    expect(mintToken).toHaveBeenCalledTimes(2);
+    expect(vendorStyle()['--controls']).toBeUndefined();
+  });
+
+  it('in browser fullscreen the video is contained, not cropped, and covers again on exit', async () => {
+    show(video());
+    const [player] = await players();
+    const objectFit = () => vendorStyle()['--media-object-fit'];
+    expect(objectFit()).toBe('cover');
+
+    // The vendor fullscreens its controller inside its shadow tree: the document sees the host.
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => player,
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('fullscreenchange'));
+    });
+    expect(objectFit()).toBe('contain');
+
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => null });
+    await act(async () => {
+      document.dispatchEvent(new Event('fullscreenchange'));
+    });
+    expect(objectFit()).toBe('cover');
+  });
+
+  it('another element in fullscreen leaves the fit alone', async () => {
+    show(video());
+    await players();
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => document.body,
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('fullscreenchange'));
+    });
+    expect(vendorStyle()['--media-object-fit']).toBe('cover');
+  });
+
+  it('a press on the bar of a video the browser held back is no sound gesture and no pause', async () => {
+    const gesture = { open: false };
+    media.play.mockImplementation((node: StandInElement) => {
+      if (!node.muted && !gesture.open) return Promise.reject(refusal('NotAllowedError'));
+      node.paused = false;
+      node.dispatchEvent(new Event('playing'));
+      return Promise.resolve();
+    });
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    await flush();
+    expect(player?.muted).toBe(true);
+    expect(player?.paused).toBe(false);
+
+    gesture.open = true;
+    const control = barControl(player as Element);
+    fireEvent.pointerDown(control, { clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(control, { clientX: 20, clientY: 20 });
+    fireEvent.click(control);
+    await windowCloses();
+    expect(player?.muted).toBe(true);
+    expect(player?.paused).toBe(false);
+    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.unmute'));
+
+    // The next ordinary touch on the video unmutes inside the touch and is no pause; then one pauses.
+    fireEvent.pointerDown(frame(), { clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(frame(), { clientX: 20, clientY: 20 });
+    fireEvent.click(frame());
+    await windowCloses();
+    expect(player?.muted).toBe(false);
+    expect(player?.paused).toBe(false);
+
+    await tap(frame());
+    expect(player?.paused).toBe(true);
   });
 });
 
