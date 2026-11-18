@@ -148,6 +148,46 @@ function withCacheBuster(path: string, attempt: number): string {
   return `${path}${path.includes('?') ? '&' : '?'}r=${attempt}-${Date.now()}`;
 }
 
+/** The play disc: 40px visual, 44px touch area (the shipped hit-area technique). */
+function discClass(own: boolean): string {
+  return cn(
+    'relative grid h-10 w-10 shrink-0 place-items-center rounded-full after:absolute after:-inset-0.5',
+    own ? 'bg-on-brand text-brand' : 'bg-button bg-(image:--button-image) text-on-button',
+  );
+}
+
+/** The 4px track (the unplayed colour; the played fill sits inside). */
+function trackClass(own: boolean, off: boolean): string {
+  return cn(
+    'absolute inset-x-0 top-1/2 -mt-0.5 h-1 overflow-hidden rounded-full',
+    own ? 'bg-on-brand/30' : 'bg-bg-tertiary',
+    off && 'opacity-50',
+  );
+}
+
+/** The played part of the track. No transition: it moves with the audio clock. */
+function fillClass(own: boolean): string {
+  return cn('h-full rounded-full', own ? 'bg-on-brand' : 'bg-text');
+}
+
+/** The 40x32 speed pill with a 44px touch area. */
+function pillClass(own: boolean): string {
+  return cn(
+    'relative grid h-8 w-10 shrink-0 place-items-center whitespace-nowrap rounded-full text-sm font-bold leading-none tabular-nums after:absolute after:-inset-x-0.5 after:-inset-y-1.5',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+    own ? 'bg-on-brand/20 text-on-brand' : 'bg-bg-tertiary text-text-secondary',
+    own ? OWN_RING : OTHER_RING,
+  );
+}
+
+function timeClass(own: boolean, wraps: boolean): string {
+  return cn(
+    'min-w-0 text-sm font-normal leading-5 tabular-nums',
+    wraps ? 'break-words' : 'truncate',
+    own ? 'text-on-brand' : 'text-text-secondary',
+  );
+}
+
 export function VoicePlayer({
   src,
   durationSeconds,
@@ -369,10 +409,7 @@ export function VoicePlayer({
   const timeLine =
     message ?? (started ? `${formatClock(shown)} / ${formatClock(total)}` : formatClock(total));
   const ring = own ? OWN_RING : OTHER_RING;
-  const discBase = cn(
-    'relative grid h-10 w-10 shrink-0 place-items-center rounded-full after:absolute after:-inset-0.5',
-    own ? 'bg-on-brand text-brand' : 'bg-button bg-(image:--button-image) text-on-button',
-  );
+  const discBase = discClass(own);
 
   return (
     <div className="flex items-center gap-2">
@@ -483,16 +520,9 @@ export function VoicePlayer({
             onKeyDown={onKeyDown}
             className="peer absolute inset-x-0 top-1/2 z-10 m-0 h-11 w-full -translate-y-1/2 cursor-pointer appearance-none bg-transparent opacity-0 disabled:cursor-default [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none"
           />
-          <div
-            aria-hidden
-            className={cn(
-              'absolute inset-x-0 top-1/2 -mt-0.5 h-1 overflow-hidden rounded-full',
-              own ? 'bg-on-brand/30' : 'bg-bg-tertiary',
-              barOff && 'opacity-50',
-            )}
-          >
+          <div aria-hidden className={trackClass(own, barOff)}>
             <div
-              className={cn('h-full rounded-full', own ? 'bg-on-brand' : 'bg-text')}
+              className={fillClass(own)}
               style={{ width: `calc(8px + ${ratio} * (100% - 16px))` }}
             />
           </div>
@@ -508,29 +538,109 @@ export function VoicePlayer({
             style={{ left: `calc(${ratio} * (100% - 16px))` }}
           />
         </div>
-        <span
-          className={cn(
-            'min-w-0 text-sm font-normal leading-5 tabular-nums',
-            message ? 'break-words' : 'truncate',
-            own ? 'text-on-brand' : 'text-text-secondary',
-          )}
-        >
-          {timeLine}
-        </span>
+        <span className={timeClass(own, message !== null)}>{timeLine}</span>
       </div>
       <button
         type="button"
         aria-label={labels.speed(rateText)}
         disabled={disabled || loading || failed || unsupported}
         onClick={cycleRate}
-        className={cn(
-          'relative grid h-8 w-10 shrink-0 place-items-center whitespace-nowrap rounded-full text-sm font-bold leading-none tabular-nums after:absolute after:-inset-x-0.5 after:-inset-y-1.5',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
-          own ? 'bg-on-brand/20 text-on-brand' : 'bg-bg-tertiary text-text-secondary',
-          ring,
-        )}
+        className={pillClass(own)}
       >
         {rateText}
+      </button>
+    </div>
+  );
+}
+
+export interface VoicePlayerGhostProps {
+  /** The stored length: the time line already shows it while the file is not on the server yet or failed. */
+  durationSeconds: number;
+  own: boolean;
+  labels: Pick<VoicePlayerLabels, 'play' | 'seek' | 'speed'>;
+  formatClock: (seconds: number) => string;
+  /** The finished label of the first speed, "1x": the pill is drawn but cannot be used. */
+  rateLabel: (rate: number) => string;
+  /**
+   * An upload in flight (UI-D-846): the bar becomes a determinate `role="progressbar"` named by the host,
+   * `percent` null while the first byte has not moved (an indeterminate, empty bar). Absent on a failed
+   * bubble (UI-D-847), whose bar is empty and disabled: a frozen partial fill would read as "62% uploaded".
+   */
+  progress?: { percent: number | null; label: string };
+}
+
+/**
+ * The player's exact geometry with nothing to play (UI-D-846, UI-D-847): the pending upload and the failed
+ * send. The disc, the bar and the speed pill are all disabled, there is no audio element and no media
+ * request, and nothing here can start a sound.
+ */
+export function VoicePlayerGhost({
+  durationSeconds,
+  own,
+  labels,
+  formatClock,
+  rateLabel,
+  progress,
+}: VoicePlayerGhostProps) {
+  const total = Math.max(0, Math.round(durationSeconds));
+  const percent = progress?.percent == null ? null : Math.min(Math.max(progress.percent, 0), 100);
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        aria-label={labels.play}
+        disabled
+        className={cn(discClass(own), 'disabled:pointer-events-none disabled:opacity-50')}
+      >
+        <Play size={20} aria-hidden className="fill-current" />
+      </button>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="relative h-4">
+          {progress ? (
+            <div
+              role="progressbar"
+              aria-label={progress.label}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={percent ?? undefined}
+              className="absolute inset-0"
+            >
+              <div aria-hidden className={trackClass(own, false)}>
+                <div className={fillClass(own)} style={{ width: `${percent ?? 0}%` }} />
+              </div>
+            </div>
+          ) : (
+            <>
+              <input
+                type="range"
+                min={0}
+                max={total}
+                value={0}
+                aria-label={labels.seek}
+                disabled
+                readOnly
+                className="absolute inset-x-0 top-1/2 m-0 h-11 w-full -translate-y-1/2 appearance-none bg-transparent opacity-0"
+              />
+              <div aria-hidden className={trackClass(own, true)} />
+              <div
+                aria-hidden
+                className={cn(
+                  'absolute left-0 top-0 h-4 w-4 rounded-full opacity-50',
+                  own ? 'bg-on-brand' : 'bg-text',
+                )}
+              />
+            </>
+          )}
+        </div>
+        <span className={timeClass(own, false)}>{formatClock(total)}</span>
+      </div>
+      <button
+        type="button"
+        aria-label={labels.speed(rateLabel(1))}
+        disabled
+        className={pillClass(own)}
+      >
+        {rateLabel(1)}
       </button>
     </div>
   );

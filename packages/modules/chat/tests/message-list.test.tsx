@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { MessageBubbleVoice } from '../ui/index';
 import { MessageList, type MessageListItem } from '../ui/index';
 
 /**
@@ -111,5 +112,85 @@ describe('MessageList (UI-D-259)', () => {
     );
     expect(times).toEqual(['14:02', '14:05', 'pending-sentinel']);
     expect(container.querySelector('[data-pending]')).not.toBeNull();
+  });
+});
+
+describe('MessageList with voice messages (12.5-14, UI-D-851)', () => {
+  const voice = (spokenLabel: string): MessageBubbleVoice => ({
+    status: 'ready',
+    src: '/v1/media/abc/original',
+    durationSeconds: 42,
+    spokenLabel,
+    player: {
+      labels: {
+        play: 'play-sentinel',
+        pause: 'pause-sentinel',
+        loading: 'loading-sentinel',
+        retry: 'retry-sentinel',
+        seek: 'seek-sentinel',
+        error: 'error-sentinel',
+        unsupported: 'unsupported-sentinel',
+        speed: (rate) => `speed-${rate}`,
+        seekValue: (current, total) => `${current}-${total}`,
+      },
+      formatClock: (seconds) =>
+        `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`,
+      nextRate: () => 1,
+      rateLabel: () => 'rate',
+    },
+  });
+
+  it('mixes text and voice in one log, each voice message its own group, in the order given', () => {
+    const mixed: MessageListItem[] = [
+      { kind: 'message', key: 'v1', side: 'other', voice: voice('group-one-sentinel'), time: null },
+      { kind: 'message', key: 't1', side: 'own', body: 'texto', time: null },
+      {
+        kind: 'message',
+        key: 'v2',
+        side: 'own',
+        voice: voice('group-two-sentinel'),
+        time: '14:05',
+      },
+    ];
+    const { container } = render(<MessageList label="log" items={mixed} />);
+    const log = screen.getByRole('log');
+    expect(within(log).getAllByRole('listitem')).toHaveLength(3);
+    expect(
+      within(log)
+        .getAllByRole('group')
+        .map((g) => g.getAttribute('aria-label')),
+    ).toEqual(['group-one-sentinel', 'group-two-sentinel']);
+    // A text message in the same run still carries its body.
+    expect(container.querySelector('[data-chat-message="t1"]')?.textContent).toBe('texto');
+  });
+
+  it('never autoplays an arriving voice message and requests no media on render', () => {
+    const original = HTMLMediaElement.prototype.play;
+    let plays = 0;
+    HTMLMediaElement.prototype.play = function play() {
+      plays += 1;
+      return Promise.resolve();
+    };
+    try {
+      const first: MessageListItem[] = [
+        { kind: 'message', key: 'v1', side: 'other', voice: voice('group-one-sentinel') },
+      ];
+      const { container, rerender } = render(<MessageList label="log" items={first} />);
+      rerender(
+        <MessageList
+          label="log"
+          items={[
+            ...first,
+            { kind: 'message', key: 'v2', side: 'other', voice: voice('group-two-sentinel') },
+          ]}
+        />,
+      );
+      expect(plays).toBe(0);
+      for (const audio of container.querySelectorAll('audio')) {
+        expect(audio.hasAttribute('src')).toBe(false);
+      }
+    } finally {
+      HTMLMediaElement.prototype.play = original;
+    }
   });
 });

@@ -1,6 +1,6 @@
-import { cn, linkify } from '@rede-social/ui';
-import { ShieldCheck } from 'lucide-react';
-import { VoicePlayer, type VoicePlayerLabels } from './VoicePlayer';
+import { Button, cn, linkify } from '@rede-social/ui';
+import { CircleAlert, RotateCw, ShieldCheck, Trash2 } from 'lucide-react';
+import { VoicePlayer, VoicePlayerGhost, type VoicePlayerLabels } from './VoicePlayer';
 
 /**
  * One chat message: the prototype's bubble pair (UI-D-259) minus the ticket extras.
@@ -22,7 +22,10 @@ import { VoicePlayer, type VoicePlayerLabels } from './VoicePlayer';
  *   props are a type union so a bubble has either one and never both. The voice bubble is the same shell
  *   (radii, fills, `px-3 py-2`, sender label above, time under) at a fixed `w-70` capped by `max-w-[85%]`,
  *   carries no text (no `linkify`, no `whitespace-pre-wrap`) and is ONE `role="group"` named by the host's
- *   finished spoken phrase.
+ *   finished spoken phrase. Its variants (UI-D-846, UI-D-847, UI-D-858): `ready` plays; `pending` keeps the
+ *   player's geometry at `opacity-70` with a determinate progress bar and the host's progress text in the
+ *   footer; `failed` loses the dimming, shows the danger line and the retry and discard buttons; `deleted`
+ *   keeps place, side and time and reads the host's sentence, with no player and no media request.
  *
  * Props-only: this component ships no words.
  */
@@ -44,19 +47,58 @@ export interface MessageBubbleVoicePlayer {
   onRateChange?: (label: string) => void;
 }
 
-/**
- * The recording a voice bubble draws (D-853). `src` is the same-origin media path the host built; there is
- * no file name, URL display, size or mime anywhere in it (UI-D-857).
- */
-export interface MessageBubbleVoice {
-  status: 'ready';
-  src: string;
-  /** The stored, server-checked length in seconds. */
+/** What every voice bubble that has a recording to show carries. */
+interface MessageBubbleVoiceShared {
+  /** The stored, server-checked length in seconds (the recorder's own count only until the server answers). */
   durationSeconds: number;
   /** The finished spoken phrase naming the group, e.g. "Mensagem de voz, 42 segundos". */
   spokenLabel: string;
   player: MessageBubbleVoicePlayer;
 }
+
+/** The recording is stored and plays. `src` is the same-origin media path the host built (UI-D-857). */
+export interface MessageBubbleVoiceReady extends MessageBubbleVoiceShared {
+  status: 'ready';
+  src: string;
+}
+
+/**
+ * The recording is still going up (UI-D-846): the disc is disabled and the bar is a determinate progress
+ * bar. The footer text ("Enviando… 62%") is the bubble's `pendingLabel`, which the host finishes.
+ */
+export interface MessageBubbleVoicePending extends MessageBubbleVoiceShared {
+  status: 'pending';
+  /** `percent` null until the first byte moves (an empty bar); `label` names the progress bar. */
+  progress: { percent: number | null; label: string };
+}
+
+/** The send failed (UI-D-847): the bubble stays for a retry, or only for a discard when it cannot succeed. */
+export interface MessageBubbleVoiceFailed extends MessageBubbleVoiceShared {
+  status: 'failed';
+  failure: {
+    /** The host's one sentence, in danger ink under the bubble. */
+    text: string;
+    /** False for a permanent refusal: only "Descartar" shows. */
+    retriable: boolean;
+    retryLabel: string;
+    discardLabel: string;
+    onRetry?: () => void;
+    onDiscard?: () => void;
+  };
+}
+
+/** The sender's account is gone (UI-D-858): the host's sentence in muted ink, nothing to play. */
+export interface MessageBubbleVoiceDeleted {
+  status: 'deleted';
+  text: string;
+}
+
+/** The recording a voice bubble draws (D-853). There is no file name, size or mime anywhere in it. */
+export type MessageBubbleVoice =
+  | MessageBubbleVoiceReady
+  | MessageBubbleVoicePending
+  | MessageBubbleVoiceFailed
+  | MessageBubbleVoiceDeleted;
 
 interface MessageBubbleBase {
   side: 'own' | 'other';
@@ -96,12 +138,15 @@ export function MessageBubble({
   pendingLabel = '',
 }: MessageBubbleProps) {
   const own = side === 'own';
-  const footer = pending ? pendingLabel : time;
+  // A pending voice upload is an optimistic bubble whether or not the host also set `pending`.
+  const inFlight = pending || voice?.status === 'pending';
+  const failed = voice?.status === 'failed' ? voice.failure : null;
+  const footer = inFlight ? pendingLabel : time;
 
   return (
     <div
       data-chat-bubble={side}
-      data-pending={pending || undefined}
+      data-pending={inFlight || undefined}
       className={cn(
         'flex max-w-[85%] min-w-0 flex-col',
         own ? 'self-end items-end' : 'self-start items-start',
@@ -117,7 +162,17 @@ export function MessageBubble({
           {label.srSuffix ? <span className="sr-only">{label.srSuffix}</span> : null}
         </span>
       ) : null}
-      {voice ? (
+      {voice?.status === 'deleted' ? (
+        <div
+          data-chat-voice-deleted
+          className={cn(
+            'max-w-full border border-border bg-bg-secondary px-3 py-2 text-sm font-normal leading-normal text-text-secondary',
+            own ? 'rounded-2xl rounded-br-md' : 'rounded-2xl rounded-bl-md',
+          )}
+        >
+          {voice.text}
+        </div>
+      ) : voice ? (
         // biome-ignore lint/a11y/useSemanticElements: a fieldset brings legend and min-width quirks into a chat bubble; UI-D-855 prescribes role="group"
         <div
           role="group"
@@ -127,19 +182,30 @@ export function MessageBubble({
             own
               ? 'rounded-2xl rounded-br-md bg-brand text-on-brand'
               : 'rounded-2xl rounded-bl-md border border-border bg-bg-secondary text-text',
-            pending && 'opacity-70',
+            inFlight && 'opacity-70',
           )}
         >
-          <VoicePlayer
-            src={voice.src}
-            durationSeconds={voice.durationSeconds}
-            own={own}
-            labels={voice.player.labels}
-            formatClock={voice.player.formatClock}
-            nextRate={voice.player.nextRate}
-            rateLabel={voice.player.rateLabel}
-            onRateChange={voice.player.onRateChange}
-          />
+          {voice.status === 'ready' ? (
+            <VoicePlayer
+              src={voice.src}
+              durationSeconds={voice.durationSeconds}
+              own={own}
+              labels={voice.player.labels}
+              formatClock={voice.player.formatClock}
+              nextRate={voice.player.nextRate}
+              rateLabel={voice.player.rateLabel}
+              onRateChange={voice.player.onRateChange}
+            />
+          ) : (
+            <VoicePlayerGhost
+              durationSeconds={voice.durationSeconds}
+              own={own}
+              labels={voice.player.labels}
+              formatClock={voice.player.formatClock}
+              rateLabel={voice.player.rateLabel}
+              progress={voice.status === 'pending' ? voice.progress : undefined}
+            />
+          )}
         </div>
       ) : (
         <div
@@ -154,7 +220,42 @@ export function MessageBubble({
           {linkify(body ?? '', { linkClassName: own ? OWN_LINK_CLASS : OTHER_LINK_CLASS })}
         </div>
       )}
-      {footer ? (
+      {failed ? (
+        <>
+          <span
+            data-chat-failure
+            role="alert"
+            className="mt-1 inline-flex items-center gap-1 px-1 text-sm font-normal text-danger"
+          >
+            <CircleAlert size={14} aria-hidden />
+            {failed.text}
+          </span>
+          <div className={cn('mt-1 flex flex-wrap gap-2', own ? 'justify-end' : 'justify-start')}>
+            {failed.retriable ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                hitArea
+                className="text-text-secondary"
+                onClick={failed.onRetry}
+              >
+                <RotateCw size={16} aria-hidden />
+                {failed.retryLabel}
+              </Button>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              hitArea
+              className="text-text-secondary"
+              onClick={failed.onDiscard}
+            >
+              <Trash2 size={16} aria-hidden />
+              {failed.discardLabel}
+            </Button>
+          </div>
+        </>
+      ) : footer ? (
         <span data-chat-time className="mt-1 px-1 text-xs font-normal text-text-tertiary">
           {footer}
         </span>

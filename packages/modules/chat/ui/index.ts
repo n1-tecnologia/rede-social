@@ -18,8 +18,12 @@ export {
   type MessageBubbleProps,
   type MessageBubbleTextProps,
   type MessageBubbleVoice,
+  type MessageBubbleVoiceDeleted,
+  type MessageBubbleVoiceFailed,
+  type MessageBubbleVoicePending,
   type MessageBubbleVoicePlayer,
   type MessageBubbleVoiceProps,
+  type MessageBubbleVoiceReady,
 } from './MessageBubble';
 export { MessageList, type MessageListItem, type MessageListProps } from './MessageList';
 export {
@@ -45,5 +49,11 @@ export {
   type VoiceTake,
   voiceRecorderReducer,
 } from './useVoiceRecorder';
-export { VoicePlayer, type VoicePlayerLabels, type VoicePlayerProps } from './VoicePlayer';
+export {
+  VoicePlayer,
+  VoicePlayerGhost,
+  type VoicePlayerGhostProps,
+  type VoicePlayerLabels,
+  type VoicePlayerProps,
+} from './VoicePlayer';
 export { pauseAllVoice } from './voice-playback-controller';
