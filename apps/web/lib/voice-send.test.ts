@@ -340,7 +340,9 @@ describe('runVoiceSend cancellation (WR-01)', () => {
   it('WR-01: the flag flipping after start stops before the PUT', async () => {
     let gone = false;
     const f = fakes([{ ok: true, sent: { view: VIEW } }]);
-    const realStart = f.start.getMockImplementation();
+    const realStart = f.start.getMockImplementation() as
+      | ((input: unknown) => Promise<unknown>)
+      | undefined;
     f.start.mockImplementation(async (input: unknown) => {
       const answer = await realStart?.(input);
       gone = true;
@@ -391,7 +393,9 @@ describe('runVoiceSend cancellation (WR-01)', () => {
       { ok: false, error: 'not_ready' },
       { ok: true, sent: { view: VIEW } },
     ]);
-    const realSend = f.send.getMockImplementation();
+    const realSend = f.send.getMockImplementation() as
+      | ((mediaId: string) => Promise<unknown>)
+      | undefined;
     f.send.mockImplementation(async (mediaId: string) => {
       const answer = await realSend?.(mediaId);
       if (f.send.mock.calls.length === 2) gone = true;
