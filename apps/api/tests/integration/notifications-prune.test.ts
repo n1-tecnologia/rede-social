@@ -25,9 +25,10 @@ import { adminSql, api } from './setup';
  */
 
 const MEDIA_SWEEP_QUEUE = 'kernel.media-sweep-orphans';
-/** Every sweep function the app registers: the notifications manifest's, the dashboard's (08.7-12), the payments module's (09.1-09) and the chat module's (12.4-04). */
+/** Every sweep function the app registers: the notifications manifest's, the dashboard's (08.7-12), the payments module's (09.1-09) and the chat module's (12.4-04, 12.5-08). */
 const REAL_SWEEP_FUNCTIONS = [
   'chat_cases_auto_close',
+  'chat_voice_orphans_sweep',
   'dashboard_snapshots_prune',
   'notifications_prune',
   'payment_events_prune',
