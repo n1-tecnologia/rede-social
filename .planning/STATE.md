@@ -4,11 +4,11 @@ current_phase: "12.5"
 current_phase_name: Mensagem de voz no chat
 current_plan: 18
 status: verifying
-stopped_at: Completed 12.4-22-PLAN.md; re-verification gaps_found (WR-06), phase not closed
-last_updated: "2026-11-18T01:33:23.602Z"
+stopped_at: Phase 12.5 executed 18/18; verification human_needed (8/11), 34 ledger rows are Igor's; phase not closed, nothing pushed
+last_updated: "2026-11-18T01:49:42.002Z"
 last_activity: 2026-11-17
-last_activity_desc: Phase 12.5 all 18 plans executed; running review, regression gate and verification
-state_head: 4dd463bbce623da196f2d521e38ae63867c55171
+last_activity_desc: Phase 12.5 executed 18/18, code review (3 warnings, no blockers), verification human_needed; UAT persisted, phase not marked complete
+state_head: 6bc75f70a2290adaef2207cb234c71a0f2c50c90
 progress:
   total_phases: 35
   completed_phases: 0
@@ -1337,5 +1337,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-17T16:19:32.442Z
-Stopped at: Completed 12.4-22-PLAN.md
+Stopped at: Phase 12.5 executed 18/18; verification human_needed (8/11), 34 ledger rows are Igor's; phase not closed, nothing pushed
 Resume file: None
