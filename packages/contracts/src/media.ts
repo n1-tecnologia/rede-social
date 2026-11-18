@@ -167,11 +167,14 @@ export const MEDIA_LIMITS: Record<MediaKind, Partial<Record<MediaPurpose, MediaL
     story: { mimes: IMAGE_MIMES, maxBytes: 15 * 1024 * 1024 },
   },
   video: {
-    // TEMPORARY (quick 261117-d1o): the boss asked for ONE 2 h video posted by the tenant admin.
-    // Old values: 500 MiB and 300 s. Revert = put them back and flip the explicit post pin in
+    // TEMPORARY, applies to every tenant. Current values: 8 GiB and 9000 s. First raise: quick
+    // 261117-d1o (to 4 GiB and 9000 s, for ONE 2 h post by the tenant admin). This raise: quick
+    // 261118-glh (to 8 GiB, for a 7.2 GB video of about one hour). ORIGINAL values: 500 MiB and 300 s.
+    // Revert = put the original values back and flip the explicit post pin in
     // packages/contracts/tests/media.test.ts. The member-video range in the platform social form
-    // follows this entry through D-474.
-    post: { mimes: VIDEO_MIMES, maxBytes: 4 * 1024 * 1024 * 1024, maxDurationSeconds: 9000 },
+    // follows this entry through D-474. Mux documents no file-size cap that could be confirmed, so
+    // the 8 GiB is UNVERIFIED against Mux; a refusal would show as a failed upload.
+    post: { mimes: VIDEO_MIMES, maxBytes: 8 * 1024 * 1024 * 1024, maxDurationSeconds: 9000 },
     story: { mimes: VIDEO_MIMES, maxBytes: 500 * 1024 * 1024, maxDurationSeconds: 60 },
     // 08.3 (D-409, COURSE-12; RESEARCH A1): a long-form lecture, 4 GiB and 4 hours. Same mimes as a
     // post video; the ready-event job compares the provider's duration against this cap. The

@@ -48,13 +48,29 @@ describe('media contract: the lesson purpose (08.3-01)', () => {
     expect(lesson?.mimes).toEqual(['video/mp4', 'video/quicktime']);
   });
 
-  it('TEMPORARY raise (quick 261117-d1o): video/post is 4 GiB and 9000 s; story and lesson did not move', () => {
-    // TEMPORARY pin: flip it back to 500 MiB and 300 s together with the constant in media.ts.
-    expect(MEDIA_LIMITS.video.post?.maxBytes).toBe(4 * 1024 ** 3);
+  it('TEMPORARY raise (quick 261117-d1o to 4 GiB, quick 261118-glh to 8 GiB): video/post is 8 GiB and 9000 s; story and lesson did not move', () => {
+    // TEMPORARY pin: flipping the constant back means 500 MiB and 300 s; flip this pin with it.
+    expect(MEDIA_LIMITS.video.post?.maxBytes).toBe(8 * 1024 ** 3);
     expect(MEDIA_LIMITS.video.post?.maxDurationSeconds).toBe(9000);
     expect(MEDIA_LIMITS.video.story?.maxBytes).toBe(500 * 1024 * 1024);
     expect(MEDIA_LIMITS.video.story?.maxDurationSeconds).toBe(60);
     expect(MEDIA_LIMITS.video.lesson?.maxDurationSeconds).toBe(14_400);
+  });
+
+  it('the post video cap is judged by the table: at the cap passes, one byte more is size; the start body only checks positivity', () => {
+    // Derived from the table so this case survives the revert of the TEMPORARY cap.
+    const cap = MEDIA_LIMITS.video.post?.maxBytes ?? 0;
+    const at = { name: 'v.mp4', type: 'video/mp4', size: cap } as File;
+    const over = { name: 'v.mp4', type: 'video/mp4', size: cap + 1 } as File;
+    expect(classifyMediaFile(at, 'video', 'post')).toBeNull();
+    expect(classifyMediaFile(over, 'video', 'post')).toBe('size');
+    for (const size of [cap, cap + 1]) {
+      expect(
+        mediaStartBodySchema.safeParse({ kind: 'video', purpose: 'post', mime: 'video/mp4', size })
+          .success,
+      ).toBe(true);
+    }
+    expect(Number.isSafeInteger(cap)).toBe(true);
   });
 
   it('no image.lesson or file.lesson pair exists (covers use cover, materials use attachment)', () => {

@@ -17,7 +17,8 @@ export interface VideoUploadFieldProps {
   /**
    * Which video budget and caps the upload is charged to (08.3-03, D-409, COURSE-12). `post` — the
    * default, and what the media screen and every composer keep passing nothing for — is the feed's
-   * 500 MiB / 5 min pair; `lesson` is the school's 4 GiB / 4 h pair under its own tenant ceiling.
+   * pair read from `MEDIA_LIMITS.video.post` (raised for now, see the TEMPORARY comment there);
+   * `lesson` is the school's long-form pair under its own tenant ceiling.
    * The accept list and the `start` body both follow it, so the server judges the right pair.
    */
   purpose?: 'post' | 'lesson';
