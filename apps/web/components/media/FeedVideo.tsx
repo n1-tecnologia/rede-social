@@ -9,6 +9,7 @@ import { useTranslations } from 'next-intl';
 import {
   type CSSProperties,
   type MouseEvent,
+  type PointerEvent,
   useCallback,
   useEffect,
   useId,
@@ -18,6 +19,7 @@ import {
 } from 'react';
 import { fetchPlaybackTokenAction } from '@/app/(app)/configuracoes/midia/actions';
 import { VideoPlayer } from './VideoPlayer';
+import { isVendorBarEvent, PLAYBACK_RATES, SEEK_STEP_SECONDS } from './vendor-bar';
 import { probePosterRatio, rememberVideoRatio, useKnownVideoRatio } from './video-ratio';
 import {
   forgetVideo,
@@ -456,9 +458,35 @@ function ReadyFeedVideo({
    * touch, so the tap it ends in must not pause it. Read when the press STARTS, before that unmute.
    */
   const unlocking = useRef(false);
-  const notePress = useCallback(() => {
-    unlocking.current = heldBack(element);
-  }, [element]);
+  /**
+   * Pointers whose press STARTED on the vendor's bar. The start decides, not the end: a scrub that
+   * ends over the video is never a tap, and a press that starts on the video and ends over the bar
+   * still ends normally (a hold resumes).
+   */
+  const barPresses = useRef<Set<number>>(new Set());
+  const notePress = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (isVendorBarEvent(event.nativeEvent)) {
+        barPresses.current.add(event.pointerId);
+        // A bar press is no sound gesture, so it never leaves the next tap's pause suppressed.
+        unlocking.current = false;
+        return;
+      }
+      barPresses.current.delete(event.pointerId);
+      unlocking.current = heldBack(element);
+    },
+    [element],
+  );
+
+  /** The card's gestures (`DoubleTapHeart`, an ancestor) never see a press that started on the bar. */
+  const keepBarPress = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (barPresses.current.has(event.pointerId)) event.stopPropagation();
+  }, []);
+  const endBarPress = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (!barPresses.current.has(event.pointerId)) return;
+    event.stopPropagation();
+    barPresses.current.delete(event.pointerId);
+  }, []);
 
   const tapPause = useCallback(() => {
     if (unlocking.current) {
@@ -476,8 +504,12 @@ function ReadyFeedVideo({
   const holdStart = useCallback(() => setHeld(true), []);
   const holdEnd = useCallback(() => setHeld(false), []);
 
-  /** media-chrome plays/pauses on a mouse click of the video by itself; the single tap does it here. */
+  /**
+   * media-chrome plays/pauses on a mouse click of the video by itself; the single tap does it here.
+   * Only the VIDEO's clicks are stopped: the bar's own buttons must reach the vendor.
+   */
   const stopVendorClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (isVendorBarEvent(event.nativeEvent)) return;
     event.stopPropagation();
   }, []);
 
@@ -505,7 +537,7 @@ function ReadyFeedVideo({
           onHoldStart={holdStart}
           onHoldEnd={holdEnd}
         >
-          {/* biome-ignore lint/a11y/noStaticElementInteractions: it only notes a press, cancels the long-press menu and stops the vendor's click; the taps are DoubleTapHeart's and the keyboard path is the hidden pause button. */}
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: it only notes a press, cancels the long-press menu, stops the vendor's click and keeps the bar's own presses and clicks away from the card; the taps are DoubleTapHeart's and the keyboard path is the hidden pause button. */}
           <div
             ref={frameRef}
             data-testid="feed-video-frame"
@@ -516,6 +548,9 @@ function ReadyFeedVideo({
             tabIndex={-1}
             data-ratio={ratio}
             onPointerDownCapture={notePress}
+            onPointerDown={keepBarPress}
+            onPointerUp={endBarPress}
+            onPointerCancel={endBarPress}
             onClickCapture={stopVendorClick}
             onContextMenu={preventMenu}
             className="w-full cursor-pointer overflow-hidden bg-bg-tertiary [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset"
@@ -533,13 +568,16 @@ function ReadyFeedVideo({
                 streamType="on-demand"
                 playsInline
                 loop
-                nohotkeys
+                forwardSeekOffset={SEEK_STEP_SECONDS}
+                backwardSeekOffset={SEEK_STEP_SECONDS}
+                playbackRates={PLAYBACK_RATES}
                 noMutedPref
                 noVolumePref
                 preload={view.mostly ? 'auto' : 'metadata'}
                 poster={poster}
                 style={{
-                  '--controls': 'none',
+                  // The vendor draws its bar; a player in the error state hides it again.
+                  ...(failed ? { '--controls': 'none' } : {}),
                   '--dialog': 'none',
                   '--media-object-fit': 'cover',
                   '--media-background-color': 'transparent',
@@ -574,7 +612,8 @@ function ReadyFeedVideo({
             onClick={toggleSound}
             data-testid="feed-video-sound"
             data-video-sound=""
-            className="absolute right-3 bottom-3 z-[2] bg-black/60 text-white hover:bg-black/70 active:bg-black/75 focus-visible:ring-white focus-visible:ring-offset-0"
+            // The vendor's bar owns the bottom edge, so the button sits at the top right.
+            className="absolute top-3 right-3 z-[2] bg-black/60 text-white hover:bg-black/70 active:bg-black/75 focus-visible:ring-white focus-visible:ring-offset-0"
           />
         ) : null}
 

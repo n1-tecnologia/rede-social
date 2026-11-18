@@ -14,6 +14,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { fetchPlaybackTokenAction } from '@/app/(app)/configuracoes/midia/actions';
+import { PLAYBACK_RATES, SEEK_STEP_SECONDS } from './vendor-bar';
 import {
   forgetVideo,
   pauseVideo,
@@ -96,10 +97,6 @@ const POSTER_PROBE_STEP_MS = 120;
 const POSTER_PROBE_TIMEOUT_MS = 3000;
 /** How much of the frame must be on screen before it plays by itself. */
 const IN_VIEW_RATIO = 0.5;
-/** The bar's back and forward buttons (and the arrow hotkeys) jump this many seconds. */
-const SEEK_STEP_SECONDS = 10;
-/** The speed menu: the vendor default has no slow rate, and a lesson needs 0.5 and 0.75. */
-const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
 function subscribeHidden(listener: () => void) {
   document.addEventListener('visibilitychange', listener);

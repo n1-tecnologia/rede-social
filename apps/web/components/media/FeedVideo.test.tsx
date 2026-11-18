@@ -11,8 +11,9 @@ import { knownVideoRatio, rememberVideoRatio, resetVideoRatios } from './video-r
 import { resetVideoSound, videoSoundWanted } from './video-sound';
 
 /**
- * 2026-10-05 — the feed's video, Instagram style: its own proportion, no player chrome, autoplay
- * in view (one at a time), one tap pauses, two taps like. 2026-10-09: one tap OPENS Reels when
+ * 2026-10-05 — the feed's video, Instagram style: its own proportion, autoplay in view (one at a
+ * time), one tap pauses, two taps like. 2026-11-18: it shows the vendor's bar, and a press on the bar
+ * is never one of those gestures. 2026-10-09: one tap OPENS Reels when
  * the card offers it (`onOpen`), the sound button is always there while the video can play, and a
  * surface over the feed suspends every video (`suspendFeedVideos`). 2026-10-20 (the client's
  * FRONT.pdf): it plays WITH sound through `video-sound` (reset before every case), a refused sound
@@ -173,6 +174,14 @@ async function players(count = 1): Promise<StandInElement[]> {
     await flush(1);
   }
   throw new Error('the vendor element never mounted');
+}
+
+/** A control of the vendor's bar: a plain button inside the stand-in `mux-player`. */
+function barControl(player: Element): HTMLButtonElement {
+  const control = document.createElement('button');
+  control.type = 'button';
+  player.append(control);
+  return control;
 }
 
 const frames = () => screen.getAllByTestId('feed-video-frame');
@@ -412,8 +421,8 @@ describe('FeedVideo — the ratio is learned early and remembered (2026-10-09, i
   });
 });
 
-describe('FeedVideo — no player chrome', () => {
-  it('hands the vendor no controls, no dialog, cover, loop and the preference opt-outs, and no muted', async () => {
+describe('FeedVideo — the vendor bar (2026-11-18)', () => {
+  it('hands the vendor the bar and its hotkeys, the 10 s jumps and the 0.5 to 2 speeds, and no muted', async () => {
     show(video());
     await players();
     const props = recorded.at(-1);
@@ -421,27 +430,179 @@ describe('FeedVideo — no player chrome', () => {
       playbackId: 'pb-feed-1',
       loop: true,
       playsInline: true,
-      nohotkeys: true,
       noMutedPref: true,
       noVolumePref: true,
       streamType: 'on-demand',
+      forwardSeekOffset: 10,
+      backwardSeekOffset: 10,
     });
+    // The bar's hotkeys are on: the prop is not passed at all.
+    expect(props && 'nohotkeys' in props).toBe(false);
     expect(props && 'autoPlay' in props).toBe(false);
     // 2026-10-20: the sound is `video-sound`'s, set on the element at every play.
     expect(props && 'muted' in props).toBe(false);
+    const rates = props?.playbackRates as number[] | undefined;
+    expect(rates).toContain(0.5);
+    expect(rates).toContain(2);
     const style = props?.style as Record<string, string> | undefined;
-    expect(style?.['--controls']).toBe('none');
+    // No `--controls: none`: the vendor draws its bar. Its error dialog stays hidden.
+    expect(style && '--controls' in style).toBe(false);
     expect(style?.['--dialog']).toBe('none');
     expect(style?.['--media-object-fit']).toBe('cover');
+    expect(style?.['--media-background-color']).toBe('transparent');
   });
 
-  it('a mouse click never reaches the vendor, which would toggle play by itself', async () => {
+  it('the frame box does not change: the video’s ratio, clipped, with the 4:5 fallback', async () => {
+    show(video({ width: 1920, height: 1080 }));
+    await players();
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(16 / 9, 4);
+    expect(frame().style.aspectRatio).toMatch(/^1\.77/);
+    expect(frame().className).toContain('overflow-hidden');
+  });
+
+  it('a mouse click on the video never reaches the vendor, which would toggle play by itself', async () => {
     show(video());
     const [player] = await players();
     const vendorClick = vi.fn();
     player?.addEventListener('click', vendorClick);
     fireEvent.click(player as Element);
     expect(vendorClick).not.toHaveBeenCalled();
+  });
+
+  it('a click on the bar reaches the vendor: the bar’s buttons work', async () => {
+    show(video());
+    const [player] = await players();
+    const control = barControl(player as Element);
+    const barClick = vi.fn();
+    control.addEventListener('click', barClick);
+    fireEvent.click(control);
+    expect(barClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('the sound button moved to the top right, off the bar’s fullscreen button', async () => {
+    show(video());
+    await players();
+    const button = soundButton() as HTMLElement;
+    expect(button.hasAttribute('data-video-sound')).toBe(true);
+    expect(button.className).toContain('top-3');
+    expect(button.className).toContain('right-3');
+    expect(button.className).not.toContain('bottom-3');
+  });
+});
+
+describe('FeedVideo — a press on the bar is never a gesture of the card (2026-11-18)', () => {
+  const labels = { carousel: 'carousel', attachmentError: 'attachment-error' };
+
+  function inPost(handlers: { open?: () => void; like?: () => void }) {
+    return (
+      <PostMedia
+        mediaKind="video"
+        images={[]}
+        video={video()}
+        attachments={[]}
+        onDoubleTapLike={handlers.like}
+        onOpenVideo={handlers.open}
+        labels={labels}
+      />
+    );
+  }
+
+  it('two quick taps on the bar like nothing, open nothing, burst nothing and pause nothing', async () => {
+    const open = vi.fn();
+    const like = vi.fn();
+    show(inPost({ open, like }));
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    const control = barControl(player as Element);
+
+    await doubleTap(control);
+    expect(like).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-double-tap-burst]')).toBeNull();
+    expect(player?.paused).toBe(false);
+  });
+
+  it('one tap on the bar opens nothing, and pauses nothing in a card with no Reels', async () => {
+    const open = vi.fn();
+    show(inPost({ open }));
+    const [first] = await players();
+    await scrollTo(frame(), 1);
+    await tap(barControl(first as Element));
+    expect(open).not.toHaveBeenCalled();
+    cleanup();
+
+    show(inPost({}));
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    await tap(barControl(player as Element));
+    expect(player?.paused).toBe(false);
+  });
+
+  it('a press held on the bar does not hold the video', async () => {
+    show(inPost({}));
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    const control = barControl(player as Element);
+
+    await holdDown(control);
+    expect(player?.paused).toBe(false);
+    await release(control);
+    await windowCloses();
+    expect(player?.paused).toBe(false);
+  });
+
+  it('a press that starts on the bar and ends on the video is no tap', async () => {
+    const open = vi.fn();
+    const like = vi.fn();
+    show(inPost({ open, like }));
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    const control = barControl(player as Element);
+
+    // A scrub that ends over the video, twice in a row.
+    for (let i = 0; i < 2; i += 1) {
+      fireEvent.pointerDown(control, { clientX: 20, clientY: 20 });
+      fireEvent.pointerUp(frame(), { clientX: 20, clientY: 20 });
+    }
+    await windowCloses();
+    expect(open).not.toHaveBeenCalled();
+    expect(like).not.toHaveBeenCalled();
+    cleanup();
+
+    show(inPost({}));
+    const [plain] = await players();
+    await scrollTo(frame(), 1);
+    fireEvent.pointerDown(barControl(plain as Element), { clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(frame(), { clientX: 20, clientY: 20 });
+    await windowCloses();
+    expect(plain?.paused).toBe(false);
+  });
+
+  it('a hold that starts on the video and ends over the bar still ends, and the video resumes', async () => {
+    show(inPost({}));
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+
+    await holdDown(frame());
+    expect(player?.paused).toBe(true);
+    await release(barControl(player as Element));
+    expect(player?.paused).toBe(false);
+    await windowCloses();
+    expect(player?.paused).toBe(false);
+  });
+
+  it('a pointer the browser takes from the bar (a scroll) leaves no stale press behind', async () => {
+    const like = vi.fn();
+    show(inPost({ like }));
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    const control = barControl(player as Element);
+
+    fireEvent.pointerDown(control, { clientX: 20, clientY: 20 });
+    fireEvent.pointerCancel(control, { clientX: 20, clientY: 60 });
+    // The same pointer now taps the video twice: the like is back.
+    await doubleTap(frame());
+    expect(like).toHaveBeenCalledTimes(1);
   });
 });
 
