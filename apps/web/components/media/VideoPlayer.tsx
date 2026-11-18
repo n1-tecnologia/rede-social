@@ -69,8 +69,10 @@ export interface VideoPlayerProps {
   ) => void;
   /**
    * 2026-11-17: opt-in vendor bar for LONG videos (lessons, live replays, the media library
-   * preview). `false` (the default) keeps the 2026-10-20 no-bar rule for every short, autoplaying
-   * surface: the feed, Reels, stories, the composer and the lesson-form previews.
+   * preview). `false` (the default) keeps the 2026-10-20 no-bar rule for the short, autoplaying
+   * surfaces that use this component: the composer and the lesson-form previews. The feed shows the
+   * bar too since 2026-11-18, but through `FeedVideo`, which wires it to the feed's own gestures;
+   * Reels and stories keep none.
    */
   controls?: boolean;
 }
@@ -125,13 +127,14 @@ function stopVendorClick(event: MouseEvent<HTMLDivElement>) {
  * ghost "Tentar novamente" that mints a fresh one — a raw player error, a provider status or a token
  * fragment never reaches the screen (T-03-51).
  *
- * **Two modes (the `controls` prop).** The 2026-10-20 rule below (no bar) still holds for the feed,
- * Reels, stories and every call site that does not pass `controls`; `controls` (2026-11-17) is the
+ * **Two modes (the `controls` prop).** The 2026-10-20 rule below (no bar) still holds for Reels,
+ * stories and every call site of this component that does not pass `controls` (the feed's own
+ * `FeedVideo` shows the bar since 2026-11-18 and does not go through this mode); `controls` (2026-11-17) is the
  * opt-in of the long videos, and a paragraph after the rule describes it.
  *
- * **No player bar (2026-10-20, the client's FRONT.pdf: no video of the app shows one).** The vendor's
- * controls and its error dialog are hidden (`--controls: none`, `--dialog: none`, no hotkeys), and
- * the video plays the way the feed's does:
+ * **No player bar (2026-10-20, the client's FRONT.pdf: no video of the app showed one).** The
+ * vendor's controls and its error dialog are hidden (`--controls: none`, `--dialog: none`, no
+ * hotkeys), and the video plays the way the feed's does:
  *  - by itself once half of it is on screen, looping, and paused when it leaves or the tab hides;
  *    under reduced motion it waits for a tap. Every play goes through `video-sound`: WITH sound
  *    unless the member muted a video this visit, and a browser that refuses the sound outside a

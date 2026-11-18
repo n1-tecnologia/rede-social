@@ -13,8 +13,9 @@ const M = mediaMessages.media;
  * Everything runs against the SEEDED communities and writes nothing, so the shared seed stays as it
  * was and the file is re-runnable in any order.
  *
- * 2026-10-20 (the client's FRONT.pdf): the feed's video shows no player bar, plays by itself in view
- * and is never left paused (with sound, or muted while the browser holds the sound back).
+ * 2026-10-20 (the client's FRONT.pdf): the feed's video plays by itself in view and is never left
+ * paused (with sound, or muted while the browser holds the sound back). Since 2026-11-18 it also
+ * shows the vendor's player bar; everything else about it is unchanged.
  *
  * `serviceWorkers: 'block'` is the 03-05 lesson: a registered Serwist worker can answer a navigation
  * from its own cache, and a spec that asserts what the SERVER rendered would then be asserting what
@@ -125,7 +126,7 @@ test.describe('D-53 — the video post renders a player frame and no carousel', 
     await expect(card.getByTestId('post-gallery-dot')).toHaveCount(0);
   });
 
-  test('2026-10-20: the feed video has no player bar, plays in view never paused, and its sound button says what it hears', async ({
+  test('2026-11-18: the feed video shows the vendor bar, plays in view never paused, and its sound button says what it hears', async ({
     page,
   }) => {
     // The stream stays loading (no local stack decodes it): the element never errors.
@@ -138,11 +139,12 @@ test.describe('D-53 — the video post renders a player frame and no carousel', 
     const player = card.locator('mux-player');
     await expect(player).toBeAttached({ timeout: 20_000 });
 
-    // No bar (FRONT.pdf): the vendor's controls are hidden, and none is visible.
+    // The bar is on: `--controls` is no longer `none` and the hotkeys are not switched off. The bar
+    // autohides and the stream never loads here, so its visibility and geometry are not asserted.
     expect(
       await player.evaluate((node) => getComputedStyle(node).getPropertyValue('--controls').trim()),
-    ).toBe('none');
-    await expect(card.locator('media-control-bar').filter({ visible: true })).toHaveCount(0);
+    ).not.toBe('none');
+    expect(await player.evaluate((node) => node.hasAttribute('nohotkeys'))).toBe(false);
 
     // In view it plays by itself and is never left paused: with sound, or muted while the browser
     // holds the sound back, and the button reads which.

@@ -212,8 +212,8 @@ export function PostMedia({
   // caption with a card beneath it.
   const linkCard = linkPreview ? <LinkPreviewCard {...linkPreview} /> : null;
 
-  // No gesture wrapper here: the player has no seek bar and handles its own taps (one opens or
-  // pauses, two like), so it only needs the like toggle and the open, which the context carries. The
+  // No gesture wrapper here: the player draws the vendor's bar but handles its own taps on the video
+  // (one opens or pauses, two like), so it only needs the like toggle and the open, which the context carries. The
   // keyboard/AT path to the like is still the LikeButton beside the card.
   if (mediaKind === 'video' && video !== undefined) {
     return (

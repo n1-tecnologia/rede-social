@@ -170,12 +170,12 @@ export interface FeedVideoProps {
 
 /**
  * A post's video in the feed, Instagram style (2026-10-05): the video at its own proportion, edge to
- * edge, with NO player chrome. It plays looping once most of it is on screen, one video at a time.
- * Two taps like the post (the card's one toggle, from `usePostVideoGestures`).
+ * edge, with the vendor's own player bar since 2026-11-18 (see below). It plays looping once most of
+ * it is on screen, one video at a time. Two taps like the post (the card's one toggle, from `usePostVideoGestures`).
  *
  * **One tap opens Reels at this video** (2026-10-09) when the card hands one (`onOpen` in
  * `usePostVideoGestures`: the tenant has Reels); without it one tap pauses or resumes, as before.
- * The sound button is therefore ALWAYS there while the video can play (bottom-right, over the frame),
+ * The sound button is therefore ALWAYS there while the video can play (top-right, over the frame),
  * since pausing first is no longer how the member reaches it. While a surface plays over the feed
  * (`suspendFeedVideos`) every video stands down. The frame takes focus from script only
  * (`tabIndex={-1}`), so the overlay can hand it back on close.
@@ -189,6 +189,34 @@ export interface FeedVideoProps {
  * the press starts, before the module unmutes). A tap that opens Reels unmutes nothing: the feed's
  * video stands down at once under the overlay. A play refused even muted (Low Power Mode) waits
  * paused for a tap, as before.
+ *
+ * **The vendor bar (2026-11-18, Igor: every feed video).** Play and pause, a time bar to drag, speed
+ * (0.5 to 2), volume, 10 s back and forward and fullscreen, with the bar's hotkeys on (they act only
+ * while focus is inside the player). The bar is the vendor's own overlay inside the player, so the
+ * frame's box never changes when it appears; its autohide, its theme and the centre play button
+ * before the first play stay the vendor's, and an autohidden bar still takes hits in its bottom strip
+ * (the vendor sets `opacity`, not `pointer-events`). Its labels stay in English (the same open item
+ * as the lessons: media-chrome's pt dictionary is not bundled). Three rules keep it from fighting the
+ * feed:
+ *  - **Origin.** Pointer and click events from inside the vendor's shadow tree arrive retargeted to
+ *    the `mux-player` host, so `isVendorBarEvent` reads the real origin (`composedPath()[0]`), the
+ *    vendor's own gesture-layer rule: the bar's events are anything inside the player except the
+ *    video, the controller and the host. Surface clicks are still swallowed in the capture phase so
+ *    the vendor never toggles play by itself; the bar's clicks go through. A press that STARTS on the
+ *    bar never reaches `DoubleTapHeart` (no like, no Reels, no pause, no hold, no heart burst) even
+ *    when it ends over the video (a scrub); a press that starts on the video and ends over the bar
+ *    ends normally (a hold resumes). A bar press is no sound gesture either (`video-sound` ignores
+ *    it, and `unlocking` is cleared), so the bar's mute button never double-toggles.
+ *  - **Intent.** The vendor's composed request events, which only the bar, the hotkeys and its
+ *    gesture layer dispatch (never a programmatic `play()`, `pause()` or `muted` write, so our own
+ *    scroll-out and tab-hidden pauses never read as intent), are carried into the state below: a bar
+ *    pause is the member's pause and sticks across scrolling and tab changes, a bar play clears it
+ *    and takes the turn (one video at a time), a bar mute or unmute is the visit's sound.
+ *    `mediavolumerequest` (the slider only adjusts the element) and the seek requests are not
+ *    bridged. Reduced motion is unchanged: a bar play starts it.
+ *  - **States.** In the error state `--controls: none` returns, so the catalog line and the retry
+ *    are the whole state (the vendor error dialog stays hidden), and the retry remount brings the
+ *    bar back. In browser fullscreen the video is `contain`ed, not cropped by the feed's `cover`.
  *
  * **What stays from `VideoPlayer`.** The processing and failed states are its frames, unchanged. The
  * playback token is minted per request when the frame opens (D-44) and lives in this closure only:
@@ -205,9 +233,9 @@ export interface FeedVideoProps {
  * and probes once the poster exists. Until any of it arrives the frame is 4:5. From `md` the frame
  * also never grows taller than the screen: it narrows and centres, like the Reels column.
  *
- * **Gestures.** `DoubleTapHeart` owns the taps (`onSingleTap` opens or pauses, `onDoubleTap` likes,
+ * **Gestures.** `DoubleTapHeart` owns the taps of the video surface (`onSingleTap` opens or pauses, `onDoubleTap` likes,
  * with the Reels slop so a scroll is never a tap). media-chrome toggles play on a MOUSE click of the
- * video by itself, which would fight the single tap, so clicks inside the frame are stopped in the
+ * video by itself, which would fight the single tap, so clicks on the video are stopped in the
  * capture phase before they reach the vendor. The member's own play runs inside the tap (WebKit
  * only lets sound start inside a gesture), and the sound button turns the visit's sound on or off
  * inside its click (`setVideoSoundWanted`) for the same reason. Keyboard and AT reach the pause

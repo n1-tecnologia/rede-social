@@ -143,8 +143,9 @@ function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
           downloadLabel: tf('attachment.download', { name: filename }),
         };
       }),
-    // Instagram style (2026-10-05): the video at its own proportion, edge to edge, no player chrome;
-    // one tap pauses, two like. The stored size is the frame's ratio from the first paint.
+    // Instagram style (2026-10-05): the video at its own proportion, edge to edge, with the vendor's
+    // bar (2026-11-18) that handles its own taps on the video; one tap pauses, two like. The stored
+    // size is the frame's ratio from the first paint.
     video: video ? (
       <FeedVideo
         assetId={video.assetId}
