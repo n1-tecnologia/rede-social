@@ -642,14 +642,36 @@ describe('voice send queue and failures', () => {
     expect(bubbles()).toHaveLength(1);
   });
 
-  it.each(['closed', 'not_found'])('a %s answer removes the bubble and refreshes', async (kind) => {
-    mocks.sendVoice.mockResolvedValue({ ok: false, error: kind });
-    inCase();
-    await recordAndSend();
-    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
-    expect(bubbles()).toHaveLength(1);
-    expect(screen.queryByRole('button', { name: 'Tentar novamente' })).toBeNull();
-  });
+  it.each([
+    [
+      'member',
+      'closed',
+      'Este chamado foi fechado. Para falar com a equipe de novo, abra um novo chamado.',
+    ],
+    ['member', 'not_found', 'Não foi possível concluir. Tente de novo.'],
+    ['staff', 'closed', 'Este chamado está fechado. A conversa fica disponível só para leitura.'],
+    ['staff', 'not_found', 'Não foi possível concluir. Tente de novo.'],
+  ] as const)(
+    'WR-03: a %s take answered %s says why, then removes the bubble and refreshes',
+    async (viewer, kind, sentence) => {
+      if (viewer === 'member') {
+        mocks.sendVoice.mockResolvedValue({ ok: false, error: kind });
+        inCase();
+      } else {
+        mocks.staffVoice.mockResolvedValue({ ok: false, error: kind });
+        renderStaff('in_progress');
+      }
+      await recordAndSend();
+      await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
+      expect(mocks.refresh).toHaveBeenCalledTimes(1);
+      expect(pendingBubbles()).toHaveLength(0);
+      expect(bubbles()).toHaveLength(1);
+      expect(screen.queryByRole('button', { name: 'Tentar novamente' })).toBeNull();
+      // The toast says why the take went, once, and never names the take (no file, URL, id or number).
+      expect(screen.getAllByText(sentence)).toHaveLength(1);
+      expect(sentence).not.toMatch(/\d|https?:|\.webm|\.m4a|voice\./);
+    },
+  );
 
   it('starts nothing more and sets no state once the pane is gone', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});

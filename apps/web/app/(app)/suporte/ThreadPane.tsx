@@ -801,6 +801,12 @@ export function ThreadPane({
       ? (raceNotices?.[kind] ?? t('composer.errors.failed'))
       : t('blocked.memberNotice');
 
+  /** The sentence a take that ended `closed` or `not_found` toasts (WR-03): existing chat catalog keys only. */
+  const endedNoticeFor = (kind: 'closed' | 'not_found'): string => {
+    if (kind === 'not_found') return t('toast.failed');
+    return viewer === 'staff' ? t('staffCase.closedNotice') : t('case.closedNotice');
+  };
+
   const runVoice = async (tempId: string) => {
     const record = voiceTakesRef.current.get(tempId);
     // Unmounted, discarded or cleared by a refusal while it waited its turn: nothing more is started.
@@ -885,7 +891,9 @@ export function ThreadPane({
       router.refresh();
       return;
     }
-    // `closed` (a team reply to a case that ended) and `not_found`: the bubble goes and the page re-reads.
+    // `closed` (a reply to a case that ended) and `not_found`: the sentence is toasted first (WR-03), so the take
+    // never vanishes silently; then the bubble goes and the page re-reads.
+    show({ tone: 'error', message: endedNoticeFor(kind) });
     setViews((current) => current.filter((view) => view.id !== tempId));
     if (viewer === 'staff') void refreshCase();
     router.refresh();
