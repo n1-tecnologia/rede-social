@@ -34,9 +34,10 @@ const QUARTILES = [25, 50, 75, 100];
  *
  * It REUSES `useSignedUpload` unchanged rather than forking it: the same six-state machine the photo
  * zone runs, pointed at `{ kind: 'video', purpose }` (`post` by default). What differs is entirely inside
- * `lib/upload.ts`'s router — a provider-owned object travels through `@mux/upchunk` in 5 MiB slices
- * with retries and `308`-continue semantics, so a dropped mobile connection resumes instead of
- * restarting a 100 MB video, and the bytes never pass through Cloud Run (MEDIA-01, R-04).
+ * `lib/upload.ts`'s router — a provider-owned object travels through the in-repo resumable uploader
+ * (`uploadChunked` in `lib/upload.ts`) in 32 MiB chunks that retry with backoff, ask the server how
+ * much it persisted and resume from there, so a dropped connection resumes instead of restarting a
+ * large video, and the bytes never pass through Cloud Run (MEDIA-01, R-04).
  *
  * A file the picker never offered is refused AT PICK TIME with the video-specific sentence and costs
  * no request at all; the zone keeps its own verdict here (`screen` defaults to `true`) because,

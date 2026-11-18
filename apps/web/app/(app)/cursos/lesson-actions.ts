@@ -34,8 +34,8 @@ import { getMediaAsset } from '@/lib/media';
  * bootstrap knows navigates OUTSIDE the try/catch (Next 16: `redirect()` throws), and a success
  * revalidates the hub, the course page and the lesson route.
  *
- * **No upload byte passes here** (MEDIA-01, PR-7): the video went browser → provider through UpChunk
- * and every material browser → Storage through its signed URL; these actions carry ASSET IDS only.
+ * **No upload byte passes here** (MEDIA-01, PR-7): the video went browser → provider through the resumable `uploadChunked`
+ * uploader and every material browser → Storage through its signed URL; these actions carry ASSET IDS only.
  *
  * **The material URL is never logged** (T-08.3-06): `materialUrlAction` hands a ten-minute bearer
  * capability to exactly one tab; the log line, when any, carries the material id.

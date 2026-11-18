@@ -3484,7 +3484,8 @@ test.describe('backstops', () => {
     await expect(videoBlock(page)).toHaveAttribute('data-video-state', 'empty');
     await page.locator('#lesson-title').fill(title);
 
-    // The iPhone recording goes browser → provider (the fake's signed Storage URL) through UpChunk;
+    // The iPhone recording goes browser → provider (the fake's signed Storage URL) through the resumable `uploadChunked`
+    // uploader (one 186 KiB request);
     // the row is `pending` server-side and the block draws the processing card.
     await pickVideo(page, {
       name: 'IMG_0421.mov',

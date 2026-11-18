@@ -16,8 +16,8 @@ import { getSupabaseCoordinates } from '@/lib/supabase-coordinates';
  *   `ws:`/`wss:` twin) is the HOST'S project (09.2-17, D-538): `proxy.ts` passes the exact origin of
  *   the tenant's own project (or the central one for the platform, a generic host and a tenant of the
  *   central project), so local (`http://127.0.0.1:54321`) and production need no separate list and a
- *   tenant never gets another project's origin. No wildcard host is ever written for Supabase. Mux playback, Mux Data and UpChunk's upload host come from
- *   Mux's own CSP guidance.
+ *   tenant never gets another project's origin. No wildcard host is ever written for Supabase. Mux playback, Mux Data and the
+ *   resumable uploader's direct-upload host come from Mux's own CSP guidance.
  * - `frame-src` admits exactly the two inline players (`LinkPreviewCard`, click-to-play) and the
  *   event page's keyless Google Maps embed (`EventLocationMap`, the 2026-10-06 reversal of D-203):
  *   its `maps.google.com/maps?…&output=embed` answers a 301 to `www.google.com/maps/embed`, and a
