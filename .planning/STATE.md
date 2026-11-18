@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.5"
 current_phase_name: Mensagem de voz no chat
-current_plan: 15
+current_plan: 16
 status: executing
 stopped_at: Completed 12.4-22-PLAN.md; re-verification gaps_found (WR-06), phase not closed
-last_updated: "2026-11-18T00:04:53.959Z"
+last_updated: "2026-11-18T00:51:24.764Z"
 last_activity: 2026-11-17
-last_activity_desc: Phase 12.5 wave 10 complete (plans 13, 16); next wave 11 (14), then 15 which needs the member-side blocked sentence
-state_head: 07cc14504a34a6185182334f1952587748b3a8fe
+last_activity_desc: Phase 12.5 wave 11 complete (plan 14); next wave 12 (15, thread host; Igor chose the member blocked sentence)
+state_head: 88b9a26837d6eb6c72b4b63554924f378eae686e
 progress:
   total_phases: 35
   completed_phases: 0
   total_plans: 491
-  completed_plans: 459
+  completed_plans: 460
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.5 (Mensagem de voz no chat) — EXECUTING
-Current Plan: 15
+Current Plan: 16
 Total Plans in Phase: 18
-Plan: 15 of 18
+Plan: 16 of 18
 Status: Ready to execute
 Last activity: 2026-11-17 — Phase 12.5 execution started
 
