@@ -368,9 +368,10 @@ function isBlank(value: string): boolean {
 
 describe('12.4-11 — the case copy is exactly the UI-SPEC table (UI-D-834)', () => {
   it('1. the new key set is the table plus history.actorGone and inbox.filter.rosterError, no extra and none missing (EP-092)', () => {
-    // The `voice` subtree is Phase 12.5's (12.5-10); its own guard test pins that key set.
+    // The `voice` subtree is Phase 12.5's (12.5-10); its own guard test pins that key set. So is the
+    // member-side blocked sentence (12.5-15, Igor's words), pinned by `chat-view.test.ts`.
     const present = Object.keys(all)
-      .filter((key) => !key.startsWith('voice.'))
+      .filter((key) => !key.startsWith('voice.') && key !== 'blocked.memberNotice')
       .sort();
     const expected = [...SHIPPED_UNCHANGED, ...Object.keys(CASE_COPY)].sort();
     expect(present).toEqual(expected);

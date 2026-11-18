@@ -8,7 +8,14 @@ import {
   CHAT_CASE_PRIORITIES,
   CHAT_PAGE_SIZE,
 } from '@rede-social/module-chat/contracts';
-import { ChatComposer, MessageList } from '@rede-social/module-chat/ui';
+import {
+  ChatComposer,
+  type ChatComposerVoice,
+  type MessageBubbleVoice,
+  MessageList,
+  pauseAllVoice,
+  type VoiceTake as RecordedTake,
+} from '@rede-social/module-chat/ui';
 import { Button, EmptyState, useToast } from '@rede-social/ui';
 import { ArrowDown, Ban, MessageCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -22,14 +29,27 @@ import {
   caseStateView,
   caseTitle,
   chatRuns,
+  formatVoiceDuration,
   type MemberCaseHeaderView,
+  nextPlaybackRate,
+  playbackRateLabel,
   type StaffCaseHeaderView,
+  spokenVoiceDuration,
 } from '@/lib/chat-view';
+import {
+  runVoiceSend,
+  type VoiceFailureKind,
+  type VoiceResume,
+  type VoiceSendError,
+} from '@/lib/voice-send';
 import { AssignSheet } from './AssignSheet';
 import {
   type ReplyToConversationResult,
+  type ReplyVoiceResult,
   type SendSupportMessageResult,
+  type SendSupportVoiceResult,
   sendSupportMessageAction,
+  sendSupportVoiceAction,
 } from './actions';
 import type { StaffSheetKind } from './CaseActionSheet';
 import { CaseBar, CaseOpenedRow, ClosedStrip, ResolvedStrip } from './CaseBar';
@@ -133,6 +153,31 @@ export interface ThreadPaneProps {
    * sheet reads the device's own zone (it only ever draws after a tap, so there is no hydration to match).
    */
   timeZone?: string;
+  /**
+   * 12.5-15 (D-847, UI-D-852): the team's voice reply (a server action). The member's pane sends its own
+   * recordings through `sendSupportVoiceAction`; a staff pane with no such action gets no microphone.
+   */
+  onSendVoiceAction?: (conversationId: string, mediaId: string) => Promise<ReplyVoiceResult>;
+}
+
+/** What a stored voice send answers, whichever viewer sent it (the team's answer simply has no `case`). */
+type VoiceSentOk = Extract<SendSupportVoiceResult, { ok: true }>;
+
+/** What the optimistic view's tail adopts: the server's own answer of a text or a voice send. */
+type SentOk = Extract<
+  SendSupportMessageResult | ReplyToConversationResult | SendSupportVoiceResult | ReplyVoiceResult,
+  { ok: true }
+>;
+
+/**
+ * One recording the pane holds in memory only (UI-D-847, A-UI-10): the bytes, the asset a failed attempt left
+ * ready to send again, and where the take stands. Never stored, never named in a URL, a log or a toast.
+ */
+interface VoiceRecord {
+  take: { blob: Blob; durationSeconds: number };
+  resume?: VoiceResume;
+  state: 'queued' | 'running' | 'failed';
+  failure?: 'retriable' | 'permanent';
 }
 
 interface MessagesAnswer {
@@ -331,6 +376,7 @@ export function ThreadPane({
   hasAnyCase = false,
   initialStaffCase = null,
   timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+  onSendVoiceAction,
 }: ThreadPaneProps) {
   const t = useTranslations('chat');
   const router = useRouter();
@@ -355,6 +401,10 @@ export function ThreadPane({
   const [openedNumber, setOpenedNumber] = useState<number | null>(null);
   /** The two values the opener holds for the first send (controlled, W17). */
   const [opening, setOpening] = useState<CaseOpenerValue>({ category: 'other' });
+  /** 12.5-15 (UI-D-847): the member-side sentence once a voice send was refused for a block or a departure. */
+  const [lockedNotice, setLockedNotice] = useState<string | null>(null);
+  /** 12.5-15 (UI-D-850): what the polite region speaks after a speed change; re-keyed so a repeat is spoken. */
+  const [rateNote, setRateNote] = useState({ count: 0, text: '' });
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const intentRef = useRef<ScrollIntent | null>({ kind: 'bottom' });
@@ -379,6 +429,23 @@ export function ThreadPane({
   });
   const barRef = useRef<HTMLDivElement>(null);
   useBarHeightAnchor(barRef, scrollerRef);
+  /** 12.5-15: the takes of this pane, keyed by the optimistic id. In memory only; they die with the pane. */
+  const voiceTakesRef = useRef(new Map<string, VoiceRecord>());
+  /** 12.5-15 (VOICE-23): the tap-order queue, ONE take in flight at a time. */
+  const voiceChainRef = useRef<Promise<void>>(Promise.resolve());
+  /** 12.5-15: always the latest render's runner, so a queued take reads fresh props when its turn comes. */
+  const voiceRunRef = useRef<(tempId: string) => Promise<void>>(async () => {});
+  const aliveRef = useRef(true);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    const takes = voiceTakesRef.current;
+    return () => {
+      // Leaving the screen loses every take and starts no further send (UI-D-847, A-UI-10).
+      aliveRef.current = false;
+      takes.clear();
+    };
+  }, []);
 
   const closeSheet = useCallback(() => setOpenSheet(null), []);
 
@@ -463,6 +530,10 @@ export function ThreadPane({
           // Dedupe by id, never by a moving max: an own send may already show a later seq (C-CR-01).
           const known = new Set(settledOf(viewsRef.current).map((view) => view.id));
           const fresh = answer.items.filter((item) => !known.has(item.id));
+          // UI-D-858: a recording whose sender left comes back carrying its flag; the bubble on screen is
+          // replaced in place (the merge is by id), with no scroll and no counter.
+          const gone = answer.items.filter((item) => known.has(item.id) && item.voice?.deleted);
+          if (gone.length > 0) setViews((current) => mergeViews(current, gone));
           if (fresh.length > 0) {
             const stick = nearBottom();
             const fromOther = fresh.filter((item) => item.side === 'other').length;
@@ -572,6 +643,93 @@ export function ThreadPane({
     setOlderState('idle');
   };
 
+  /**
+   * The success tail of a send, text or voice (12.4-12, WR-02, C-CR-01): the server's view replaces the
+   * optimistic one by id, the pane adopts the conversation the answer names (a first message, or a NEW case
+   * after a closed one) and the case swap runs. `subjectFallback` is what row 2 of the new bar starts as when
+   * the opener's subject is blank: the text the member wrote, or the finished label of a voice message.
+   */
+  const adoptSent = (result: SentOk, tempId: string, subjectFallback: string) => {
+    const { view, conversationId: created } = result;
+    const sentCase = 'case' in result ? result.case : undefined;
+    // WR-02 (D-801): the API retried after the case was closed and opened a NEW one. The pane adopts the
+    // conversation the send answered (the id comes from the server action's own answer, never from input):
+    // topic, message list, catch-up cursor, read mark and older-page flag are the new case's. Only the member
+    // pane switches; a staff pane's conversation never changes under it.
+    const switched =
+      viewer === 'member' &&
+      conversationRef.current !== null &&
+      created !== conversationRef.current;
+    if (!conversationRef.current) {
+      conversationRef.current = created;
+      setConversationId(created);
+    } else if (switched) {
+      conversationRef.current = created;
+      setConversationId(created);
+      cursorRef.current = 0;
+      readSeqRef.current = 0;
+      setHasOlder(false);
+      setOlderState('idle');
+      setOpenedNumber(null);
+    }
+    intentRef.current = { kind: 'bottom' };
+    // C-CR-01: the own seq moves the cursor only when nothing can be missing before it; past a gap
+    // (the other side wrote meanwhile and its signal has not landed yet) the catch-up fills it.
+    const next = cursorAfterOwnSend(cursorRef.current, view.seq);
+    cursorRef.current = next.cursor;
+    setViews((current) =>
+      switched
+        ? // The new case's list: its first message, plus the voice takes still waiting in the queue.
+          [view, ...current.filter((v) => v.pending && v.voice !== undefined && v.id !== tempId)]
+        : mergeViews(current, [view], [tempId]),
+    );
+    setNewCount(0);
+    if (next.catchUp) void catchUp();
+    // A team reply may take an unowned case: the server decides, the bar re-reads (UI-D-828a).
+    if (viewer === 'staff') void refreshCase();
+    if (sentCase && viewer === 'member') {
+      if (sentCase.opened) {
+        // The swap: the opener leaves and the bar arrives with the server's number. Row 2 starts as what
+        // the member wrote and becomes the server's finished label as soon as the header is read.
+        setCaseView({
+          viewer: 'member',
+          id: sentCase.id,
+          number: sentCase.number,
+          title: caseTitle(t, sentCase.number),
+          state: caseStateView(sentCase.state, t),
+          subject: subjectFallback,
+          subjectLine: '',
+        });
+        setOpenedNumber(sentCase.number);
+      } else if (switched) {
+        // A send that landed in another, already existing case: its bar from the answer until the re-read.
+        setCaseView({
+          viewer: 'member',
+          id: sentCase.id,
+          number: sentCase.number,
+          title: caseTitle(t, sentCase.number),
+          state: caseStateView(sentCase.state, t),
+          subject: '',
+          subjectLine: '',
+        });
+      } else {
+        // The server's own word on the state after this send (a reply may reopen a resolved case).
+        setCaseView((current) =>
+          current && current.id === sentCase.id
+            ? { ...current, state: caseStateView(sentCase.state, t) }
+            : current,
+        );
+        if (sentCase.reopened) {
+          show({
+            tone: 'success',
+            message: t('case.reopenedToast', { number: String(sentCase.number) }),
+          });
+        }
+      }
+      void refreshCase();
+    }
+  };
+
   const onSend = async (body: string): Promise<boolean> => {
     pendingIdRef.current += 1;
     const tempId = `pending-${pendingIdRef.current}`;
@@ -624,81 +782,236 @@ export function ThreadPane({
       }
       return false;
     }
-    const { view, conversationId: created } = result;
-    const sentCase = 'case' in result ? result.case : undefined;
-    // WR-02 (D-801): the API retried after the case was closed and opened a NEW one. The pane adopts the
-    // conversation the send answered (the id comes from the server action's own answer, never from input):
-    // topic, message list, catch-up cursor, read mark and older-page flag are the new case's. Only the member
-    // pane switches; a staff pane's conversation never changes under it.
-    const switched =
-      viewer === 'member' &&
-      conversationRef.current !== null &&
-      created !== conversationRef.current;
-    if (!conversationRef.current) {
-      conversationRef.current = created;
-      setConversationId(created);
-    } else if (switched) {
-      conversationRef.current = created;
-      setConversationId(created);
-      cursorRef.current = 0;
-      readSeqRef.current = 0;
-      setHasOlder(false);
-      setOlderState('idle');
-      setOpenedNumber(null);
-    }
-    intentRef.current = { kind: 'bottom' };
-    // C-CR-01: the own seq moves the cursor only when nothing can be missing before it; past a gap
-    // (the other side wrote meanwhile and its signal has not landed yet) the catch-up fills it.
-    const next = cursorAfterOwnSend(cursorRef.current, view.seq);
-    cursorRef.current = next.cursor;
-    setViews((current) => (switched ? [view] : mergeViews(current, [view], [tempId])));
-    setNewCount(0);
-    if (next.catchUp) void catchUp();
-    // A team reply may take an unowned case: the server decides, the bar re-reads (UI-D-828a).
-    if (viewer === 'staff') void refreshCase();
-    if (sentCase && viewer === 'member') {
-      if (sentCase.opened) {
-        // The swap: the opener leaves and the bar arrives with the server's number. Row 2 starts as what
-        // the member wrote and becomes the server's finished label as soon as the header is read.
-        setCaseView({
-          viewer: 'member',
-          id: sentCase.id,
-          number: sentCase.number,
-          title: caseTitle(t, sentCase.number),
-          state: caseStateView(sentCase.state, t),
-          subject: opening.subject?.trim() || body,
-          subjectLine: '',
-        });
-        setOpenedNumber(sentCase.number);
-      } else if (switched) {
-        // A send that landed in another, already existing case: its bar from the answer until the re-read.
-        setCaseView({
-          viewer: 'member',
-          id: sentCase.id,
-          number: sentCase.number,
-          title: caseTitle(t, sentCase.number),
-          state: caseStateView(sentCase.state, t),
-          subject: '',
-          subjectLine: '',
-        });
-      } else {
-        // The server's own word on the state after this send (a reply may reopen a resolved case).
-        setCaseView((current) =>
-          current && current.id === sentCase.id
-            ? { ...current, state: caseStateView(sentCase.state, t) }
-            : current,
-        );
-        if (sentCase.reopened) {
-          show({
-            tone: 'success',
-            message: t('case.reopenedToast', { number: String(sentCase.number) }),
-          });
-        }
-      }
-      void refreshCase();
-    }
+    adoptSent(result, tempId, opening.subject?.trim() || body);
     return true;
   };
+
+  /* ── 12.5-15: voice messages (D-847, D-861, D-862, UI-D-846, UI-D-847, UI-D-852) ─────────────────── */
+
+  /** Change one view in place (a progress step, a failure, a retry). A view that is gone is left alone. */
+  const patchView = useCallback((id: string, patch: Partial<ChatMessageView>) => {
+    setViews((current) => current.map((view) => (view.id === id ? { ...view, ...patch } : view)));
+  }, []);
+
+  /** The sentence a refused voice send toasts: the team's shipped notice, or the member's own sentence. */
+  const raceNoticeFor = (kind: 'member_blocked' | 'member_removed'): string =>
+    viewer === 'staff'
+      ? (raceNotices?.[kind] ?? t('composer.errors.failed'))
+      : t('blocked.memberNotice');
+
+  const runVoice = async (tempId: string) => {
+    const record = voiceTakesRef.current.get(tempId);
+    // Unmounted, discarded or cleared by a refusal while it waited its turn: nothing more is started.
+    if (!aliveRef.current || !record) return;
+    record.state = 'running';
+    patchView(tempId, { voiceUpload: { percent: null }, voiceFailed: undefined });
+
+    const id = conversationRef.current;
+    // The first message of a member with no case opens it, carrying the chosen pair (as text does).
+    const opensCase = viewer === 'member' && !caseView && id === null;
+    const sendAction = (
+      mediaId: string,
+    ): Promise<VoiceSentOk | { ok: false; error: VoiceSendError }> => {
+      if (viewer === 'staff') {
+        return id && onSendVoiceAction
+          ? onSendVoiceAction(id, mediaId)
+          : Promise.resolve({ ok: false, error: 'not_found' } as const);
+      }
+      return opensCase
+        ? sendSupportVoiceAction(mediaId, opening.category, opening.subject?.trim() || undefined)
+        : sendSupportVoiceAction(mediaId);
+    };
+
+    const alive = () => aliveRef.current && voiceTakesRef.current.get(tempId) === record;
+    // Loaded at the first recording, not with the pane: the wiring pulls in the media server actions, which
+    // a thread that never records has no use for.
+    const { voiceSendDeps } = await import('./voice-deps');
+    if (!alive()) return;
+    const outcome = await runVoiceSend(
+      voiceSendDeps<VoiceSentOk>(sendAction),
+      record.take,
+      {
+        onProgress: (progress) => {
+          if (!alive()) return;
+          // The finishing step has no percent: the footer reads the plain pending label again.
+          patchView(tempId, {
+            voiceUpload: {
+              percent: progress.phase === 'uploading' ? Math.round(progress.percent) : null,
+            },
+          });
+        },
+      },
+      record.resume,
+    );
+    if (!alive()) return;
+
+    if (outcome.ok) {
+      voiceTakesRef.current.delete(tempId);
+      adoptSent(outcome.sent, tempId, opening.subject?.trim() || t('voice.message'));
+      return;
+    }
+    failVoice(tempId, record, outcome.kind, outcome.resume);
+  };
+  voiceRunRef.current = runVoice;
+
+  /** What each way a take can end does to the list (UI-D-847, D-862). */
+  const failVoice = (
+    tempId: string,
+    record: VoiceRecord,
+    kind: VoiceFailureKind,
+    resume: VoiceResume | undefined,
+  ) => {
+    if (kind === 'retriable' || kind === 'permanent') {
+      // The bubble stays with the take in memory; a permanent refusal offers only "Descartar".
+      record.state = 'failed';
+      record.failure = kind;
+      record.resume = resume;
+      patchView(tempId, { voiceFailed: kind, voiceUpload: undefined });
+      return;
+    }
+    voiceTakesRef.current.delete(tempId);
+    if (kind === 'member_blocked' || kind === 'member_removed') {
+      // Nothing to restore: this bubble and every take still waiting are discarded, the shipped notice is
+      // toasted, the page re-renders and the read-only strip replaces the composer.
+      voiceTakesRef.current.clear();
+      setViews((current) => current.filter((view) => !(view.pending && view.voice !== undefined)));
+      const notice = raceNoticeFor(kind);
+      show({ tone: 'error', message: notice });
+      if (viewer === 'member') setLockedNotice(t('blocked.memberNotice'));
+      router.refresh();
+      return;
+    }
+    // `closed` (a team reply to a case that ended) and `not_found`: the bubble goes and the page re-reads.
+    setViews((current) => current.filter((view) => view.id !== tempId));
+    if (viewer === 'staff') void refreshCase();
+    router.refresh();
+  };
+
+  /** Queue a take behind the ones before it: ONE in flight at a time, in the order they were tapped. */
+  const enqueueVoice = useCallback((tempId: string) => {
+    voiceChainRef.current = voiceChainRef.current
+      .then(() => voiceRunRef.current(tempId))
+      .catch(() => {});
+  }, []);
+
+  /** The composer's hand-off (UI-D-846): the bubble appears at once and the composer is idle again. */
+  const onSendVoice = async (take: RecordedTake): Promise<boolean> => {
+    pendingIdRef.current += 1;
+    const tempId = `pending-${pendingIdRef.current}`;
+    const staff = viewer === 'staff';
+    const seconds = Math.round(take.seconds);
+    const optimistic: ChatMessageView = {
+      id: tempId,
+      seq: 0,
+      side: 'own',
+      authorKey: staff ? 'staff:you' : 'member',
+      body: '',
+      label: staff ? { firstName: t('sender.you'), srSuffix: '', icon: null } : null,
+      time: '',
+      dayKey: keys.todayKey,
+      createdAtMs: 0,
+      pending: true,
+      voice: {
+        mediaId: '',
+        durationSeconds: seconds,
+        durationLabel: formatVoiceDuration(seconds),
+        spokenLabel: spokenVoiceDuration(seconds, t),
+      },
+      voiceUpload: { percent: null },
+    };
+    // The recorder hands a base type in `mime`; the blob keeps the recorder's own (with parameters).
+    const blob =
+      take.blob.type === take.mime ? take.blob : new Blob([take.blob], { type: take.mime });
+    voiceTakesRef.current.set(tempId, {
+      take: { blob, durationSeconds: seconds },
+      state: 'queued',
+    });
+    intentRef.current = { kind: 'bottom' };
+    setViews((current) => [...current, optimistic]);
+    enqueueVoice(tempId);
+    return true;
+  };
+
+  const retryVoice = useCallback(
+    (tempId: string) => {
+      const record = voiceTakesRef.current.get(tempId);
+      if (record?.state !== 'failed' || record.failure !== 'retriable') return;
+      record.state = 'queued';
+      patchView(tempId, { voiceFailed: undefined, voiceUpload: { percent: null } });
+      enqueueVoice(tempId);
+    },
+    [patchView, enqueueVoice],
+  );
+
+  const discardVoice = useCallback((tempId: string) => {
+    voiceTakesRef.current.delete(tempId);
+    setViews((current) => current.filter((view) => view.id !== tempId));
+  }, []);
+
+  const announceRate = useCallback(
+    (label: string) => {
+      setRateNote((before) => ({
+        count: before.count + 1,
+        text: t('voice.live.rate', { rate: label }),
+      }));
+    },
+    [t],
+  );
+
+  /** The finished bubble props of a view with a recording (UI-D-846..848, UI-D-858). */
+  const voiceFor = useCallback(
+    (view: ChatMessageView): MessageBubbleVoice | undefined => {
+      const recording = view.voice;
+      if (!recording) return undefined;
+      if (recording.deleted) return { status: 'deleted', text: t('voice.deleted') };
+      const shared = {
+        durationSeconds: recording.durationSeconds,
+        spokenLabel: t('voice.group', { spoken: recording.spokenLabel }),
+        player: {
+          labels: {
+            play: t('voice.player.play'),
+            pause: t('voice.player.pause'),
+            loading: t('voice.player.loading'),
+            retry: t('thread.retry'),
+            seek: t('voice.player.seek'),
+            error: t('voice.player.error'),
+            unsupported: t('voice.player.unsupported'),
+            speed: (rate: string) => t('voice.player.speed', { rate }),
+            seekValue: (current: string, total: string) =>
+              t('voice.player.seekValue', { current, total }),
+          },
+          formatClock: formatVoiceDuration,
+          nextRate: (rate: number) => nextPlaybackRate(rate),
+          rateLabel: (rate: number) => playbackRateLabel(rate, t),
+          onRateChange: announceRate,
+        },
+      };
+      if (view.voiceFailed) {
+        const retriable = view.voiceFailed === 'retriable';
+        return {
+          status: 'failed',
+          ...shared,
+          failure: {
+            text: retriable ? t('voice.failed.retriable') : t('voice.failed.permanent'),
+            retriable,
+            retryLabel: t('thread.retry'),
+            discardLabel: t('voice.failed.discard'),
+            onRetry: () => retryVoice(view.id),
+            onDiscard: () => discardVoice(view.id),
+          },
+        };
+      }
+      if (view.pending) {
+        return {
+          status: 'pending',
+          ...shared,
+          progress: { percent: view.voiceUpload?.percent ?? null, label: t('voice.upload.label') },
+        };
+      }
+      return { status: 'ready', ...shared, src: `/v1/media/${recording.mediaId}/original` };
+    },
+    [t, announceRate, retryVoice, discardVoice],
+  );
 
   const toBottom = () => {
     const el = scrollerRef.current;
@@ -708,12 +1021,18 @@ export function ThreadPane({
 
   const items = useMemo(
     () =>
-      chatRuns(views, keys, {
-        today: t('day.today'),
-        yesterday: t('day.yesterday'),
-        pending: t('composer.sending'),
-      }),
-    [views, keys, t],
+      chatRuns(
+        views,
+        keys,
+        {
+          today: t('day.today'),
+          yesterday: t('day.yesterday'),
+          pending: t('composer.sending'),
+          voiceProgress: (percent) => t('voice.upload.progress', { percent }),
+        },
+        voiceFor,
+      ),
+    [views, keys, t, voiceFor],
   );
 
   if (initialError) {
@@ -734,11 +1053,49 @@ export function ThreadPane({
   }
 
   // The opener: only a member with no case at all (no conversation yet), never for staff or a reply.
-  const showOpener =
-    viewer === 'member' && !caseView && conversationId === null && readOnlyNotice === null;
+  const notice = readOnlyNotice ?? lockedNotice;
+  const showOpener = viewer === 'member' && !caseView && conversationId === null && notice === null;
   const opener = showOpener ? (
     <CaseOpener category={opening.category} subject={opening.subject} onChange={setOpening} />
   ) : null;
+
+  // 12.5-15 (UI-D-841, UI-D-852): the microphone only where the composer renders. A strip or a notice
+  // replaces the composer, so there is no bundle and no microphone there; a staff pane with no voice
+  // action has none either.
+  const voiceBundle: ChatComposerVoice | undefined =
+    viewer === 'staff' && !onSendVoiceAction
+      ? undefined
+      : {
+          micLabel: t('voice.mic.label'),
+          micRequestingLabel: t('voice.mic.requesting'),
+          recordingLabel: t('voice.recording.status'),
+          timerLabel: t('voice.recording.timer'),
+          discardLabel: t('voice.recording.discard'),
+          sendLabel: showOpener ? t('voice.recording.sendNew') : t('voice.recording.send'),
+          limitWord: t('voice.recording.limitWord'),
+          interruptedWord: t('voice.recording.interruptedWord'),
+          notices: {
+            warning: t('voice.notice.warning'),
+            limit: t('voice.notice.limit'),
+            interrupted: t('voice.notice.interrupted'),
+            tooShort: t('voice.notice.tooShort'),
+          },
+          problems: {
+            blocked: t('voice.problem.blocked'),
+            missing: t('voice.problem.missing'),
+            busy: t('voice.problem.busy'),
+            failed: t('voice.problem.failed'),
+          },
+          live: {
+            started: t('voice.live.started'),
+            minute: (count: number) => t('voice.live.minute', { count }),
+            discarded: t('voice.live.discarded'),
+          },
+          formatClock: formatVoiceDuration,
+          onSendVoice,
+          // A recording pauses every playing voice message, so the speaker never feeds the microphone (A-UI-9).
+          onRecordingStart: pauseAllVoice,
+        };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -846,13 +1203,13 @@ export function ThreadPane({
             </Button>
           </div>
         ) : null}
-        {readOnlyNotice ? (
+        {notice ? (
           <div
             data-chat-readonly
             className="flex items-center gap-3 border-t border-border bg-bg-secondary px-4 py-3"
           >
             <Ban aria-hidden size={20} className="shrink-0 text-text-tertiary" />
-            <p className="text-sm font-normal text-text-secondary">{readOnlyNotice}</p>
+            <p className="text-sm font-normal text-text-secondary">{notice}</p>
           </div>
         ) : viewer === 'staff' && staffCase?.state.state === 'closed' ? (
           // UI-D-828d: the team's closed case is read-only too; a blocked or removed notice above wins.
@@ -874,9 +1231,14 @@ export function ThreadPane({
               }
               errorText={sendError ?? t('composer.errors.failed')}
               onSend={onSend}
+              voice={voiceBundle}
             />
           </>
         )}
+      </div>
+      {/* UI-D-850: the polite region the speed pills speak through; the speed itself is never stored. */}
+      <div data-chat-rate-status role="status" aria-live="polite" className="sr-only">
+        <span key={rateNote.count}>{rateNote.text}</span>
       </div>
     </div>
   );

@@ -1335,3 +1335,77 @@ describe('12.5-10 voice catalog guard rails (UI-D-840, UI-D-856, D-850, D-852, D
     });
   });
 });
+
+describe('12.5-15 chatRuns with recordings and the member-side blocked sentence', () => {
+  const keys = { todayKey: '2026-11-17', yesterdayKey: '2026-11-16' };
+  const base = (over: Partial<ChatMessageView>): ChatMessageView => ({
+    id: 'v-1',
+    seq: 1,
+    side: 'own',
+    authorKey: 'member',
+    body: '',
+    label: null,
+    time: '10:00',
+    dayKey: '2026-11-17',
+    createdAtMs: at('2026-11-17T10:00:00Z'),
+    voice: { mediaId: 'm-1', durationSeconds: 3, durationLabel: '0:03', spokenLabel: '3 segundos' },
+    ...over,
+  });
+  const ready = { status: 'deleted', text: 'voice-sentinel' } as const;
+
+  it('1. a view with a recording gets the mapper voice props and no body; a text view is unchanged', () => {
+    const items = chatRuns(
+      [base({}), base({ id: 't-1', seq: 2, body: 'oi', voice: undefined })],
+      keys,
+      words,
+      (view) => (view.voice ? ready : undefined),
+    );
+    const messages = items.filter((item) => item.kind === 'message');
+    expect(messages[0]).toMatchObject({ key: 'v-1', voice: ready });
+    expect(messages[0]).not.toHaveProperty('body');
+    expect(messages[1]).toMatchObject({ key: 't-1', body: 'oi' });
+    expect(messages[1]).not.toHaveProperty('voice');
+  });
+
+  it('2. without a mapper a recording is drawn exactly as before (an empty text bubble)', () => {
+    const items = chatRuns([base({})], keys, words);
+    expect(items.at(-1)).toMatchObject({ key: 'v-1', body: '' });
+  });
+
+  it('3. a pending recording carries its percent in the footer only when it has one', () => {
+    const voiceProgress = (percent: number) => `Enviando… ${percent}%`;
+    const pending = (id: string, percent: number | null) =>
+      base({ id, seq: 0, pending: true, voiceUpload: { percent } });
+    const items = chatRuns(
+      [pending('p-1', 62), pending('p-2', null), pending('p-3', 0)],
+      keys,
+      { ...words, voiceProgress },
+      () => ready,
+    );
+    const footers = items.flatMap((item) =>
+      item.kind === 'message' ? [(item as { pendingLabel?: string }).pendingLabel] : [],
+    );
+    expect(footers).toEqual(['Enviando… 62%', 'Enviando…', 'Enviando… 0%']);
+    for (const item of items) expect(item).toMatchObject({ pending: true });
+  });
+
+  it('4. a failed recording keeps its place at the end but is not in flight', () => {
+    const items = chatRuns(
+      [base({ id: 'p-1', seq: 0, pending: true, voiceFailed: 'retriable' })],
+      keys,
+      words,
+      () => ready,
+    );
+    const failed = items.at(-1);
+    expect(failed).toMatchObject({ key: 'p-1' });
+    expect(failed).not.toHaveProperty('pending');
+  });
+
+  it("5. the member-side blocked sentence is exactly Igor's words and has no placeholder", () => {
+    expect(t('blocked.memberNotice')).toBe('Você não pode enviar mensagens neste chat.');
+    // The sentence the team reads stays the shipped one.
+    expect(t('blocked.notice', { name: 'Marina Costa' })).toBe(
+      'Marina Costa está bloqueado. A conversa fica disponível só para leitura.',
+    );
+  });
+});

@@ -108,7 +108,8 @@
     },
     "blocked": {
       "pill": "Bloqueado",
-      "notice": "{name} está bloqueado. A conversa fica disponível só para leitura."
+      "notice": "{name} está bloqueado. A conversa fica disponível só para leitura.",
+      "memberNotice": "Você não pode enviar mensagens neste chat."
     },
     "removed": {
       "name": "Membro removido",

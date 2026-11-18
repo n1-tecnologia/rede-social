@@ -14,6 +14,7 @@ import type {
 import type {
   InboxRowState,
   MessageBubbleLabel,
+  MessageBubbleVoice,
   MessageListItem,
 } from '@rede-social/module-chat/ui';
 import type { getTranslations } from 'next-intl/server';
@@ -76,6 +77,17 @@ export interface ChatMessageView {
    * string then, so text and recording stay mutually exclusive in practice.
    */
   voice?: ChatVoiceView;
+  /**
+   * 12.5-15 (UI-D-846, client only): how far a pending voice bubble got. `percent` is `null` while the take is
+   * queued behind another and during the finishing step, so the footer reads the plain pending label.
+   */
+  voiceUpload?: { percent: number | null };
+  /**
+   * 12.5-15 (UI-D-847, client only): a voice send that ended. `retriable` offers "Tentar novamente" and
+   * "Descartar"; `permanent` offers "Descartar" alone. The view keeps `pending: true` in the pane's list (so
+   * the server's merge never drops it) and `chatRuns` draws it as a failed bubble.
+   */
+  voiceFailed?: 'retriable' | 'permanent';
 }
 
 /**
@@ -273,11 +285,26 @@ function sameRun(a: ChatMessageView, b: ChatMessageView): boolean {
 export function chatRuns(
   views: readonly ChatMessageView[],
   keys: ChatDayKeys,
-  words: ChatDayWords & { pending: string },
+  words: ChatDayWords & {
+    pending: string;
+    /** 12.5-15: the footer of an uploading voice bubble, "Enviando… 62%"; absent, the plain pending label. */
+    voiceProgress?: (percent: number) => string;
+  },
+  /**
+   * 12.5-15: maps a view that carries a recording to the bubble's finished voice props. Without it (every
+   * caller before the voice host) a voice view is drawn as an empty text bubble, as it always was.
+   */
+  voiceFor?: (view: ChatMessageView) => MessageBubbleVoice | undefined,
 ): MessageListItem[] {
   const settled = views.filter((view) => !view.pending).sort((a, b) => a.seq - b.seq);
   const pending = views.filter((view) => view.pending);
   const items: MessageListItem[] = [];
+
+  /** The bubble content of a view: its voice props when it has a recording and a mapper, else its text. */
+  const contentOf = (view: ChatMessageView) => {
+    const voice = view.voice && voiceFor ? voiceFor(view) : undefined;
+    return voice ? { voice } : { body: view.body };
+  };
 
   settled.forEach((view, index) => {
     const previous = settled[index - 1];
@@ -293,21 +320,27 @@ export function chatRuns(
       kind: 'message',
       key: view.id,
       side: view.side,
-      body: view.body,
+      ...contentOf(view),
       label: view.label,
       time: next && sameRun(view, next) ? null : view.time,
     });
   });
 
   for (const view of pending) {
+    const percent = view.voiceUpload?.percent;
+    // A failed voice bubble is not in flight: no dimming, no pending footer (the bubble draws its failure).
+    const failed = view.voice !== undefined && view.voiceFailed !== undefined;
     items.push({
       kind: 'message',
       key: view.id,
       side: view.side,
-      body: view.body,
+      ...contentOf(view),
       label: view.label,
-      pending: true,
-      pendingLabel: words.pending,
+      ...(failed ? {} : { pending: true as const }),
+      pendingLabel:
+        typeof percent === 'number' && words.voiceProgress
+          ? words.voiceProgress(percent)
+          : words.pending,
     });
   }
   return items;
