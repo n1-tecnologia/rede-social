@@ -191,3 +191,28 @@ priority and both instants stay unset for them, and no case history row is writt
 non-support row. A Phase 11 plan that adds member-to-member chat must therefore leave `state` null for `direct` (and
 for `group`) and must not reuse the case states for a conversation lifecycle; the numbering and message triggers
 touch only `support` rows. The `kind` column and the support-only case policies are the contract.
+
+### Voice in direct chats (Phase 12.5 hand-off)
+
+Direct and group conversations accept a recording through the same table, policy, gate and bubble as the support
+chat: the message model (`body` or `media_asset_id` with `voice_seconds`, exactly one), the replaced insert policy,
+the read gate `app.chat_asset_hidden` (it follows the chat RLS, so the participants of a direct or group conversation
+open the recording and nobody else does) and the shared bubble and composer all hold for `kind = 'direct'` and
+`'group'` rows. This is proven at database and contract level only (`supabase/tests/236-chat-voice.sql` has a direct
+and a group accept, and a cross-tenant negative beside its control); no screen, route or notification for a direct or
+group recording was built in Phase 12.5.
+
+For the Phase 11 planner:
+
+- Phase 11 must list "voice in direct chats" in its acceptance and must NOT plan the recorder, the player, the media
+  kind or the message model again: it passes the `voice` bundle to the shared `ChatComposer`, reuses `MessageBubble`
+  and `VoicePlayer`, and adds its own send routes for a recording (the two routes of Phase 12.5 are support-only).
+- The staff of a direct conversation are not participants and cannot open its audio: the read gate lets in only the
+  uploader and the people who can read the message through the chat policies, and the support-staff clause of the
+  insert policy covers `kind = 'support'` only.
+- Previews and push words for a direct recording (`voiceSeconds`, "Mensagem de voz · m:ss") are the same facts and the
+  same builders; Phase 11 maps them on its own lists.
+
+For Phase 13 (the native app): the shell's microphone permission text in `scripts/app-release/config.ts` already covers
+voice messages, and Phase 13 must list "record a voice message inside the app" and the OS microphone permission as
+acceptance (the shell's WebView needs its capture permission too).
