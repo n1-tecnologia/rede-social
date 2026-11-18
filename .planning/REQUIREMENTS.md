@@ -444,59 +444,59 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 ### Voice messages
 
 **Message model**
-- [ ] **VOICE-01**: A chat message is either text or one recording: `chat_messages.body` becomes nullable and a CHECK requires exactly one of `body` (1 to 2000 characters after trim) or `media_asset_id` with `voice_seconds` between 1 and 300; a row with both or neither is refused for every writer *(D-846)*
-- [ ] **VOICE-02**: A recording is referenced by an expand-only FK to `media_assets` and its server-verified duration is copied on the message; an asset can back at most one message (unique per tenant), so a repeated send of the same take answers the stored message and never makes a second one *(D-846, D-857)*
-- [ ] **VOICE-03**: The message INSERT policy accepts a recording only when the asset is the author's own, in the author's tenant, `audio` kind and `voice` purpose, `ready`, not deleted, and its `duration_seconds` equals the message's `voice_seconds`; a foreign, processing, deleted, non-audio or other member's asset is refused *(D-858, T-voice)*
-- [ ] **VOICE-04**: Existing text rows, the text send routes and their contracts are unchanged; every new response key is optional and absent on a text row, `body` stays a string on the wire (empty for a recording), and the previous API keeps working between the migrations and the deploy *(D-846, CASE-24 rule)*
-- [ ] **VOICE-05**: The case transitions, the gapless `seq` and the Realtime ids-only signal behave identically for a recording: a recording reopens a `Resolvido` case, opens a new case after `Fechado`, can be the first message of a case, and no trigger reads a body *(D-861)*
-- [ ] **VOICE-06**: Direct and group conversations accept a recording through the same message model and policy, with no change in this phase to their screens *(D-847)*
+- [x] **VOICE-01**: A chat message is either text or one recording: `chat_messages.body` becomes nullable and a CHECK requires exactly one of `body` (1 to 2000 characters after trim) or `media_asset_id` with `voice_seconds` between 1 and 300; a row with both or neither is refused for every writer *(D-846)*
+- [x] **VOICE-02**: A recording is referenced by an expand-only FK to `media_assets` and its server-verified duration is copied on the message; an asset can back at most one message (unique per tenant), so a repeated send of the same take answers the stored message and never makes a second one *(D-846, D-857)*
+- [x] **VOICE-03**: The message INSERT policy accepts a recording only when the asset is the author's own, in the author's tenant, `audio` kind and `voice` purpose, `ready`, not deleted, and its `duration_seconds` equals the message's `voice_seconds`; a foreign, processing, deleted, non-audio or other member's asset is refused *(D-858, T-voice)*
+- [x] **VOICE-04**: Existing text rows, the text send routes and their contracts are unchanged; every new response key is optional and absent on a text row, `body` stays a string on the wire (empty for a recording), and the previous API keeps working between the migrations and the deploy *(D-846, CASE-24 rule)*
+- [x] **VOICE-05**: The case transitions, the gapless `seq` and the Realtime ids-only signal behave identically for a recording: a recording reopens a `Resolvido` case, opens a new case after `Fechado`, can be the first message of a case, and no trigger reads a body *(D-861)*
+- [x] **VOICE-06**: Direct and group conversations accept a recording through the same message model and policy, with no change in this phase to their screens *(D-847)*
 
 **Recording**
-- [ ] **VOICE-07**: The microphone shares the send button's slot (mic when the field is empty after trim, send otherwise), is drawn on the server render and withdrawn after mount when the browser has no recording API, and never appears where the composer is replaced by a read-only strip *(D-851, UI-D-841)*
-- [ ] **VOICE-08**: The microphone permission is requested only at the tap on the microphone; a refused, absent or busy microphone shows the specified sentence, keeps the text composer working and keeps the mic tappable *(D-852, UI-D-842)*
-- [ ] **VOICE-09**: While recording, the composer shows trash, the pill (dot, "Gravando", elapsed `m:ss`) and send; one tap on send stops and sends; the trash discards at once; the take is kept in memory only *(D-849, UI-D-843)*
-- [ ] **VOICE-10**: At 4:30 the notice appears; at 300 seconds, measured from the recorder's own start and also checked on each data event, the recording stops by itself and nothing is sent until the member chooses send or discard *(D-850, D-848)*
-- [ ] **VOICE-11**: A recording under 1 second is discarded with the specified notice; an interrupted recording (track `ended`, a sustained `mute`, or a recorder error) of 1 second or more is kept for send or discard *(D-848, UI-D-844, UI-D-845)*
-- [ ] **VOICE-12**: Every exit (send, discard, too short, interruption, leaving the screen, the composer being replaced) stops every audio track; starting a recording pauses any playing voice message *(UI-D-845)*
+- [x] **VOICE-07**: The microphone shares the send button's slot (mic when the field is empty after trim, send otherwise), is drawn on the server render and withdrawn after mount when the browser has no recording API, and never appears where the composer is replaced by a read-only strip *(D-851, UI-D-841)*
+- [x] **VOICE-08**: The microphone permission is requested only at the tap on the microphone; a refused, absent or busy microphone shows the specified sentence, keeps the text composer working and keeps the mic tappable *(D-852, UI-D-842)*
+- [x] **VOICE-09**: While recording, the composer shows trash, the pill (dot, "Gravando", elapsed `m:ss`) and send; one tap on send stops and sends; the trash discards at once; the take is kept in memory only *(D-849, UI-D-843)*
+- [x] **VOICE-10**: At 4:30 the notice appears; at 300 seconds, measured from the recorder's own start and also checked on each data event, the recording stops by itself and nothing is sent until the member chooses send or discard *(D-850, D-848)*
+- [x] **VOICE-11**: A recording under 1 second is discarded with the specified notice; an interrupted recording (track `ended`, a sustained `mute`, or a recorder error) of 1 second or more is kept for send or discard *(D-848, UI-D-844, UI-D-845)*
+- [x] **VOICE-12**: Every exit (send, discard, too short, interruption, leaving the screen, the composer being replaced) stops every audio track; starting a recording pauses any playing voice message *(UI-D-845)*
 
 **Sending, upload, normalization**
-- [ ] **VOICE-13**: `audio` is a media kind and `voice` a media purpose with mimes `audio/webm`, `audio/mp4`, `audio/ogg` (parameters stripped by the client), a 6 MiB cap (one PUT) and a 300-second duration declared in `MEDIA_LIMITS`; the private bucket allow-list is exactly the contract union *(D-848)*
-- [ ] **VOICE-14**: Starting a `voice` upload requires `chat.support.contact` or `chat.support` for the caller in a tenant with chat on; any other caller gets 403, with no new permission *(D-847)*
-- [ ] **VOICE-15**: Completing a voice upload checks the object's size, its content type and the 16-byte signature the declared mime demands (EBML at 0, `ftyp` at 4, `OggS` at 0), then leaves the asset `processing` and enqueues the existing derive job; a mismatch removes the object and marks the row `rejected` *(D-848)*
-- [ ] **VOICE-16**: The worker normalizes every voice upload to one mono AAC `audio/mp4` file with the index at the front, overwrites the object, records `mime`, `bytes`, `duration_seconds` from the output and marks the asset `ready`; an undecodable file or one with no audio stream is `rejected` with `transcode_failed` and its object removed *(D-848)*
-- [ ] **VOICE-17**: A recording whose measured duration exceeds 301 seconds is `rejected` with `duration_too_long`; the stored duration is the rounded measured value clamped to 1..300 *(D-848)*
-- [ ] **VOICE-18**: The member and the staff each send a recording through a new route (`POST /v1/chat/support/voice-messages`, `POST /v1/chat/conversations/{id}/voice-messages`) with the same guard chain, refusals and order as text (blocked, removed, not a participant, closed case); an asset still `pending` or `processing` answers a retriable `voice_not_ready`, any unusable asset answers one `voice_invalid`; the closed `CHAT_ISSUES` list and its contract test gain these codes *(D-862)*
+- [x] **VOICE-13**: `audio` is a media kind and `voice` a media purpose with mimes `audio/webm`, `audio/mp4`, `audio/ogg` (parameters stripped by the client), a 6 MiB cap (one PUT) and a 300-second duration declared in `MEDIA_LIMITS`; the private bucket allow-list is exactly the contract union *(D-848)*
+- [x] **VOICE-14**: Starting a `voice` upload requires `chat.support.contact` or `chat.support` for the caller in a tenant with chat on; any other caller gets 403, with no new permission *(D-847)*
+- [x] **VOICE-15**: Completing a voice upload checks the object's size, its content type and the 16-byte signature the declared mime demands (EBML at 0, `ftyp` at 4, `OggS` at 0), then leaves the asset `processing` and enqueues the existing derive job; a mismatch removes the object and marks the row `rejected` *(D-848)*
+- [x] **VOICE-16**: The worker normalizes every voice upload to one mono AAC `audio/mp4` file with the index at the front, overwrites the object, records `mime`, `bytes`, `duration_seconds` from the output and marks the asset `ready`; an undecodable file or one with no audio stream is `rejected` with `transcode_failed` and its object removed *(D-848)*
+- [x] **VOICE-17**: A recording whose measured duration exceeds 301 seconds is `rejected` with `duration_too_long`; the stored duration is the rounded measured value clamped to 1..300 *(D-848)*
+- [x] **VOICE-18**: The member and the staff each send a recording through a new route (`POST /v1/chat/support/voice-messages`, `POST /v1/chat/conversations/{id}/voice-messages`) with the same guard chain, refusals and order as text (blocked, removed, not a participant, closed case); an asset still `pending` or `processing` answers a retriable `voice_not_ready`, any unusable asset answers one `voice_invalid`; the closed `CHAT_ISSUES` list and its contract test gain these codes *(D-862)*
 
 **Playback**
-- [ ] **VOICE-19**: A voice bubble draws from the stored duration and makes no media request until the first tap; the first tap assigns the same-origin media path to the audio element inside the tap handler *(D-853, UI-D-849)*
-- [ ] **VOICE-20**: The player offers play/pause, a draggable bar whose maximum is the stored duration, the elapsed and total time and the 1x, 1.5x, 2x speed cycle (per player, not stored); only one player plays at a time and the paused one keeps its position *(D-853, D-854, UI-D-849, UI-D-850)*
-- [ ] **VOICE-21**: A failed or expired link shows the error state and a tap fetches a fresh link and resumes from the same position; a format the browser cannot decode (element error code 4) shows the "unsupported" sentence *(UI-D-849)*
-- [ ] **VOICE-22**: The service worker never handles audio or video requests, so Range requests reach the network untouched *(Pitfall 2)*
-- [ ] **VOICE-23**: The optimistic voice bubble uses the player's geometry, shows upload progress then "Enviando…" through normalization, keeps the take for "Tentar novamente" and "Descartar" on a retriable failure, offers only "Descartar" on a permanent refusal without naming a quota or limit, and posts takes in tap order *(UI-D-846, UI-D-847)*
+- [x] **VOICE-19**: A voice bubble draws from the stored duration and makes no media request until the first tap; the first tap assigns the same-origin media path to the audio element inside the tap handler *(D-853, UI-D-849)*
+- [x] **VOICE-20**: The player offers play/pause, a draggable bar whose maximum is the stored duration, the elapsed and total time and the 1x, 1.5x, 2x speed cycle (per player, not stored); only one player plays at a time and the paused one keeps its position *(D-853, D-854, UI-D-849, UI-D-850)*
+- [x] **VOICE-21**: A failed or expired link shows the error state and a tap fetches a fresh link and resumes from the same position; a format the browser cannot decode (element error code 4) shows the "unsupported" sentence *(UI-D-849)*
+- [x] **VOICE-22**: The service worker never handles audio or video requests, so Range requests reach the network untouched *(Pitfall 2)*
+- [x] **VOICE-23**: The optimistic voice bubble uses the player's geometry, shows upload progress then "Enviando…" through normalization, keeps the take for "Tentar novamente" and "Descartar" on a retriable failure, offers only "Descartar" on a permanent refusal without naming a quota or limit, and posts takes in tap order *(UI-D-846, UI-D-847)*
 
 **Access and quota**
-- [ ] **VOICE-24**: `GET /v1/media/{id}/original` for a voice asset answers 302 only to its uploader and to users who can read the message through the chat policies (the member, the tenant's staff for a support conversation, the participants of a direct or group one); a same-tenant non-participant and another tenant's user get the same bare 404 as a miss *(D-858)*
-- [ ] **VOICE-25**: The gate is a kernel-declared seam with a chat-owned body built over the chat RLS, asked by the same one-read `serveVariant('original')` gate; non-voice assets are unaffected *(D-858)*
-- [ ] **VOICE-26**: A voice recording counts in the tenant ceiling and the member share through the existing byte sums with no separate budget; `DELETE /v1/media/{id}` is refused for a voice asset and the admin media list excludes voice assets *(D-857, D-859)*
-- [ ] **VOICE-27**: An unreferenced voice asset older than 24 hours is soft-deleted by a chat sweep function run by the existing hourly sweeper, only within its own tenant, executable by the service role only, idempotent; no new queue or job name exists *(D-856, D-844)*
-- [ ] **VOICE-37**: When a member's account is anonymised or deleted, every voice recording that member sent is removed: the media asset is soft-deleted and its storage object is purged, and the message stays in the thread as a bubble that reads "Mensagem de voz apagada" with no player, no media request and no duration; text messages keep today's behaviour; the change keeps `app.account_anonymise` identical in every other respect *(D-868, Igor 2026-11-17)*
+- [x] **VOICE-24**: `GET /v1/media/{id}/original` for a voice asset answers 302 only to its uploader and to users who can read the message through the chat policies (the member, the tenant's staff for a support conversation, the participants of a direct or group one); a same-tenant non-participant and another tenant's user get the same bare 404 as a miss *(D-858)*
+- [x] **VOICE-25**: The gate is a kernel-declared seam with a chat-owned body built over the chat RLS, asked by the same one-read `serveVariant('original')` gate; non-voice assets are unaffected *(D-858)*
+- [x] **VOICE-26**: A voice recording counts in the tenant ceiling and the member share through the existing byte sums with no separate budget; `DELETE /v1/media/{id}` is refused for a voice asset and the admin media list excludes voice assets *(D-857, D-859)*
+- [x] **VOICE-27**: An unreferenced voice asset older than 24 hours is soft-deleted by a chat sweep function run by the existing hourly sweeper, only within its own tenant, executable by the service role only, idempotent; no new queue or job name exists *(D-856, D-844)*
+- [x] **VOICE-37**: When a member's account is anonymised or deleted, every voice recording that member sent is removed: the media asset is soft-deleted and its storage object is purged, and the message stays in the thread as a bubble that reads "Mensagem de voz apagada" with no player, no media request and no duration; text messages keep today's behaviour; the change keeps `app.account_anonymise` identical in every other respect *(D-868, Igor 2026-11-17)*
 
 **Previews and push**
-- [ ] **VOICE-28**: Wherever a message's text is a preview (inbox row, "Meus chamados" card), a voice message carries its stored duration as an optional `voiceSeconds` and the host renders "Mensagem de voz · m:ss" with a microphone glyph *(D-860, UI-D-853)*
-- [ ] **VOICE-29**: The push to the team (new case, reopened case, new message) and to the member (staff reply) carries "Mensagem de voz · m:ss" in the slot where a preview goes, built by the server copy file and cut by the existing 100-grapheme rule; no bell row is added *(D-860)*
-- [ ] **VOICE-30**: A case whose first message is a recording and has no typed subject is labelled "Mensagem de voz" (no duration) in the bar, card, inbox row and details *(D-861)*
+- [x] **VOICE-28**: Wherever a message's text is a preview (inbox row, "Meus chamados" card), a voice message carries its stored duration as an optional `voiceSeconds` and the host renders "Mensagem de voz · m:ss" with a microphone glyph *(D-860, UI-D-853)*
+- [x] **VOICE-29**: The push to the team (new case, reopened case, new message) and to the member (staff reply) carries "Mensagem de voz · m:ss" in the slot where a preview goes, built by the server copy file and cut by the existing 100-grapheme rule; no bell row is added *(D-860)*
+- [x] **VOICE-30**: A case whose first message is a recording and has no typed subject is labelled "Mensagem de voz" (no duration) in the bar, card, inbox row and details *(D-861)*
 
 **Cases**
-- [ ] **VOICE-31**: The recording's first send opens the case with the chosen category and typed subject exactly as text does, and a failed first send keeps the opener's chip and subject *(D-861, UI-D-852)*
-- [ ] **VOICE-32**: A staff voice reply takes an unowned `Aberto` case and does not reopen a `Resolvido` one, as text does *(D-806, UI-D-852)*
+- [x] **VOICE-31**: The recording's first send opens the case with the chosen category and typed subject exactly as text does, and a failed first send keeps the opener's chip and subject *(D-861, UI-D-852)*
+- [x] **VOICE-32**: A staff voice reply takes an unowned `Aberto` case and does not reopen a `Resolvido` one, as text does *(D-806, UI-D-852)*
 
 **Native shell text**
-- [ ] **VOICE-33**: The microphone permission text of the app shell reads "{tenant} usa o microfone para gravar o som dos seus vídeos e as suas mensagens de voz." and stays under the 200-character schema limit *(UI-D-856)*
+- [x] **VOICE-33**: The microphone permission text of the app shell reads "{tenant} usa o microfone para gravar o som dos seus vídeos e as suas mensagens de voz." and stays under the 200-character schema limit *(UI-D-856)*
 
 **Release, tests, owner proofs**
-- [ ] **VOICE-34**: Every new table column, policy, function, route, kernel import, sweep function and gate carries a cross-tenant negative with a positive control (pgTAP and integration); both new routes are in the isolation inventory with a case id; the chat README lists the new sweep function and any new kernel specifier *(MOD-05, TENANT-05)*
-- [ ] **VOICE-35**: The release is expand-only and ordered (migrations on every tenant database, then API and worker from a rebuilt image that contains ffmpeg, then web); the failing windows are named in `docs/DEPLOY.md` and the ledger
-- [ ] **VOICE-36**: The owner proves on real devices and records in the ledger: recording and playing on an iPhone (Safari and the installed PWA), on an Android phone and on desktop Firefox; the permission prompt on each; the first-tap gesture; an interruption by a call and by backgrounding; the screen-reader phrases; seeking and resuming inside the signed URL's hour *(CONTEXT discretion, UI-SPEC row V40)*
+- [x] **VOICE-34**: Every new table column, policy, function, route, kernel import, sweep function and gate carries a cross-tenant negative with a positive control (pgTAP and integration); both new routes are in the isolation inventory with a case id; the chat README lists the new sweep function and any new kernel specifier *(MOD-05, TENANT-05)*
+- [x] **VOICE-35**: The release is expand-only and ordered (migrations on every tenant database, then API and worker from a rebuilt image that contains ffmpeg, then web); the failing windows are named in `docs/DEPLOY.md` and the ledger
+- [x] **VOICE-36**: The owner proves on real devices and records in the ledger: recording and playing on an iPhone (Safari and the installed PWA), on an Android phone and on desktop Firefox; the permission prompt on each; the first-tap gesture; an interruption by a call and by backgrounding; the screen-reader phrases; seeking and resuming inside the signed URL's hour *(CONTEXT discretion, UI-SPEC row V40)*
 
 ### Database per tenant
 
@@ -1185,43 +1185,43 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-27 | Phase 12.4 | Complete |
 | CASE-28 | Phase 12.4 | Pending |
 | CASE-29 | Phase 12.4 | Pending |
-| VOICE-01 | Phase 12.5 | Pending |
-| VOICE-02 | Phase 12.5 | Pending |
-| VOICE-03 | Phase 12.5 | Pending |
-| VOICE-04 | Phase 12.5 | Pending |
-| VOICE-05 | Phase 12.5 | Pending |
-| VOICE-06 | Phase 12.5 | Pending |
-| VOICE-07 | Phase 12.5 | Pending |
-| VOICE-08 | Phase 12.5 | Pending |
-| VOICE-09 | Phase 12.5 | Pending |
-| VOICE-10 | Phase 12.5 | Pending |
-| VOICE-11 | Phase 12.5 | Pending |
-| VOICE-12 | Phase 12.5 | Pending |
-| VOICE-13 | Phase 12.5 | Pending |
-| VOICE-14 | Phase 12.5 | Pending |
-| VOICE-15 | Phase 12.5 | Pending |
-| VOICE-16 | Phase 12.5 | Pending |
-| VOICE-17 | Phase 12.5 | Pending |
-| VOICE-18 | Phase 12.5 | Pending |
-| VOICE-19 | Phase 12.5 | Pending |
-| VOICE-20 | Phase 12.5 | Pending |
-| VOICE-21 | Phase 12.5 | Pending |
-| VOICE-22 | Phase 12.5 | Pending |
-| VOICE-23 | Phase 12.5 | Pending |
-| VOICE-24 | Phase 12.5 | Pending |
-| VOICE-25 | Phase 12.5 | Pending |
-| VOICE-26 | Phase 12.5 | Pending |
-| VOICE-27 | Phase 12.5 | Pending |
-| VOICE-28 | Phase 12.5 | Pending |
-| VOICE-29 | Phase 12.5 | Pending |
-| VOICE-30 | Phase 12.5 | Pending |
-| VOICE-31 | Phase 12.5 | Pending |
-| VOICE-32 | Phase 12.5 | Pending |
-| VOICE-33 | Phase 12.5 | Pending |
-| VOICE-34 | Phase 12.5 | Pending |
-| VOICE-35 | Phase 12.5 | Pending |
-| VOICE-36 | Phase 12.5 | Pending |
-| VOICE-37 | Phase 12.5 | Pending |
+| VOICE-01 | Phase 12.5 | Complete |
+| VOICE-02 | Phase 12.5 | Complete |
+| VOICE-03 | Phase 12.5 | Complete |
+| VOICE-04 | Phase 12.5 | Complete |
+| VOICE-05 | Phase 12.5 | Complete |
+| VOICE-06 | Phase 12.5 | Complete |
+| VOICE-07 | Phase 12.5 | Complete |
+| VOICE-08 | Phase 12.5 | Complete |
+| VOICE-09 | Phase 12.5 | Complete |
+| VOICE-10 | Phase 12.5 | Complete |
+| VOICE-11 | Phase 12.5 | Complete |
+| VOICE-12 | Phase 12.5 | Complete |
+| VOICE-13 | Phase 12.5 | Complete |
+| VOICE-14 | Phase 12.5 | Complete |
+| VOICE-15 | Phase 12.5 | Complete |
+| VOICE-16 | Phase 12.5 | Complete |
+| VOICE-17 | Phase 12.5 | Complete |
+| VOICE-18 | Phase 12.5 | Complete |
+| VOICE-19 | Phase 12.5 | Complete |
+| VOICE-20 | Phase 12.5 | Complete |
+| VOICE-21 | Phase 12.5 | Complete |
+| VOICE-22 | Phase 12.5 | Complete |
+| VOICE-23 | Phase 12.5 | Complete |
+| VOICE-24 | Phase 12.5 | Complete |
+| VOICE-25 | Phase 12.5 | Complete |
+| VOICE-26 | Phase 12.5 | Complete |
+| VOICE-27 | Phase 12.5 | Complete |
+| VOICE-28 | Phase 12.5 | Complete |
+| VOICE-29 | Phase 12.5 | Complete |
+| VOICE-30 | Phase 12.5 | Complete |
+| VOICE-31 | Phase 12.5 | Complete |
+| VOICE-32 | Phase 12.5 | Complete |
+| VOICE-33 | Phase 12.5 | Complete |
+| VOICE-34 | Phase 12.5 | Complete |
+| VOICE-35 | Phase 12.5 | Complete |
+| VOICE-36 | Phase 12.5 | Complete |
+| VOICE-37 | Phase 12.5 | Complete |
 | DBT-01 | Phase 09.2 (plans 02, 14) | Complete |
 | DBT-02 | Phase 09.2 (plans 03, 14) | Complete |
 | DBT-03 | Phase 09.2 (plan 03) | Complete |

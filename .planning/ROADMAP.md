@@ -54,7 +54,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 - [x] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it right after their first login, members without a completed profile and members who had completed it before the form existed answer it too
 - [ ] **Phase 12.4: Abertura de chamado no suporte (INSERTED)** - A member's message to support opens a case with a number and a status; the support team takes it, answers it, resolves it and closes it from an inbox with tabs by status; reverses D-221/D-225 of Phase 7 (the support chat had no status, owner or closing)
-- [ ] **Phase 12.5: Mensagem de voz no chat (INSERTED)** - Anyone in a chat records a voice message on the spot (up to 5 minutes) and sends it; the other side plays it in the conversation; works in the support chat now and in the direct and group chats of Phase 11; previews read "Mensagem de voz"
+- [x] **Phase 12.5: Mensagem de voz no chat (INSERTED)** - Anyone in a chat records a voice message on the spot (up to 5 minutes) and sends it; the other side plays it in the conversation; works in the support chat now and in the direct and group chats of Phase 11; previews read "Mensagem de voz" (completed 2026-11-17)
 - [ ] **Phase 13: App nativo iOS e Android por tenant (white-label)** - Post-MVP, additive: each tenant gets its own native iOS and Android app (stage 1: a native shell around the web's own screens), fixed to the tenant's host, with every feature of the web app (member area and tenant admin), native push and links that open the app; the web, the PWA and the API stay as they are for a browser
 
 **MVP scope** (user decision 2026-09-25): the MVP is the pilot going live, closed by the go-live gate (D-344, 2026-10-01: Phase 8 runs the full gate, and the MVP is declared closed at 08.1's exit gate). It covers Phases 1-8 and their decimal insertions (01.1, 05.1, 05.2, 05.3). The "Rede social" module (Phases 9-11) is V2 scope promoted into this milestone; it is post-MVP, runs after Phase 8, and no MVP phase may depend on it.
@@ -2342,7 +2342,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 12.4. Abertura de chamado no suporte (INSERTED) | 22/22 | In Progress|  |
-| 12.5. Mensagem de voz no chat (INSERTED) | 18/18 | In Progress|  |
+| 12.5. Mensagem de voz no chat (INSERTED) | 18/18 | Complete    | 2026-11-17 |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |
 
 ---

@@ -1,13 +1,13 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "12.5"
-current_phase_name: Mensagem de voz no chat
-current_plan: 18
-status: verifying
-stopped_at: Phase 12.5 executed 18/18; verification human_needed (8/11), 34 ledger rows are Igor's; phase not closed, nothing pushed
+current_phase: "11"
+current_phase_name: Rede Social - Direct Messages, Member Blocking and Reports
+current_plan: 0
+status: ready_to_discuss
+stopped_at: "Phase 12.5 CLOSED 2026-11-17 by developer closure (Igor approved closing, fixing WR-01..03, sketch 024 final and the account-deletion function): 18/18 plans, verification human_needed and stale (owed), UAT closed partial with 8 rows blocked, ledger P1..P34 are his; Phase 12.4 is still not closed; nothing pushed or deployed"
 last_updated: "2026-11-18T02:22:35.679Z"
 last_activity: 2026-11-17
-last_activity_desc: "Completed quick task 261117-w3z: WR-01..03 of the 12.5 review fixed (local only)"
+last_activity_desc: "Phase 12.5 closed by developer closure"
 state_head: 0ec0441b91fdc30f609d49ed908b10cd3f992702
 progress:
   total_phases: 35
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 12.5 — Mensagem de voz no chat
+**Current focus:** Phase 11 — Rede Social - Direct Messages, Member Blocking and Reports
 
 ## Current Position
 
-Phase: 12.5 (Mensagem de voz no chat) — EXECUTED 18/18, verification human_needed (8/11), not closed
-Current Plan: 18
-Total Plans in Phase: 18
-Plan: 18 of 18
-Status: Executed and verified by code; 34 ledger rows (real devices, release, review items) are Igor's; WR-01..03 of the code review open; nothing pushed or deployed
-Last activity: 2026-11-17 — Phase 12.5 executed 18/18, code review 3 warnings no blockers, verification human_needed
+Phase: 11 (Rede Social - Direct Messages, Member Blocking and Reports) — NOT STARTED
+Current Plan: 0
+Total Plans in Phase: TBD
+Plan: 0 of TBD
+Status: Ready to discuss Phase 11 (Phase 12.5 closed 2026-11-17 by developer closure; Phase 11 inherits the voice composer, message model and bubble and must not plan audio again; Phase 12.4 is executed but not closed)
+Last activity: 2026-11-17 — Phase 12.5 closed by developer closure
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
