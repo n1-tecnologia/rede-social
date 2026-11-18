@@ -8,6 +8,8 @@ import {
   deleteVoiceAssetsOf,
   resetMemberConversation,
   SUPPORT_EMAIL,
+  softDeleteVoiceAssets,
+  voiceAssetIdsOf,
 } from './chat-admin';
 import { hosts, login, SEED_PASSWORD } from './fixtures';
 import { ensureWorker } from './worker';
@@ -126,6 +128,14 @@ const recordingSend = (page: Page) =>
   page.getByRole('button', {
     name: new RegExp(`^(${escapeRegExp(V.recording.send)}|${escapeRegExp(V.recording.sendNew)})$`),
   });
+/** The text field and its send (the same button name as the opener's while the member has no case). */
+const composerField = (page: Page) => page.getByRole('textbox', { name: C.composer.label });
+const textSend = (page: Page) =>
+  page.getByRole('button', {
+    name: new RegExp(`^(${escapeRegExp(C.composer.send)}|${escapeRegExp(C.composer.sendNew)})$`),
+  });
+/** Every message bubble of the visible thread, text or voice. */
+const messages = (page: Page) => thread(page).locator('[data-chat-message]');
 /** The elapsed counter of the recording row. */
 const recordingTimer = (page: Page) => page.getByRole('timer', { name: V.recording.timer });
 /** The own voice bubble still uploading (the ghost player, dimmed, with a progress bar). */
@@ -270,6 +280,118 @@ test.describe('mensagem de voz no navegador', () => {
       await expect(theirs.getByRole('button', { name: V.player.play, exact: true })).toBeVisible();
     } finally {
       await staff.context.close();
+    }
+  });
+
+  // ── 2. the gate ──────────────────────────────────────────────────────────────────────────────────
+
+  test("2. the gate: another member of the tenant cannot open a recording's media path, its uploader can", async ({
+    page,
+    browser,
+    contextOptions,
+    viewport,
+    isMobile,
+    hasTouch,
+    userAgent,
+    deviceScaleFactor,
+  }) => {
+    await login(page, MEMBER, SEED_PASSWORD, hosts.demo);
+    await recordAndSend(page);
+    await expect(settledBubble(page)).toHaveCount(1, { timeout: 90_000 });
+    const [assetId] = await voiceAssetIdsOf(MEMBER);
+    if (!assetId) throw new Error('the recording left no asset');
+    const path = `${hosts.demo}/v1/media/${assetId}/original`;
+
+    // The uploader is sent on to the file (a redirect, never followed here: only the status is read).
+    const own = await page.request.get(path, { maxRedirects: 0 });
+    expect(own.status()).toBe(302);
+
+    // Another throwaway member of the same tenant gets the bare not-found of an unknown id, never the file.
+    const other = await contextAs(
+      browser,
+      OTHER,
+      deviceOf({ contextOptions, viewport, isMobile, hasTouch, userAgent, deviceScaleFactor }),
+    );
+    try {
+      const foreign = await other.page.request.get(path, { maxRedirects: 0 });
+      expect(foreign.status()).toBe(404);
+      expect(foreign.headers().location).toBeUndefined();
+    } finally {
+      await other.context.close();
+    }
+  });
+
+  // ── 3. a deleted recording ───────────────────────────────────────────────────────────────────────
+
+  test('3. a deleted recording reads the deleted sentence and has no audio element after a reload', async ({
+    page,
+  }) => {
+    await login(page, MEMBER, SEED_PASSWORD, hosts.demo);
+    await recordAndSend(page);
+    await expect(settledBubble(page)).toHaveCount(1, { timeout: 90_000 });
+    await expect(thread(page).locator('audio')).toHaveCount(1);
+
+    // The admin lane retires the member's recordings the way the account-deletion step does.
+    await softDeleteVoiceAssets(MEMBER);
+    await page.reload();
+
+    const deleted = thread(page).locator('[data-chat-voice-deleted]');
+    await expect(deleted).toHaveCount(1);
+    await expect(deleted).toHaveText(V.deleted);
+    await expect(thread(page).locator('audio')).toHaveCount(0);
+  });
+
+  // ── 4. the refusals ──────────────────────────────────────────────────────────────────────────────
+
+  test('4. refused microphone and too short: the blocked sentence keeps the text path open, a tap and an at-once send is discarded', async ({
+    page,
+    browser,
+    contextOptions,
+    viewport,
+    isMobile,
+    hasTouch,
+    userAgent,
+    deviceScaleFactor,
+  }) => {
+    // Too short (D-848, VOICE-11): a tap on the microphone and at once on send sends nothing.
+    await login(page, MEMBER, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/suporte`);
+    await expect(micButton(page)).toBeEnabled();
+    const before = await messages(page).count();
+    await micButton(page).click();
+    await recordingSend(page).click();
+    await expect(page.locator('[data-chat-voice-notice]')).toContainText(V.notice.tooShort);
+    await expect(messages(page)).toHaveCount(before);
+    expect(await voiceAssetIdsOf(MEMBER)).toHaveLength(0);
+
+    // A refused microphone (D-852, VOICE-08): a context with no permission. The capture call answers what a
+    // real denial raises, because the fake-UI flag would answer a prompt for us.
+    const refused = await browser.newContext({
+      ...deviceOf({ contextOptions, viewport, isMobile, hasTouch, userAgent, deviceScaleFactor }),
+      serviceWorkers: 'block',
+      permissions: [],
+    });
+    try {
+      await refused.addInitScript(() => {
+        navigator.mediaDevices.getUserMedia = () =>
+          Promise.reject(new DOMException('Permission denied', 'NotAllowedError'));
+      });
+      const rp = await refused.newPage();
+      await login(rp, MEMBER, SEED_PASSWORD, hosts.demo);
+      await rp.goto(`${hosts.demo}/suporte`);
+      await expect(micButton(rp)).toBeEnabled();
+      await micButton(rp).click();
+
+      // The blocked sentence shows, the microphone is still tappable and the text field still sends.
+      await expect(rp.locator('[data-chat-voice-notice]')).toContainText(V.problem.blocked);
+      await expect(micButton(rp)).toBeEnabled();
+      const text = `e2evoice-${Date.now()}-texto`;
+      await composerField(rp).fill(text);
+      await textSend(rp).click();
+      await expect(messages(rp).filter({ hasText: text })).toHaveCount(1);
+      await expect(rp.locator('[data-chat-voice-notice]')).toHaveCount(0);
+    } finally {
+      await refused.close();
     }
   });
 });

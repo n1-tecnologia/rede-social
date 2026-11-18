@@ -344,16 +344,18 @@
     },
     {
       "id": "chat",
-      "why": "Support chat (inbox, thread, BFF routes, cursors); the chat spec drives it, chat-cases walks a case from the opener to the next one, phase7 and notifications read its unread signals.",
+      "why": "Support chat (inbox, thread, BFF routes, cursors); the chat spec drives it, chat-cases walks a case from the opener to the next one, chat-voice records a voice message and plays it on the team's side (12.5-17), phase7 and notifications read its unread signals.",
       "globs": [
         "packages/modules/chat/**",
         "apps/web/app/(app)/suporte/**",
         "apps/web/app/api/chat/**",
-        "apps/web/lib/chat*"
+        "apps/web/lib/chat*",
+        "apps/web/lib/voice-send.ts"
       ],
       "specs": [
         "chat.spec.ts",
         "chat-cases.spec.ts",
+        "chat-voice.spec.ts",
         "phase7-smoke.spec.ts",
         "notifications.spec.ts",
         "csp.spec.ts"
@@ -366,6 +368,7 @@
       "specs": [
         "chat.spec.ts",
         "chat-cases.spec.ts",
+        "chat-voice.spec.ts",
         "phase7-smoke.spec.ts",
         "notifications.spec.ts",
         "csp.spec.ts"
@@ -655,20 +658,26 @@
         "stories.spec.ts",
         "phase52-smoke.spec.ts",
         "reels.spec.ts",
+        "chat-voice.spec.ts",
         "csp.spec.ts"
       ]
     },
     {
       "id": "pwa",
-      "why": "The service worker, the offline page, the app icons and the manifest delivery; the pwa and push specs drive them, with the branding and phase 2/7 smokes.",
-      "globs": ["apps/web/app/{sw.ts,serwist/**,~offline/**}", "apps/web/public/icons/**"],
+      "why": "The service worker, the offline page, the app icons and the manifest delivery; the pwa and push specs drive them, with the branding and phase 2/7 smokes, and chat-voice plays a recording through the worker's audio rule (12.5-17).",
+      "globs": [
+        "apps/web/app/{sw.ts,serwist/**,~offline/**}",
+        "apps/web/lib/sw-rules.ts",
+        "apps/web/public/icons/**"
+      ],
       "specs": [
         "pwa.spec.ts",
         "push.spec.ts",
         "phase7-smoke.spec.ts",
         "branding.spec.ts",
         "phase2-smoke.spec.ts",
-        "shell.spec.ts"
+        "shell.spec.ts",
+        "chat-voice.spec.ts"
       ]
     },
     {

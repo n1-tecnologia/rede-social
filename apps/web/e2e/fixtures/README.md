@@ -102,3 +102,12 @@ sem.wait()
 
 The moving gradient is deliberate: uniform frames compress to almost nothing, and a fixture that
 weighs 2 KB would not exercise a chunked transfer at all.
+
+## The voice spec (`chat-voice.spec.ts`, plan 12.5-17)
+
+It needs no fixture file: Chromium's fake microphone (`--use-fake-device-for-media-stream`) is the audio
+source, and the spec creates and deletes its own `e2evoice-` members. It does need **ffmpeg and the worker**:
+the worker derives the stored mono AAC `audio/mp4` file, and `ensureWorker()` brings one. Playwright's bundled
+Chromium may not decode AAC; if the play step fails with the "cannot decode AAC" message, run it on the
+installed Google Chrome with `PLAYWRIGHT_VOICE_CHANNEL=chrome`. The spec was written and listed but never run
+by an agent; the run is Igor's, from the ledger of plan 12.5-18.
