@@ -7,7 +7,7 @@ status: ready_to_discuss
 stopped_at: "Phase 12.5 CLOSED 2026-11-17 by developer closure (Igor approved closing, fixing WR-01..03, sketch 024 final and the account-deletion function): 18/18 plans, verification human_needed and stale (owed), UAT closed partial with 8 rows blocked, ledger P1..P34 are his; Phase 12.4 is still not closed; nothing pushed or deployed"
 last_updated: "2026-11-18T15:20:15.816Z"
 last_activity: 2026-11-17
-last_activity_desc: "Completed quick task 261118-glh: oversize video message fixed, 8 GiB cap and 3 h upload window (local only, not pushed)"
+last_activity_desc: "Completed quick task 261118-mst: resumable in-repo uploader replaces UpChunk for the video direct-upload (local only, not pushed)"
 state_head: 82894cd45d5316eb5d9affe103cb7a5d4af6c9e5
 progress:
   total_phases: 35
@@ -1286,6 +1286,7 @@ None yet.
 | 261117-w3z | Fix WR-01..03 of the 12.5 voice code review (cancel the send on leaving, purge tombstone only for audio, toast on closed/not_found) | 2026-11-18 | 0ec0441b | — | [261117-w3z-fix-wr-01-03-of-the-12-5-voice-code-revi](./quick/261117-w3z-fix-wr-01-03-of-the-12-5-voice-code-revi/) |
 | 261118-eti | Mux Player bar on every feed post video (play/pause, time bar, speed, volume, fullscreen), bridged into the feed state | 2026-11-18 | 24d5a262 | — | [261118-eti-mux-player-bar-on-every-feed-post-video](./quick/261118-eti-mux-player-bar-on-every-feed-post-video/) |
 | 261118-glh | Oversize video now says too large (was the photo-prepare error) and the temporary post-video limits go to 8 GiB with a 3 h upload window | 2026-11-18 | 82894cd4 | — | [261118-glh-oversize-video-message-and-raise-the-tem](./quick/261118-glh-oversize-video-message-and-raise-the-tem/) |
+| 261118-mst | Chunked video direct-upload survives a multi-hour upload: UpChunk replaced by an in-repo resumable uploader (fresh slice per attempt, 32 MiB chunks, backoff, status-query resume, offline pause, stall watchdog); the blob-broken trigger is unknown and the real Mux status query is unverified | 2026-11-18 | e6b09771 | — | [261118-mst-resilient-chunked-video-direct-upload-re](./quick/261118-mst-resilient-chunked-video-direct-upload-re/) |
 
 ### Roadmap Evolution
 
