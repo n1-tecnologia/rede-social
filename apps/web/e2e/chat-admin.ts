@@ -305,6 +305,58 @@ export async function setMemberReadSeq(conversationId: string, seq: number): Pro
        and p.user_id = c.created_by_user_id`;
 }
 
+/* ── 12.5-17: the voice message ──────────────────────────────────────────────────────────────────── */
+
+/**
+ * The id of `email`'s newest support conversation (the one a recording opened or joined): the e2e reads the
+ * row of the inbox and the media path through it, so it never needs to be seeded.
+ */
+export async function conversationIdOf(email: string, slug = 'rede-demo'): Promise<string> {
+  const { tenantId, userId } = await tenantAndUser(email, slug);
+  const [row] = await sql()<{ id: string }[]>`
+    select id::text as id from public.chat_conversations
+     where tenant_id = ${tenantId}::uuid and kind = 'support' and created_by_user_id = ${userId}::uuid
+     order by created_at desc limit 1`;
+  if (!row) throw new Error(`${email} has no support conversation`);
+  return row.id;
+}
+
+/** The ids of `email`'s live voice recordings in `slug` (uploaded by that member, not deleted), oldest first. */
+export async function voiceAssetIdsOf(email: string, slug = 'rede-demo'): Promise<string[]> {
+  const { tenantId, userId } = await tenantAndUser(email, slug);
+  const rows = await sql()<{ id: string }[]>`
+    select id::text as id from public.media_assets
+     where tenant_id = ${tenantId}::uuid and owner_user_id = ${userId}::uuid
+       and purpose = 'voice' and deleted_at is null
+     order by created_at`;
+  return rows.map((row) => row.id);
+}
+
+/**
+ * Soft-deletes `email`'s voice recordings the way the account-deletion step does (12.5-08, D-868): status
+ * `deleted`, `deleted_at` set and the file name blanked, scoped by the member's own id and tenant. The message
+ * rows stay, so the thread reads "apagada" after a reload. It touches nothing of any other member.
+ */
+export async function softDeleteVoiceAssets(email: string, slug = 'rede-demo'): Promise<void> {
+  const { tenantId, userId } = await tenantAndUser(email, slug);
+  await sql()`
+    update public.media_assets a
+       set status = 'deleted', deleted_at = coalesce(a.deleted_at, now()), filename = null
+     where a.tenant_id = ${tenantId}::uuid and a.owner_user_id = ${userId}::uuid and a.purpose = 'voice'`;
+}
+
+/**
+ * Removes every voice asset row `email` owns, sent or not (the member's own rows only). Call it AFTER
+ * `resetMemberConversation`: the messages hold a no-action foreign key to the asset, so the messages go first.
+ * The Storage objects of a local run are left to the media sweeper, as a real removal leaves them.
+ */
+export async function deleteVoiceAssetsOf(email: string, slug = 'rede-demo'): Promise<void> {
+  const { tenantId, userId } = await tenantAndUser(email, slug);
+  await sql()`
+    delete from public.media_assets
+     where tenant_id = ${tenantId}::uuid and owner_user_id = ${userId}::uuid and purpose = 'voice'`;
+}
+
 /* ── 07-10: the staff side ─────────────────────────────────────────────────────────────────────── */
 
 /**
