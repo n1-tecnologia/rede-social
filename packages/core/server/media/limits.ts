@@ -122,6 +122,10 @@ export const MEDIA_SWEEP_INTERVAL_S = 60 * 60;
  * [supabase.com/docs/guides/storage/uploads/resumable-uploads; RESEARCH R-07 and Pitfall 3], so a
  * member who picked a file on a train can still legitimately finish the PUT up to that moment.
  * Past it nothing legitimate can still be in flight, which is exactly when collecting is safe.
+ *
+ * A video's live upload target is `VIDEO_UPLOAD_TTL_S` (3 h, `video/types.ts`), far shorter than this
+ * window, so a pending video is never collected while its provider upload can still finish; the two
+ * numbers are pinned against each other in `packages/core/tests/media-video-mux.test.ts`.
  */
 export const MEDIA_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 

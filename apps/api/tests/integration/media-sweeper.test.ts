@@ -12,6 +12,7 @@ import {
   resetFakeVideoInternals,
 } from '@rede-social/core/server/media/video/fake';
 import { resetReconcileInternals } from '@rede-social/core/server/media/video/reconcile';
+import { VIDEO_UPLOAD_TTL_S } from '@rede-social/core/server/media/video/types';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
 
@@ -463,6 +464,21 @@ describe('convergence — a finished video is reconciled, never purged (quick-26
       status: 'pending',
       kind: 'video',
       ageHours: 1,
+      providerAssetId: uploadId,
+    });
+
+    await sweepOrphansJob.handler({});
+
+    expect((await videoRow(id)).status).toBe('pending');
+    expect(fakeVideoInternals.uploadStateCalls).toContain(uploadId);
+  });
+
+  it('S4: a pending video as old as the whole upload window, still waiting at the provider, is asked about and left pending (quick 261118-glh)', async () => {
+    const uploadId = `fake-up-${crypto.randomUUID()}`;
+    const id = await seedAsset({
+      status: 'pending',
+      kind: 'video',
+      ageHours: Math.ceil(VIDEO_UPLOAD_TTL_S / 3600),
       providerAssetId: uploadId,
     });
 

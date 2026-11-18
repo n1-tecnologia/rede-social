@@ -17,8 +17,17 @@
 /** The kernel-owned pg-boss queue every provider event is applied through. Registered in `./index.ts`. */
 export const MEDIA_PROVIDER_EVENT_QUEUE = 'kernel.media-provider-event';
 
-/** How long a direct-upload target stays valid (seconds). Mux marks the upload `timed_out` after it. */
-export const VIDEO_UPLOAD_TTL_S = 3600;
+/**
+ * How long a direct-upload target stays valid (seconds): three hours. Mux marks the upload
+ * `timed_out` after it and documents the range 60 to 604 800 seconds for this timeout.
+ *
+ * It was one hour. It was raised with the TEMPORARY post video cap (quick 261118-glh) so a
+ * multi-GiB upload on a slow link is not cut off mid-transfer. It must stay far below
+ * `MEDIA_PENDING_TTL_MS` (the 24 h abandoned-upload window in `../limits.ts`), so the sweeper never
+ * collects a pending video whose provider upload can still finish; a test pins the two against each
+ * other. The fake provider ignores it: its target is a Supabase signed upload URL with its own life.
+ */
+export const VIDEO_UPLOAD_TTL_S = 3 * 60 * 60;
 
 /** Signature tolerance shared by both implementations: a delivery older than this is refused. */
 export const VIDEO_WEBHOOK_TOLERANCE_S = 300;

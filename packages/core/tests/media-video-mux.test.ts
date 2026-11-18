@@ -153,3 +153,35 @@ describe('mux createDirectUpload — the passthrough carries the tenant (09.2-10
     expect(event.assetId).toBe(ASSET);
   });
 });
+
+describe('mux createDirectUpload - the upload window (quick 261118-glh)', () => {
+  const TENANT = '11111111-1111-4111-8111-111111111111';
+  const ASSET = '22222222-2222-4222-8222-222222222222';
+
+  it('W1: the timeout handed to Mux is VIDEO_UPLOAD_TTL_S and is 10 800 s (3 h)', async () => {
+    const { VIDEO_UPLOAD_TTL_S } = await import('../server/media/video/types');
+    uploadsCreate.mockResolvedValue({ id: 'up1', url: 'https://upload.example/up1' });
+    await provider.createDirectUpload({
+      assetId: ASSET,
+      tenantId: TENANT,
+      corsOrigin: 'https://comunidade.example',
+      test: true,
+    });
+    const params = uploadsCreate.mock.calls[0]?.[0] as { timeout: number };
+    expect(params.timeout).toBe(VIDEO_UPLOAD_TTL_S);
+    // The explicit number is the pin: the window was one hour and was raised for a multi-GiB post video.
+    expect(params.timeout).toBe(10_800);
+  });
+
+  it('W2: the window is inside the range Mux documents for a direct-upload timeout (60 to 604 800 s)', async () => {
+    const { VIDEO_UPLOAD_TTL_S } = await import('../server/media/video/types');
+    expect(VIDEO_UPLOAD_TTL_S).toBeGreaterThanOrEqual(60);
+    expect(VIDEO_UPLOAD_TTL_S).toBeLessThanOrEqual(604_800);
+  });
+
+  it('W3: the sweeper abandoned-upload window outlives the upload window', async () => {
+    const { VIDEO_UPLOAD_TTL_S } = await import('../server/media/video/types');
+    const { MEDIA_PENDING_TTL_MS } = await import('../server/media/limits');
+    expect(VIDEO_UPLOAD_TTL_S * 1000).toBeLessThan(MEDIA_PENDING_TTL_MS);
+  });
+});
