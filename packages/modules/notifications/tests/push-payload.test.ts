@@ -1,7 +1,12 @@
 import { cutOnWord } from '@rede-social/contracts/text';
 import type { NotificationPushHint } from '@rede-social/core/server/notifications/source';
 import { describe, expect, it } from 'vitest';
-import { PUSH_PAYLOAD_MAX_BYTES, pushPayloadSchema } from '../contracts/index';
+import {
+  notificationPushHintSchema,
+  PUSH_PAYLOAD_MAX_BYTES,
+  PUSH_TITLE_TEXT_MAX,
+  pushPayloadSchema,
+} from '../contracts/index';
 import { buildPushPayload, NEUTRAL_PUSH_ICON } from '../server/push/payload';
 
 /**
@@ -115,5 +120,94 @@ describe('buildPushPayload', () => {
   it('a negative or fractional badge is clamped to a non-negative integer', () => {
     expect(build({}, 'Rede Demo', -2).payload.badge).toBe(0);
     expect(build({}, 'Rede Demo', 2.7).payload.badge).toBe(2);
+  });
+
+  describe('a literal title (D-728, D-729)', () => {
+    it('the path: the hint parses and the payload carries the writer name within the byte bound', () => {
+      const raw = hint({ titleText: 'Marina Costa' });
+      expect(notificationPushHintSchema.parse(raw).titleText).toBe('Marina Costa');
+      const { payload, json } = build({ titleText: 'Marina Costa' });
+      expect(payload.title).toBe('Marina Costa');
+      expect(bytes(json)).toBeLessThanOrEqual(PUSH_PAYLOAD_MAX_BYTES);
+      expect(pushPayloadSchema.parse(JSON.parse(json))).toEqual(payload);
+    });
+
+    it('a literal wins over the closed title, for tenant and for team', () => {
+      expect(build({ title: 'team', titleText: 'Nova denúncia' }).payload.title).toBe(
+        'Nova denúncia',
+      );
+    });
+
+    it('a blank literal falls back to the tenant name, never an empty title', () => {
+      expect(build({ titleText: '   ' }).payload.title).toBe('Rede Demo');
+      expect(build({ titleText: '\n\t ' }).payload.title).toBe('Rede Demo');
+      expect(build({ title: 'team', titleText: '  ' }).payload.title).toBe('Equipe Rede Demo');
+    });
+
+    it('a hint without titleText renders as before for tenant and team', () => {
+      expect(build().payload.title).toBe('Rede Demo');
+      expect(build({ title: 'team' }).payload.title).toBe('Equipe Rede Demo');
+    });
+
+    it('a 90-grapheme name is cut at 60 graphemes with an ellipsis', () => {
+      const long = 'a'.repeat(90);
+      expect(graphemes(long)).toHaveLength(90);
+      const { payload } = build({ titleText: long });
+      expect(payload.title.endsWith('…')).toBe(true);
+      expect(graphemes(payload.title.slice(0, -1))).toHaveLength(PUSH_TITLE_TEXT_MAX);
+      expect(payload.title).toBe(`${'a'.repeat(PUSH_TITLE_TEXT_MAX)}…`);
+      // A name of exactly the maximum is not cut.
+      expect(build({ titleText: 'a'.repeat(PUSH_TITLE_TEXT_MAX) }).payload.title).toBe(
+        'a'.repeat(PUSH_TITLE_TEXT_MAX),
+      );
+    });
+
+    it('ZWJ emoji sequences, combining marks and a right-to-left name are cut by graphemes', () => {
+      const family = '👩‍👩‍👧‍👦';
+      const combining = 'e\u0301\u0323'; // e + acute + dot below: one grapheme
+      const rtl = 'مرحبا بالعالم';
+      for (const unit of [family, combining, rtl]) {
+        let source = '';
+        while (graphemes(source).length < 90) source += unit;
+        const { payload } = build({ titleText: source });
+        expect(payload.title.endsWith('…')).toBe(true);
+        const kept = graphemes(payload.title.slice(0, -1));
+        expect(kept).toHaveLength(PUSH_TITLE_TEXT_MAX);
+        expect(kept.every((g, i) => g === graphemes(source)[i])).toBe(true);
+        // No lone surrogate and no leading combining mark survives the cut.
+        expect(
+          /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(
+            payload.title,
+          ),
+        ).toBe(false);
+      }
+    });
+
+    it('a 60-grapheme title of four-byte characters with a maximal url and tag stays inside the bound', () => {
+      const url = `/eventos/${'a'.repeat(503)}`;
+      const tag = `events-reminder-${'f'.repeat(32)}`;
+      const { payload, json } = build({
+        titleText: '😀'.repeat(100),
+        url,
+        tag,
+        body: 'x '.repeat(900),
+        renotify: true,
+      });
+      expect(bytes(json)).toBeLessThanOrEqual(PUSH_PAYLOAD_MAX_BYTES);
+      expect(graphemes(payload.title.slice(0, -1))).toHaveLength(PUSH_TITLE_TEXT_MAX);
+      expect(payload.url).toBe(url);
+      expect(payload.tag).toBe(tag);
+    });
+
+    it('a maximal literal with fixed fields past the bound throws, as a producer bug does today', () => {
+      expect(() =>
+        buildPushPayload({
+          tenantName: 'Rede Demo',
+          iconUrl: `https://storage.test/${'x'.repeat(3000)}.png`,
+          hint: hint({ titleText: 'Marina' }),
+          badge: 1,
+        }),
+      ).toThrow();
+    });
   });
 });

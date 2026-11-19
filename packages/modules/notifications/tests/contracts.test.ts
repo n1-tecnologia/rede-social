@@ -16,6 +16,7 @@ import {
   NOTIF_PAGE_SIZE,
   NOTIF_SECTIONS,
   notificationPageSchema,
+  notificationPushHintSchema,
   notificationQuerySchema,
   notificationRowSchema,
   notificationsFanoutJobSchema,
@@ -148,5 +149,44 @@ describe('Realtime topics (planning decision 3: the SQL is the spec)', () => {
     const migration = readFileSync(join(dir, file as string), 'utf8');
     expect(migration).toContain(`'${REALTIME_TOPIC_PATTERN}'`);
     expect(migration).toContain(`'${REALTIME_SUFFIX_PATTERN}'`);
+  });
+});
+
+describe('notificationPushHintSchema literal title (D-728, D-729)', () => {
+  const base = {
+    title: 'tenant',
+    body: 'Mensagem',
+    url: '/chat',
+    tag: 'chat-msg',
+    topic: 'chat-msg',
+    ttlSeconds: 3600,
+    urgency: 'normal',
+    renotify: true,
+  };
+
+  it('a hint without titleText still parses (every shipped producer)', () => {
+    expect(notificationPushHintSchema.safeParse(base).success).toBe(true);
+  });
+
+  it('accepts a literal of 1 to 200 characters', () => {
+    expect(notificationPushHintSchema.parse({ ...base, titleText: 'Marina Costa' }).titleText).toBe(
+      'Marina Costa',
+    );
+    expect(
+      notificationPushHintSchema.safeParse({ ...base, titleText: 'a'.repeat(200) }).success,
+    ).toBe(true);
+  });
+
+  it('refuses a 201-character literal and an empty literal', () => {
+    expect(
+      notificationPushHintSchema.safeParse({ ...base, titleText: 'a'.repeat(201) }).success,
+    ).toBe(false);
+    expect(notificationPushHintSchema.safeParse({ ...base, titleText: '' }).success).toBe(false);
+  });
+
+  it('title stays the closed union and the schema stays strict', () => {
+    expect(notificationPushHintSchema.safeParse({ ...base, title: 'Marina' }).success).toBe(false);
+    expect(notificationPushHintSchema.safeParse({ ...base, memberId: 'x' }).success).toBe(false);
+    expect(notificationPushHintSchema.safeParse({ ...base, titleText: 5 }).success).toBe(false);
   });
 });

@@ -352,6 +352,12 @@ export const PUSH_PATH = /^\/(?![/\\])[^\\\s]*$/;
 export const PUSH_TAG = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
+ * The longest literal push title the builder keeps, in graphemes (D-728: the writer's name, cut with an
+ * ellipsis beyond this). The schema bounds the raw literal at 200 characters; the cut is the builder's.
+ */
+export const PUSH_TITLE_TEXT_MAX = 60;
+
+/**
  * The push hint a producer's intent carries (`NotificationPushHint` in the kernel seam), as the push
  * adapter and the send job validate it. `url` is a same-origin PATH (`/…`, never `//…`), resolved by the
  * service worker against its own origin, the tenant's domain.
@@ -359,6 +365,8 @@ export const PUSH_TAG = /^[A-Za-z0-9_-]{1,64}$/;
 export const notificationPushHintSchema = z
   .object({
     title: z.enum(['tenant', 'team']),
+    /** D-728/D-729: an optional literal title beside the closed `title`; see `NotificationPushHint`. */
+    titleText: z.string().min(1).max(200).optional(),
     body: z.string().max(1000),
     url: z.string().max(512).regex(PUSH_PATH),
     tag: z.string().regex(PUSH_TAG),

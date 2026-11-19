@@ -30,6 +30,14 @@ export type NotificationAudience = { type: 'members' } | { type: 'users'; userId
 export interface NotificationPushHint {
   /** `tenant` = the tenant's display name; `team` = "Equipe {tenant}" (support replies, D-235). */
   title: 'tenant' | 'team';
+  /**
+   * A literal title (D-728: the writer's display name for a direct message; D-729: `Nova denúncia`
+   * for a report), OPTIONAL and additive: `title` stays the closed union and stays required, so every
+   * shipped producer keeps its shape. When present and not blank it replaces the title the closed value
+   * would render, cut on a grapheme boundary; when blank the tenant name is used. It carries the
+   * producer's literal and nothing else: never an id, an e-mail or another member's text.
+   */
+  titleText?: string;
   /** The rendered pt-BR body (UI-SPEC §Push banner copy), at most ~100 characters. */
   body: string;
   /** Where a tap lands (D-232). A path, never an absolute URL. */
