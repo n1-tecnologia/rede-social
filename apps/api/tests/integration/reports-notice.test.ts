@@ -75,7 +75,7 @@ async function subscribeDevice(token: string, label: string): Promise<string> {
   return endpoint;
 }
 
-const ids = { demo: '', lab: '', admin: '' };
+const ids = { demo: '', lab: '', admin: '', demoSupport: '' };
 const tokens = { admin: '' };
 const restores: Array<() => Promise<void>> = [];
 const createdPosts: string[] = [];
@@ -179,6 +179,7 @@ beforeAll(async () => {
   ids.demo = kit.ids.demo;
   ids.lab = kit.ids.lab;
   ids.admin = kit.ids.demoAdmin;
+  ids.demoSupport = kit.ids.demoSupport;
   tokens.admin = kit.tokens.demoAdmin;
   // `social` and `chat` for the direct-message subject, `notifications` for the span of the file (rede-lab ships
   // with it off and the demo may too): every flag goes back in `afterAll`.
@@ -580,7 +581,7 @@ describe('tenant isolation', () => {
       select u.id::text as id from public.users u where u.email = 'marcos.vinicius@rede-lab.local'`;
     const [labPost] = await adminSql<{ id: string }[]>`
       insert into public.feed_posts (tenant_id, caption, author_user_id)
-      values (${ids.lab}::uuid, ${`${PREFIX}lab`}, ${labAuthor?.id}::uuid)
+      values (${ids.lab}::uuid, ${`${PREFIX}lab`}, ${labAuthor?.id ?? ''}::uuid)
       returning id::text as id`;
     createdPosts.push(labPost?.id ?? '');
     const labReport = await fileReport(labReporter, 'feed_post', labPost?.id ?? '', HOSTS.lab);
