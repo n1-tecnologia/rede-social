@@ -1,0 +1,5 @@
+ALTER TABLE "chat_conversations" ADD COLUMN "direct_low_user_id" uuid;--> statement-breakpoint
+ALTER TABLE "chat_conversations" ADD COLUMN "direct_high_user_id" uuid;--> statement-breakpoint
+CREATE UNIQUE INDEX "chat_conversations_direct_pair_uq" ON "chat_conversations" USING btree ("tenant_id","direct_low_user_id","direct_high_user_id") WHERE direct_low_user_id is not null;--> statement-breakpoint
+ALTER TABLE "chat_conversations" ADD CONSTRAINT "chat_conversations_direct_pair_chk" CHECK (("chat_conversations"."direct_low_user_id" is null and "chat_conversations"."direct_high_user_id" is null) or ("chat_conversations"."direct_low_user_id" is not null and "chat_conversations"."direct_high_user_id" is not null and "chat_conversations"."direct_low_user_id" < "chat_conversations"."direct_high_user_id"));--> statement-breakpoint
+ALTER TABLE "chat_conversations" ADD CONSTRAINT "chat_conversations_direct_pair_kind_chk" CHECK ("chat_conversations"."direct_low_user_id" is null or "chat_conversations"."kind" = 'direct');

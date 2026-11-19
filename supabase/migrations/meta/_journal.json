@@ -1492,6 +1492,27 @@
       "when": 1794956798764,
       "tag": "20261117230638_chat_voice_account_deletion",
       "breakpoints": true
+    },
+    {
+      "idx": 213,
+      "version": "7",
+      "when": 1795103898386,
+      "tag": "20261119155818_direct_pair_gates",
+      "breakpoints": true
+    },
+    {
+      "idx": 214,
+      "version": "7",
+      "when": 1795103943390,
+      "tag": "20261119155903_direct_pairs",
+      "breakpoints": true
+    },
+    {
+      "idx": 215,
+      "version": "7",
+      "when": 1795103954154,
+      "tag": "20261119155914_direct_open",
+      "breakpoints": true
     }
   ]
 }

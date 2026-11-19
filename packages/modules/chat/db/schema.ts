@@ -130,8 +130,32 @@ export const chatConversations = pgTable(
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     /** D-805: set once the case is `closed`. */
     closedAt: timestamp('closed_at', { withTimezone: true }),
+    /**
+     * Phase 11 (D-720): the LOWER user id of a direct pair, in uuid byte order (never text). Null for every
+     * other row, and for a bare direct row that predates the pair model. No foreign key: the evidence outlives
+     * the identity. Written only by `app.direct_conversation_open`.
+     */
+    directLowUserId: uuid('direct_low_user_id'),
+    /** Phase 11 (D-720): the HIGHER user id of a direct pair; set together with `direct_low_user_id`, always above it. */
+    directHighUserId: uuid('direct_high_user_id'),
   },
   (t) => [
+    // D-720: ONE conversation per unordered pair per tenant (tenant first: the same two user ids in another
+    // tenant are another pair). The partial predicate leaves every bare direct row (both columns null) alone.
+    uniqueIndex('chat_conversations_direct_pair_uq')
+      .on(t.tenantId, t.directLowUserId, t.directHighUserId)
+      .where(sql`direct_low_user_id is not null`),
+    // D-720: both pair columns or neither, and the low one is the smaller UUID (byte order of the uuid type, so a
+    // pair opened from either side lands on the same row). NO check forces the pair on every direct row.
+    check(
+      'chat_conversations_direct_pair_chk',
+      sql`(${t.directLowUserId} is null and ${t.directHighUserId} is null) or (${t.directLowUserId} is not null and ${t.directHighUserId} is not null and ${t.directLowUserId} < ${t.directHighUserId})`,
+    ),
+    // D-720: only a `direct` row may carry the pair.
+    check(
+      'chat_conversations_direct_pair_kind_chk',
+      sql`${t.directLowUserId} is null or ${t.kind} = 'direct'`,
+    ),
     // D-802: ONE ACTIVE case per member per tenant (active = not closed). It REPLACES the Phase 7 index
     // `chat_conversations_one_support_per_member` (D-221), which the activation migration drops in the
     // same atomic file. The member send's `on conflict` predicate is exactly this one (a test pins both).
