@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { caseKit, removeThrowaways, request } from './chat-case-fixtures';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { caseKit, post, removeThrowaways, request } from './chat-case-fixtures';
 import {
   blockUser,
   directCountOf,
@@ -14,7 +14,7 @@ import {
   unblockUser,
   withDirectModules,
 } from './direct-fixtures';
-import { adminSql, uploadAvatar } from './setup';
+import { adminSql, HOSTS, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
 
 /**
  * Phase 11 plan 08 (CHAT-06; D-719, D-720, D-721, D-722; T-11-01, T-11-03, T-11-06): the direct conversation through the
@@ -475,5 +475,224 @@ describe('direct with', () => {
     const bad = await directWith(a, 'not-a-uuid');
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
+  });
+});
+
+/** `POST /v1/admin/members/{id}/(un)block` with the seeded administrator of the demo tenant (the shipped route). */
+const adminMember = async (action: 'block' | 'unblock', membershipId: string) => {
+  const { tokens } = await caseKit();
+  return request(`/v1/admin/members/${membershipId}/${action}`, tokens.demoAdmin, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+};
+
+describe('direct admin block', () => {
+  it('10. D-721: an administrator-blocked member is the bare 404 of a send and of `with`, the conversation is hidden, and unblocking brings the history back', async () => {
+    const a = await directMember('x1a');
+    const b = await directMember('x1b');
+    const first = (await (
+      await sendDirect(a, b.membershipId, 'Antes do bloqueio')
+    ).json()) as SendBody;
+    const unknown = await expectBareNotFound(await sendDirect(a, randomUUID(), 'Oi'), 'unknown');
+
+    expect((await adminMember('block', b.membershipId)).status).toBe(200);
+    try {
+      expect(await expectBareNotFound(await sendDirect(a, b.membershipId, 'Oi'), 'send')).toBe(
+        unknown,
+      );
+      await expectBareNotFound(await directWith(a, b.membershipId), 'with');
+      // The existing conversation is not visible through the API either (the readable policy of plan 03).
+      await expectBareNotFound(
+        await request(`/v1/chat/conversations/${first.conversationId}/messages`, a.token),
+        'messages',
+      );
+      await expectBareNotFound(
+        await request(`/v1/chat/conversations/${first.conversationId}`, a.token),
+        'detail',
+      );
+      // Nothing was written by the refusals.
+      expect((await directRowsOf(a.userId, b.userId))[0]?.messages).toBe(1);
+    } finally {
+      expect((await adminMember('unblock', b.membershipId)).status).toBe(200);
+    }
+
+    // Unblocked: the same conversation, the history intact, and the next send continues it.
+    const back = (await (await directWith(a, b.membershipId)).json()) as WithAnswer;
+    expect(back.conversationId).toBe(first.conversationId);
+    expect(back.composer).toBe('open');
+    const history = await request(
+      `/v1/chat/conversations/${first.conversationId}/messages`,
+      a.token,
+    );
+    expect(history.status).toBe(200);
+    const page = (await history.json()) as { items: { body: string; seq: number }[] };
+    expect(page.items.map((item) => [item.seq, item.body])).toEqual([[1, 'Antes do bloqueio']]);
+    const next = (await (await sendDirect(a, b.membershipId, 'Depois')).json()) as SendBody;
+    expect(next.conversationId).toBe(first.conversationId);
+    expect(next.created).toBe(false);
+    expect(next.message.seq).toBe(2);
+  });
+
+  it('11. a removed or anonymised member is the same bare 404 on a send and on `with`', async () => {
+    const a = await directMember('x2a');
+    const gone = await directMember('x2b');
+    const anonymised = await directMember('x2c');
+    await sendDirect(a, gone.membershipId, 'Oi');
+    await sendDirect(a, anonymised.membershipId, 'Oi');
+    const unknown = await expectBareNotFound(await sendDirect(a, randomUUID(), 'Oi'), 'unknown');
+
+    await adminSql`
+      update public.memberships set deleted_at = now() where id = ${gone.membershipId}::uuid`;
+    // The real flow: a deletion request, its due date, the soft delete, then the anonymisation (memberships_deletion_chk).
+    await adminSql`
+      update public.memberships
+         set deleted_at = now(), anonymised_at = now(),
+             deletion_requested_at = now() - interval '31 days', deletion_due_at = now() - interval '1 day'
+       where id = ${anonymised.membershipId}::uuid`;
+    for (const [label, target] of [
+      ['removed', gone],
+      ['anonymised', anonymised],
+    ] as const) {
+      expect(
+        await expectBareNotFound(await sendDirect(a, target.membershipId, 'Oi'), `${label} send`),
+      ).toBe(unknown);
+      await expectBareNotFound(await directWith(a, target.membershipId), `${label} with`);
+    }
+    // Nothing was written by the refusals.
+    expect((await directRowsOf(a.userId, gone.userId))[0]?.messages).toBe(1);
+    expect((await directRowsOf(a.userId, anonymised.userId))[0]?.messages).toBe(1);
+  });
+});
+
+describe('direct limits', () => {
+  afterEach(() => {
+    resetDirectLimiters();
+  });
+
+  it('12. T-11-07: the 31st send of one minute is 429 RATE_LIMITED and writes nothing', async () => {
+    resetDirectLimiters();
+    const a = await directMember('l1a');
+    const b = await directMember('l1b');
+    expect((await sendDirect(a, b.membershipId, 'primeira')).status).toBe(201);
+    const burst = await Promise.all(
+      Array.from({ length: 29 }, (_, index) => sendDirect(a, b.membershipId, `rajada ${index}`)),
+    );
+    expect(burst.map((res) => res.status)).toEqual(Array(29).fill(201));
+    const refused = await sendDirect(a, b.membershipId, 'a trigésima primeira');
+    expect(refused.status).toBe(429);
+    expect(((await refused.json()) as Envelope).error.code).toBe('RATE_LIMITED');
+    expect((await directRowsOf(a.userId, b.userId))[0]?.messages).toBe(30);
+    // The limiter is per sender: the other member is not touched by it.
+    expect((await sendDirect(b, a.membershipId, 'resposta')).status).toBe(201);
+  }, 60_000);
+
+  it('13. T-11-07: the 21st new conversation of an hour is 429, an existing conversation still works', async () => {
+    resetDirectLimiters();
+    const a = await directMember('l2a');
+    const targets: Awaited<ReturnType<typeof directMember>>[] = [];
+    for (let index = 0; index < 21; index += 1) targets.push(await directMember(`l2t${index}`));
+    for (const target of targets.slice(0, 20)) {
+      expect((await sendDirect(a, target.membershipId, 'Oi')).status).toBe(201);
+    }
+    const last = targets[20];
+    if (!last) throw new Error('fixture');
+    const refused = await sendDirect(a, last.membershipId, 'Oi');
+    expect(refused.status).toBe(429);
+    expect(((await refused.json()) as Envelope).error.code).toBe('RATE_LIMITED');
+    // The refusal created nothing: twenty conversations, none with the 21st member.
+    expect(await directCountOf(a.userId)).toBe(20);
+    expect(await directCountOf(last.userId)).toBe(0);
+    // Not a new conversation, so the hourly limiter does not apply.
+    const first = targets[0];
+    if (!first) throw new Error('fixture');
+    expect((await sendDirect(a, first.membershipId, 'De novo')).status).toBe(201);
+  }, 120_000);
+
+  it('14. the lab tenant (social on, chat off) answers MODULE_DISABLED on both routes', async () => {
+    const labMember = await signInAs('member@rede-lab.local', SEED_PASSWORD);
+    const { ids } = await caseKit();
+    const [labOther] = await adminSql<{ id: string }[]>`
+      select m.id::text as id from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${ids.lab}::uuid and m.role = 'member' and u.email <> 'member@rede-lab.local' limit 1`;
+    const headers = { 'x-tenant-host': HOSTS.lab };
+    const send = await request('/v1/chat/direct/messages', labMember, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ toMembershipId: labOther?.id, body: 'Oi' }),
+    });
+    expect(send.status).toBe(404);
+    expect(((await send.json()) as Envelope).error.code).toBe('MODULE_DISABLED');
+    const read = await request(`/v1/chat/direct/with/${labOther?.id}`, labMember, { headers });
+    expect(read.status).toBe(404);
+    expect(((await read.json()) as Envelope).error.code).toBe('MODULE_DISABLED');
+  });
+});
+
+describe('direct support unchanged', () => {
+  it('15. a member who also receives a direct message keeps the same support thread, the same answers and the same counters', async () => {
+    const m = await directMember('u1m');
+    const a = await directMember('u1a');
+    const supportKeys = {
+      thread: ['case', 'conversation', 'hasAnyCase', 'hasOlder', 'messages'],
+      send: ['case', 'conversationId', 'message'],
+    };
+
+    const sent = await post('/v1/chat/support/messages', m.token, { body: 'Preciso de ajuda' });
+    expect(sent.status).toBe(201);
+    const support = (await sent.json()) as { conversationId: string } & Record<string, unknown>;
+    expect(Object.keys(support).sort()).toEqual(supportKeys.send);
+    const threadBefore = (await (await request('/v1/chat/support', m.token)).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(threadBefore).sort()).toEqual(supportKeys.thread);
+    const countersBefore = (
+      (await (await request('/v1/me/bootstrap', m.token)).json()) as {
+        counters: Record<string, unknown>;
+      }
+    ).counters;
+
+    // Another member writes to this one, twice.
+    expect((await sendDirect(a, m.membershipId, 'Oi, m')).status).toBe(201);
+    expect((await sendDirect(a, m.membershipId, 'Tudo bem?')).status).toBe(201);
+
+    const threadAfter = (await (await request('/v1/chat/support', m.token)).json()) as {
+      conversation: { id: string } | null;
+      messages: { body: string }[];
+    };
+    expect(threadAfter).toEqual(threadBefore);
+    expect(threadAfter.conversation?.id).toBe(support.conversationId);
+    expect(threadAfter.messages.map((message) => message.body)).toEqual(['Preciso de ajuda']);
+    const countersAfter = (
+      (await (await request('/v1/me/bootstrap', m.token)).json()) as {
+        counters: Record<string, unknown>;
+      }
+    ).counters;
+    expect(countersAfter).toEqual(countersBefore);
+
+    // The team's inbox does not list the direct conversation, and the member still sends to the team.
+    const { tokens } = await caseKit();
+    const inbox = (await (await request('/v1/chat/inbox', tokens.demoSupport)).json()) as {
+      items: { conversationId: string }[];
+    };
+    const directIds = (await directRowsOf(a.userId, m.userId)).map((row) => row.id);
+    expect(directIds).toHaveLength(1);
+    expect(inbox.items.map((item) => item.conversationId)).not.toContain(directIds[0]);
+    const again = await post('/v1/chat/support/messages', m.token, { body: 'Mais uma' });
+    expect(again.status).toBe(201);
+    expect(((await again.json()) as { conversationId: string }).conversationId).toBe(
+      support.conversationId,
+    );
+    // The staff reply route refuses a direct conversation as it does any non-support one.
+    const staffReply = await post(
+      `/v1/chat/conversations/${directIds[0]}/messages`,
+      tokens.demoSupport,
+      {
+        body: 'Oi',
+      },
+    );
+    expect(staffReply.status).toBe(404);
   });
 });
