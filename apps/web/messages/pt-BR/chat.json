@@ -23,10 +23,28 @@
         "labelRead": "{name}. {preview}",
         "supportLabel": "{name}. {preview}",
         "supportLabelUnread": "{name}. {preview}, mensagem nova"
+      },
+      "empty": {
+        "title": "Você ainda não conversou com outros membros",
+        "body": "Abra o perfil de um membro e toque em Enviar mensagem.",
+        "cta": "Encontrar pessoas"
+      },
+      "error": {
+        "title": "Não foi possível carregar suas conversas.",
+        "body": "Verifique sua conexão e tente de novo.",
+        "retry": "Tentar novamente",
+        "more": "Não foi possível carregar mais conversas."
       }
     },
     "direct": {
       "removedName": "Membro removido",
+      "empty": {
+        "title": "Escreva para {nome}",
+        "body": "A conversa aparece na sua lista depois da primeira mensagem."
+      },
+      "composer": {
+        "placeholder": "Escreva uma mensagem"
+      },
       "closed": "Esta conversa não aceita novas mensagens.",
       "blocker": {
         "text": "Você bloqueou {nome}",
@@ -34,7 +52,18 @@
         "unblocking": "Desbloqueando…",
         "unblocked": "{nome} foi desbloqueado."
       },
-      "removed": "Este membro não está mais na comunidade. A conversa fica só para leitura."
+      "removed": "Este membro não está mais na comunidade. A conversa fica só para leitura.",
+      "notFound": {
+        "title": "Conversa não encontrada",
+        "body": "Este link não existe mais ou não é de {tenant}.",
+        "cta": "Voltar para Conversas"
+      },
+      "menu": {
+        "trigger": "Mais ações da mensagem",
+        "title": "Opções da mensagem",
+        "report": "Denunciar mensagem",
+        "block": "Bloquear {nome}"
+      }
     },
     "member": {
       "title": "Equipe {tenant}",

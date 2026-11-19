@@ -48,7 +48,8 @@
       "profile": "Ver perfil de {name}"
     },
     "directory": {
-      "you": "Você"
+      "you": "Você",
+      "messageAria": "Enviar mensagem para {nome}"
     },
     "followers": {
       "title": "Seguidores",
@@ -64,6 +65,14 @@
     "stories": {
       "region": "Stories de quem você segue",
       "regionStaff": "Stories dos membros"
+    },
+    "profile": {
+      "message": "Enviar mensagem",
+      "messageAria": "Enviar mensagem para {nome}",
+      "unblock": "Desbloquear",
+      "unblockAria": "Desbloquear {nome}",
+      "unblocking": "Desbloqueando…",
+      "unblocked": "{nome} foi desbloqueado."
     }
   }
 }

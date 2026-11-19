@@ -36,6 +36,11 @@ export const ROUTE_HANDLER_INVENTORY: Record<string, RouteHandlerEntry> = {
   'api/chat/conversations/[conversationId]/read/route.ts': {
     proxies: 'POST /v1/chat/conversations/:conversationId/read',
   },
+  // 11-18: the Conversas list and one direct conversation's composer state, finished (CHAT-06, CHAT-07).
+  'api/chat/direct/route.ts': { proxies: 'GET /v1/chat/direct' },
+  'api/chat/direct/[conversationId]/route.ts': {
+    proxies: 'GET /v1/chat/direct/:conversationId',
+  },
   'api/chat/inbox/route.ts': { proxies: 'GET /v1/chat/inbox' },
   'api/chat/staff/route.ts': { proxies: 'GET /v1/chat/staff' },
   'api/chat/support/cases/route.ts': { proxies: 'GET /v1/chat/support/cases' },

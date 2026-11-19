@@ -1,5 +1,18 @@
 {
   "safety": {
+    "menu": {
+      "storyTitle": "Opções do story",
+      "communityTitle": "Opções da comunidade",
+      "messageTitle": "Opções da mensagem",
+      "reportPost": "Denunciar publicação",
+      "reportComment": "Denunciar comentário",
+      "reportStory": "Denunciar story",
+      "reportCommunity": "Denunciar comunidade",
+      "reportMessage": "Denunciar mensagem",
+      "block": "Bloquear {nome}",
+      "communityTrigger": "Mais opções da comunidade",
+      "commentTrigger": "Mais ações do comentário"
+    },
     "subject": {
       "feedPost": {
         "pill": "Publicação",
@@ -36,10 +49,53 @@
       "sexualViolent": "Conteúdo sexual ou violento",
       "other": "Outro motivo"
     },
+    "sheet": {
+      "intro": "Diga o que há de errado. A equipe de {tenant} vai analisar.",
+      "noteLabel": "Quer dar mais detalhes? (opcional)",
+      "noteCounter": "{count}/500",
+      "submit": "Enviar denúncia",
+      "submitting": "Enviando…",
+      "success": "Denúncia enviada. Obrigado por avisar.",
+      "already": "Você já denunciou isto.",
+      "failure": "Não foi possível enviar agora. Nada foi alterado. Tente de novo.",
+      "gone": "Este conteúdo não está mais disponível."
+    },
+    "block": {
+      "title": "Bloquear {nome}?",
+      "bodySocialOff": "Você deixa de ver as publicações e os comentários de {nome}. {nome} não é avisado. Você pode desbloquear em Configurações.",
+      "bodySocialOn": "Você deixa de ver as publicações e os comentários de {nome}. {nome} não pode mais seguir você nem escrever para você, e vocês dois deixam de se seguir. {nome} não é avisado. Você pode desbloquear em Configurações.",
+      "confirm": "Bloquear",
+      "cancel": "Cancelar",
+      "blocked": "{nome} foi bloqueado.",
+      "unblocked": "{nome} foi desbloqueado."
+    },
+    "settings": {
+      "blockedRow": "Membros bloqueados",
+      "reportsRow": "Denúncias"
+    },
+    "blocked": {
+      "title": "Membros bloqueados",
+      "unblock": "Desbloquear",
+      "unblocking": "Desbloqueando…",
+      "emptyTitle": "Você não bloqueou ninguém",
+      "emptyBody": "Quando você bloquear alguém, a pessoa aparece aqui para você desbloquear."
+    },
     "queue": {
-      "removedMember": "Membro removido",
-      "meta": "Motivo: {motivo} · por {nome} · {data}",
+      "title": "Denúncias",
+      "filter": {
+        "open": "Abertas",
+        "resolved": "Resolvidas",
+        "all": "Todas"
+      },
+      "empty": {
+        "title": "Nenhuma denúncia por aqui",
+        "body": "Quando um membro denunciar uma publicação, um comentário, um story, uma comunidade ou uma mensagem, ela aparece aqui."
+      },
+      "resolve": "Resolver",
+      "resolveTitle": "Resolver denúncia",
       "viewContent": "Ver conteúdo",
+      "meta": "Motivo: {motivo} · por {nome} · {data}",
+      "removedMember": "Membro removido",
       "state": {
         "open": "Aberta",
         "dismissed": "Ignorada",
@@ -52,6 +108,16 @@
         "messageNote": "Só esta mensagem é mostrada.",
         "voiceGone": "Mensagem de voz apagada",
         "unavailable": "Conteúdo não está mais disponível"
+      },
+      "removeDialog": {
+        "title": "Remover este conteúdo?",
+        "body": "O conteúdo some para todos. A ação fica registrada no histórico de moderação.",
+        "confirm": "Remover",
+        "cancel": "Cancelar"
+      },
+      "toasts": {
+        "resolved": "Denúncia resolvida.",
+        "alreadyResolved": "Esta denúncia já foi resolvida."
       }
     }
   }

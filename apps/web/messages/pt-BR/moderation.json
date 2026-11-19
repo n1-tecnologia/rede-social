@@ -119,6 +119,12 @@
         "archive": "Arquivar comunidade",
         "block": "Bloquear autor",
         "helperMessage": "Uma mensagem enviada não pode ser removida."
+      },
+      "archiveDialog": {
+        "title": "Arquivar comunidade?",
+        "body": "Ela sai da lista e ninguém mais publica nela. A pessoa que criou não é avisada. A ação fica registrada no histórico de moderação.",
+        "confirm": "Arquivar",
+        "cancel": "Manter comunidade"
       }
     }
   }

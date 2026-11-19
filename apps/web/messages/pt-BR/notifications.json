@@ -50,6 +50,8 @@
       "purchaseConfirmed": "<b>Compra confirmada:</b> “{product}”. Seu acesso foi liberado.",
       "ticketConfirmed": "<b>Presença confirmada</b> em “{event}”.",
       "supportResolved": "<b>Seu chamado #{number}</b> foi resolvido.",
+      "socialFollowed": "<b>{actor}</b> começou a te seguir.",
+      "moderationReport": "<b>Nova denúncia</b> para analisar.",
       "generic": "Você tem uma nova notificação.",
       "removed": "Este conteúdo foi removido."
     },
