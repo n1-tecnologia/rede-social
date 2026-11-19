@@ -682,3 +682,106 @@ describe('direct message push', () => {
     expect(await messageJobs(reply.message.id)).toHaveLength(0);
   });
 });
+
+describe('direct message push shares the support push contract', () => {
+  let restoreChat: () => Promise<void> = async () => {};
+
+  beforeAll(async () => {
+    restoreChat = await withDirectModules('demo', ['chat']);
+  });
+
+  beforeEach(async () => {
+    resetDirectLimiters();
+    await closeWaitingJobs();
+    resetFakePushOutbox();
+  });
+
+  afterAll(async () => {
+    await closeWaitingJobs();
+    await restoreChat();
+  });
+
+  it('5. badge counts the direct unread: the payload badge is the bell count plus the conversations count of the recipient', async () => {
+    const { a, b, endpointB } = await messagePair('m5');
+    const c = await directMember('m5c', { displayName: 'Carla m5' });
+    // Two conversations unread by B, so the sum is more than the one this push is about.
+    await writeTo(a, b, 'primeira conversa');
+    const last = await writeTo(c, b, 'segunda conversa');
+    await closeWaitingJobs();
+    await fanOut({
+      conversationId: last.conversationId,
+      messageId: last.message.id,
+      seq: last.message.seq,
+      authorUserId: c.userId,
+    });
+    await runPushSendJobs(demoTenantId);
+
+    const toB = fakePushOutbox().find((out) => out.endpoint === endpointB);
+    expect(toB).toBeDefined();
+    const res = await request('/v1/me/bootstrap', b.token);
+    const { counters } = (await res.json()) as {
+      counters: { unreadNotifications: number; unreadConversations: number };
+    };
+    expect(counters.unreadConversations).toBeGreaterThanOrEqual(2);
+    expect(JSON.parse(toB?.payload ?? '{}').badge).toBe(
+      counters.unreadNotifications + counters.unreadConversations,
+    );
+  });
+
+  it('6. ttl and urgency: 72 hours and high, with the conversation tag as the topic, as the support push', async () => {
+    const { a, b, endpointB } = await messagePair('m6');
+    const sent = await writeTo(a, b, 'prazo e urgencia');
+    await runNotificationJobs(demoTenantId);
+    const [job] = await messageJobs(sent.message.id);
+    expect(job?.data.push).toMatchObject({ ttlSeconds: 259_200, urgency: 'high' });
+    await runPushSendJobs(demoTenantId);
+    const toB = fakePushOutbox().find((out) => out.endpoint === endpointB);
+    const tag = sent.conversationId.replaceAll('-', '');
+    expect(toB?.opts).toMatchObject({ ttlSeconds: 259_200, urgency: 'high', topic: tag });
+  });
+
+  it('7. unchanged: a support reply keeps the team title and a team push keeps the tenant title, neither with a literal title', async () => {
+    const { tokens, ids } = await caseKit();
+    const member = await throwawayMember('m7');
+    const memberEndpoint = await addNamedDevice(member.id, 'm7-member');
+    const staffEndpoint = `https://push.fake.test/dirnotif/m7-staff-${randomUUID()}`;
+    await adminSql`
+      insert into public.push_subscriptions (tenant_id, user_id, endpoint, p256dh, auth)
+      values (${demoTenantId}::uuid, ${ids.demoSupport}::uuid, ${staffEndpoint}, 'k', 'a')`;
+
+    const opened = await post('/v1/chat/support/messages', member.token, {
+      body: 'Preciso de ajuda',
+    });
+    expect(opened.status).toBe(201);
+    const first = (await opened.json()) as SendBody;
+    await runNotificationJobs(demoTenantId);
+    await runPushSendJobs(demoTenantId);
+    const toStaff = fakePushOutbox().find((out) => out.endpoint === staffEndpoint);
+    expect(toStaff).toBeDefined();
+    expect(JSON.parse(toStaff?.payload ?? '{}')).toMatchObject({
+      url: `/suporte/${first.conversationId}`,
+    });
+    expect(JSON.parse(toStaff?.payload ?? '{}').title).not.toBe(undefined);
+
+    resetFakePushOutbox();
+    await closeWaitingJobs();
+    const replied = await post(
+      `/v1/chat/conversations/${first.conversationId}/messages`,
+      tokens.demoSupport,
+      { body: 'Resposta da equipe' },
+    );
+    expect(replied.status).toBe(201);
+    await runNotificationJobs(demoTenantId);
+    await runPushSendJobs(demoTenantId);
+    const toMember = fakePushOutbox().find((out) => out.endpoint === memberEndpoint);
+    expect(toMember).toBeDefined();
+    const payload = JSON.parse(toMember?.payload ?? '{}') as {
+      title: string;
+      body: string;
+      url: string;
+    };
+    expect(payload).toMatchObject({ body: 'Resposta da equipe', url: '/suporte' });
+    // The support reply is titled "Equipe {tenant}", never with a person's name.
+    expect(payload.title).toMatch(/^Equipe /);
+  });
+});
