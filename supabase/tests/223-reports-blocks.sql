@@ -234,10 +234,10 @@ select throws_ok(
 );
 select throws_ok(
   $$ insert into public.content_reports (tenant_id, reporter_user_id, subject_type, subject_id, author_user_id, reason)
-     values ('22300000-0000-4000-8000-000000000021', '22300000-0000-4000-8000-0000000000c1', 'story',
+     values ('22300000-0000-4000-8000-000000000021', '22300000-0000-4000-8000-0000000000c1', 'reel',
              gen_random_uuid(), gen_random_uuid(), 'spam') $$,
   '23514', null,
-  'fact 1: an unknown subject type is refused (23514; Phase 11 appends story_comment, community, direct_message)'
+  'fact 1: an unknown subject type is refused (23514; Phase 11 plan 09 appended story, story_comment, community, direct_message, so the probe is now `reel`)'
 );
 select throws_ok(
   $$ insert into public.content_reports (tenant_id, reporter_user_id, subject_type, subject_id, author_user_id, reason, status)
@@ -377,9 +377,9 @@ select throws_ok(
   'fact 2: a comment id given as a post is RP002 (the type picks the table)'
 );
 select throws_ok(
-  $$ select app.content_report_create('story_comment', '22300000-0000-4000-8000-0000000005a1', 'spam', null) $$,
+  $$ select app.content_report_create('reel', '22300000-0000-4000-8000-0000000005a1', 'spam', null) $$,
   '22023', null,
-  'fact 2: a subject type this phase does not know is 22023 (Phase 11 appends the others)'
+  'fact 2: a subject type the definer does not know is 22023 (Phase 11 plan 09 appended the four others, so the probe is now `reel`)'
 );
 select throws_ok(
   $$ select app.content_report_create('feed_post', '22300000-0000-4000-8000-0000000004a5', 'rude', null) $$,

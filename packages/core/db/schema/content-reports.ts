@@ -11,6 +11,7 @@ import {
   index,
   pgPolicy,
   pgTable,
+  smallint,
   text,
   timestamp,
   unique,
@@ -24,8 +25,10 @@ const list = (values: readonly string[]) => sql.raw(values.map((value) => `'${va
 
 /**
  * A member's report of a post or a comment (Phase 13, NATIVE-31; D-616, AD-5, AD-6, AD-7). The minimum
- * the store policies require (Apple 1.2, Google UGC); Phase 11 keeps the rest of moderation and appends
- * values to the CHECK lists below (`story_comment`, `community`, `direct_message`).
+ * the store policies require (Apple 1.2, Google UGC). Phase 11 (D-730, one-way) APPENDED four subjects to
+ * the CHECK below (`story`, `story_comment`, `community`, `direct_message`) and (D-731) two nullable voice
+ * columns, so a reported recording can be judged: the report carries a REFERENCE to the asset plus its stored
+ * length, never a copy and never the conversation.
  *
  * MODERATION IS A KERNEL CAPABILITY (SCHEMA-CONVENTIONS (f).2), so this is a kernel table, not a module
  * table, and it is not gated by `social`.
@@ -57,9 +60,9 @@ export const contentReports = pgTable(
     reporterUserId: uuid('reporter_user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    /** 'feed_post' | 'post_comment' (the CHECK is built from `REPORT_SUBJECT_TYPES`). */
+    /** One of `REPORT_SUBJECT_TYPES` (the CHECK is built from the constant; values are only ever appended). */
     subjectType: text('subject_type').notNull(),
-    /** The post or comment id. No foreign key: it spans two tables and the report outlives a removal. */
+    /** The subject's id (a post, comment, story, community or message). No foreign key: it spans tables and the report outlives a removal. */
     subjectId: uuid('subject_id').notNull(),
     /** The author when the report was filed. No foreign key (see above). */
     authorUserId: uuid('author_user_id').notNull(),
@@ -67,7 +70,10 @@ export const contentReports = pgTable(
     reason: text().notNull(),
     /** The reporter's optional words: null or at most `REPORT_NOTE_MAX` characters. Nulled at anonymisation. */
     note: text(),
-    /** The first `REPORT_EXCERPT_MAX` code points of the caption or body, taken at report time. */
+    /**
+     * The first `REPORT_EXCERPT_MAX` code points of the caption, body or community name and description, taken at
+     * report time. EMPTY for a story with no caption and for a voice message (D-731).
+     */
     excerpt: text().notNull().default(''),
     /** 'open' | 'dismissed' | 'content_removed' | 'author_blocked'; `open` is the only state a report is filed in. */
     status: text().notNull().default('open'),
@@ -75,6 +81,15 @@ export const contentReports = pgTable(
     resolvedByUserId: uuid('resolved_by_user_id'),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * D-731: the recording of a reported VOICE message, as a REFERENCE to the existing media asset (not a second
+     * file). Null for every other subject and for a text message. NO foreign key: the report outlives the asset,
+     * which reads as gone once it is retired. `app.chat_asset_hidden` lets the administrator play it only through
+     * this row.
+     */
+    mediaAssetId: uuid('media_asset_id'),
+    /** D-731: the recording's stored length in whole seconds (1..300), set exactly when `media_asset_id` is. */
+    voiceSeconds: smallint('voice_seconds'),
   },
   (t) => [
     // AD-6: one report per reporter and item; the arbiter of the duplicate (23505).
@@ -95,6 +110,20 @@ export const contentReports = pgTable(
       'content_reports_subject_type_chk',
       sql`${t.subjectType} in (${list(REPORT_SUBJECT_TYPES)})`,
     ),
+    // D-731: both voice columns null, or both set with the seconds in the message CHECK's own range.
+    check(
+      'content_reports_voice_pair_chk',
+      sql`(${t.mediaAssetId} is null and ${t.voiceSeconds} is null) or (${t.mediaAssetId} is not null and ${t.voiceSeconds} is not null and ${t.voiceSeconds} between 1 and 300)`,
+    ),
+    // D-731: only a direct message carries a recording.
+    check(
+      'content_reports_voice_subject_chk',
+      sql`${t.mediaAssetId} is null or ${t.subjectType} = 'direct_message'`,
+    ),
+    // The read seam of a reported recording asks "does a report of this tenant carry this asset" (D-731).
+    index('content_reports_tenant_asset_idx')
+      .on(t.tenantId, t.mediaAssetId)
+      .where(sql`media_asset_id is not null`),
     check('content_reports_reason_chk', sql`${t.reason} in (${list(REPORT_REASONS)})`),
     check('content_reports_status_chk', sql`${t.status} in (${list(REPORT_STATUSES)})`),
     check(

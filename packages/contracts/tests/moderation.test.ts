@@ -24,6 +24,7 @@ import {
   moderationLogEntrySchema,
   moderationLogPageSchema,
   moderationLogQuerySchema,
+  REPORT_SUBJECT_TYPES,
 } from '../src/moderation';
 import { MEMBERS_MAX_QUERY_LENGTH } from '../src/profiles';
 
@@ -81,6 +82,26 @@ describe('moderation vocabulary', () => {
     const row = z.object({ id: z.string(), removal: commentRemovalSchema.optional() }).strict();
     expect(row.parse({ id: 'a' })).toEqual({ id: 'a' });
     expect(row.parse({ id: 'a', removal: 'moderation' }).removal).toBe('moderation');
+  });
+});
+
+/**
+ * 11-09 (D-730, one-way): the report subject list is the `content_reports_subject_type_chk` list, fixed with the
+ * table and grown only by APPENDING. Phase 13 shipped the first two; Phase 11 appends the other four after them.
+ */
+describe('report subject vocabulary (D-730)', () => {
+  it('is the six values in order, the two shipped ones keeping positions 0 and 1', () => {
+    expect([...REPORT_SUBJECT_TYPES]).toEqual([
+      'feed_post',
+      'post_comment',
+      'story',
+      'story_comment',
+      'community',
+      'direct_message',
+    ]);
+    expect(REPORT_SUBJECT_TYPES.indexOf('feed_post')).toBe(0);
+    expect(REPORT_SUBJECT_TYPES.indexOf('post_comment')).toBe(1);
+    expect(new Set(REPORT_SUBJECT_TYPES).size).toBe(REPORT_SUBJECT_TYPES.length);
   });
 });
 

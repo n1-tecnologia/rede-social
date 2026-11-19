@@ -288,16 +288,21 @@ export const chatParticipants = pgTable(
     primaryKey({ columns: [t.conversationId, t.userId] }),
     index('chat_participants_tenant_user_idx').on(t.tenantId, t.userId),
     check('chat_participants_role_chk', sql`${t.role} in ('member','support','admin')`),
-    // Fact 7: your own participant rows, or any row of your tenant when you are staff. A lane may
+    // Fact 7: your own participant rows, or (staff) the rows of a support thread of your tenant. A lane may
     // enrol ONLY ITSELF and ONLY into a conversation it created (07 review A-CR-01: nothing else ties
     // a participant row to a conversation the lane may see, and the participant row is what grants the
     // messages and the `conv:` Realtime topic). Staff never hold participant rows (fact 2). A member
     // updates only its own row, and only `last_read_seq`/`last_read_at` (column grant in
     // `*_chat_rls_grants.sql`); nobody DELETEs.
+    // Phase 11 (plan 09, D-731, D-482): the staff term follows the staff term of `chat_conversations_select`
+    // (`kind = 'support'`): staff read the participant rows of SUPPORT threads only, never the two member rows of a
+    // direct conversation, so a message report cannot reveal who talks to whom. A definer answers "is this a support
+    // thread" because reading `chat_conversations` as the invoker would recurse (its own select policy reads this table).
+    // The call is DIRECT: wrapped as `(select app.chat_conversation_is_support(...))` it raises 42P17 on the insert policies.
     pgPolicy('chat_participants_select', {
       for: 'select',
       to: authenticatedRole,
-      using: sql`tenant_id = app.tenant_id() and (user_id = app.user_id() or ${STAFF_ROLE})`,
+      using: sql`tenant_id = app.tenant_id() and (user_id = app.user_id() or (${STAFF_ROLE} and app.chat_conversation_is_support(conversation_id)))`,
     }),
     pgPolicy('chat_participants_insert', {
       for: 'insert',

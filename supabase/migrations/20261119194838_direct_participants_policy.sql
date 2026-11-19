@@ -1,0 +1,1 @@
+ALTER POLICY "chat_participants_select" ON "chat_participants" TO authenticated USING (tenant_id = app.tenant_id() and (user_id = app.user_id() or (app.tenant_role() in ('admin_tenant', 'support_tenant') and app.chat_conversation_is_support(conversation_id))));

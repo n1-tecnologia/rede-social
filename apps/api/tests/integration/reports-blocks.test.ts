@@ -604,9 +604,10 @@ describe("member blocks and the blocker's reads (NATIVE-33)", () => {
     expect(feedPostSchema.safeParse(full).success).toBe(true);
   });
 
-  it('a story comment is not reportable yet, and the report and block limits answer 429 beyond 20 and 60 an hour', async () => {
+  it('a subject type outside the closed list is a 400, and the report and block limits answer 429 beyond 20 and 60 an hour', async () => {
+    // 11-09 (D-730): `story_comment` joined the list, so the probe is a value that is on no list.
     const story = await post('/v1/reports', tokens.third, {
-      subjectType: 'story_comment',
+      subjectType: 'reel',
       subjectId: comments.byAuthor,
       reason: 'spam',
     });
@@ -694,9 +695,9 @@ describe('what a report accepts and refuses (NATIVE-31 edges)', () => {
       { ...base, reason: 'nao-existe' },
       { ...base, reason: '' },
       { subjectId: base.subjectId, reason: base.reason },
-      { ...base, subjectType: 'story_comment' },
-      { ...base, subjectType: 'community' },
-      { ...base, subjectType: 'direct_message' },
+      { ...base, subjectType: 'reel' },
+      { ...base, subjectType: 'chat_message' },
+      { ...base, subjectType: 'Direct_Message' },
       { ...base, subjectId: 'not-a-uuid' },
       { ...base, tenantId: ids.tenant },
       { ...base, note: 'x'.repeat(501) },
@@ -804,8 +805,15 @@ describe('what a report accepts and refuses (NATIVE-31 edges)', () => {
     expect(follower.status).toBe(201);
   });
 
-  it('Phase 11 boundary: the subject types stay the two of this phase', () => {
-    expect([...REPORT_SUBJECT_TYPES]).toEqual(['feed_post', 'post_comment']);
+  it('Phase 11 boundary (D-730): the subject types are the six, the four new ones appended after the shipped two', () => {
+    expect([...REPORT_SUBJECT_TYPES]).toEqual([
+      'feed_post',
+      'post_comment',
+      'story',
+      'story_comment',
+      'community',
+      'direct_message',
+    ]);
   });
 });
 

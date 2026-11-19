@@ -30,9 +30,9 @@ import { TENANT_ROLES } from './modules';
  *
  * Phase 13 (D-616) adds the MINIMUM report and member-block slice the store policies require (Apple
  * 1.2, Google UGC): the report vocabularies below are the CHECK lists of `content_reports`, fixed with
- * the table the way the moderation log's were. Phase 11 appends `story_comment`, `community` and
- * `direct_message` to `REPORT_SUBJECT_TYPES` the way 09-07 appended `post_removed` to the actions;
- * values are appended, never inserted. Phase 13 covers MODER-05 (posts and comments, the admin queue
+ * the table the way the moderation log's were. Phase 11 (D-730) appends `story`, `story_comment`,
+ * `community` and `direct_message` to `REPORT_SUBJECT_TYPES` the way 09-07 appended `post_removed` to the
+ * actions; values are appended, never inserted. Phase 13 covers MODER-05 (posts and comments, the admin queue
  * and its dismiss / remove / block-author actions) and CHAT-07 (the member block, unblock and the
  * blocker's content filter) only in part; the rest stays in Phase 11.
  */
@@ -85,10 +85,23 @@ export const MODERATION_EXCERPT_MAX = 280;
 export const MODERATION_REASON_MAX = 500;
 
 /**
- * Phase 13 (D-616): what a member can report. A post (`feed_post`) or a comment on a post
- * (`post_comment`); the `content_reports_subject_type_chk` list, verbatim. Phase 11 appends.
+ * What a member can report; the `content_reports_subject_type_chk` list, verbatim. FIXED WITH THE TABLE and only
+ * ever grown by APPENDING (D-730, reversibility one-way: once production holds a report of a new type, narrowing
+ * the CHECK would need a data migration).
+ *
+ * Phase 13 (D-616) shipped the first two: a post (`feed_post`) and a comment on a post (`post_comment`).
+ * Phase 11 (D-730, MODER-05) appends the other four AFTER them, in this order, never inserted: a story (`story`),
+ * a comment on a story (`story_comment`), a community (`community`) and one direct message (`direct_message`).
+ * `app.content_report_create` resolves each in the caller's tenant (`*_report_subjects_functions.sql`).
  */
-export const REPORT_SUBJECT_TYPES = ['feed_post', 'post_comment'] as const;
+export const REPORT_SUBJECT_TYPES = [
+  'feed_post',
+  'post_comment',
+  'story',
+  'story_comment',
+  'community',
+  'direct_message',
+] as const;
 export type ReportSubjectType = (typeof REPORT_SUBJECT_TYPES)[number];
 
 /** Why a member reports (AD-5); the `content_reports_reason_chk` list, verbatim. */
@@ -144,8 +157,7 @@ export type ReportResolveAction = (typeof REPORT_RESOLVE_ACTIONS)[number];
 /**
  * `POST /v1/reports` (NATIVE-31). `.strict()`: no tenant, reporter or author is ever named by the client.
  *
- * - `subjectType` is the CLOSED `REPORT_SUBJECT_TYPES` list; a story comment, a community or a message is a 400
- *   until Phase 11 appends it.
+ * - `subjectType` is the CLOSED `REPORT_SUBJECT_TYPES` list; a value outside it is a 400.
  * - `reason` is the closed `REPORT_REASONS` list; a missing or unknown one is a 400.
  * - `note` is trimmed and at most `REPORT_NOTE_MAX` characters (code points, the table CHECK counts the same); an
  *   empty or whitespace-only note is stored as `null`, so `note` leaves this schema as a string or `undefined`.

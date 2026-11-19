@@ -1,0 +1,7 @@
+ALTER TABLE "content_reports" DROP CONSTRAINT "content_reports_subject_type_chk";--> statement-breakpoint
+ALTER TABLE "content_reports" ADD COLUMN "media_asset_id" uuid;--> statement-breakpoint
+ALTER TABLE "content_reports" ADD COLUMN "voice_seconds" smallint;--> statement-breakpoint
+CREATE INDEX "content_reports_tenant_asset_idx" ON "content_reports" USING btree ("tenant_id","media_asset_id") WHERE media_asset_id is not null;--> statement-breakpoint
+ALTER TABLE "content_reports" ADD CONSTRAINT "content_reports_voice_pair_chk" CHECK (("content_reports"."media_asset_id" is null and "content_reports"."voice_seconds" is null) or ("content_reports"."media_asset_id" is not null and "content_reports"."voice_seconds" is not null and "content_reports"."voice_seconds" between 1 and 300));--> statement-breakpoint
+ALTER TABLE "content_reports" ADD CONSTRAINT "content_reports_voice_subject_chk" CHECK ("content_reports"."media_asset_id" is null or "content_reports"."subject_type" = 'direct_message');--> statement-breakpoint
+ALTER TABLE "content_reports" ADD CONSTRAINT "content_reports_subject_type_chk" CHECK ("content_reports"."subject_type" in ('feed_post','post_comment','story','story_comment','community','direct_message'));
