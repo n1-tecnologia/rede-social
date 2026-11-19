@@ -66,6 +66,40 @@ New contracts, all strict and all NEW (no existing response schema gained a requ
 `DIRECT_COMPOSER_STATES`, `directSendInputSchema`, `directWithParamsSchema`, `directWithAnswerSchema`,
 `directSendResultSchema`.
 
+### Conversas list, bubble count and conversation detail (Phase 11, plan 10)
+
+The reading half of the direct API (CHAT-06, CHAT-07), behind the same two guards as the send and always
+`Cache-Control: no-store`.
+
+- `GET /v1/chat/direct?cursor=&limit=` answers `{ support?, rows, nextCursor }`. `rows` are the paired direct
+  conversations the caller's LANE can read (the select policy `app.direct_pair_readable` hides a pair with an
+  administrator-blocked or removed member, and `social` off hides them all, so the list restates no predicate), ordered by
+  `last_message_at desc, id desc`, 20 a page by keyset with the shipped instant-cursor guard (a forged cursor degrades to
+  page 1, an over-fetch of one decides `nextCursor`). A conversation with no live message never shows. Each row carries the
+  other member (`removed: true` with no id and no name for an anonymised account), `lastPreview` (`{ kind: 'text', text,
+  own }` or `{ kind: 'voice', durationSeconds, own, deleted? }`, the recording's stored length, `deleted: true` once its
+  asset is retired), `lastMessageAt` and `unreadCount` (messages of the other side above the caller's read position,
+  capped at 100; the web prints `99+`). `support` is on the FIRST page only: the preview of the last message of the member's
+  most recent support conversation (null when they never wrote) and `unread`, the shipped support dot, read by the same
+  statement the bubble uses (`memberSupportUnread`); it never carries a staff id, an owner or a priority. A member block
+  never hides a row.
+- `GET /v1/chat/direct/{conversationId}` answers `{ conversationId, other, composer, canBlock, lastSeq, lastReadSeq }`.
+  `composer` is ONE finished enum by the precedence `removed`, `blocker`, `closed`, else `open`; `closed` carries no reason,
+  date or name and no key says "blocked me" (`blockedByViewer` belongs to the social read of plan 11, not here).
+  `canBlock` is decided by the server (A-11-ROLE): the viewer's role of record on the request is `member`, the other member
+  is live and the viewer has not blocked them already. A miss (unknown id, another tenant's, a support case, a pair the
+  administrator hid, a conversation the caller is not part of) is ONE bare `404 NOT_FOUND`. The history stays readable
+  for both sides through the shipped `GET /v1/chat/conversations/{id}/messages` and the read mark through the shipped
+  `POST /v1/chat/conversations/{id}/read`; both are kind-agnostic through the policy.
+- `chatCounters` (member branch): a caller holding `chat.direct` gets `unreadConversations` = the support dot (0 or 1) plus
+  the number of paired directs with `c.last_seq > p.last_read_seq`, and `conversationsBadge: 'count'`; a caller without
+  `chat.direct` keeps `{ dot }` exactly as before and staff are untouched. The counter and the list read through the same
+  lane and the same readable policy, so a hidden conversation lights no badge (T-11-25).
+
+New contracts, all strict and all NEW: `DIRECT_LIST_PAGE_SIZE` (20), `DIRECT_UNREAD_CAP` (100), `directListQuerySchema`,
+`directPreviewSchema`, `directOtherSchema`, `directListRowSchema`, `directSupportSummarySchema`, `directListAnswerSchema`,
+`directDetailParamsSchema`, `directDetailSchema`.
+
 ### Voice messages (Phase 12.5)
 
 A message can carry ONE recording instead of text. Contracts: `voiceSendInputSchema` (the member's

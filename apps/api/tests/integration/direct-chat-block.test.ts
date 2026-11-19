@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { caseKit, removeThrowaways, request } from './chat-case-fixtures';
 import {
   blockUser,
+  countersOf,
   type DirectMember,
   directDetail,
   directList,
@@ -12,6 +13,7 @@ import {
   removeDirectRows,
   resetDirectLimiters,
   sendDirect,
+  setModule,
   unblockUser,
   withDirectModules,
 } from './direct-fixtures';
@@ -351,5 +353,123 @@ describe('block does not leak', () => {
     expect(empty.rows).toEqual([]);
     expect(empty.support).toEqual({ lastPreview: null, unread: false });
     expect(empty.nextCursor).toBeNull();
+  });
+});
+
+/** The three reads that must agree in every state: the bubble, the Conversas list and the message history. */
+async function threeReads(
+  viewer: DirectMember,
+  conversationId: string,
+): Promise<{ counter: number; listed: boolean; messages: number }> {
+  const counter = (await countersOf(viewer)).unreadConversations;
+  const listRes = await directList(viewer);
+  const listed =
+    listRes.status === 200 &&
+    ((await listRes.json()) as { rows: { conversationId: string }[] }).rows.some(
+      (row) => row.conversationId === conversationId,
+    );
+  return { counter, listed, messages: (await readMessages(viewer, conversationId)).status };
+}
+
+describe('hidden parity', () => {
+  it('8. D-721, T-11-25: the administrator blocking B drops the counter, the row and the history together for A, and unblocking restores all three', async () => {
+    const a = await directMember('h1a');
+    const b = await directMember('h1b');
+    const sent = (await (await sendDirect(b, a.membershipId, 'Olá, A')).json()) as SendBody;
+
+    // Visible: the bubble counts the conversation, the list shows it, the history reads.
+    expect(await threeReads(a, sent.conversationId)).toEqual({
+      counter: 1,
+      listed: true,
+      messages: 200,
+    });
+
+    expect((await adminMember('block', b.membershipId)).status).toBe(200);
+    try {
+      expect(await threeReads(a, sent.conversationId)).toEqual({
+        counter: 0,
+        listed: false,
+        messages: 404,
+      });
+      expect((await directDetail(a, sent.conversationId)).status).toBe(404);
+    } finally {
+      expect((await adminMember('unblock', b.membershipId)).status).toBe(200);
+    }
+    expect(await threeReads(a, sent.conversationId)).toEqual({
+      counter: 1,
+      listed: true,
+      messages: 200,
+    });
+    expect((await detailOf(a, sent.conversationId)).composer).toBe('open');
+  });
+
+  it('9. a member block never hides the conversation: the counter, the row and the history stay for both sides, and the blocked member’s unread keeps counting', async () => {
+    const a = await directMember('h2a');
+    const b = await directMember('h2b');
+    const sent = (await (await sendDirect(a, b.membershipId, 'Antes')).json()) as SendBody;
+    expect((await blockUser(b.token, a.userId)).ok).toBe(true);
+    // B blocked A: B still has the unread of what A wrote before; A still has the history and the row.
+    expect(await threeReads(b, sent.conversationId)).toEqual({
+      counter: 1,
+      listed: true,
+      messages: 200,
+    });
+    expect(await threeReads(a, sent.conversationId)).toEqual({
+      counter: 0,
+      listed: true,
+      messages: 200,
+    });
+  });
+
+  it('10. D-483: turning `social` off hides every direct read for both participants, and turning it on returns everything unchanged', async () => {
+    const a = await directMember('h3a');
+    const b = await directMember('h3b');
+    const sent = (await (await sendDirect(a, b.membershipId, 'Oi, B')).json()) as SendBody;
+    const visible = { counter: 1, listed: true, messages: 200 };
+    expect(await threeReads(b, sent.conversationId)).toEqual(visible);
+
+    const restoreSocial = await setModule('demo', 'social', false);
+    try {
+      for (const viewer of [a, b]) {
+        const list = await directList(viewer);
+        expect(list.status).toBe(404);
+        expect(((await list.json()) as Envelope).error.code).toBe('MODULE_DISABLED');
+        const detail = await directDetail(viewer, sent.conversationId);
+        expect(detail.status).toBe(404);
+        expect(((await detail.json()) as Envelope).error.code).toBe('MODULE_DISABLED');
+        // The generic history read answers the bare 404 of an unreadable conversation, never a module word.
+        const messages = await readMessages(viewer, sent.conversationId);
+        expect(messages.status).toBe(404);
+        expect(((await messages.json()) as Envelope).error.code).toBe('NOT_FOUND');
+      }
+      // The bubble falls back to the support dot: no direct permission, so no direct count.
+      expect(await countersOf(b)).toMatchObject({
+        unreadConversations: 0,
+        conversationsBadge: 'dot',
+      });
+    } finally {
+      await restoreSocial();
+    }
+    expect(await threeReads(b, sent.conversationId)).toEqual(visible);
+    expect(await countersOf(b)).toMatchObject({ conversationsBadge: 'count' });
+    expect((await detailOf(a, sent.conversationId)).composer).toBe('open');
+  });
+
+  it('11. D-725: the shipped surfaces carry no direct filter: the support thread and the support counter are those of a member with no direct conversation', async () => {
+    const m = await directMember('h4m');
+    const before = await countersOf(m);
+    expect(before).toMatchObject({ unreadConversations: 0, conversationsBadge: 'count' });
+    const thread = (await (await request('/v1/chat/support', m.token)).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(thread).sort()).toEqual([
+      'case',
+      'conversation',
+      'hasAnyCase',
+      'hasOlder',
+      'messages',
+    ]);
+    expect(thread.conversation).toBeNull();
   });
 });
