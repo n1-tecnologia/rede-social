@@ -1744,9 +1744,67 @@ Plans:
 **Research needed**: Light — reuses Phase 7's chat and notification infrastructure and Phase 8's moderation log; the new parts are one direct conversation per pair of members, member-block enforcement across messaging, follow and profile, and follower fan-out for member-post notifications.
 **Notes**: Split out on 2026-09-25 from Phase 7 (criteria 5-7: CHAT-06, CHAT-07, the follower-scoped notification rules) and Phase 8 (criteria 5-6: MODER-04, MODER-05) when the "Rede social" module moved after the MVP. Phase 7's chat schema keeps `kind`, so direct conversations need no migration. **Amended 2026-11-04 (Phase 13, D-616):** Phase 13 delivers, ahead of this phase and for the app-store review, the minimum slice of MODER-05 (reports of posts and comments, the admin list and its three actions) and of CHAT-07 (the member block and the blocker's content filter) as NATIVE-31 and NATIVE-33 on kernel tables (`content_reports`, `member_blocks`) that are not gated by `social`; when this phase is planned it appends `story_comment`, `community` and `direct_message` to the report subject list, adds the block's effects on messaging, follow and the profile button, and must not plan the slice again.
 
+**Plans:** 0/28 plans executed (planned 2026-11-19: 28 plans in 10 waves; the database, contract, API, worker, push, view-function and catalog plans run before the sketch gate and are not gated; plan 02 stops at the sketch 025 approval that only Igor writes; plans 19 to 26 are the web and e2e plans and carry the approval precondition; plan 09 opens with the D-730 one-way confirmation; plan 28 holds the release, the ledger and the exit gate; the report and block screens plan 13-20 never delivered are built here by plans 20, 24, 25 and 27 from sketch 025)
+
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 11 to break down)
+**Wave 1**
+
+- [ ] 11-01-PLAN.md — Sketch 025: the 64 designed frames of the Conversas list, the direct conversation, the entry points, the report and block surfaces, the queue and the two bell rows
+- [ ] 11-03-PLAN.md — Direct pair model in the database: the pair columns, the only creator `app.direct_conversation_open`, the readable policy and the helper functions (pgTAP 237)
+- [ ] 11-04-PLAN.md — The literal push title (`titleText`) in the kernel seam, the schema and `buildPushPayload`
+- [ ] 11-05-PLAN.md — The in-transaction removers of a story, a story comment and a member community, and the blocker's filter on story comments
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 11-02-PLAN.md — Sketch gate: README, manifest row and a blocking-human checkpoint for sketch 025 (draws nothing, only Igor writes the approval)
+- [ ] 11-06-PLAN.md — The send guard, the unread position and the recipient signal in the chat triggers, and the worker-only notice definer (pgTAP 238)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 11-07-PLAN.md — The member block's effects in the database: two-way follow delete, the pair lock and the follow policy refusal
+- [ ] 11-08-PLAN.md — The direct API tracer: `chat.direct`, lazy creation, the `with` read, the neutral refusal, limiters and fixtures
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 11-09-PLAN.md — Four more report subjects in the database: the one-way CHECK append, the voice copy columns, the definer and the recording read seam (pgTAP 239, 240)
+- [ ] 11-10-PLAN.md — The Conversas list, the bubble's counters and the conversation detail with the composer enum
+- [ ] 11-11-PLAN.md — The follow refusal, the profile facts and the "começou a te seguir" notice
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 11-12-PLAN.md — Voice in a direct chat, the send-versus-block two-connection proof and the final isolation sweep of the chat routes
+- [ ] 11-13-PLAN.md — The new-message push: one per conversation, the writer's name as the title, no bell row
+- [ ] 11-14-PLAN.md — Filing and listing the four new subjects: the exhaustive precheck, `report.created` and the queue projection
+- [ ] 11-15-PLAN.md — `canReport` and `canBlock` riders for stories, story comments, communities, posts and comments
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 11-16-PLAN.md — The resolve dispatcher over six subjects with the log rows in one transaction
+- [ ] 11-17-PLAN.md — The "Nova denúncia" notice for the holders of `moderation.manage` and the role-list drift test
+- [ ] 11-18-PLAN.md — Web view functions, loaders, BFF reads and the pt-BR catalogs (not gated by the sketch)
+- [ ] 11-27-PLAN.md — Block and unblock by membership id (closes the gap Phase 13's SUMMARY flagged for the screens)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 11-19-PLAN.md — The Conversas screen and the bubble's destination (gated on sketch 025)
+- [ ] 11-20-PLAN.md — The report sheet, the block dialog, the post and comment menus and `Membros bloqueados` (gated; the scope of plan 13-20)
+- [ ] 11-21-PLAN.md — The two bell rows: "começou a te seguir" and "Nova denúncia" (gated)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 11-22-PLAN.md — The direct conversation screen: lazy start, the five composer states, the message menu and voice (gated)
+- [ ] 11-23-PLAN.md — "Enviar mensagem" on the profile and the `/membros` row, the blocker's "Desbloquear" (gated)
+- [ ] 11-24-PLAN.md — The report and block entries of the story viewer, the story comment and the community header (gated)
+- [ ] 11-25-PLAN.md — The administrator's queue and resolve sheet for six subjects (gated)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 11-26-PLAN.md — The two Playwright specs, written and listed, never run by an agent (gated)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 11-28-PLAN.md — The release notes, the owner's ledger and the recorded exit gate
 
 ### Phase 12: Formulário de perfil do tenant
 
