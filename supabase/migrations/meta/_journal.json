@@ -1541,6 +1541,13 @@
       "when": 1795109524371,
       "tag": "20261119173204_block_effects",
       "breakpoints": true
+    },
+    {
+      "idx": 220,
+      "version": "7",
+      "when": 1795109593380,
+      "tag": "20261119173313_follow_block_policy",
+      "breakpoints": true
     }
   ]
 }

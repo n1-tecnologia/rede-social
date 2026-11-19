@@ -34,7 +34,7 @@ begin;
 --    idempotency and the blocker-only read of `member_blocks`.
 --
 -- Fixture ids use the `1e380000-…` prefix (`tests.d38('a1')` spells one). Like its siblings, this file ROLLS BACK.
-select plan(77);
+select plan(89);
 
 create function tests.d38(p text) returns uuid language sql immutable as
   $$ select ('1e380000-0000-4000-8000-0000000000' || p)::uuid $$;
@@ -558,6 +558,54 @@ reset role;
 select is(
   (select count(*)::int from public.chat_messages where conversation_id = tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2'))), 3,
   'D-723: the history held two messages through the block and now three');
+
+-- ── 8. the follow insert policy across a block (plan 07 task 2) ─────────────────────────────────
+-- Inserts ONE follow as the CURRENT lane and answers 'ok' or '<sqlstate>:<message>', so the refusal across a block can be
+-- compared with the refusal of an unknown target (T-11-03: the blocked side learns nothing from the failure).
+create function tests.fol38(p_tenant uuid, p_follower uuid, p_followee uuid) returns text language plpgsql as $$
+begin
+  insert into public.social_follows (tenant_id, follower_user_id, followee_user_id) values (p_tenant, p_follower, p_followee);
+  return 'ok';
+exception when others then
+  return sqlstate || ':' || sqlerrm;
+end
+$$;
+select tests.as_tenant(tests.d38('01'), tests.d38('c4'));
+select is(app.member_block_create(tests.d38('c5')), true, 'D-724 (setup): c4 blocks c5');
+select is(left(tests.fol38(tests.d38('01'), tests.d38('c4'), tests.d38('c5')), 6), '42501:',
+  'D-724: the BLOCKER following the blocked member is refused 42501');
+select is(tests.fol38(tests.d38('01'), tests.d38('c4'), tests.d38('c5')), tests.fol38(tests.d38('01'), tests.d38('c4'), tests.d38('ff')),
+  'T-11-03: the refusal across a block is the SAME failure as a follow toward an unknown target');
+select is(tests.fol38(tests.d38('01'), tests.d38('c4'), tests.d38('c3')), 'ok',
+  'D-724 (control): the blocker follows a third member while the block stands');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('c5'));
+select is(left(tests.fol38(tests.d38('01'), tests.d38('c5'), tests.d38('c4')), 6), '42501:',
+  'D-724: the BLOCKED member following the blocker is refused 42501 from the other side');
+select is(tests.fol38(tests.d38('01'), tests.d38('c5'), tests.d38('c3')), 'ok',
+  'D-724 (control): the blocked member follows a third member');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('c3'));
+select is(tests.fol38(tests.d38('01'), tests.d38('c3'), tests.d38('c4')), 'ok',
+  'D-724 (control): a third member follows the blocker, the block touches only the pair');
+reset role;
+select tests.as_tenant(tests.d38('03'), tests.d38('c4'));
+select is(tests.fol38(tests.d38('03'), tests.d38('c4'), tests.d38('c5')), 'ok',
+  'T-11-01: the same two users follow in tenant C, a block in tenant A refuses nothing there');
+reset role;
+select tests.as_tenant(tests.d38('03'), tests.d38('c5'));
+select is(tests.fol38(tests.d38('03'), tests.d38('c5'), tests.d38('c4')), 'ok',
+  'T-11-01: …and the other direction in tenant C');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('c4'));
+select is(app.member_block_delete(tests.d38('c5')), true, 'D-724: c4 lifts the block');
+select is(tests.fol38(tests.d38('01'), tests.d38('c4'), tests.d38('c5')), 'ok',
+  'D-724: once the block is lifted the follow is accepted again');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('c5'));
+select is(tests.fol38(tests.d38('01'), tests.d38('c5'), tests.d38('c4')), 'ok',
+  'D-724: …and from the other side');
+reset role;
 
 select * from finish();
 rollback;

@@ -28,7 +28,10 @@ import { authenticatedRole } from 'drizzle-orm/supabase';
  *    `on conflict` arbiter of the idempotent PUT and also serves "who do I follow".
  *
  * A blocked or removed party does not delete anything: the rows stay and every read filters
- * liveness, so unblocking restores the follow rows, followers included (D-484).
+ * liveness, so unblocking restores the follow rows, followers included (D-484). That is the ADMINISTRATOR's
+ * block (`memberships.blocked_at`). A MEMBER block (`member_blocks`, Phase 11 plan 07; D-724) is the opposite: the
+ * definer `app.member_block_create` deletes the two follow rows between the pair in the same transaction, unblocking
+ * restores nothing, and the insert policy below refuses a new follow across a block from either side.
  *
  * Owned by `packages/modules/social` and picked up by `apps/api/drizzle.config.ts`'s module glob.
  */
@@ -82,7 +85,8 @@ export const socialFollows = pgTable(
            where m.tenant_id = social_follows.tenant_id
              and m.user_id = social_follows.followee_user_id
              and m.role = 'member' and m.status = 'active'
-             and m.blocked_at is null and m.deleted_at is null)`,
+             and m.blocked_at is null and m.deleted_at is null)
+        and not (select app.members_blocked_between(social_follows.followee_user_id))`,
     }),
     pgPolicy('social_follows_delete_own', {
       for: 'delete',
