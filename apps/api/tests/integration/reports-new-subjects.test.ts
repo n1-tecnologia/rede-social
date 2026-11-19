@@ -14,6 +14,7 @@ import {
   removeDirectRows,
   resetDirectLimiters,
   sendDirect,
+  setModule,
   withDirectModules,
 } from './direct-fixtures';
 import {
@@ -746,5 +747,137 @@ describe('report queue projection', () => {
       seen.slice(positions[0], (positions[0] ?? 0) + 3),
       'ties break on id descending',
     ).toEqual([...mine].sort().reverse());
+  });
+});
+
+describe('report social off', () => {
+  it('1. with social off a story, a story comment, a community, a post and a comment still file and list for whatever the reporter can read; a followers story and a message are the bare 404', async () => {
+    const tenantStory = await insertStory(userIds.marcos);
+    const followersStory = await insertStory(userIds.marcos, { visibility: 'followers' });
+    const commentId = await insertStoryComment(
+      tenantStory,
+      userIds.marcos,
+      `${PREFIX}comentario sem social`,
+    );
+    const communityId = await insertCommunity(userIds.marcos, { name: `${PREFIX}Sem social` });
+    const [post] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, caption, author_user_id)
+      values (${labTenantId}::uuid, ${`${PREFIX}post sem social`}, ${userIds.marcos}::uuid) returning id::text as id`;
+    const postId = post?.id ?? '';
+    const [postComment] = await adminSql<{ id: string }[]>`
+      insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+      values (${labTenantId}::uuid, ${postId}::uuid, ${userIds.marcos}::uuid, ${`${PREFIX}comentario do post`})
+      returning id::text as id`;
+    const a = await directMember('o1a');
+    const b = await directMember('o1b');
+    const sent = await sendDirect(a, b.membershipId, 'mensagem com social');
+    const messageId = ((await sent.json()) as { message: { id: string } }).message.id;
+
+    const restoreLab = await setModule('lab', 'social', false);
+    const restoreDemo = await setModule('demo', 'social', false);
+    try {
+      for (const [label, type, subject] of [
+        ['story', 'story', tenantStory],
+        ['story comment', 'story_comment', commentId],
+        ['community', 'community', communityId],
+        ['post', 'feed_post', postId],
+        ['post comment', 'post_comment', postComment?.id ?? ''],
+      ] as const) {
+        const res = await fileReport(tokens.helena, type, subject);
+        expect(res.status, `${label} with social off`).toBe(201);
+        const item = await queueItem(tokens.labAdmin, ((await res.json()) as { id: string }).id);
+        expect(item?.subjectType, label).toBe(type);
+        expect(item?.contentAvailable, label).toBe(true);
+      }
+      // What the lane cannot read any more is the bare 404: the followers audience needs social, and so does a pair.
+      const followers = await fileReport(tokens.helena, 'story', followersStory);
+      expect(followers.status).toBe(404);
+      const message = await fileReport(b.token, 'direct_message', messageId, { host: HOSTS.demo });
+      expect(message.status).toBe(404);
+      expect(await sansRequestId(message)).toBe(await sansRequestId(followers));
+    } finally {
+      await restoreDemo();
+      await restoreLab();
+      await adminSql`delete from public.content_reports where subject_id = ${postId}::uuid or subject_id = ${postComment?.id ?? ''}::uuid`;
+      await adminSql`delete from public.feed_comments where post_id = ${postId}::uuid`;
+      await adminSql`delete from public.feed_posts where id = ${postId}::uuid`;
+    }
+    // The positive control beside the message negative: with social back on the same report files.
+    reportLimiter.reset();
+    expect(
+      (await fileReport(b.token, 'direct_message', messageId, { host: HOSTS.demo })).status,
+    ).toBe(201);
+    expect((await fileReport(tokens.helena, 'story', followersStory)).status).toBe(201);
+  });
+});
+
+describe('report concurrency', () => {
+  it('ten parallel reports of one item by one reporter leave one row, nine 409 and one report.created', async () => {
+    const storyId = await insertStory(userIds.marcos);
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => fileReport(tokens.helena, 'story', storyId)),
+    );
+    const statuses = results.map((res) => res.status).sort();
+    expect(statuses).toEqual([201, 409, 409, 409, 409, 409, 409, 409, 409, 409]);
+    for (const res of results.filter((r) => r.status === 409)) {
+      expect((await errorOf(res)).code).toBe('ALREADY_REPORTED');
+    }
+    const [rows] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.content_reports
+       where reporter_user_id = ${userIds.helena}::uuid and subject_id = ${storyId}::uuid`;
+    expect(rows?.n).toBe(1);
+    expect(events.filter((event) => event.reporterUserId === userIds.helena)).toHaveLength(1);
+  });
+});
+
+describe('report tenant isolation', () => {
+  it("1. a report of tenant A's story, comment, community or message from tenant B is the bare 404 and stores nothing, beside its positive control; each queue lists only its own tenant", async () => {
+    const storyId = await insertStory(userIds.marcos);
+    const commentId = await insertStoryComment(
+      storyId,
+      userIds.marcos,
+      `${PREFIX}comentario isolado`,
+    );
+    const communityId = await insertCommunity(userIds.marcos, { name: `${PREFIX}Isolada` });
+    const a = await directMember('i1a');
+    const b = await directMember('i1b');
+    const sent = await sendDirect(a, b.membershipId, 'mensagem do demo');
+    const messageId = ((await sent.json()) as { message: { id: string } }).message.id;
+
+    const demoBefore = await reportCount(userIds.demoMember);
+    const labBefore = await reportCount(userIds.alvaro);
+    const bodies = new Set<string>();
+    for (const [type, subject] of [
+      ['story', storyId],
+      ['story_comment', commentId],
+      ['community', communityId],
+    ] as const) {
+      const res = await fileReport(tokens.demoMember, type, subject, { host: HOSTS.demo });
+      expect(res.status, `demo reporting the lab ${type}`).toBe(404);
+      bodies.add(await sansRequestId(res));
+    }
+    const crossMessage = await fileReport(tokens.alvaro, 'direct_message', messageId, {
+      host: HOSTS.lab,
+    });
+    expect(crossMessage.status).toBe(404);
+    bodies.add(await sansRequestId(crossMessage));
+    expect(bodies.size, 'one bare body for every cross-tenant miss').toBe(1);
+    expect(await reportCount(userIds.demoMember)).toBe(demoBefore);
+    expect(await reportCount(userIds.alvaro)).toBe(labBefore);
+
+    // Positive controls: each tenant's own reporter files the same items.
+    const labReport = await fileReport(tokens.helena, 'story', storyId);
+    expect(labReport.status).toBe(201);
+    const demoReport = await fileReport(b.token, 'direct_message', messageId, { host: HOSTS.demo });
+    expect(demoReport.status).toBe(201);
+    const labReportId = ((await labReport.json()) as { id: string }).id;
+    const demoReportId = ((await demoReport.json()) as { id: string }).id;
+
+    const labQueue = await queue(tokens.labAdmin, '?estado=todas&limit=50');
+    const demoQueue = await queue(tokens.demoAdmin, '?estado=todas&limit=50', HOSTS.demo);
+    expect(labQueue.items.map((row) => row.id)).toContain(labReportId);
+    expect(labQueue.items.map((row) => row.id)).not.toContain(demoReportId);
+    expect(demoQueue.items.map((row) => row.id)).toContain(demoReportId);
+    expect(demoQueue.items.map((row) => row.id)).not.toContain(labReportId);
   });
 });

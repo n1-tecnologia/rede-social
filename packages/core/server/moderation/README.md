@@ -35,7 +35,15 @@ Published through the kernel's `./server/*` export; nothing else may be imported
     membership row on every request.
 - `@rede-social/core/server/tenancy/admin-members`: `listMembersForAdmin(ctx, query)`,
   `getMemberForAdmin(ctx, membershipId)`.
-- `@rede-social/contracts/moderation`: `MODERATION_ACTIONS`, `MODERATION_SUBJECT_TYPES`,
+- `@rede-social/core/server/safety/index` (member reports, Phase 13 and Phase 11, MODER-05):
+  `createReport(ctx, body)` files a report of one of the six `REPORT_SUBJECT_TYPES` (a post, a post
+  comment, a story, a story comment, a community or one direct message) READABLE-FIRST through the
+  reporter's own lane, so a miss of any cause is one bare 404; `listReports(ctx, query)` is the
+  administrator's queue, which projects each subject's own copy (a community's `community`, a
+  recording's `voice`, every post or story item's `ref`) and never a conversation or a counterpart;
+  `resolveReport` is plan 16's. Nothing here removes or blocks by itself.
+- `@rede-social/contracts/moderation`: `ReportCreated`, `REPORT_NOTIFICATION_KIND`, `reportItemSchema`,
+  `MODERATION_ACTIONS`, `MODERATION_SUBJECT_TYPES`,
   `MODERATION_EXCERPT_MAX`, `MODERATION_REASON_MAX`, `KERNEL_PERMISSIONS`, `commentRemovalSchema`,
   `moderationLogQuerySchema`, `moderationLogEntrySchema`, `moderationLogPageSchema`,
   `adminMemberListQuerySchema`, `adminMemberSchema`, `adminMemberPageSchema`,
@@ -71,6 +79,13 @@ and the reason are read only through permission-guarded routes.
 - `membership.blocked`: `tenantId`, `userId`, `membershipId`. Emitted by `blockMembership` after its
   admin-lane transaction committed, and only when the block changed something. Never the reason.
   The notifications module consumes it to drop the member's push devices and nudge the open app.
+
+- `report.created`: `tenantId`, `reportId`, `reporterUserId`, `authorUserId`. Emitted by `createReport`
+  after the filing committed, once per stored row, IDS ONLY: never the reporter's name, the note, the
+  reason or the excerpt. It exists for the moderators' notice (Phase 11 plan 17: the notifications
+  module's source subscribes to it and raises `REPORT_NOTIFICATION_KIND`, `moderation.report_created`,
+  for the holders of `moderation.manage`); nothing a member can read changes because of it. The author
+  is told nothing.
 
 ## Events consumed
 

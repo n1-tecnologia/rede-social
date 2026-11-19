@@ -56,13 +56,13 @@ const createRoute_ = createRoute({
       content: { 'application/json': { schema: reportCreateAnswerSchema } },
     },
     400: envelope(
-      'VALIDATION_FAILED — a missing or unknown `reason` or `subjectType` (a story comment, a community or a message is not reportable yet), a malformed id, a note over 500 characters or an unknown key',
+      'VALIDATION_FAILED — a missing or unknown `reason` or `subjectType` (the closed list is a post, a post comment, a story, a story comment, a community and one direct message), a malformed id, a note over 500 characters or an unknown key',
     ),
     403: envelope(
       'CANNOT_REPORT_OWN — the caller wrote the content; FORBIDDEN — not a live member',
     ),
     404: envelope(
-      'NOT_FOUND — ONE bare body for a missing, removed or another tenant’s post or comment',
+      'NOT_FOUND — ONE bare body for a missing, removed or another tenant’s item, and for any item the reporter cannot read (a followers-only story not followed, a community locked for them, a message of another pair or of the support thread)',
     ),
     409: envelope('ALREADY_REPORTED — this member already reported this item'),
     429: envelope('RATE_LIMITED — more than 20 reports in an hour'),
