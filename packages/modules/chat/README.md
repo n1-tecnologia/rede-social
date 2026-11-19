@@ -100,6 +100,20 @@ New contracts, all strict and all NEW: `DIRECT_LIST_PAGE_SIZE` (20), `DIRECT_UNR
 `directPreviewSchema`, `directOtherSchema`, `directListRowSchema`, `directSupportSummarySchema`, `directListAnswerSchema`,
 `directDetailParamsSchema`, `directDetailSchema`.
 
+### Direct message push (Phase 11, plan 13)
+
+The `chat.message_sent` notification source gains a direct branch (CHAT-06, D-728). The worker lane cannot read a direct
+through RLS (`chat_conversations_select` admits staff only on a support case), so when the shipped read returns no row the
+resolver asks the worker-only definer `app.direct_message_notice(messageId)` and builds the intent only from its row.
+One push-only intent (`chat.direct_message`, never a bell row) goes to the OTHER participant: the title is the writer's
+display name (the hint's `titleText`, absent when the name is blank, so the banner is titled with the tenant name), the
+body is the start of the text cut on a word at 100 graphemes or `Mensagem de voz · m:ss` from the stored length, the tap
+opens `/conversas/{id}`, and the tag and topic are the conversation's 32-hex id (one banner per conversation, 72 h TTL,
+high urgency). `deliverable` is recomputed in SQL at fan-out time, so a closed pair, `social` off, a removed or
+administrator-blocked recipient, a gone recording and a foreign or deleted message push nothing. The banner of a
+participant looking at the app is suppressed by the service worker's global rule (a window focused and visible), not by a
+per-conversation presence. The hint carries `titleText`, so the API and the worker deploy together.
+
 ### Voice messages (Phase 12.5)
 
 A message can carry ONE recording instead of text. Contracts: `voiceSendInputSchema` (the member's
