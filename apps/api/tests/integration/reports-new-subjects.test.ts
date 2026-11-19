@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { caseKit, removeThrowaways, SEED_THREAD } from './chat-case-fixtures';
 import { readyVoiceAsset, removeVoiceRows } from './chat-voice-fixtures';
 import {
+  directList,
   directMember,
   readMessages,
   removeDirectRows,
@@ -1132,5 +1133,282 @@ describe('report resolve tracer', () => {
     expect(await reportStatus(reportId)).toBe('open');
     expect(await deletedAtOf('stories', storyId)).toBeNull();
     expect(await logRowsOfSubject(storyId)).toHaveLength(0);
+  });
+});
+
+/** Every id of one status of the demo's community list, read as `token`. */
+async function listedCommunityIds(token: string, status: 'active' | 'archived'): Promise<string[]> {
+  const seen: string[] = [];
+  let cursor: string | null = null;
+  for (let guard = 0; guard < 60; guard++) {
+    const query: string = cursor
+      ? `?limit=25&status=${status}&cursor=${encodeURIComponent(cursor)}`
+      : `?limit=25&status=${status}`;
+    const res = await request(`/v1/communities${query}`, token, {}, HOSTS.demo);
+    expect(res.status).toBe(200);
+    const page = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+    seen.push(...page.items.map((item) => item.id));
+    cursor = page.nextCursor;
+    if (cursor === null) break;
+  }
+  return seen;
+}
+
+describe('resolve story comment', () => {
+  it('1. remove_content takes the comment down with ONE comment_removed row of subject story_comment; the story stays', async () => {
+    const storyAuthor = await directMember('c1s');
+    const commenter = await directMember('c1c');
+    const reporter = await directMember('c1r');
+    const storyId = await insertStory(storyAuthor.userId, { tenantId: demoTenantId });
+    const commentId = await insertStoryComment(
+      storyId,
+      commenter.userId,
+      `${PREFIX}comentario r`,
+      demoTenantId,
+    );
+    const reportId = await fileDemo(reporter, 'story_comment', commentId);
+
+    const res = await resolve(tokens.demoAdmin, reportId, 'remove_content');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: reportId, status: 'content_removed' });
+
+    expect(await deletedAtOf('feed_comments', commentId)).not.toBeNull();
+    expect(await deletedAtOf('stories', storyId)).toBeNull();
+    const rows = await logRowsOfSubject(commentId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      action: 'comment_removed',
+      subject_type: 'story_comment',
+      target_user_id: commenter.userId,
+      actor_user_id: demoAdminId,
+    });
+    const page = (await (
+      await request(`/v1/stories/${storyId}/comments`, reporter.token, {}, HOSTS.demo)
+    ).json()) as { items: { id: string }[] };
+    expect(page.items.map((item) => item.id)).not.toContain(commentId);
+  });
+});
+
+describe('resolve community', () => {
+  it('1. a member community is archived (it leaves the active list, still opens read-only) with ONE community_archived row; its creator can reactivate it', async () => {
+    const creator = await directMember('m1c');
+    const reporter = await directMember('m1r');
+    const communityId = await insertCommunity(creator.userId, {
+      name: `${PREFIX}Clube resolve`,
+      tenantId: demoTenantId,
+    });
+    const reportId = await fileDemo(reporter, 'community', communityId);
+
+    const res = await resolve(tokens.demoAdmin, reportId, 'remove_content');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: reportId, status: 'content_removed' });
+
+    expect(await communityStatusOf(communityId)).toBe('archived');
+    expect(await deletedAtOf('communities', communityId), 'an archive, not a removal').toBeNull();
+    expect(await listedCommunityIds(reporter.token, 'active')).not.toContain(communityId);
+    expect(await listedCommunityIds(tokens.demoAdmin, 'archived')).toContain(communityId);
+    const opened = await request(`/v1/communities/${communityId}`, reporter.token, {}, HOSTS.demo);
+    expect(opened.status, 'an archived community still opens read-only').toBe(200);
+    expect(((await opened.json()) as { status: string }).status).toBe('archived');
+
+    const rows = await logRowsOfSubject(communityId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      action: 'community_archived',
+      subject_type: 'community',
+      target_user_id: creator.userId,
+      actor_user_id: demoAdminId,
+    });
+
+    // Reactivation by its creator is the shipped path and is untouched by the resolution.
+    const back = await request(
+      `/v1/communities/${communityId}`,
+      creator.token,
+      { method: 'PATCH', body: JSON.stringify({ status: 'active' }) },
+      HOSTS.demo,
+    );
+    expect(back.status).toBe(200);
+    expect(await communityStatusOf(communityId)).toBe('active');
+  });
+
+  it('2. an organization community is archived with NO log row, and an administrator removing their own organization story writes none either', async () => {
+    const reporter = await directMember('m2r');
+    const communityId = await insertCommunity(demoAdminId, {
+      name: `${PREFIX}Organizacao resolve`,
+      kind: 'organization',
+      tenantId: demoTenantId,
+    });
+    const communityReport = await fileDemo(reporter, 'community', communityId);
+    expect((await resolve(tokens.demoAdmin, communityReport, 'remove_content')).status).toBe(200);
+    expect(await communityStatusOf(communityId)).toBe('archived');
+    expect(await logRowsOfSubject(communityId)).toHaveLength(0);
+
+    // The administrator is the author of an organization story: it is removed, no row, no block offered.
+    const { storyId, reportId } = await reportedStory(demoAdminId, reporter, {
+      visibility: 'tenant',
+    });
+    const res = await resolve(tokens.demoAdmin, reportId, 'remove_content');
+    expect(res.status).toBe(200);
+    expect(await deletedAtOf('stories', storyId)).not.toBeNull();
+    expect(await logRowsOfSubject(storyId)).toHaveLength(0);
+  });
+});
+
+describe('resolve message', () => {
+  it('1. remove_content is a 409 not_removable and changes nothing; the report stays open and dismiss still works', async () => {
+    const a = await directMember('g1a');
+    const b = await directMember('g1b');
+    const sent = await sendDirect(a, b.membershipId, 'texto que o administrador nao remove');
+    expect(sent.status).toBe(201);
+    const { message, conversationId } = (await sent.json()) as {
+      message: { id: string };
+      conversationId?: string;
+    };
+    const reportId = await fileDemo(b, 'direct_message', message.id);
+    const [before] = await adminSql<{ n: number; body: string }[]>`
+      select count(*)::int as n, max(body) as body from public.chat_messages
+       where id = ${message.id}::uuid and deleted_at is null`;
+    expect(before?.n).toBe(1);
+
+    const res = await resolve(tokens.demoAdmin, reportId, 'remove_content');
+    expect(res.status).toBe(409);
+    expect(await errorOf(res)).toMatchObject({
+      code: 'CONFLICT',
+      details: { report: 'not_removable' },
+    });
+    expect(await reportStatus(reportId), 'the report is still open').toBe('open');
+    const [after] = await adminSql<{ n: number; body: string }[]>`
+      select count(*)::int as n, max(body) as body from public.chat_messages
+       where id = ${message.id}::uuid and deleted_at is null`;
+    expect(after).toEqual(before);
+    expect(await logRowsOfSubject(message.id)).toHaveLength(0);
+    void conversationId;
+
+    const dismissed = await resolve(tokens.demoAdmin, reportId, 'dismiss');
+    expect(dismissed.status).toBe(200);
+    expect(await dismissed.json()).toEqual({ id: reportId, status: 'dismissed' });
+    expect(await logRowsOfSubject(message.id)).toHaveLength(0);
+    expect(await blockRowsOf(a.userId)).toHaveLength(0);
+  });
+
+  it('2. block_author blocks the sender with a member_blocked row and their conversation leaves the other participant list', async () => {
+    const a = await directMember('g2a');
+    const b = await directMember('g2b');
+    const sent = await sendDirect(a, b.membershipId, 'mensagem de quem sera bloqueado');
+    const { message } = (await sent.json()) as { message: { id: string } };
+    const reportId = await fileDemo(b, 'direct_message', message.id);
+
+    const listOf = async () =>
+      (
+        (await (await directList(b)).json()) as {
+          rows: { other: { displayName: string | null } }[];
+        }
+      ).rows.map((row) => row.other.displayName);
+    expect(await listOf(), 'the conversation is listed before the block').toContain(a.displayName);
+
+    const res = await resolve(tokens.demoAdmin, reportId, 'block_author');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: reportId, status: 'author_blocked' });
+
+    expect(await membershipStatusOf(a.userId)).toBe('blocked');
+    const rows = await blockRowsOf(a.userId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ actor_user_id: demoAdminId, target_user_id: a.userId });
+    expect(await listOf(), 'the blocked sender leaves the other list').not.toContain(a.displayName);
+    // Nothing else moved: the message itself is untouched.
+    expect(await logRowsOfSubject(message.id)).toHaveLength(0);
+  });
+});
+
+describe('resolve block author', () => {
+  it('1. a story author, a story commenter and a community creator are each blocked with ONE member_blocked row; the content stays', async () => {
+    const reporter = await directMember('b1r');
+
+    const storyAuthor = await directMember('b1s');
+    const story = await reportedStory(storyAuthor.userId, reporter);
+    expect((await resolve(tokens.demoAdmin, story.reportId, 'block_author')).status).toBe(200);
+    expect(await membershipStatusOf(storyAuthor.userId)).toBe('blocked');
+    expect(await blockRowsOf(storyAuthor.userId)).toHaveLength(1);
+    expect(await deletedAtOf('stories', story.storyId), 'the story is not removed').toBeNull();
+
+    const commenter = await directMember('b1c');
+    const host = await directMember('b1h');
+    const hostStory = await insertStory(host.userId, { tenantId: demoTenantId });
+    const commentId = await insertStoryComment(
+      hostStory,
+      commenter.userId,
+      `${PREFIX}comentario b1`,
+      demoTenantId,
+    );
+    const commentReport = await fileDemo(reporter, 'story_comment', commentId);
+    expect((await resolve(tokens.demoAdmin, commentReport, 'block_author')).status).toBe(200);
+    expect(await membershipStatusOf(commenter.userId)).toBe('blocked');
+    expect(await blockRowsOf(commenter.userId)).toHaveLength(1);
+    expect(await membershipStatusOf(host.userId), 'only the stored author is blocked').toBe(
+      'active',
+    );
+    expect(await deletedAtOf('feed_comments', commentId)).toBeNull();
+
+    const creator = await directMember('b1m');
+    const communityId = await insertCommunity(creator.userId, {
+      name: `${PREFIX}Clube bloqueio`,
+      tenantId: demoTenantId,
+    });
+    const communityReport = await fileDemo(reporter, 'community', communityId);
+    expect((await resolve(tokens.demoAdmin, communityReport, 'block_author')).status).toBe(200);
+    expect(await membershipStatusOf(creator.userId)).toBe('blocked');
+    expect(await blockRowsOf(creator.userId)).toHaveLength(1);
+    expect(await communityStatusOf(communityId), 'the community is not archived').toBe('active');
+
+    for (const reportId of [story.reportId, commentReport, communityReport]) {
+      expect(await reportStatus(reportId)).toBe('author_blocked');
+    }
+  });
+
+  it('2. a staff author, a removed author and the administrator themselves refuse the resolution and leave the report open', async () => {
+    const reporter = await directMember('b2r');
+    // The log is append-only and the seeded administrator may carry rows of earlier suites: count relative.
+    const adminBlocksBefore = (await blockRowsOf(demoAdminId)).length;
+
+    const staff = await directMember('b2s', { role: 'support_tenant' });
+    const staffStory = await reportedStory(staff.userId, reporter, { visibility: 'tenant' });
+    const staffRes = await resolve(tokens.demoAdmin, staffStory.reportId, 'block_author');
+    expect(staffRes.status).toBe(409);
+    expect(await errorOf(staffRes)).toMatchObject({
+      code: 'CONFLICT',
+      details: { report: 'author_not_member' },
+    });
+    expect(await membershipStatusOf(staff.userId)).toBe('active');
+
+    const leaver = await directMember('b2l');
+    const leaverStory = await reportedStory(leaver.userId, reporter, { visibility: 'tenant' });
+    await adminSql`
+      update public.memberships set deleted_at = now()
+       where tenant_id = ${demoTenantId}::uuid and user_id = ${leaver.userId}::uuid`;
+    const leaverRes = await resolve(tokens.demoAdmin, leaverStory.reportId, 'block_author');
+    expect(leaverRes.status).toBe(409);
+    expect(await errorOf(leaverRes)).toMatchObject({
+      code: 'CONFLICT',
+      details: { report: 'author_unavailable' },
+    });
+
+    // The administrator's own content: the author is staff, so the block is refused and the administrator is untouched
+    // (`self` of the shipped admin block stays behind this role check).
+    const own = await reportedStory(demoAdminId, reporter, { visibility: 'tenant' });
+    const ownRes = await resolve(tokens.demoAdmin, own.reportId, 'block_author');
+    expect(ownRes.status).toBe(409);
+    expect(await errorOf(ownRes)).toMatchObject({
+      code: 'CONFLICT',
+      details: { report: 'author_not_member' },
+    });
+    expect(await membershipStatusOf(demoAdminId)).toBe('active');
+
+    for (const reportId of [staffStory.reportId, leaverStory.reportId, own.reportId]) {
+      expect(await reportStatus(reportId), 'the report stays open').toBe('open');
+    }
+    for (const userId of [staff.userId, leaver.userId]) {
+      expect(await blockRowsOf(userId)).toHaveLength(0);
+    }
+    expect(await blockRowsOf(demoAdminId)).toHaveLength(adminBlocksBefore);
   });
 });
