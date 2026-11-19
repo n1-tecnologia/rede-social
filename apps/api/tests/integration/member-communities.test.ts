@@ -1515,6 +1515,12 @@ describe('10 visibility', () => {
     };
     expect((await listOf(tokens.marcos)).items.map((item) => item.id)).toContain(id);
 
+    // Phase 11 D-724: a member block deletes the follows between the pair and unblocking restores nothing. The seeded
+    // Helena -> Marcos follow is shared fixture data of other suites, so it is put back at the end of this test.
+    const [seededFollow] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.social_follows
+       where tenant_id = ${labTenantId}::uuid and follower_user_id = ${userIds.helena}::uuid
+         and followee_user_id = ${userIds.marcos}::uuid`;
     const block = await request('/v1/blocks', tokens.marcos, json({ userId: userIds.helena }));
     expect(block.status).toBe(200);
 
@@ -1534,6 +1540,12 @@ describe('10 visibility', () => {
       method: 'DELETE',
     });
     expect(unblock.status).toBe(200);
+    if (seededFollow?.n === 1) {
+      await adminSql`
+        insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+        values (${labTenantId}::uuid, ${userIds.helena}::uuid, ${userIds.marcos}::uuid)
+        on conflict do nothing`;
+    }
     expect((await listOf(tokens.marcos)).items.map((item) => item.id)).toContain(id);
     expect((await request(`/v1/communities/${id}`, tokens.marcos)).status).toBe(200);
   });

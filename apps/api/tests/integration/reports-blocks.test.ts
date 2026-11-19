@@ -331,6 +331,13 @@ const sansRequestId = async (res: Response) => {
 };
 
 describe("member blocks and the blocker's reads (NATIVE-33)", () => {
+  // The blocker's follow of the author, the edge that carries the author's member post to the blocker's Explorar.
+  async function followAuthor(): Promise<void> {
+    await adminSql`
+      insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+      values (${ids.tenant}::uuid, ${ids.third}::uuid, ${ids.author}::uuid)
+      on conflict do nothing`;
+  }
   const fx = { orgPost: '', communityPost: '', memberPost: '', adminPost: '', replyRoot: '' };
   const comments = { byAuthor: '', rootByReporter: '', replyByAuthor: '', byThird: '' };
   let community = '';
@@ -368,10 +375,7 @@ describe("member blocks and the blocker's reads (NATIVE-33)", () => {
     community = comm?.id ?? '';
 
     // The blocker follows the author, so the author's member post reaches the blocker's Explorar.
-    await adminSql`
-      insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
-      values (${ids.tenant}::uuid, ${ids.third}::uuid, ${ids.author}::uuid)
-      on conflict do nothing`;
+    await followAuthor();
 
     // Three posts the AUTHOR wrote: tenant-wide, in a community, and a followers-only member post (the V2 shape).
     const insertPost = async (label: string, visibility: string, communityId: string | null) => {
@@ -475,6 +479,10 @@ describe("member blocks and the blocker's reads (NATIVE-33)", () => {
       replies: await replyIds(token, comments.rootByReporter),
     });
 
+    // The blocks of the test above cleared the follow (Phase 11 D-724: a member block deletes the follows both ways
+    // and unblocking restores nothing), so the follow that carries the member post to Explorar is set again.
+    await followAuthor();
+
     // Positive controls first: before the block the blocker sees all of it.
     const before = await readAll(tokens.third);
     expect(before.main).toContain(fx.orgPost);
@@ -492,7 +500,9 @@ describe("member blocks and the blocker's reads (NATIVE-33)", () => {
     expect(hidden.explorar).not.toContain(fx.memberPost);
     expect(hidden.community).not.toContain(fx.communityPost);
     expect(hidden.orgDetail).toBe(404);
-    expect(hidden.memberDetail).toBe(404);
+    // The member post is followers-only and the block took the follow with it (Phase 11 D-724), so the blocker now meets
+    // the followers-only gate (403) before the viewer-block 404; either way the post is not readable for the blocker.
+    expect([403, 404]).toContain(hidden.memberDetail);
     expect(hidden.roots).not.toContain(comments.byAuthor);
     expect(hidden.replies).not.toContain(comments.replyByAuthor);
     // What is NOT the author's stays: the blocker's own comment and the reporter's root.
@@ -513,6 +523,12 @@ describe("member blocks and the blocker's reads (NATIVE-33)", () => {
     expect(blockedSelf.roots).toContain(comments.byAuthor);
 
     expect((await del(`/v1/blocks/${ids.author}`, tokens.third)).status).toBe(200);
+    // D-724: the block took the follow with it and the unblock does not bring it back; the member follows again by choice.
+    const [gone] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.social_follows
+       where tenant_id = ${ids.tenant}::uuid and follower_user_id = ${ids.third}::uuid and followee_user_id = ${ids.author}::uuid`;
+    expect(gone?.n).toBe(0);
+    await followAuthor();
     const restored = await readAll(tokens.third);
     expect(restored.main).toContain(fx.orgPost);
     expect(restored.explorar).toContain(fx.memberPost);
