@@ -589,7 +589,7 @@ describe('send versus block', () => {
     });
     try {
       let answeredAt = 0;
-      const blocking = blockUser(a.token, b.userId).then((res) => {
+      const blocking = Promise.resolve(blockUser(a.token, b.userId)).then((res) => {
         answeredAt = performance.now();
         return res;
       });
@@ -651,11 +651,11 @@ describe('send versus block', () => {
     let sent: Response | undefined;
     let blocked: Response | undefined;
     try {
-      const sending = sendDirect(a, b.membershipId, 'Corrida').then((res) => {
+      const sending = Promise.resolve(sendDirect(a, b.membershipId, 'Corrida')).then((res) => {
         sent = res;
         return res;
       });
-      const blocking = blockUser(b.token, a.userId).then((res) => {
+      const blocking = Promise.resolve(blockUser(b.token, a.userId)).then((res) => {
         blocked = res;
         return res;
       });

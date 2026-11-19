@@ -66,6 +66,28 @@ New contracts, all strict and all NEW (no existing response schema gained a requ
 `DIRECT_COMPOSER_STATES`, `directSendInputSchema`, `directWithParamsSchema`, `directWithAnswerSchema`,
 `directSendResultSchema`.
 
+### Voice in a direct conversation (Phase 11, plan 12)
+
+`POST /v1/chat/direct/voice-messages` `{ toMembershipId, mediaId }` (strict, `directVoiceSendInputSchema`) answers
+`201 { conversationId, created, message }` with the same guards as the text send (`requireModule('social')` and
+`chat.direct`). Nothing of the voice machinery is rebuilt: it is the support voice send's order over the shipped
+`storedVoiceMessage` (the idempotent read of the caller's own message for that asset), `assertVoiceUsable` and
+`insertMessage` with `{ kind: 'voice', mediaAssetId }`, with the pair opened by the same `app.direct_conversation_open`
+as text. `message.body` is the empty string and `message.voice` carries the asset id and the SERVER-MEASURED duration; no
+client duration is accepted.
+
+- The asset is asked BEFORE the pair (`voice_invalid`, `voice_not_ready`, the 12.5 words), so a refusal for the asset never
+  reveals a block; a pair the database closed (`DM001`) is the same `409 CONFLICT { chat: 'direct_closed' }` body as text and
+  the take stays unused (the orphan sweep retires it).
+- Idempotent per take: the same `mediaId` again answers the stored message with `created: false` and emits nothing; the loser
+  of two concurrent sends hits `chat_messages_tenant_media_asset_uq` (`23505`) and re-reads in a NEW transaction.
+  `chat.message_sent` (ids only) is emitted after commit and only by the call that stored the message.
+- Only the two participants play the recording (`GET /v1/media/{id}/original`, the gate `app.chat_asset_hidden` over the
+  readable policy); a third member, `admin_tenant` and `support_tenant` get the bare 404 BEFORE any report. The staff reply
+  routes stay support-only (a direct conversation id is the bare 404).
+
+Contract added: `directVoiceSendInputSchema`. `assetIndexViolated` and `insertedMessage` are now exported from `service.ts`.
+
 ### Conversas list, bubble count and conversation detail (Phase 11, plan 10)
 
 The reading half of the direct API (CHAT-06, CHAT-07), behind the same two guards as the send and always
@@ -288,7 +310,8 @@ For the Phase 11 planner:
 
 - Phase 11 must list "voice in direct chats" in its acceptance and must NOT plan the recorder, the player, the media
   kind or the message model again: it passes the `voice` bundle to the shared `ChatComposer`, reuses `MessageBubble`
-  and `VoicePlayer`, and adds its own send routes for a recording (the two routes of Phase 12.5 are support-only).
+  and `VoicePlayer`, and adds its own send routes for a recording (the two routes of Phase 12.5 are support-only; the
+  direct one is `POST /v1/chat/direct/voice-messages`, Phase 11 plan 12).
 - The staff of a direct conversation are not participants and cannot open its audio: the read gate lets in only the
   uploader and the people who can read the message through the chat policies, and the support-staff clause of the
   insert policy covers `kind = 'support'` only.

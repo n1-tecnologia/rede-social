@@ -5,7 +5,7 @@ import { subscribe } from '@rede-social/core/server/events/bus';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import type { DirectSendResult } from '@rede-social/module-chat/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { caseKit, post, removeThrowaways } from './chat-case-fixtures';
+import { caseKit, post, removeThrowaways, request } from './chat-case-fixtures';
 import { processingVoiceAsset, readyVoiceAsset, removeVoiceRows } from './chat-voice-fixtures';
 import {
   blockUser,
@@ -324,5 +324,63 @@ suite('direct voice tracer', () => {
     } finally {
       await restore();
     }
+  });
+});
+
+suite('direct voice staff negatives', () => {
+  it('5. D-846, D-859: staff cannot reach a direct conversation: the voice reply, the text reply and both reads are the bare 404 of an unknown id, and nothing is stored', async () => {
+    const { tokens } = await caseKit();
+    const a = await voiceMember('vs5a');
+    const b = await voiceMember('vs5b');
+    const mediaId = await readyVoiceAsset(a.token, 'voice-2s.webm');
+    const sent = await sendDirectVoice(a, b.membershipId, mediaId);
+    expect(sent.status).toBe(201);
+    const { conversationId } = (await sent.json()) as DirectSendResult;
+    const unknown = randomUUID();
+
+    /** The refusal text of an answer with the per-call `requestId` taken out. */
+    const bare = async (res: Response): Promise<string> => {
+      expect(res.status).toBe(404);
+      const { error } = (await res.json()) as Envelope & { error: { requestId?: string } };
+      const { requestId: _requestId, ...rest } = error;
+      expect(rest.code).toBe('NOT_FOUND');
+      expect(Object.hasOwn(rest, 'details')).toBe(false);
+      return JSON.stringify(rest);
+    };
+
+    for (const [label, token] of [
+      ['support_tenant', tokens.demoSupport],
+      ['admin_tenant', tokens.demoAdmin],
+    ] as const) {
+      const staffTake = await readyVoiceAsset(token, 'voice-2s.webm');
+      const calls: [string, (id: string) => Promise<Response> | Response][] = [
+        [
+          'voice reply',
+          (id) =>
+            post(`/v1/chat/conversations/${id}/voice-messages`, token, { mediaId: staffTake }),
+        ],
+        [
+          'text reply',
+          (id) => post(`/v1/chat/conversations/${id}/messages`, token, { body: 'Oi, equipe' }),
+        ],
+        ['message read', (id) => request(`/v1/chat/conversations/${id}/messages`, token)],
+        ['detail read', (id) => request(`/v1/chat/conversations/${id}`, token)],
+      ];
+      for (const [call, run] of calls) {
+        expect(await bare(await run(conversationId)), `${label} ${call}`).toBe(
+          await bare(await run(unknown)),
+        );
+      }
+      // The take was never touched and the pair's history is the one message of A.
+      expect(await messageCountOf(staffTake), label).toBe(0);
+    }
+    const [held] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.chat_messages where conversation_id = ${conversationId}::uuid`;
+    expect(held?.n).toBe(1);
+
+    // The positive control: the participant reads the same conversation through the same generic route.
+    const own = await readMessages(b, conversationId);
+    expect(own.status).toBe(200);
+    expect(await pairRows(a, b)).toEqual({ conversations: 1, messages: 1 });
   });
 });
