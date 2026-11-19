@@ -13,6 +13,7 @@ import {
   SOCIAL_MAX_PHOTOS_PER_POST,
   SOCIAL_MAX_VIDEO_BYTES,
   SOCIAL_MAX_VIDEO_SECONDS,
+  SOCIAL_NOTIFICATION_KINDS,
   SOCIAL_SETTINGS_DEFAULTS,
   socialListItemSchema,
   socialListPageSchema,
@@ -102,6 +103,25 @@ describe('memberSocialProfileSchema (FOLLOW-04, EP-40, EP-41)', () => {
       false,
     );
   });
+
+  // 11-11 (D-722): the three facts are OPTIONAL keys on the same strict shape, so the new web tolerates the old API
+  // and the old web still parses the new answer's old keys.
+  it('accepts the three optional facts and still parses without them', () => {
+    const withFacts = { ...social, canFollow: true, canMessage: false, blockedByViewer: false };
+    expect(memberSocialProfileSchema.parse(withFacts)).toEqual(withFacts);
+    expect(memberSocialProfileSchema.safeParse(social).success).toBe(true);
+    expect(memberSocialProfileSchema.safeParse({ ...social, canFollow: true }).success).toBe(true);
+  });
+
+  it('rejects a fact that is not a boolean and any "blocked me" key (T-11-03)', () => {
+    expect(memberSocialProfileSchema.safeParse({ ...social, canFollow: 'yes' }).success).toBe(
+      false,
+    );
+    expect(memberSocialProfileSchema.safeParse({ ...social, blockedMe: true }).success).toBe(false);
+    expect(memberSocialProfileSchema.safeParse({ ...social, blockedByTarget: true }).success).toBe(
+      false,
+    );
+  });
 });
 
 describe('the base memberProfileSchema stays D-45 (EP-40)', () => {
@@ -149,6 +169,26 @@ describe('followStateBodySchema (batch state)', () => {
     };
     expect(followStateSchema.parse(body)).toEqual(body);
     expect(followStateSchema.safeParse({ items: [{ membershipId: ID }] }).success).toBe(false);
+  });
+
+  it('followStateSchema takes the three optional facts per item and refuses any other key', () => {
+    const body = {
+      items: [
+        {
+          membershipId: ID,
+          following: false,
+          canFollow: true,
+          canMessage: true,
+          blockedByViewer: false,
+        },
+      ],
+    };
+    expect(followStateSchema.parse(body)).toEqual(body);
+    expect(
+      followStateSchema.safeParse({
+        items: [{ membershipId: ID, following: false, blockedMe: true }],
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -340,5 +380,11 @@ describe('communities.maxPerMember (D-710)', () => {
         .success,
     ).toBe(false);
     expect(socialSettingsAnswerSchema.safeParse({ media: answer.media }).success).toBe(false);
+  });
+});
+
+describe('SOCIAL_NOTIFICATION_KINDS (D-727)', () => {
+  it('is exactly the one kind a follow produces', () => {
+    expect(SOCIAL_NOTIFICATION_KINDS).toEqual({ followed: 'social.followed' });
   });
 });

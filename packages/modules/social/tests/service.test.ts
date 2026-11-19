@@ -1,3 +1,4 @@
+import type { DomainEventRecord } from '@rede-social/contracts';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,7 +19,7 @@ const ctx = {
   tenantId: '44444444-4444-4444-8444-444444444444',
   role: 'member' as const,
   requestId: 'req-1',
-  events: [],
+  events: [] as DomainEventRecord[],
 };
 
 const lane = vi.hoisted(() => ({ results: [] as unknown[][], executed: 0 }));
@@ -32,11 +33,14 @@ vi.mock('@rede-social/core/db/tenant-tx', () => ({
     }),
 }));
 
-const { followMember, unfollowMember } = await import('../server/service');
+const { followMember, followState, getMemberSocial, unfollowMember } = await import(
+  '../server/service'
+);
 
 beforeEach(() => {
   lane.results = [];
   lane.executed = 0;
+  ctx.events.length = 0;
 });
 
 describe('followMember (D-467)', () => {
@@ -73,6 +77,38 @@ describe('followMember (D-467)', () => {
     expect(lane.executed).toBe(3);
   });
 
+  // 11-11 (D-727): the event is ids only, queued once and ONLY when the insert created a row.
+  it('queues social.followed with ids only when the insert created a row', async () => {
+    lane.results = [
+      [{ user_id: TARGET_USER }],
+      [{ id: 'row' }],
+      [{ counts: { followers: 1, following: 0 } }],
+    ];
+    await followMember(ctx, TARGET_MEMBERSHIP);
+    expect(ctx.events).toHaveLength(1);
+    expect(ctx.events[0]?.name).toBe('social.followed');
+    expect(ctx.events[0]?.payload).toEqual({
+      tenantId: ctx.tenantId,
+      followerUserId: ME,
+      followeeUserId: TARGET_USER,
+    });
+  });
+
+  it('queues nothing for a repeat PUT (the insert answered no row)', async () => {
+    lane.results = [[{ user_id: TARGET_USER }], [], [{ counts: { followers: 1, following: 0 } }]];
+    await expect(followMember(ctx, TARGET_MEMBERSHIP)).resolves.toEqual({
+      following: true,
+      followerCount: 1,
+    });
+    expect(ctx.events).toHaveLength(0);
+  });
+
+  it('queues nothing when the target is refused (a blocked pair is the lookup answering no row)', async () => {
+    lane.results = [[]];
+    await expect(followMember(ctx, TARGET_MEMBERSHIP)).rejects.toBeInstanceOf(ApiError);
+    expect(ctx.events).toHaveLength(0);
+  });
+
   it('answers the bare 404 when the target stopped being a live member after the insert', async () => {
     lane.results = [[{ user_id: TARGET_USER }], [], [{ counts: null }]];
     const refusal = await followMember(ctx, TARGET_MEMBERSHIP).catch((error: unknown) => error);
@@ -107,5 +143,85 @@ describe('unfollowMember (EP-33)', () => {
       followerCount: 0,
     });
     expect(lane.executed).toBe(1);
+  });
+});
+
+describe('the profile facts (11-11, D-722)', () => {
+  it('followState answers the three facts per item from the statement’s columns', async () => {
+    lane.results = [
+      [
+        {
+          membership_id: TARGET_MEMBERSHIP,
+          following: true,
+          can_interact: true,
+          blocked_by_viewer: false,
+        },
+        { membership_id: ME, following: false, can_interact: false, blocked_by_viewer: true },
+      ],
+    ];
+    await expect(followState(ctx, [TARGET_MEMBERSHIP, ME])).resolves.toEqual({
+      items: [
+        {
+          membershipId: TARGET_MEMBERSHIP,
+          following: true,
+          canFollow: true,
+          canMessage: true,
+          blockedByViewer: false,
+        },
+        {
+          membershipId: ME,
+          following: false,
+          canFollow: false,
+          canMessage: false,
+          blockedByViewer: true,
+        },
+      ],
+    });
+  });
+
+  it('getMemberSocial offers both to an unblocked member and shows blockedByViewer to the blocker only', async () => {
+    const counts = [{ counts: { followers: 2, following: 1 } }];
+    lane.results = [
+      [{ user_id: TARGET_USER }],
+      counts,
+      [{ following: false, blocked_between: false, blocked_by_viewer: false }],
+    ];
+    await expect(getMemberSocial(ctx, TARGET_MEMBERSHIP)).resolves.toMatchObject({
+      canFollow: true,
+      canMessage: true,
+      blockedByViewer: false,
+    });
+    lane.results = [
+      [{ user_id: TARGET_USER }],
+      counts,
+      [{ following: false, blocked_between: true, blocked_by_viewer: true }],
+    ];
+    await expect(getMemberSocial(ctx, TARGET_MEMBERSHIP)).resolves.toMatchObject({
+      canFollow: false,
+      canMessage: false,
+      blockedByViewer: true,
+    });
+    // The blocked member: blocked between the two, but the viewer is not the blocker.
+    lane.results = [
+      [{ user_id: TARGET_USER }],
+      counts,
+      [{ following: false, blocked_between: true, blocked_by_viewer: false }],
+    ];
+    await expect(getMemberSocial(ctx, TARGET_MEMBERSHIP)).resolves.toMatchObject({
+      canFollow: false,
+      canMessage: false,
+      blockedByViewer: false,
+    });
+  });
+
+  it('getMemberSocial answers the three facts false for the caller’s own membership, without the extra statement', async () => {
+    lane.results = [[{ user_id: ME }], [{ counts: { followers: 0, following: 0 } }]];
+    await expect(getMemberSocial(ctx, TARGET_MEMBERSHIP)).resolves.toMatchObject({
+      self: true,
+      canFollow: false,
+      canMessage: false,
+      blockedByViewer: false,
+    });
+    expect(lane.executed).toBe(2);
   });
 });

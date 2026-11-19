@@ -113,9 +113,32 @@ export const followStateBodySchema = z
   .strict();
 export type FollowStateBody = z.infer<typeof followStateBodySchema>;
 
+/**
+ * 11-11 (D-722, CHAT-07): the three profile FACTS a screen reads to decide what to offer, shared by the follow state
+ * item and the social profile below. They are OPTIONAL keys appended to the shipped strict shapes, so a web built
+ * before this plan still parses an answer that carries them, and a web built after tolerates an older API that does
+ * not. The API always sends all three.
+ *
+ * - `canFollow`: the caller may start following this member. True only for a live `member` who is not the caller and
+ *   has no block either way with them.
+ * - `canMessage`: the SOCIAL half of "may write to them" (same conditions); the web composes it with the `chat.direct`
+ *   permission, which this package does not know.
+ * - `blockedByViewer`: true ONLY for the blocker looking at the blocked member (`app.is_blocked_by_viewer`), so the
+ *   screen can show "Desbloquear". There is deliberately NO "blocked me" flag: the blocked member's answer is
+ *   `canFollow: false, canMessage: false, blockedByViewer: false`, the same words a pair that simply cannot interact
+ *   gets (T-11-03).
+ */
+export const memberFactFields = {
+  canFollow: z.boolean().optional(),
+  canMessage: z.boolean().optional(),
+  blockedByViewer: z.boolean().optional(),
+};
+
 export const followStateSchema = z
   .object({
-    items: z.array(z.object({ membershipId: z.uuid(), following: z.boolean() }).strict()),
+    items: z.array(
+      z.object({ membershipId: z.uuid(), following: z.boolean(), ...memberFactFields }).strict(),
+    ),
   })
   .strict();
 export type FollowState = z.infer<typeof followStateSchema>;
@@ -124,7 +147,8 @@ export type FollowState = z.infer<typeof followStateSchema>;
  * `GET /v1/social/members/{membershipId}` (FOLLOW-04): the SOCIAL variant of another member's profile,
  * a separate shape on purpose. The base `memberProfileSchema` (`@rede-social/contracts/profiles`)
  * stays `.strict()` and unchanged (D-45), so a role or a count can never ride on it. Exactly these
- * five keys, `.strict()`, so the shape cannot drift between the API and the web (EP-41).
+ * five keys plus the three optional facts (11-11), `.strict()`, so the shape cannot drift between the API and the web
+ * (EP-41).
  *
  * `self` is true when the id is the caller's own membership; then `viewerFollows` is false.
  */
@@ -135,9 +159,36 @@ export const memberSocialProfileSchema = z
     followingCount: z.number().int().min(0),
     viewerFollows: z.boolean(),
     self: z.boolean(),
+    ...memberFactFields,
   })
   .strict();
 export type MemberSocialProfile = z.infer<typeof memberSocialProfileSchema>;
+
+/**
+ * 11-11 (D-727): the notification kind this module produces, `<module>.<kind>`. Stored as a string in
+ * `notifications.kind` and rendered by the web's registry, so it is append-only like every kind (D-448). One kind
+ * today: "começou a te seguir", sent once per ordered pair, to the bell only, never pushed.
+ */
+export const SOCIAL_NOTIFICATION_KINDS = { followed: 'social.followed' } as const;
+export type SocialNotificationKind =
+  (typeof SOCIAL_NOTIFICATION_KINDS)[keyof typeof SOCIAL_NOTIFICATION_KINDS];
+
+/**
+ * `social.followed` (D-727), emitted after the commit of the transaction that CREATED a follow row (never for a
+ * repeat of an existing one). Ids only (T-04-05): the follower's display name, avatar and membership id are read by
+ * the source in the worker. Declaration-merged into the kernel's `EventMap`, the feed's style.
+ */
+export interface SocialFollowed {
+  tenantId: string;
+  followerUserId: string;
+  followeeUserId: string;
+}
+
+declare module '@rede-social/contracts' {
+  interface EventMap {
+    'social.followed': SocialFollowed;
+  }
+}
 
 const MIB = 1024 * 1024;
 

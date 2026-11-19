@@ -1,5 +1,6 @@
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { emit } from '@rede-social/core/server/events/bus';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
@@ -16,6 +17,8 @@ import type {
 const log = moduleLogger('module-social');
 
 type Ctx = Pick<RequestContext, 'userId' | 'tenantId' | 'role' | 'requestId'>;
+/** `followMember` queues the `social.followed` event on the request context, so it needs `events` too. */
+type EmitCtx = Ctx & Pick<RequestContext, 'events'>;
 
 /**
  * The social module's service (09-02: the follow graph and its reads). Every function is ONE `withTenantTx`, so
@@ -50,6 +53,17 @@ async function countsOf(tx: Tx, membershipId: string): Promise<Counts | null> {
   return rows[0]?.counts ?? null;
 }
 
+/**
+ * The three profile facts of one target (11-11, D-722), as the screens read them. `canFollow` and `canMessage` are the
+ * same social question today (a live `member` who is not the caller and shares no block with them), kept as two names
+ * because the web composes the second with the `chat.direct` permission and a later plan may split them.
+ * `blockedByViewer` is true ONLY for the blocker. A blocked member's own answer is all false, the words a pair that
+ * simply cannot interact gets, so no field says "blocked me" (T-11-03).
+ */
+type Facts = { canFollow: boolean; canMessage: boolean; blockedByViewer: boolean };
+
+const NO_FACTS: Facts = { canFollow: false, canMessage: false, blockedByViewer: false };
+
 /** Postgres' SQLSTATE walked out of whatever the driver wrapped the error in (communities' shape). */
 function pgCode(error: unknown): string | null {
   const seen = new Set<unknown>();
@@ -79,13 +93,16 @@ function pgCode(error: unknown): string | null {
  * (4) Read the count back through the definer; `null` there means the target stopped being a live
  * member after all, which is the bare 404 again.
  */
-export async function followMember(ctx: Ctx, membershipId: string): Promise<FollowResult> {
+export async function followMember(ctx: EmitCtx, membershipId: string): Promise<FollowResult> {
   try {
-    const result = await withTenantTx(ctx, async (tx) => {
+    const { result, followeeUserId, created } = await withTenantTx(ctx, async (tx) => {
+      // D-724: a blocked pair (either direction) is the same miss as an unknown, staff or removed target. The
+      // predicate is a plain `and` beside `LIVE_MEMBER`, so there is no new code and no oracle (T-11-03).
       const target = await tx.execute<{ user_id: string }>(sql`
         select m.user_id
           from memberships m
          where m.id = ${membershipId}::uuid and ${LIVE_MEMBER}
+           and not app.members_blocked_between(m.user_id)
          limit 1`);
       const row = target[0];
       if (!row) throw new ApiError(404, 'NOT_FOUND');
@@ -93,17 +110,33 @@ export async function followMember(ctx: Ctx, membershipId: string): Promise<Foll
         throw new ApiError(400, 'VALIDATION_FAILED', { follow: 'self_follow' });
       }
 
-      await tx.execute(sql`
+      const inserted = await tx.execute<{ id: string }>(sql`
         insert into social_follows (tenant_id, follower_user_id, followee_user_id)
         select app.tenant_id(), ${ctx.userId}::uuid, m.user_id
           from memberships m
          where m.id = ${membershipId}::uuid and ${LIVE_MEMBER}
-        on conflict (tenant_id, follower_user_id, followee_user_id) do nothing`);
+           and not app.members_blocked_between(m.user_id)
+        on conflict (tenant_id, follower_user_id, followee_user_id) do nothing
+        returning id`);
 
       const counts = await countsOf(tx, membershipId);
       if (!counts) throw new ApiError(404, 'NOT_FOUND');
-      return { following: true, followerCount: counts.followers } satisfies FollowResult;
+      return {
+        result: { following: true, followerCount: counts.followers } satisfies FollowResult,
+        followeeUserId: row.user_id,
+        // `returning` answers a row ONLY when this call created the follow: a repeat PUT answers none.
+        created: inserted.length > 0,
+      };
     });
+    // D-727: queued after the transaction resolved, and ONLY when a row was created, so a repeat PUT tells nobody.
+    // Ids only; the fan-out reads the rest in the worker.
+    if (created) {
+      emit(ctx, 'social.followed', {
+        tenantId: ctx.tenantId,
+        followerUserId: ctx.userId,
+        followeeUserId,
+      });
+    }
     log.info(
       {
         event: 'social.follow',
@@ -112,13 +145,16 @@ export async function followMember(ctx: Ctx, membershipId: string): Promise<Foll
         requestId: ctx.requestId,
         membershipId,
         followerCount: result.followerCount,
+        created,
       },
       'member followed',
     );
     return result;
   } catch (error) {
     // The insert policy refused a statement the guard had let through: `social` was turned off, or
-    // the role changed, between the guard and the write. That is D-483's answer, not a 500.
+    // the role changed, between the guard and the write. That is D-483's answer, not a 500. (A block
+    // between the lookup and the insert refuses with 42501 too: the lookup above is the answer a blocked
+    // caller normally sees, and this is only the backstop of the policy, plan 07.)
     if (pgCode(error) === '42501') throw new ApiError(404, 'MODULE_DISABLED');
     throw error;
   }
@@ -275,9 +311,21 @@ export async function followState(ctx: Ctx, membershipIds: string[]): Promise<Fo
   // communities `unnest` precedent), never spliced into the statement.
   const asked = `{${membershipIds.join(',')}}`;
   const rows = await withTenantTx(ctx, (tx) =>
-    tx.execute<{ membership_id: string; following: boolean }>(sql`
+    tx.execute<{
+      membership_id: string;
+      following: boolean;
+      can_interact: boolean;
+      blocked_by_viewer: boolean;
+    }>(sql`
       select o.id as membership_id,
-             (f.id is not null) as following
+             (f.id is not null) as following,
+             coalesce(
+               m.id is not null
+                 and m.user_id <> ${ctx.userId}::uuid
+                 and not app.members_blocked_between(m.user_id),
+               false) as can_interact,
+             coalesce(m.id is not null and app.is_blocked_by_viewer(m.user_id), false)
+               as blocked_by_viewer
         from unnest(${asked}::uuid[]) with ordinality as o(id, ord)
         left join memberships m on m.id = o.id and ${LIVE_MEMBER}
         left join social_follows f
@@ -298,7 +346,13 @@ export async function followState(ctx: Ctx, membershipIds: string[]): Promise<Fo
     'follow state read',
   );
   return {
-    items: rows.map((row) => ({ membershipId: row.membership_id, following: row.following })),
+    items: rows.map((row) => ({
+      membershipId: row.membership_id,
+      following: row.following,
+      canFollow: row.can_interact,
+      canMessage: row.can_interact,
+      blockedByViewer: row.blocked_by_viewer,
+    })),
   };
 }
 
@@ -324,14 +378,30 @@ export async function getMemberSocial(
     if (!counts) throw new ApiError(404, 'NOT_FOUND');
     const self = row.user_id === ctx.userId;
     let viewerFollows = false;
+    let facts: Facts = NO_FACTS;
     if (!self) {
-      const mine = await tx.execute<{ following: boolean }>(sql`
+      const mine = await tx.execute<{
+        following: boolean;
+        blocked_between: boolean;
+        blocked_by_viewer: boolean;
+      }>(sql`
         select exists (
-          select 1 from social_follows f
-           where f.tenant_id = app.tenant_id()
-             and f.follower_user_id = ${ctx.userId}::uuid
-             and f.followee_user_id = ${row.user_id}::uuid) as following`);
+                 select 1 from social_follows f
+                  where f.tenant_id = app.tenant_id()
+                    and f.follower_user_id = ${ctx.userId}::uuid
+                    and f.followee_user_id = ${row.user_id}::uuid) as following,
+               app.members_blocked_between(${row.user_id}::uuid) as blocked_between,
+               app.is_blocked_by_viewer(${row.user_id}::uuid) as blocked_by_viewer`);
       viewerFollows = mine[0]?.following ?? false;
+      // D-722: the target is a live member (the lookup above) and not the caller, so the only thing left to
+      // refuse is a block in either direction. The blocked member reads the all-false words of a pair that cannot
+      // interact; only the blocker reads `blockedByViewer`.
+      const open = mine[0]?.blocked_between === false;
+      facts = {
+        canFollow: open,
+        canMessage: open,
+        blockedByViewer: mine[0]?.blocked_by_viewer === true,
+      };
     }
     return {
       membershipId,
@@ -339,6 +409,7 @@ export async function getMemberSocial(
       followingCount: counts.following,
       viewerFollows,
       self,
+      ...facts,
     } satisfies MemberSocialProfile;
   });
   log.info(

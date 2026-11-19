@@ -57,8 +57,11 @@ permission, the database by the member role.
 
 ## Events emitted
 
-None. A follow and a member post notify nobody (D-476); the one notice of the phase, the author's
-comment notice, is a notification source of the feed module.
+- `social.followed` (11-11, D-727): `followMember` queues it after the commit of the transaction that CREATED a follow
+  row, never for a repeat PUT. The payload is ids only: `tenantId`, `followerUserId`, `followeeUserId`. It exists so the
+  followee's bell can say "começou a te seguir"; it is declared against `@rede-social/contracts` in `./contracts`.
+
+A member post notifies nobody (D-476); the author's comment notice is a notification source of the feed module.
 
 ## Events consumed
 
@@ -81,6 +84,7 @@ only through a confirmation that points at the "Ativar a Rede social" go-live it
 - `@rede-social/core/db/tenant-tx`
 - `@rede-social/core/server/auth/context`
 - `@rede-social/core/server/auth/require-auth`
+- `@rede-social/core/server/events/bus`
 - `@rede-social/core/server/http/api-error`
 - `@rede-social/core/server/logging`
 - `@rede-social/core/server/modules/manifest`
@@ -89,7 +93,7 @@ only through a confirmation that points at the "Ativar a Rede social" go-live it
 - `@rede-social/core/server/rbac/permissions`
 
 The list above is the imports of this package: `withTenantTx` (every read and write in the caller's
-tenant lane), `paging` (the keyset cursor of the two private lists), `requireAuth`, `requireModule`
+tenant lane), `events/bus` (`emit` of `social.followed`), `paging` (the keyset cursor of the two private lists), `requireAuth`, `requireModule`
 and `requirePermission` (the route guards), and the `social-gate` constants the follow policies and
 the seam bodies share. The member media policy seam (`packages/core/server/media/member-policy.ts`)
 is a kernel contract this package does not import: the host fills it.
