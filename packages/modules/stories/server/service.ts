@@ -1680,8 +1680,26 @@ export async function deleteStoryComment(
   commentId: string,
   opts: { canModerate: boolean },
 ): Promise<void> {
-  const moderated = await withTenantTx(ctx, async (tx) => {
-    const locked = await tx.execute<{ id: string; author_user_id: string; body: string }>(sql`
+  const moderated = await withTenantTx(ctx, (tx) =>
+    deleteStoryCommentInTx(tx, ctx, storyId, commentId, opts),
+  );
+  announceStoryCommentRemoved(ctx, storyId, commentId, moderated);
+}
+
+/**
+ * The body of `deleteStoryComment`, in the CALLER's tenant transaction (11-05, D-732): the locked read with the
+ * `story_id` predicate, the soft delete with `deleted_by_user_id` and the `comment_removed` row of subject
+ * `story_comment`. The route (through `deleteStoryComment`) and a report's removal (`removeReportedStoryCommentInTx`)
+ * both call it. Returns whether the removal was a moderator's. A 404 writes nothing.
+ */
+async function deleteStoryCommentInTx(
+  tx: Tx,
+  ctx: RequestContext,
+  storyId: string,
+  commentId: string,
+  opts: { canModerate: boolean },
+): Promise<boolean> {
+  const locked = await tx.execute<{ id: string; author_user_id: string; body: string }>(sql`
       select id, author_user_id, body
         from feed_comments
        where id = ${commentId}::uuid
@@ -1689,32 +1707,39 @@ export async function deleteStoryComment(
          and story_id = ${storyId}::uuid
          and deleted_at is null
        for update`);
-    const target = locked[0];
-    const isAuthor = target?.author_user_id === ctx.userId;
-    if (!target || (!isAuthor && !opts.canModerate)) throw new ApiError(404, 'NOT_FOUND');
+  const target = locked[0];
+  const isAuthor = target?.author_user_id === ctx.userId;
+  if (!target || (!isAuthor && !opts.canModerate)) throw new ApiError(404, 'NOT_FOUND');
 
-    const removed = await tx.execute<{ id: string }>(sql`
+  const removed = await tx.execute<{ id: string }>(sql`
       update feed_comments
          set deleted_at = now(),
              deleted_by_user_id = ${ctx.userId}::uuid
        where id = ${commentId}::uuid
          and deleted_at is null
       returning id`);
-    if (!removed[0]) throw new ApiError(404, 'NOT_FOUND');
+  if (!removed[0]) throw new ApiError(404, 'NOT_FOUND');
 
-    if (!isAuthor) {
-      await recordModerationAction(tx, ctx, {
-        action: 'comment_removed',
-        targetUserId: target.author_user_id,
-        subjectType: 'story_comment',
-        subjectId: commentId,
-        excerptSource: target.body,
-        reason: null,
-      });
-    }
-    return !isAuthor;
-  });
+  if (!isAuthor) {
+    await recordModerationAction(tx, ctx, {
+      action: 'comment_removed',
+      targetUserId: target.author_user_id,
+      subjectType: 'story_comment',
+      subjectId: commentId,
+      excerptSource: target.body,
+      reason: null,
+    });
+  }
+  return !isAuthor;
+}
 
+/** The event and the log line of a story comment removal; the caller runs it once the transaction has committed. */
+function announceStoryCommentRemoved(
+  ctx: RequestContext,
+  storyId: string,
+  commentId: string,
+  moderated: boolean,
+): void {
   emit(ctx, 'story.comment_deleted', {
     tenantId: ctx.tenantId,
     storyId,
@@ -1735,6 +1760,48 @@ export async function deleteStoryComment(
     },
     'story comment soft-deleted',
   );
+}
+
+/**
+ * Removes the story comment a report points at, in the CALLER's tenant transaction (11-05, D-732, T-11-11). The
+ * comment's story id is read first (the route carries it in its path, a report carries only the comment id); a
+ * missing, already removed or non-story comment is `already_gone`. A live comment the caller may not take (no
+ * `canModerate`, not the author) is `not_removable` and nothing is written.
+ */
+export async function removeReportedStoryCommentInTx(
+  tx: Tx,
+  ctx: RequestContext,
+  commentId: string,
+  flags: { canModerate: boolean },
+): Promise<ReportedRemoval> {
+  const liveStory = async (): Promise<string | null> => {
+    const live = await tx.execute<{ story_id: string }>(sql`
+      select story_id from feed_comments
+       where tenant_id = ${ctx.tenantId}::uuid
+         and id = ${commentId}::uuid
+         and story_id is not null
+         and deleted_at is null`);
+    return live[0]?.story_id ?? null;
+  };
+  const storyId = await liveStory();
+  if (!storyId) return { outcome: 'already_gone', afterCommit: NOTHING_AFTER_COMMIT };
+
+  try {
+    const moderated = await deleteStoryCommentInTx(tx, ctx, storyId, commentId, flags);
+    return {
+      outcome: 'removed',
+      afterCommit: () => announceStoryCommentRemoved(ctx, storyId, commentId, moderated),
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      // A removal that landed between the read and the lock leaves nothing to take.
+      if ((await liveStory()) === null) {
+        return { outcome: 'already_gone', afterCommit: NOTHING_AFTER_COMMIT };
+      }
+      return { outcome: 'not_removable', afterCommit: NOTHING_AFTER_COMMIT };
+    }
+    throw error;
+  }
 }
 
 /* ── Highlights (05.2) ────────────────────────────────────────────────────────────────────────── */

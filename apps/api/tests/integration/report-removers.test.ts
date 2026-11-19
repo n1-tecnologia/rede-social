@@ -5,8 +5,14 @@ import {
   communityCreateLimiter,
   storyPublishLimiter,
 } from '@rede-social/core/server/safety/limits';
+import type { CommunitySummary } from '@rede-social/module-communities/contracts';
+import { archiveReportedCommunityInTx } from '@rede-social/module-communities/server';
 import type { StorySummary } from '@rede-social/module-stories/contracts';
-import { type ReportedRemoval, removeReportedStoryInTx } from '@rede-social/module-stories/server';
+import {
+  type ReportedRemoval,
+  removeReportedStoryCommentInTx,
+  removeReportedStoryInTx,
+} from '@rede-social/module-stories/server';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -14,6 +20,7 @@ import {
   HOSTS,
   SEED_PASSWORD,
   signInAs,
+  withCommunitiesEnabled,
   withSocialEnabled,
   withStoriesEnabled,
 } from './setup';
@@ -29,11 +36,12 @@ import {
  */
 
 const PREFIX = 'Teste 11-05 rem ';
-const tokens = { helena: '', labAdmin: '' };
+const tokens = { helena: '', marcos: '', labAdmin: '' };
 const userIds = { helena: '', marcos: '', labAdmin: '', labSupport: '' };
 let labTenantId = '';
 let restoreSocial: () => Promise<void> = async () => {};
 let restoreStories: () => Promise<void> = async () => {};
+let restoreCommunities: () => Promise<void> = async () => {};
 
 const request = (path: string, token: string, init: RequestInit = {}) =>
   api.request(path, {
@@ -96,6 +104,8 @@ async function resolveWith<A extends unknown[]>(
 const createdAssets: string[] = [];
 
 async function sweep(): Promise<void> {
+  await adminSql`delete from public.feed_posts where community_id in (select id from public.communities where name like ${`${PREFIX}%`})`;
+  await adminSql`delete from public.communities where name like ${`${PREFIX}%`}`;
   await adminSql`delete from public.stories where caption like ${`${PREFIX}%`}`;
   for (const id of createdAssets.splice(0)) {
     await adminSql`delete from public.stories where media_asset_id = ${id}::uuid`;
@@ -135,7 +145,9 @@ beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
   restoreSocial = await withSocialEnabled('lab');
   restoreStories = await withStoriesEnabled('lab');
+  restoreCommunities = await withCommunitiesEnabled('lab');
   tokens.helena = await signInAs('helena.kuster@rede-lab.local', SEED_PASSWORD);
+  tokens.marcos = await signInAs('marcos.vinicius@rede-lab.local', SEED_PASSWORD);
   tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
   userIds.helena = await userOf('helena.kuster@rede-lab.local');
   userIds.marcos = await userOf('marcos.vinicius@rede-lab.local');
@@ -155,6 +167,7 @@ beforeEach(() => {
 
 afterAll(async () => {
   await sweep();
+  await restoreCommunities();
   await restoreStories();
   await restoreSocial();
   await adminSql.end();
@@ -241,5 +254,244 @@ describe('story remover tracer', () => {
     });
     expect(across.outcome).toBe('already_gone');
     expect(await storyDeletedAt(foreign?.id ?? '')).toBeNull();
+  });
+});
+
+describe('story comment remover', () => {
+  beforeEach(async () => {
+    await sweep();
+  });
+
+  /** An organization story every member can read, and one comment written by `token` on it. */
+  async function commentFixture(token: string, label: string) {
+    const story = await publishStory(tokens.labAdmin, userIds.labAdmin, `${PREFIX}${label}`);
+    const res = await request(`/v1/stories/${story.id}/comments`, token, {
+      method: 'POST',
+      body: JSON.stringify({ body: `${PREFIX}comentário ${label}` }),
+    });
+    expect(res.status, 'POST story comment').toBe(201);
+    const comment = (await res.json()) as { id: string };
+    return { storyId: story.id, commentId: comment.id };
+  }
+
+  const commentDeletedAt = async (id: string) => {
+    const [row] = await adminSql<{ deleted_at: string | null }[]>`
+      select deleted_at::text from public.feed_comments where id = ${id}::uuid`;
+    return row?.deleted_at ?? null;
+  };
+
+  it('1. a moderator’s removal writes ONE comment_removed row of subject story_comment naming the author; the event waits for afterCommit', async () => {
+    const { commentId } = await commentFixture(tokens.helena, 'um');
+    const done = await resolveWith(adminCtx(), removeReportedStoryCommentInTx, commentId, {
+      canModerate: true,
+    });
+    expect(done.outcome).toBe('removed');
+    expect(await commentDeletedAt(commentId)).not.toBeNull();
+    expect(done.eventsBeforeCommitHook).toEqual([]);
+    expect(done.events).toEqual(['story.comment_deleted']);
+    const rows = await logRowsFor(commentId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      action: 'comment_removed',
+      subject_type: 'story_comment',
+      actor_user_id: userIds.labAdmin,
+      target_user_id: userIds.helena,
+    });
+  });
+
+  it('2. idempotent: a repeat is already_gone with no second row and no event; an unknown id is already_gone', async () => {
+    const { commentId } = await commentFixture(tokens.helena, 'dois');
+    const flags = { canModerate: true };
+    expect(
+      (await resolveWith(adminCtx(), removeReportedStoryCommentInTx, commentId, flags)).outcome,
+    ).toBe('removed');
+    const again = await resolveWith(adminCtx(), removeReportedStoryCommentInTx, commentId, flags);
+    expect(again.outcome).toBe('already_gone');
+    expect(again.events).toEqual([]);
+    expect(await logRowsFor(commentId)).toHaveLength(1);
+
+    const unknown = await resolveWith(
+      adminCtx(),
+      removeReportedStoryCommentInTx,
+      '00000000-0000-4000-8000-000000000b06',
+      flags,
+    );
+    expect(unknown.outcome).toBe('already_gone');
+  });
+
+  it('3. adjacency: the author removing their own comment writes no row; without canModerate another member’s comment is not_removable and stays', async () => {
+    const own = await commentFixture(tokens.helena, 'própria');
+    const byAuthor = await resolveWith(
+      ctxFor(userIds.helena, 'member'),
+      removeReportedStoryCommentInTx,
+      own.commentId,
+      { canModerate: false },
+    );
+    expect(byAuthor.outcome).toBe('removed');
+    expect(await logRowsFor(own.commentId)).toHaveLength(0);
+
+    const other = await commentFixture(tokens.helena, 'de outra pessoa');
+    const refused = await resolveWith(
+      ctxFor(userIds.marcos, 'member'),
+      removeReportedStoryCommentInTx,
+      other.commentId,
+      { canModerate: false },
+    );
+    expect(refused.outcome).toBe('not_removable');
+    expect(refused.events).toEqual([]);
+    expect(await commentDeletedAt(other.commentId)).toBeNull();
+    expect(await logRowsFor(other.commentId)).toHaveLength(0);
+  });
+
+  it('4. a comment of a feed POST is not a story comment: already_gone, and nothing is touched', async () => {
+    const [post] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, author_user_id, caption, visibility)
+      values (${labTenantId}::uuid, ${userIds.labAdmin}::uuid, ${`${PREFIX}post`}, 'tenant')
+      returning id`;
+    const [comment] = await adminSql<{ id: string }[]>`
+      insert into public.feed_comments (tenant_id, author_user_id, post_id, body)
+      values (${labTenantId}::uuid, ${userIds.helena}::uuid, ${post?.id ?? ''}::uuid, ${`${PREFIX}c`})
+      returning id`;
+    try {
+      const done = await resolveWith(
+        adminCtx(),
+        removeReportedStoryCommentInTx,
+        comment?.id ?? '',
+        {
+          canModerate: true,
+        },
+      );
+      expect(done.outcome).toBe('already_gone');
+      expect(await commentDeletedAt(comment?.id ?? '')).toBeNull();
+    } finally {
+      await adminSql`delete from public.feed_comments where post_id = ${post?.id ?? ''}::uuid`;
+      await adminSql`delete from public.feed_posts where id = ${post?.id ?? ''}::uuid`;
+    }
+  });
+});
+
+describe('community remover', () => {
+  beforeEach(async () => {
+    await sweep();
+  });
+
+  const create = async (token: string, name: string, description = ''): Promise<string> => {
+    const res = await request('/v1/communities', token, {
+      method: 'POST',
+      body: JSON.stringify({ name, description }),
+    });
+    expect(res.status, `POST /v1/communities ${name}`).toBe(201);
+    return ((await res.json()) as CommunitySummary).id;
+  };
+  const statusOf = async (id: string) => {
+    const [row] = await adminSql<{ status: string }[]>`
+      select status from public.communities where id = ${id}::uuid`;
+    return row?.status;
+  };
+
+  it('1. a moderator archiving a MEMBER community writes ONE community_archived row naming the creator and the name; it leaves the active list and still opens read-only', async () => {
+    const id = await create(tokens.helena, `${PREFIX}Corrida`, 'descrição que não vai ao log');
+    const done = await resolveWith(adminCtx(), archiveReportedCommunityInTx, id, {
+      canManage: true,
+    });
+    expect(done.outcome).toBe('removed');
+    expect(await statusOf(id)).toBe('archived');
+    expect(done.eventsBeforeCommitHook).toEqual([]);
+    expect(done.events).toEqual(['community.archived']);
+    const rows = await logRowsFor(id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      action: 'community_archived',
+      subject_type: 'community',
+      actor_user_id: userIds.labAdmin,
+      target_user_id: userIds.helena,
+      excerpt: `${PREFIX}Corrida`,
+    });
+
+    const active = await request('/v1/communities?limit=100', tokens.helena);
+    const items = ((await active.json()) as { items: { id: string }[] }).items;
+    expect(items.map((item) => item.id)).not.toContain(id);
+    const opened = await request(`/v1/communities/${id}`, tokens.helena);
+    expect(opened.status).toBe(200);
+    expect(((await opened.json()) as CommunitySummary).status).toBe('archived');
+  });
+
+  it('2. idempotent: archiving again, or an unknown id, is already_gone with no second row and no event', async () => {
+    const id = await create(tokens.helena, `${PREFIX}repetida`);
+    const flags = { canManage: true };
+    expect((await resolveWith(adminCtx(), archiveReportedCommunityInTx, id, flags)).outcome).toBe(
+      'removed',
+    );
+    const again = await resolveWith(adminCtx(), archiveReportedCommunityInTx, id, flags);
+    expect(again.outcome).toBe('already_gone');
+    expect(again.events).toEqual([]);
+    expect(await logRowsFor(id)).toHaveLength(1);
+
+    const unknown = await resolveWith(
+      adminCtx(),
+      archiveReportedCommunityInTx,
+      '00000000-0000-4000-8000-000000000b07',
+      flags,
+    );
+    expect(unknown.outcome).toBe('already_gone');
+  });
+
+  it('3. adjacency: the creator archiving their own community and a moderator archiving an organization community write NO row', async () => {
+    const own = await create(tokens.helena, `${PREFIX}própria`);
+    const byCreator = await resolveWith(
+      ctxFor(userIds.helena, 'member'),
+      archiveReportedCommunityInTx,
+      own,
+      { canManage: false },
+    );
+    expect(byCreator.outcome).toBe('removed');
+    expect(await statusOf(own)).toBe('archived');
+    expect(await logRowsFor(own)).toHaveLength(0);
+
+    const org = await create(tokens.labAdmin, `${PREFIX}da organização`);
+    const byModerator = await resolveWith(adminCtx(), archiveReportedCommunityInTx, org, {
+      canManage: true,
+    });
+    expect(byModerator.outcome).toBe('removed');
+    expect(await statusOf(org)).toBe('archived');
+    expect(await logRowsFor(org)).toHaveLength(0);
+  });
+
+  it('4. refusal: a caller without communities.community.manage who is not the creator gets not_removable and nothing changes', async () => {
+    const id = await create(tokens.helena, `${PREFIX}alheia`);
+    const refused = await resolveWith(
+      ctxFor(userIds.marcos, 'member'),
+      archiveReportedCommunityInTx,
+      id,
+      { canManage: false },
+    );
+    expect(refused.outcome).toBe('not_removable');
+    expect(refused.events).toEqual([]);
+    expect(await statusOf(id)).toBe('active');
+    expect(await logRowsFor(id)).toHaveLength(0);
+  });
+
+  it('5. empty: a community with no description archives without error and logs the name only; another tenant’s community is already_gone', async () => {
+    const id = await create(tokens.helena, `${PREFIX}sem descrição`);
+    const done = await resolveWith(adminCtx(), archiveReportedCommunityInTx, id, {
+      canManage: true,
+    });
+    expect(done.outcome).toBe('removed');
+    expect((await logRowsFor(id))[0]?.excerpt).toBe(`${PREFIX}sem descrição`);
+
+    const [demo] = await adminSql<
+      { id: string }[]
+    >`select id from public.tenants where slug = 'rede-demo'`;
+    const demoAdmin = await userOf('admin@rede-demo.local');
+    const [foreign] = await adminSql<{ id: string }[]>`
+      insert into public.communities (tenant_id, created_by_user_id, name, slug, kind)
+      values (${demo?.id ?? ''}::uuid, ${demoAdmin}::uuid, ${`${PREFIX}de outro tenant`},
+              ${`teste-11-05-rem-${Date.now()}`}, 'organization')
+      returning id`;
+    const across = await resolveWith(adminCtx(), archiveReportedCommunityInTx, foreign?.id ?? '', {
+      canManage: true,
+    });
+    expect(across.outcome).toBe('already_gone');
+    expect(await statusOf(foreign?.id ?? '')).toBe('active');
   });
 });

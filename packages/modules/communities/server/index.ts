@@ -5,10 +5,12 @@
  */
 export { communitiesRoutes } from './routes';
 export {
+  archiveReportedCommunityInTx,
   createCommunity,
   deleteCommunity,
   getCommunity,
   listCommunities,
+  type ReportedRemoval,
   reorderCommunities,
   slugify,
   updateCommunity,

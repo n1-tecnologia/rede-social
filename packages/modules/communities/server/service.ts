@@ -1277,6 +1277,130 @@ export async function updateCommunity(
 }
 
 /**
+ * What a report's `remove_content` resolution did (11-05, D-732) — the SAME structural type the feed declares for
+ * `removeReportedContentInTx` (13-14), restated here because a module never imports another module's server code;
+ * the API tier hands these functions to the kernel's `resolveReport`:
+ *  - `removed`: the community was live and the moderation path took it down, with its log row in the caller's
+ *    transaction;
+ *  - `already_gone`: nothing to take down (archived or removed since the report was filed), no second log row;
+ *  - `not_removable`: it is live but the caller may not take it, so the resolution is refused.
+ * `afterCommit` is the event half; the caller runs it once the transaction has committed.
+ */
+export type ReportedRemoval = {
+  outcome: 'removed' | 'already_gone' | 'not_removable';
+  afterCommit: () => void;
+};
+
+const NOTHING_AFTER_COMMIT = () => undefined;
+
+/**
+ * Archives the community a report points at, in the CALLER's tenant transaction (11-05, D-732, T-11-11). The
+ * kernel's report resolution cannot import this module, so the API tier hands it this function.
+ *
+ * `canManage` is `communities.community.manage`, read by the API route through `permissionsForRequest` BEFORE
+ * it opened the transaction (the pool is `max: 5`); this function never reads a permission itself. It is the
+ * same permission the shipped `updateCommunity` asks of a moderator, so the report path takes exactly what the
+ * moderation path takes: a holder takes any community; a creator takes their own member community.
+ *
+ * A missing, removed or ALREADY archived community is `already_gone` (nothing to take down, no second row, no
+ * event). A live community the caller may not archive is `not_removable` and nothing is written. The row is
+ * locked `for update of c`, so two writers queue and exactly one transition happens; the status write and the
+ * `community_archived` row (through the shipped `logModeratorAction`: member community, creator not the actor,
+ * `canManage`) are in the caller's transaction, so a failing log insert rolls the archive back.
+ *
+ * Nothing but `status` and `updated_at` is written: the name, description and cover are untouched, and the
+ * archived community still opens read-only.
+ */
+export async function archiveReportedCommunityInTx(
+  tx: Tx,
+  ctx: RequestContext,
+  communityId: string,
+  flags: { canManage: boolean },
+): Promise<ReportedRemoval> {
+  const gone: ReportedRemoval = { outcome: 'already_gone', afterCommit: NOTHING_AFTER_COMMIT };
+
+  // A plain read first (the member lane's update policy hides a row it does not own from a locking read).
+  const seen = await tx.execute<{
+    status: CommunityStatus;
+    kind: CommunityKind;
+    created_by_user_id: string | null;
+  }>(sql`
+    select c.status, c.kind, c.created_by_user_id
+      from communities c
+     where c.tenant_id = ${ctx.tenantId}::uuid
+       and c.id = ${communityId}::uuid
+       and c.deleted_at is null
+     limit 1`);
+  const first = seen[0];
+  if (!first || first.status === 'archived') return gone;
+
+  const ownMember = first.kind === 'member' && first.created_by_user_id === ctx.userId;
+  if (!flags.canManage && !ownMember) {
+    return { outcome: 'not_removable', afterCommit: NOTHING_AFTER_COMMIT };
+  }
+
+  const locked = await tx.execute<{
+    name: string;
+    status: CommunityStatus;
+    kind: CommunityKind;
+    created_by_user_id: string | null;
+  }>(sql`
+    select c.name, c.status, c.kind, c.created_by_user_id
+      from communities c
+     where c.tenant_id = ${ctx.tenantId}::uuid
+       and c.id = ${communityId}::uuid
+       and c.deleted_at is null
+     limit 1
+       for update of c`);
+  const target = locked[0];
+  // Gone or archived by a writer that held the lock first.
+  if (!target || target.status === 'archived') return gone;
+
+  await tx.execute(sql`
+    update communities
+       set status = 'archived',
+           updated_at = now()
+     where tenant_id = ${ctx.tenantId}::uuid
+       and id = ${communityId}::uuid
+       and deleted_at is null`);
+
+  await logModeratorAction(
+    tx,
+    ctx,
+    'community_archived',
+    {
+      id: communityId,
+      name: target.name,
+      kind: target.kind,
+      createdBy: target.created_by_user_id,
+    },
+    flags.canManage,
+  );
+
+  return {
+    outcome: 'removed',
+    afterCommit: () => {
+      emit(ctx, 'community.archived', {
+        tenantId: ctx.tenantId,
+        communityId,
+        actorUserId: ctx.userId,
+      });
+      log.info(
+        {
+          event: 'communities.archived',
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          requestId: ctx.requestId,
+          communityId,
+          reported: true,
+        },
+        'community archived by a report',
+      );
+    },
+  };
+}
+
+/**
  * `PUT /v1/communities/order` (2026-10-03) — the admin's order of the ACTIVE list, written as
  * `position = 1..n` in the order the request names. The `reorderHighlights` shape, retargeted.
  *

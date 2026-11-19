@@ -11,5 +11,6 @@ export {
   listOwnStories,
   publishStory,
   type ReportedRemoval,
+  removeReportedStoryCommentInTx,
   removeReportedStoryInTx,
 } from './service';

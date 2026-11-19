@@ -7,8 +7,9 @@ import * as server from '../server/index';
  * type-check time; this pin makes it break here first, with the reason in the test name.
  */
 describe('stories report removers (D-732)', () => {
-  it('1. the server entry exports the story remover as a function', () => {
+  it('1. the server entry exports the story and the story comment removers as functions', () => {
     expect(typeof server.removeReportedStoryInTx).toBe('function');
+    expect(typeof server.removeReportedStoryCommentInTx).toBe('function');
   });
 
   it('2. the shipped public removals are still exported beside them', () => {
