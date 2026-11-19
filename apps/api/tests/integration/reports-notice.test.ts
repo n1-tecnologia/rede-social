@@ -1,12 +1,15 @@
 import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 import { sqlClient } from '@rede-social/core/db';
+import { sourcesFor } from '@rede-social/core/server/notifications/source';
 import { reportLimiter } from '@rede-social/core/server/safety/limits';
+import type { NotificationPage } from '@rede-social/module-notifications/contracts';
 import {
   fakePushOutbox,
   notificationsFanoutJob,
   resetFakePushOutbox,
 } from '@rede-social/module-notifications/server';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { MODULE_REGISTRY } from '../../src/modules/registry';
 import { caseKit, removeThrowaways, request, throwawayMember } from './chat-case-fixtures';
 import {
   directMember,
@@ -18,6 +21,7 @@ import {
 } from './direct-fixtures';
 import {
   adminSql,
+  api,
   HOSTS,
   notificationJobsOf,
   pushSendJobsOf,
@@ -589,3 +593,98 @@ describe('tenant isolation', () => {
        where name in ('notifications.fanout', 'notifications.push-send') and state = 'created'`;
   });
 });
+
+describe('bell counters and list', () => {
+  it("the administrator's counter counts the new row, the list returns it with empty facts, marking it seen clears the bell, and the 90-day prune treats it like any row (D-231)", async () => {
+    const reporter = await directMember('rn-bell-rep');
+    const author = await directMember('rn-bell-aut');
+    const unseenBefore = await adminSql<{ id: string }[]>`
+      select id::text as id from public.notifications
+       where user_id = ${ids.admin}::uuid and tenant_id = ${ids.demo}::uuid and seen_at is null`;
+    const counterBefore = await unreadCounter();
+
+    const reportId = await fileReport(
+      reporter.token,
+      'feed_post',
+      await seedPost(author.userId, 'sino'),
+    );
+    await play(reportId);
+
+    expect(await unreadCounter()).toBe(counterBefore + 1);
+    const unread = await listFor('unread');
+    const row = unread.items.find((item) => item.subject.id === reportId);
+    expect(row).toMatchObject({
+      kind: KIND,
+      subject: { type: 'report', id: reportId },
+      object: null,
+      actor: null,
+      facts: {},
+      preview: null,
+      removed: false,
+      seenAt: null,
+      readAt: null,
+    });
+
+    // Seen clears the bell and leaves the row unread (D-230); read moves it to the read section.
+    const seen = await request('/v1/notifications/seen', tokens.admin, { method: 'POST' });
+    expect(seen.status).toBe(204);
+    expect(await unreadCounter()).toBe(0);
+    expect((await listFor('unread')).items.some((item) => item.id === row?.id)).toBe(true);
+    const read = await request(`/v1/notifications/${row?.id}/read`, tokens.admin, {
+      method: 'POST',
+    });
+    expect(read.status).toBe(204);
+    expect((await listFor('read')).items.some((item) => item.id === row?.id)).toBe(true);
+    // The rows other files left unseen before this case are put back as they were.
+    if (unseenBefore.length > 0) {
+      await adminSql`
+        update public.notifications set seen_at = null
+         where id = any(${unseenBefore.map((r) => r.id)}::uuid[])`;
+    }
+
+    // The prune: an old row of the kind goes, the fresh one stays.
+    const oldReport = randomUUID();
+    await adminSql`
+      insert into public.notifications
+        (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id, created_at)
+      values (${ids.demo}::uuid, ${ids.admin}::uuid, ${KIND}, ${`${KIND}:${oldReport}`}, 'report',
+              ${oldReport}::uuid, now() - interval '90 days 1 minute')`;
+    await adminSql`select app.notifications_prune(100000)`;
+    expect(await noticesOf(oldReport)).toEqual([]);
+    expect((await noticesOf(reportId)).length).toBeGreaterThan(0);
+  });
+});
+
+describe('unchanged', () => {
+  it('every source the manifests declare is still registered once, and report.created has exactly the notice of this module', () => {
+    expect(api).toBeDefined();
+    let declared = 0;
+    for (const manifest of Object.values(MODULE_REGISTRY)) {
+      for (const source of manifest?.notificationSources ?? []) {
+        declared += 1;
+        expect(sourcesFor(source.event), source.event).toContain(source);
+      }
+    }
+    expect(declared).toBeGreaterThan(1);
+    const forReport = sourcesFor('report.created');
+    expect(forReport).toHaveLength(1);
+    expect(forReport[0]).toBe(MODULE_REGISTRY.notifications?.notificationSources?.[0]);
+    // The shipped kinds keep their producers: a feed post, a story, a follow and a chat message.
+    for (const event of ['post.published', 'social.followed', 'chat.message_sent'] as const) {
+      expect(sourcesFor(event).length, event).toBeGreaterThan(0);
+    }
+  });
+});
+
+async function unreadCounter(): Promise<number> {
+  const res = await request('/v1/me/bootstrap', tokens.admin);
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { counters: { unreadNotifications: number } }).counters
+    .unreadNotifications;
+}
+
+async function listFor(section: 'unread' | 'read'): Promise<NotificationPage> {
+  const res = await request(`/v1/notifications?section=${section}&limit=50`, tokens.admin);
+  expect(res.status).toBe(200);
+  return (await res.json()) as NotificationPage;
+}
