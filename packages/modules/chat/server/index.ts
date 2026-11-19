@@ -16,7 +16,9 @@ export {
 } from './cases';
 export {
   directConversationOf,
+  getDirectDetail,
   getDirectWith,
+  listDirect,
   resolveDirectTarget,
   sendDirectMessage,
 } from './direct';

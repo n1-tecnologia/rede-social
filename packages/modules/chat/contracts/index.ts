@@ -606,6 +606,122 @@ export const directSendResultSchema = z
   .strict();
 export type DirectSendResult = z.infer<typeof directSendResultSchema>;
 
+/* ── Phase 11, plan 10: the Conversas list and the conversation detail (CHAT-06, CHAT-07; D-719, D-721..D-723) ───── */
+
+/** 20 conversations a page (D-719), the same size as the support inbox. */
+export const DIRECT_LIST_PAGE_SIZE = 20;
+
+/** The unread number of one conversation stops counting here; the web prints `99+` (D-719). */
+export const DIRECT_UNREAD_CAP = 100;
+
+/**
+ * `GET /v1/chat/direct?cursor=&limit=`: a keyset page. An over-long cursor is dropped (page 1) and a bad `limit`
+ * degrades to the page size, never a 500 (the inbox query's posture); an unknown key is the plain `VALIDATION_FAILED`.
+ */
+export const directListQuerySchema = z
+  .object({
+    cursor: z
+      .string()
+      .optional()
+      .transform((value) =>
+        value !== undefined && value.length > CHAT_MAX_CURSOR_LENGTH ? undefined : value,
+      ),
+    limit: z.coerce
+      .number()
+      .int()
+      .catch(DIRECT_LIST_PAGE_SIZE)
+      .transform((value) => Math.min(Math.max(value, 1), DIRECT_LIST_PAGE_SIZE))
+      .default(DIRECT_LIST_PAGE_SIZE),
+  })
+  .strict();
+export type DirectListQuery = z.infer<typeof directListQuerySchema>;
+
+/**
+ * The last message of a row, one line, as FACTS the host builds its words from: a text message is cut like the inbox
+ * preview; a recording carries its STORED length and `deleted: true` only once its asset is retired (D-868). `own` says
+ * whether the viewer wrote it. No author name, no side, no staff id.
+ */
+export const directPreviewSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('text'), text: z.string(), own: z.boolean() }).strict(),
+  z
+    .object({
+      kind: z.literal('voice'),
+      durationSeconds: z.int().min(1).max(CHAT_VOICE_MAX_SECONDS),
+      own: z.boolean(),
+      deleted: z.literal(true).optional(),
+    })
+    .strict(),
+]);
+export type DirectPreview = z.infer<typeof directPreviewSchema>;
+
+/**
+ * Who the other member of a direct conversation is. `removed` is the anonymised account (D-721): the row stays,
+ * read-only, with no id and no name. The key set is the same for every state, so nothing here tells a block apart.
+ */
+export const directOtherSchema = z
+  .object({
+    membershipId: z.uuid().nullable(),
+    displayName: z.string().nullable(),
+    avatarAssetId: z.uuid().nullable(),
+    removed: z.boolean(),
+  })
+  .strict();
+export type DirectOther = z.infer<typeof directOtherSchema>;
+
+/** One paired conversation of the viewer, newest activity first. A conversation with no message does not exist. */
+export const directListRowSchema = z
+  .object({
+    conversationId: z.uuid(),
+    other: directOtherSchema,
+    lastPreview: directPreviewSchema,
+    lastMessageAt: z.string(),
+    unreadCount: z.int().min(0).max(DIRECT_UNREAD_CAP),
+  })
+  .strict();
+export type DirectListRow = z.infer<typeof directListRowSchema>;
+
+/**
+ * The pinned support row (D-719): the preview of the last message of the member's most recent support conversation
+ * (null when they never wrote) and the shipped dot rule (the team wrote past the member's position in a case that is
+ * not closed). Never a staff id, an owner or a priority.
+ */
+export const directSupportSummarySchema = z
+  .object({ lastPreview: directPreviewSchema.nullable(), unread: z.boolean() })
+  .strict();
+export type DirectSupportSummary = z.infer<typeof directSupportSummarySchema>;
+
+/** `GET /v1/chat/direct`: the support summary on the FIRST page only, the rows, and the opaque next cursor. */
+export const directListAnswerSchema = z
+  .object({
+    support: directSupportSummarySchema.optional(),
+    rows: z.array(directListRowSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type DirectListAnswer = z.infer<typeof directListAnswerSchema>;
+
+/** `GET /v1/chat/direct/{conversationId}`: a strict path parameter; a malformed id is a 400 before any read. */
+export const directDetailParamsSchema = z.object({ conversationId: z.uuid() }).strict();
+export type DirectDetailParams = z.infer<typeof directDetailParamsSchema>;
+
+/**
+ * `GET /v1/chat/direct/{conversationId}` (D-722, D-723): what the screen of one conversation draws. `composer` is the ONLY
+ * block-derived fact and a finished enum (`removed`, then `blocker`, then `closed`, else `open`); `closed` carries no
+ * reason, date or name, and no field says "blocked me". `canBlock` is decided by the server (A-11-ROLE): the viewer is a
+ * member, the other is live and the viewer has not blocked them already. Positions are the viewer's own.
+ */
+export const directDetailSchema = z
+  .object({
+    conversationId: z.uuid(),
+    other: directOtherSchema,
+    composer: z.enum(DIRECT_COMPOSER_STATES),
+    canBlock: z.boolean(),
+    lastSeq: z.int().min(0),
+    lastReadSeq: z.int().min(0),
+  })
+  .strict();
+export type DirectDetail = z.infer<typeof directDetailSchema>;
+
 /** `POST /v1/chat/conversations/{id}/read`: the highest seq the reader has seen. */
 export const readInputSchema = z.object({ seq: z.int().min(0) }).strict();
 export type ReadInput = z.infer<typeof readInputSchema>;

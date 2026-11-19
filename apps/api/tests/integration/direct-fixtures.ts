@@ -160,6 +160,32 @@ export const sendDirect = (from: { token: string }, toMembershipId: string, body
 export const directWith = (from: { token: string }, membershipId: string) =>
   request(`/v1/chat/direct/with/${membershipId}`, from.token);
 
+/** `GET /v1/chat/direct` (the Conversas list), with an optional raw query string. */
+export const directList = (from: { token: string }, query = '') =>
+  request(`/v1/chat/direct${query}`, from.token);
+
+/** `GET /v1/chat/direct/{conversationId}` (the conversation detail with the composer). */
+export const directDetail = (from: { token: string }, conversationId: string) =>
+  request(`/v1/chat/direct/${conversationId}`, from.token);
+
+/** `POST /v1/chat/conversations/{id}/read`: the caller has seen the thread up to `seq`. */
+export const markRead = (from: { token: string }, conversationId: string, seq: number) =>
+  post(`/v1/chat/conversations/${conversationId}/read`, from.token, { seq });
+
+/** `GET /v1/chat/conversations/{id}/messages` (the kind-agnostic history read). */
+export const readMessages = (from: { token: string }, conversationId: string) =>
+  request(`/v1/chat/conversations/${conversationId}/messages`, from.token);
+
+/** The bootstrap counters of a caller (`GET /v1/me/bootstrap`). */
+export async function countersOf(from: {
+  token: string;
+}): Promise<{ unreadConversations: number; conversationsBadge?: string }> {
+  const res = await request('/v1/me/bootstrap', from.token);
+  return (
+    (await res.json()) as { counters: { unreadConversations: number; conversationsBadge?: string } }
+  ).counters;
+}
+
 /** The block of `blockedUserId` by the holder of `token` (`POST /v1/blocks`). */
 export const blockUser = (token: string, blockedUserId: string) =>
   post('/v1/blocks', token, { userId: blockedUserId });

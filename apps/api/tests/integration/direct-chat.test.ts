@@ -3,10 +3,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { caseKit, post, removeThrowaways, request } from './chat-case-fixtures';
 import {
   blockUser,
+  countersOf,
   directCountOf,
+  directList,
   directMember,
   directRowsOf,
   directWith,
+  markRead,
   removeDirectRows,
   resetDirectLimiters,
   sendDirect,
@@ -670,7 +673,12 @@ describe('direct support unchanged', () => {
         counters: Record<string, unknown>;
       }
     ).counters;
-    expect(countersAfter).toEqual(countersBefore);
+    // 11-10 (D-719): the support dot is untouched, but the bubble now counts the direct conversation too.
+    expect(countersAfter).toEqual({
+      ...countersBefore,
+      unreadConversations: Number(countersBefore.unreadConversations) + 1,
+      conversationsBadge: 'count',
+    });
 
     // The team's inbox does not list the direct conversation, and the member still sends to the team.
     const { tokens } = await caseKit();
@@ -694,5 +702,204 @@ describe('direct support unchanged', () => {
       },
     );
     expect(staffReply.status).toBe(404);
+  });
+});
+
+type ListPreview =
+  | { kind: 'text'; text: string; own: boolean }
+  | { kind: 'voice'; durationSeconds: number; own: boolean; deleted?: true };
+type ListRow = {
+  conversationId: string;
+  other: {
+    membershipId: string | null;
+    displayName: string | null;
+    avatarAssetId: string | null;
+    removed: boolean;
+  };
+  lastPreview: ListPreview;
+  lastMessageAt: string;
+  unreadCount: number;
+};
+type ListAnswer = {
+  support?: { lastPreview: ListPreview | null; unread: boolean };
+  rows: ListRow[];
+  nextCursor: string | null;
+};
+
+async function listOf(from: { token: string }, query = ''): Promise<ListAnswer> {
+  const res = await directList(from, query);
+  expect(res.status).toBe(200);
+  return (await res.json()) as ListAnswer;
+}
+
+describe('direct list tracer', () => {
+  it('1. the path: A writes, B reads the bubble, the support summary and the row, marks read, and both lists settle', async () => {
+    const a = await directMember('l1a', { displayName: 'Alice Lista' });
+    const b = await directMember('l1b', { displayName: 'Beto Lista' });
+    const sent = (await (await sendDirect(a, b.membershipId, 'Oi B')).json()) as SendBody;
+
+    expect(await countersOf(b)).toMatchObject({
+      unreadConversations: 1,
+      conversationsBadge: 'count',
+    });
+    const res = await directList(b);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const list = (await res.json()) as ListAnswer;
+    expect(Object.keys(list).sort()).toEqual(['nextCursor', 'rows', 'support']);
+    expect(list.support).toEqual({ lastPreview: null, unread: false });
+    expect(list.nextCursor).toBeNull();
+    expect(list.rows).toHaveLength(1);
+    const [row] = list.rows;
+    expect(Object.keys(row ?? {}).sort()).toEqual([
+      'conversationId',
+      'lastMessageAt',
+      'lastPreview',
+      'other',
+      'unreadCount',
+    ]);
+    expect(row).toMatchObject({
+      conversationId: sent.conversationId,
+      other: {
+        membershipId: a.membershipId,
+        displayName: 'Alice Lista',
+        avatarAssetId: null,
+        removed: false,
+      },
+      lastPreview: { kind: 'text', text: 'Oi B', own: false },
+      unreadCount: 1,
+    });
+
+    expect((await markRead(b, sent.conversationId, 1)).status).toBe(204);
+    expect(await countersOf(b)).toMatchObject({
+      unreadConversations: 0,
+      conversationsBadge: 'count',
+    });
+    expect((await listOf(b)).rows[0]).toMatchObject({ unreadCount: 0 });
+
+    const own = await listOf(a);
+    expect(own.rows).toHaveLength(1);
+    expect(own.rows[0]).toMatchObject({
+      other: { membershipId: b.membershipId, displayName: 'Beto Lista' },
+      lastPreview: { kind: 'text', text: 'Oi B', own: true },
+      unreadCount: 0,
+    });
+    expect(await countersOf(a)).toMatchObject({ unreadConversations: 0 });
+  });
+
+  it('2. paging and order: newest first, a tie broken by id desc, no repeat and no skip, a tampered cursor is page 1, support on page 1 only', async () => {
+    const a = await directMember('l2a');
+    const others = [
+      await directMember('l2b'),
+      await directMember('l2c'),
+      await directMember('l2d'),
+      await directMember('l2e'),
+    ];
+    const ids: string[] = [];
+    for (const other of others) {
+      const sent = (await (
+        await sendDirect(a, other.membershipId, `para ${other.displayName}`)
+      ).json()) as SendBody;
+      ids.push(sent.conversationId);
+    }
+    const [b, c, d, e] = ids as [string, string, string, string];
+    await adminSql`update public.chat_conversations set last_message_at = '2026-11-01T10:00:00Z' where id = ${b}::uuid`;
+    await adminSql`update public.chat_conversations set last_message_at = '2026-11-02T10:00:00Z' where id in (${c}::uuid, ${d}::uuid)`;
+    await adminSql`update public.chat_conversations set last_message_at = '2026-11-03T10:00:00Z' where id = ${e}::uuid`;
+    const tied = [c, d].sort().reverse();
+    const expected = [e, ...tied, b];
+
+    const full = await listOf(a);
+    expect(full.rows.map((row) => row.conversationId)).toEqual(expected);
+
+    const pageOne = await listOf(a, '?limit=2');
+    expect(pageOne.rows.map((row) => row.conversationId)).toEqual(expected.slice(0, 2));
+    expect(pageOne.nextCursor).not.toBeNull();
+    expect(pageOne.support).toBeDefined();
+    const pageTwo = await listOf(
+      a,
+      `?limit=2&cursor=${encodeURIComponent(pageOne.nextCursor ?? '')}`,
+    );
+    expect(pageTwo.rows.map((row) => row.conversationId)).toEqual(expected.slice(2, 4));
+    expect(pageTwo.nextCursor).toBeNull();
+    expect(pageTwo.support).toBeUndefined();
+
+    const forged = Buffer.from(JSON.stringify({ v: 1, n: '2026-13-45T99:99:99Z', id: e })).toString(
+      'base64url',
+    );
+    const tampered = await listOf(a, `?limit=2&cursor=${forged}`);
+    expect(tampered.rows.map((row) => row.conversationId)).toEqual(expected.slice(0, 2));
+    expect(tampered.support).toBeDefined();
+    const garbage = await listOf(a, '?limit=2&cursor=not-a-cursor');
+    expect(garbage.rows.map((row) => row.conversationId)).toEqual(expected.slice(0, 2));
+  });
+
+  it('3. unchanged: a caller without chat.direct keeps the dot, staff keep their count, and the new route is 404 or 403', async () => {
+    const { tokens } = await caseKit();
+    const m = await directMember('l3m');
+    await post('/v1/chat/support/messages', m.token, { body: 'Preciso de ajuda' });
+    // A member of the tenant WITHOUT social (restored at the end): the dot counter, no direct permission.
+    const restoreSocial = await setModule('demo', 'social', false);
+    try {
+      expect(await countersOf(m)).toMatchObject({
+        unreadConversations: 0,
+        conversationsBadge: 'dot',
+      });
+      const off = await directList(m);
+      expect(off.status).toBe(404);
+      expect(((await off.json()) as Envelope).error.code).toBe('MODULE_DISABLED');
+    } finally {
+      await restoreSocial();
+    }
+    // Staff: their shipped count (awaiting the team) and 403 on the member's list.
+    const staffCounters = await countersOf({ token: tokens.demoSupport });
+    expect(staffCounters.conversationsBadge).toBe('count');
+    expect((await directList({ token: tokens.demoSupport })).status).toBe(403);
+    expect((await directList({ token: tokens.demoAdmin })).status).toBe(403);
+  });
+
+  it('4. voice and removed: a recording previews with its stored length and `deleted` once retired; an anonymised member keeps the row, unnamed', async () => {
+    const a = await directMember('l4a', { displayName: 'Vera Voz' });
+    const b = await directMember('l4b', { displayName: 'Beto Removido' });
+    const text = (await (await sendDirect(a, b.membershipId, 'texto antes')).json()) as SendBody;
+    const { ids } = await caseKit();
+    const [asset] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets (tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds, ready_at)
+      values (${ids.demo}::uuid, ${a.userId}::uuid, 'audio', 'voice', 'ready', 'audio/mp4', 70, 7, now())
+      returning id::text as id`;
+    if (!asset) throw new Error('fixture');
+    await adminSql`
+      insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body, media_asset_id, voice_seconds)
+      select c.tenant_id, c.id, ${a.userId}::uuid, 'member', null, ${asset.id}::uuid, 7
+        from public.chat_conversations c where c.id = ${text.conversationId}::uuid`;
+    const voice = await listOf(b);
+    expect(voice.rows[0]?.lastPreview).toEqual({ kind: 'voice', durationSeconds: 7, own: false });
+    expect(voice.rows[0]?.unreadCount).toBe(2);
+    await adminSql`update public.media_assets set status = 'deleted', deleted_at = now() where id = ${asset.id}::uuid`;
+    const gone = await listOf(b);
+    expect(gone.rows[0]?.lastPreview).toEqual({
+      kind: 'voice',
+      durationSeconds: 7,
+      own: false,
+      deleted: true,
+    });
+
+    await adminSql`
+      update public.memberships
+         set deleted_at = now(), anonymised_at = now(),
+             deletion_requested_at = now() - interval '31 days', deletion_due_at = now() - interval '1 day'
+       where id = ${b.membershipId}::uuid`;
+    const removed = await listOf(a);
+    expect(removed.rows).toHaveLength(1);
+    expect(removed.rows[0]?.other).toEqual({
+      membershipId: null,
+      displayName: null,
+      avatarAssetId: null,
+      removed: true,
+    });
+    expect(removed.rows[0]?.conversationId).toBe(text.conversationId);
+    // The fixture asset goes with its message (the message holds the foreign key).
+    await adminSql`delete from public.chat_messages where media_asset_id = ${asset.id}::uuid`;
+    await adminSql`delete from public.media_assets where id = ${asset.id}::uuid`;
   });
 });

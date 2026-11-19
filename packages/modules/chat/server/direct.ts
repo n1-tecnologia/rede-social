@@ -1,8 +1,10 @@
+import { cutOnWord } from '@rede-social/contracts/text';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { emit } from '@rede-social/core/server/events/bus';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import { encodeCursor } from '@rede-social/core/server/paging';
 import {
   directConversationLimiter,
   directMessageLimiter,
@@ -10,13 +12,30 @@ import {
 } from '@rede-social/core/server/safety/limits';
 import { sqlstateOf } from '@rede-social/core/server/safety/sqlstate';
 import { sql } from 'drizzle-orm';
-import type {
-  DirectComposerState,
-  DirectSendInput,
-  DirectSendResult,
-  DirectWithAnswer,
+import {
+  CHAT_PREVIEW_GRAPHEMES,
+  DIRECT_UNREAD_CAP,
+  type DirectComposerState,
+  type DirectDetail,
+  type DirectListAnswer,
+  type DirectListQuery,
+  type DirectListRow,
+  type DirectOther,
+  type DirectPreview,
+  type DirectSendInput,
+  type DirectSendResult,
+  type DirectSupportSummary,
+  type DirectWithAnswer,
 } from '../contracts/index';
-import { bodyCheckViolated, insertMessage } from './service';
+import {
+  bodyCheckViolated,
+  CURSOR_NO_INSTANT,
+  decodeInstantCursor,
+  ISO_MICROSECONDS,
+  insertMessage,
+  memberSupportUnread,
+} from './service';
+import { voiceGoneSql } from './voice-sql';
 
 const log = moduleLogger('module-chat');
 
@@ -222,6 +241,263 @@ export async function getDirectWith(
         removed: false,
       },
       composer,
+    };
+  });
+}
+
+/* ── Phase 11, plan 10: the Conversas list and the conversation detail (CHAT-06, CHAT-07; D-719, D-721..D-723) ─── */
+
+/**
+ * The OTHER member of a paired conversation, from the caller's side: the pair user that is not the caller, read in the
+ * tenant lane. `removed` is an anonymised (or soft-deleted) account, or a membership the lane cannot see: the row stays,
+ * read-only, with no id, no name and no avatar (D-721). The avatar id is nulled when the asset is gone. One projection for
+ * the list and the detail, so the two never describe the same member differently.
+ */
+const otherMemberColumns = sql`
+           o.user_id as other_user_id,
+           (ms.id is null or ms.deleted_at is not null or ms.anonymised_at is not null) as other_removed,
+           case when ms.id is not null and ms.deleted_at is null and ms.anonymised_at is null then ms.id end
+             as other_membership_id,
+           case when ms.id is not null and ms.deleted_at is null and ms.anonymised_at is null
+                then mp.display_name end as other_display_name,
+           case when ms.id is not null and ms.deleted_at is null and ms.anonymised_at is null and a.id is not null
+                then mp.avatar_asset_id end as other_avatar_asset_id`;
+
+const otherMemberJoins = (ctx: RequestContext) => sql`
+      cross join lateral (
+        select case when c.direct_low_user_id = ${ctx.userId}::uuid
+                    then c.direct_high_user_id else c.direct_low_user_id end as user_id
+      ) o
+      left join memberships ms
+             on ms.tenant_id = c.tenant_id
+            and ms.user_id = o.user_id
+      left join member_profiles mp on mp.membership_id = ms.id
+      left join media_assets a on a.id = mp.avatar_asset_id and a.deleted_at is null`;
+
+type OtherMemberDbRow = {
+  other_user_id: string;
+  other_removed: boolean;
+  other_membership_id: string | null;
+  other_display_name: string | null;
+  other_avatar_asset_id: string | null;
+};
+
+const toOther = (row: OtherMemberDbRow): DirectOther => ({
+  membershipId: row.other_membership_id,
+  displayName: row.other_display_name,
+  avatarAssetId: row.other_avatar_asset_id,
+  removed: row.other_removed,
+});
+
+type PreviewDbRow = {
+  lm_body: string | null;
+  lm_voice_seconds: number | null;
+  lm_voice_gone: boolean | null;
+  lm_own: boolean;
+};
+
+/** The last live message of a conversation as a lateral read (a soft-deleted one is skipped, its seq stays taken). */
+const lastMessageLateral = (ctx: RequestContext, join: 'join' | 'left join') =>
+  sql`${sql.raw(join)} lateral (
+        select m.body,
+               m.voice_seconds::int as voice_seconds,
+               ${voiceGoneSql('m')} as voice_gone,
+               (m.author_user_id = ${ctx.userId}::uuid) as own
+          from chat_messages m
+         where m.tenant_id = c.tenant_id
+           and m.conversation_id = c.id
+           and m.deleted_at is null
+         order by m.seq desc
+         limit 1
+      ) lm on true`;
+
+const previewColumns = sql`
+           lm.body as lm_body,
+           lm.voice_seconds as lm_voice_seconds,
+           lm.voice_gone as lm_voice_gone,
+           lm.own as lm_own`;
+
+/** A recording is its stored length (and `deleted` once its asset is gone); a text is one line cut on a word. */
+const toPreview = (row: PreviewDbRow): DirectPreview =>
+  row.lm_voice_seconds === null
+    ? {
+        kind: 'text',
+        text: cutOnWord(row.lm_body ?? '', CHAT_PREVIEW_GRAPHEMES),
+        own: row.lm_own,
+      }
+    : {
+        kind: 'voice',
+        durationSeconds: Number(row.lm_voice_seconds),
+        own: row.lm_own,
+        ...(row.lm_voice_gone === true ? { deleted: true as const } : {}),
+      };
+
+type ListDbRow = OtherMemberDbRow &
+  PreviewDbRow & {
+    id: string;
+    last_message_at: string;
+    unread_count: number;
+  };
+
+/**
+ * The pinned support row of the Conversas list (D-719): the preview of the last live message of the member's most recent
+ * support conversation (null when they never wrote) and the SHIPPED dot rule, read by the same statement the bubble uses.
+ * No staff id, owner or priority is selected.
+ */
+async function supportSummaryOf(tx: Tx, ctx: RequestContext): Promise<DirectSupportSummary> {
+  const rows = await tx.execute<PreviewDbRow>(sql`
+    select ${previewColumns}
+      from chat_conversations c
+      ${lastMessageLateral(ctx, 'join')}
+     where c.tenant_id = ${ctx.tenantId}::uuid
+       and c.kind = 'support'
+       and c.created_by_user_id = ${ctx.userId}::uuid
+     order by c.last_message_at desc nulls last, c.id desc
+     limit 1`);
+  const row = rows[0];
+  return { lastPreview: row ? toPreview(row) : null, unread: await memberSupportUnread(tx, ctx) };
+}
+
+/**
+ * `GET /v1/chat/direct?cursor=&limit=` (CHAT-06, D-719, D-721): the Conversas list. The rows are the paired direct
+ * conversations the caller's LANE can read (the select policy already hides a pair with an administrator-blocked or removed
+ * member, and `social` off hides them all, so no extra predicate restates it: the list, the counter and the reads share
+ * ONE rule, T-11-25), newest activity first by `(last_message_at desc, id desc)`, 20 a page, keyset with the shipped
+ * instant-cursor guard (a forged cursor degrades to page 1, T-11-26) and an over-fetch of one. A conversation with no live
+ * message does not show. The first page also answers the support summary. A member block does NOT hide a row (the history
+ * stays, D-723): only the composer word of the detail changes.
+ */
+export async function listDirect(
+  ctx: RequestContext,
+  query: DirectListQuery,
+): Promise<DirectListAnswer> {
+  const limit = query.limit;
+  const decoded = decodeInstantCursor(query.cursor);
+  const after = decoded && decoded.n !== CURSOR_NO_INSTANT ? decoded : null;
+  const firstPage = after === null;
+  const keyset = after
+    ? sql`and (c.last_message_at, c.id) < (${after.n}::timestamptz, ${after.id}::uuid)`
+    : sql``;
+
+  const { rows, support } = await withTenantTx(ctx, async (tx) => {
+    const found = await tx.execute<ListDbRow>(sql`
+      select c.id,
+             to_char(c.last_message_at at time zone 'utc', ${ISO_MICROSECONDS}) as last_message_at,
+             ${otherMemberColumns},
+             ${previewColumns},
+             unread.n as unread_count
+        from chat_conversations c
+        join chat_participants p
+          on p.conversation_id = c.id
+         and p.tenant_id = c.tenant_id
+         and p.user_id = ${ctx.userId}::uuid
+        ${otherMemberJoins(ctx)}
+        ${lastMessageLateral(ctx, 'join')}
+        left join lateral (
+          select count(*)::int as n
+            from (
+              select 1
+                from chat_messages m
+               where m.tenant_id = c.tenant_id
+                 and m.conversation_id = c.id
+                 and m.deleted_at is null
+                 and m.seq > p.last_read_seq
+                 and m.author_user_id <> ${ctx.userId}::uuid
+               limit ${DIRECT_UNREAD_CAP}
+            ) capped
+        ) unread on true
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.kind = 'direct'
+         and c.direct_low_user_id is not null
+         and c.last_message_at is not null
+         ${keyset}
+       order by c.last_message_at desc, c.id desc
+       limit ${limit + 1}`);
+    return { rows: found, support: firstPage ? await supportSummaryOf(tx, ctx) : undefined };
+  });
+
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    rows.length > limit && last ? encodeCursor({ n: last.last_message_at, id: last.id }) : null;
+  log.info(
+    {
+      event: 'chat.direct_list',
+      tenantId: ctx.tenantId,
+      requestId: ctx.requestId,
+      limit,
+      returned: page.length,
+      hasNext: nextCursor !== null,
+    },
+    'direct conversations listed',
+  );
+  const items: DirectListRow[] = page.map((row) => ({
+    conversationId: row.id,
+    other: toOther(row),
+    lastPreview: toPreview(row),
+    lastMessageAt: row.last_message_at,
+    unreadCount: Math.min(Number(row.unread_count), DIRECT_UNREAD_CAP),
+  }));
+  return { ...(support ? { support } : {}), rows: items, nextCursor };
+}
+
+/**
+ * `GET /v1/chat/direct/{conversationId}` (CHAT-07, D-722, D-723, A-11-ROLE): what the screen of one conversation draws.
+ *
+ * The conversation is read through the lane (a miss, a conversation of another tenant, a support case, a pair the
+ * administrator hid or one the caller is not part of is ONE bare 404). The composer is the finished enum by the
+ * precedence `removed` (the other account is anonymised), `blocker` (`app.is_blocked_by_viewer`: the caller's OWN block),
+ * `closed` (`app.members_blocked_between`: a block either way, so the blocked side learns nothing from a row it cannot
+ * read), else `open`. `closed` carries no reason, date or name, and no key of the answer says "blocked me". `canBlock` is
+ * true only for a viewer whose role of record on the request is `member`, with a live other member the viewer has not
+ * blocked already: the web never compares a role, and the SQL definer of the block is not narrowed.
+ */
+export async function getDirectDetail(
+  ctx: RequestContext,
+  conversationId: string,
+): Promise<DirectDetail> {
+  return withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<
+      OtherMemberDbRow & {
+        id: string;
+        last_seq: number;
+        last_read_seq: number;
+        blocker: boolean;
+        closed: boolean;
+      }
+    >(sql`
+      select c.id,
+             c.last_seq::int as last_seq,
+             p.last_read_seq::int as last_read_seq,
+             ${otherMemberColumns},
+             app.is_blocked_by_viewer(o.user_id) as blocker,
+             app.members_blocked_between(o.user_id) as closed
+        from chat_conversations c
+        join chat_participants p
+          on p.conversation_id = c.id
+         and p.tenant_id = c.tenant_id
+         and p.user_id = ${ctx.userId}::uuid
+        ${otherMemberJoins(ctx)}
+       where c.id = ${conversationId}::uuid
+         and c.tenant_id = ${ctx.tenantId}::uuid
+         and c.kind = 'direct'
+         and c.direct_low_user_id is not null`);
+    const row = rows[0];
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    const composer: DirectComposerState = row.other_removed
+      ? 'removed'
+      : row.blocker
+        ? 'blocker'
+        : row.closed
+          ? 'closed'
+          : 'open';
+    return {
+      conversationId: row.id,
+      other: toOther(row),
+      composer,
+      canBlock: ctx.role === 'member' && !row.other_removed && !row.blocker,
+      lastSeq: Number(row.last_seq),
+      lastReadSeq: Number(row.last_read_seq),
     };
   });
 }

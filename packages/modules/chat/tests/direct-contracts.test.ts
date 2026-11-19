@@ -6,6 +6,14 @@ import {
   CHAT_NOTIFICATION_KINDS,
   CHAT_PERMISSIONS,
   DIRECT_COMPOSER_STATES,
+  DIRECT_LIST_PAGE_SIZE,
+  DIRECT_UNREAD_CAP,
+  directDetailParamsSchema,
+  directDetailSchema,
+  directListAnswerSchema,
+  directListQuerySchema,
+  directListRowSchema,
+  directPreviewSchema,
   directSendInputSchema,
   directSendResultSchema,
   directWithAnswerSchema,
@@ -134,5 +142,114 @@ describe('direct chat contracts (11-08)', () => {
       false,
     );
     expect(messageRowSchema.safeParse(MESSAGE).success).toBe(true);
+  });
+});
+
+describe('direct list and detail contracts (11-10)', () => {
+  const OTHER = { membershipId: ID, displayName: 'Ana', avatarAssetId: null, removed: false };
+  const ROW = {
+    conversationId: ID2,
+    other: OTHER,
+    lastPreview: { kind: 'text', text: 'Oi', own: false },
+    lastMessageAt: '2026-11-19T12:00:00.000000Z',
+    unreadCount: 3,
+  };
+
+  it('D-719: the page is 20 and the unread number is capped at 100', () => {
+    expect(DIRECT_LIST_PAGE_SIZE).toBe(20);
+    expect(DIRECT_UNREAD_CAP).toBe(100);
+  });
+
+  it('the list query is strict, clamps the limit and drops an over-long cursor instead of failing', () => {
+    expect(directListQuerySchema.parse({})).toEqual({ limit: 20 });
+    expect(directListQuerySchema.parse({ limit: '2' }).limit).toBe(2);
+    expect(directListQuerySchema.parse({ limit: '500' }).limit).toBe(20);
+    expect(directListQuerySchema.parse({ limit: 'abc' }).limit).toBe(20);
+    expect(directListQuerySchema.parse({ cursor: 'x'.repeat(600) }).cursor).toBeUndefined();
+    expect(directListQuerySchema.safeParse({ extra: 1 }).success).toBe(false);
+  });
+
+  it('the preview is a discriminated object: text, or a recording with its stored length', () => {
+    expect(directPreviewSchema.safeParse({ kind: 'text', text: 'Oi', own: true }).success).toBe(
+      true,
+    );
+    expect(
+      directPreviewSchema.safeParse({ kind: 'voice', durationSeconds: 12, own: false }).success,
+    ).toBe(true);
+    expect(
+      directPreviewSchema.safeParse({
+        kind: 'voice',
+        durationSeconds: 12,
+        own: false,
+        deleted: true,
+      }).success,
+    ).toBe(true);
+    expect(directPreviewSchema.safeParse({ kind: 'voice', own: false }).success).toBe(false);
+    expect(
+      directPreviewSchema.safeParse({ kind: 'text', text: 'Oi', own: true, deleted: true }).success,
+    ).toBe(false);
+    expect(directPreviewSchema.safeParse({ kind: 'image', own: true }).success).toBe(false);
+  });
+
+  it('the row is strict, the unread count is 0..100 and the other member may be removed', () => {
+    expect(directListRowSchema.safeParse(ROW).success).toBe(true);
+    expect(directListRowSchema.safeParse({ ...ROW, unreadCount: 100 }).success).toBe(true);
+    expect(directListRowSchema.safeParse({ ...ROW, unreadCount: 101 }).success).toBe(false);
+    expect(directListRowSchema.safeParse({ ...ROW, unreadCount: -1 }).success).toBe(false);
+    expect(
+      directListRowSchema.safeParse({
+        ...ROW,
+        other: { membershipId: null, displayName: null, avatarAssetId: null, removed: true },
+      }).success,
+    ).toBe(true);
+    expect(directListRowSchema.safeParse({ ...ROW, blocked: false }).success).toBe(false);
+    expect(
+      directListRowSchema.safeParse({ ...ROW, other: { ...OTHER, blockedMe: true } }).success,
+    ).toBe(false);
+  });
+
+  it('the answer carries the support summary on the first page only, and never a staff id or a priority', () => {
+    const support = { lastPreview: null, unread: false };
+    expect(
+      directListAnswerSchema.safeParse({ support, rows: [ROW], nextCursor: null }).success,
+    ).toBe(true);
+    expect(directListAnswerSchema.safeParse({ rows: [], nextCursor: 'abc' }).success).toBe(true);
+    expect(
+      directListAnswerSchema.safeParse({
+        support: { ...support, priority: 'high' },
+        rows: [],
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      directListAnswerSchema.safeParse({
+        support: { ...support, ownerUserId: ID },
+        rows: [],
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('D-722: the detail has the composer word and nothing that says blocked', () => {
+    const detail = {
+      conversationId: ID2,
+      other: OTHER,
+      composer: 'closed',
+      canBlock: true,
+      lastSeq: 4,
+      lastReadSeq: 2,
+    };
+    expect(directDetailSchema.safeParse(detail).success).toBe(true);
+    for (const composer of DIRECT_COMPOSER_STATES) {
+      expect(directDetailSchema.safeParse({ ...detail, composer }).success).toBe(true);
+    }
+    expect(directDetailSchema.safeParse({ ...detail, blockedByViewer: true }).success).toBe(false);
+    expect(directDetailSchema.safeParse({ ...detail, blockedMe: true }).success).toBe(false);
+    expect(directDetailSchema.safeParse({ ...detail, composer: 'blocked' }).success).toBe(false);
+    expect(directDetailParamsSchema.safeParse({ conversationId: ID2 }).success).toBe(true);
+    expect(directDetailParamsSchema.safeParse({ conversationId: 'x' }).success).toBe(false);
+    expect(directDetailParamsSchema.safeParse({ conversationId: ID2, extra: 1 }).success).toBe(
+      false,
+    );
   });
 });

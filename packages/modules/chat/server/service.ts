@@ -64,7 +64,7 @@ const log = moduleLogger('module-chat');
  * ISO-8601 in UTC with MICROSECOND precision, produced by Postgres (the `listNotifications` rule), so
  * a JS `Date` round trip never truncates an instant a later cursor compares against.
  */
-const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
+export const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
 
 /** A seq no conversation will ever reach: the "latest page" is the page before it. */
 const LATEST = Number.MAX_SAFE_INTEGER;
@@ -1021,9 +1021,9 @@ const CURSOR_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,
  * A cursor of a thread that has no message yet (`last_message_at` null, which sorts FIRST): the instant slot carries
  * this literal instead of an instant, so a walk can continue PAST such a row without skipping or repeating (EP-053).
  */
-const CURSOR_NO_INSTANT = 'none';
+export const CURSOR_NO_INSTANT = 'none';
 
-function decodeInstantCursor(raw: string | undefined) {
+export function decodeInstantCursor(raw: string | undefined) {
   const decoded = decodeCursor(raw);
   if (!decoded) return null;
   if (decoded.n === CURSOR_NO_INSTANT) return decoded;
@@ -1221,7 +1221,51 @@ export async function listInbox(ctx: RequestContext, query: InboxQuery): Promise
 }
 
 /**
- * The chat module's share of `bootstrap.counters` (D-237, D-238, D-840), inside the caller's tenant lane,
+ * The shipped support dot (D-237, D-840): the team wrote past the member's own read position in a case of theirs that is
+ * not closed. ONE statement for the counter and for the pinned support row of the Conversas list, so the two never
+ * disagree. Every comparison is of integer sequences and of the exact lowercase state literal (EP-055).
+ */
+export async function memberSupportUnread(tx: Tx, ctx: RequestContext): Promise<boolean> {
+  const rows = await tx.execute<{ unread: boolean }>(sql`
+    select exists (
+      select 1
+        from chat_conversations c
+        join chat_participants p
+          on p.conversation_id = c.id
+         and p.tenant_id = c.tenant_id
+         and p.user_id = ${ctx.userId}::uuid
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.kind = 'support'
+         and c.created_by_user_id = ${ctx.userId}::uuid
+         and c.state <> 'closed'
+         and c.last_staff_seq > p.last_read_seq
+    ) as unread`);
+  return rows[0]?.unread === true;
+}
+
+/**
+ * The paired direct conversations of the caller with something unread (D-719): `c.last_seq > p.last_read_seq`, the
+ * unread flag the send trigger keeps exact (an author's own position moves with their message, D-728). Read through the
+ * tenant lane, so the readable policy (`app.direct_pair_readable`) hides an administrator-blocked or removed member's
+ * conversation here exactly as it hides it from the list and the reads (RESEARCH Pitfall 6, T-11-25).
+ */
+async function directUnreadConversations(tx: Tx, ctx: RequestContext): Promise<number> {
+  const rows = await tx.execute<{ n: number }>(sql`
+    select count(*)::int as n
+      from chat_conversations c
+      join chat_participants p
+        on p.conversation_id = c.id
+       and p.tenant_id = c.tenant_id
+       and p.user_id = ${ctx.userId}::uuid
+     where c.tenant_id = ${ctx.tenantId}::uuid
+       and c.kind = 'direct'
+       and c.direct_low_user_id is not null
+       and c.last_seq > p.last_read_seq`);
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * The chat module's share of `bootstrap.counters` (D-237, D-238, D-840, D-719), inside the caller's tenant lane,
  * decided by the caller's composed PERMISSIONS (planning decision 4), never by a role literal. "Active" means
  * `state <> 'closed'` (D-840): a closed case never lights a badge or a dot, whatever is unread in it. Every
  * comparison is of integer sequences and of the exact lowercase state literal, so nothing is normalised (EP-055):
@@ -1229,6 +1273,8 @@ export async function listInbox(ctx: RequestContext, query: InboxQuery): Promise
  *   the member's and the team's shared position is below it, whoever owns the case (D-238);
  * - `chat.support.contact` (member): `dot` = 1 exactly while the team wrote something past the
  *   member's own read position in a case that is not closed, else 0;
+ * - `chat.support.contact` and `chat.direct` (a member with the social network on, D-719): `count` = that dot plus the
+ *   paired direct conversations with something unread, so the bubble counts conversations;
  * - neither: nothing (the zeros stand).
  */
 export async function chatCounters(
@@ -1247,22 +1293,16 @@ export async function chatCounters(
          and c.last_seq > c.staff_last_read_seq`);
     return { unreadConversations: Number(rows[0]?.awaiting ?? 0), conversationsBadge: 'count' };
   }
-  if (permissions.includes(CHAT_PERMISSIONS.contact)) {
-    const rows = await tx.execute<{ unread: boolean }>(sql`
-      select exists (
-        select 1
-          from chat_conversations c
-          join chat_participants p
-            on p.conversation_id = c.id
-           and p.tenant_id = c.tenant_id
-           and p.user_id = ${ctx.userId}::uuid
-         where c.tenant_id = ${ctx.tenantId}::uuid
-           and c.kind = 'support'
-           and c.created_by_user_id = ${ctx.userId}::uuid
-           and c.state <> 'closed'
-           and c.last_staff_seq > p.last_read_seq
-      ) as unread`);
-    return { unreadConversations: rows[0]?.unread ? 1 : 0, conversationsBadge: 'dot' };
+  const direct = permissions.includes(CHAT_PERMISSIONS.direct);
+  if (permissions.includes(CHAT_PERMISSIONS.contact) || direct) {
+    const dot = permissions.includes(CHAT_PERMISSIONS.contact)
+      ? await memberSupportUnread(tx, ctx)
+      : false;
+    if (!direct) return { unreadConversations: dot ? 1 : 0, conversationsBadge: 'dot' };
+    return {
+      unreadConversations: (dot ? 1 : 0) + (await directUnreadConversations(tx, ctx)),
+      conversationsBadge: 'count',
+    };
   }
   return {};
 }

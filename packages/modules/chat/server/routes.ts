@@ -13,6 +13,10 @@ import {
   caseHistorySchema,
   caseResultSchema,
   conversationDetailSchema,
+  directDetailParamsSchema,
+  directDetailSchema,
+  directListAnswerSchema,
+  directListQuerySchema,
   directSendInputSchema,
   directSendResultSchema,
   directWithAnswerSchema,
@@ -33,7 +37,7 @@ import {
   voiceSendInputSchema,
 } from '../contracts/index';
 import { getCaseHistory, getMyCases, getStaffRoster, runCaseAction, runCaseEdit } from './cases';
-import { getDirectWith, sendDirectMessage } from './direct';
+import { getDirectDetail, getDirectWith, listDirect, sendDirectMessage } from './direct';
 import {
   getConversation,
   getSupportThread,
@@ -527,6 +531,44 @@ const directWithRoute = createRoute({
   },
 });
 
+const directListRoute = createRoute({
+  method: 'get',
+  path: '/direct',
+  middleware: [requireModule('social'), requirePermission(CHAT_PERMISSIONS.direct)] as const,
+  request: { query: directListQuerySchema },
+  responses: {
+    200: {
+      description:
+        "CHAT-06, D-719, D-721: the Conversas list. `rows` are the paired direct conversations the caller's lane can read, newest activity first (`last_message_at desc, id desc`), 20 per page by keyset (a tampered cursor answers page 1); each carries the other member (`removed: true` with no id and no name for an anonymised account), the last message as a preview (`text`, or a `voice` with its stored length and `deleted` once retired), its instant and the caller's unread count capped at 100. A conversation hidden by the administrator's block or a removal is absent, and returns on the unblock. `support` (the pinned support row: the preview of the member's last support message or null, and the shipped dot) is on the FIRST page only. A member block never hides a row. `Cache-Control: no-store`.",
+      content: { 'application/json': { schema: directListAnswerSchema } },
+    },
+    401: { description: '`UNAUTHENTICATED`: no session.' },
+    403: { description: '`FORBIDDEN` without `chat.direct`: a staff role never holds it.' },
+    404: { description: '`MODULE_DISABLED` when `social` or `chat` is off.' },
+  },
+});
+
+const directDetailRoute = createRoute({
+  method: 'get',
+  path: '/direct/{conversationId}',
+  middleware: [requireModule('social'), requirePermission(CHAT_PERMISSIONS.direct)] as const,
+  request: { params: directDetailParamsSchema },
+  responses: {
+    200: {
+      description:
+        "CHAT-07, D-722, D-723: the conversation the screen draws: the other member, the viewer's read position and the `composer`, ONE finished enum (`removed`, then `blocker`, then `closed`, else `open`). `closed` carries no reason, no date and no name; the two sides of a block differ in that word (and `canBlock`) alone, and no field says 'blocked me'. `canBlock` is decided by the server for a member viewer with a live other member they have not blocked. The history stays readable for both sides through the shipped messages read. `Cache-Control: no-store`.",
+      content: { 'application/json': { schema: directDetailSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: a malformed conversation id.' },
+    401: { description: '`UNAUTHENTICATED`: no session.' },
+    403: { description: '`FORBIDDEN` without `chat.direct`: a staff role never holds it.' },
+    404: {
+      description:
+        'ONE bare `NOT_FOUND` for an unknown conversation, another tenant’s, a support case, a pair the administrator hid or one the caller is not part of; `MODULE_DISABLED` when `social` or `chat` is off.',
+    },
+  },
+});
+
 /** A 204 that no cache may keep: read positions are the caller's own state. */
 const noContent = () =>
   new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
@@ -654,6 +696,16 @@ export const chatRoutes = chat
   })
   .openapi(directWithRoute, async (c) => {
     const answer = await getDirectWith(c.get('ctx'), c.req.valid('param').membershipId);
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
+  .openapi(directListRoute, async (c) => {
+    const answer = await listDirect(c.get('ctx'), c.req.valid('query'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
+  .openapi(directDetailRoute, async (c) => {
+    const answer = await getDirectDetail(c.get('ctx'), c.req.valid('param').conversationId);
     c.header('Cache-Control', 'no-store');
     return c.json(answer, 200);
   });

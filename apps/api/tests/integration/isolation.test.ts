@@ -14003,4 +14003,84 @@ describe('phase 11 sweep (11-08)', () => {
       resetDirectLimiters();
     }
   });
+
+  it('phase 11 sweep: direct list — a user with memberships in both tenants lists only the request tenant’s conversations, and tenant B’s session gets the bare 404 of an unknown id on tenant A’s conversation detail, beside each positive control and the wrong host (11-10)', async () => {
+    const prefix = 'p11list';
+    await removeDirectRows([prefix]);
+    const restores = [
+      await withDirectModules('demo', ['social', 'chat']),
+      await withDirectModules('lab', ['social', 'chat']),
+    ];
+    resetDirectLimiters();
+    try {
+      const identity = await sharedDirectIdentity(prefix);
+      const demoOther = await membershipIdOf(tenantIds.demo, 'member@rede-demo.local');
+      const labOther = await membershipIdOf(tenantIds.lab, 'member@rede-lab.local');
+      const sendPath = '/v1/chat/direct/messages';
+      const inDemo = await send('POST', sendPath, identity.demo.token, HOSTS.demo, {
+        toMembershipId: demoOther,
+        body: 'Oi, demo',
+      });
+      expect(inDemo.status).toBe(201);
+      const demoConversation = ((await inDemo.json()) as { conversationId: string }).conversationId;
+      const inLab = await send('POST', sendPath, identity.lab.token, HOSTS.lab, {
+        toMembershipId: labOther,
+        body: 'Oi, lab',
+      });
+      expect(inLab.status).toBe(201);
+      const labConversation = ((await inLab.json()) as { conversationId: string }).conversationId;
+
+      // Positive controls: each host lists its own conversation, and only that one.
+      type Listed = { rows: { conversationId: string }[] };
+      const demoList = await send('GET', '/v1/chat/direct', identity.demo.token, HOSTS.demo);
+      expect(demoList.status).toBe(200);
+      const demoRows = ((await demoList.json()) as Listed).rows.map((row) => row.conversationId);
+      expect(demoRows).toEqual([demoConversation]);
+      const labList = await send('GET', '/v1/chat/direct', identity.lab.token, HOSTS.lab);
+      expect(labList.status).toBe(200);
+      const labRows = ((await labList.json()) as Listed).rows.map((row) => row.conversationId);
+      expect(labRows).toEqual([labConversation]);
+      // Positive control on the detail: the owning tenant's participant reads its own conversation.
+      const ownDetail = await send(
+        'GET',
+        `/v1/chat/direct/${demoConversation}`,
+        identity.demo.token,
+        HOSTS.demo,
+      );
+      expect(ownDetail.status).toBe(200);
+
+      // Negatives: tenant B's session on tenant A's conversation id is the bare 404 of an unknown id.
+      const unknownAnswer = sansRequestId(
+        await expectBareNotFound(
+          await send(
+            'GET',
+            `/v1/chat/direct/${crypto.randomUUID()}`,
+            identity.lab.token,
+            HOSTS.lab,
+          ),
+          'unknown id',
+        ),
+      );
+      const crossing = await expectBareNotFound(
+        await send('GET', `/v1/chat/direct/${demoConversation}`, identity.lab.token, HOSTS.lab),
+        'lab session, demo conversation detail',
+      );
+      expect(sansRequestId(crossing)).toBe(unknownAnswer);
+      expect(crossing).not.toContain(demoConversation);
+
+      // The wrong host: a session of one tenant on the other tenant's host is refused before any read.
+      await expectHostRefused(
+        await send('GET', '/v1/chat/direct', tokens.demoMember, HOSTS.lab),
+        'demo session on the lab host, list',
+      );
+      await expectHostRefused(
+        await send('GET', `/v1/chat/direct/${labConversation}`, tokens.labMember, HOSTS.demo),
+        'lab session on the demo host, detail',
+      );
+    } finally {
+      await removeDirectRows([prefix]);
+      for (const restore of restores.reverse()) await restore();
+      resetDirectLimiters();
+    }
+  });
 });

@@ -333,6 +333,11 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/chat/direct/messages': { case: 'phase 11 sweep: direct chat' },
   // 11-08: the `with` read by membership id; its own case (the bare 404 of an unknown id for the other tenant's member).
   'GET /v1/chat/direct/with/:membershipId': { case: 'phase 11 sweep: direct with' },
+  // 11-10 (CHAT-06, CHAT-07): the Conversas list and the conversation detail; one case proves both (tenant B's session sees
+  // none of tenant A's conversations in its list and gets the bare 404 of an unknown id on A's conversation id, beside both
+  // positive controls and the wrong-host 403).
+  'GET /v1/chat/direct': { case: 'phase 11 sweep: direct list' },
+  'GET /v1/chat/direct/:conversationId': { case: 'phase 11 sweep: direct list' },
   // ── /v1/store (08.2) ────────────────────────────────────────────────────────────────────────
   // 12.3-11 (NOVF-05, NOVF-11): the store front read; the category slug on create and edit is proved in
   // the same case beside it (a rede-demo slug from a rede-lab admin is a 400, never a link).
