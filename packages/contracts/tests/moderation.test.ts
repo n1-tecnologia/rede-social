@@ -9,6 +9,8 @@ import {
   adminMemberListQuerySchema,
   adminMemberPageSchema,
   adminMemberSchema,
+  blockChangeAnswerSchema,
+  blockMembershipParamsSchema,
   commentRemovalSchema,
   KERNEL_PERMISSIONS,
   MEMBER_ADMIN_REFUSALS,
@@ -441,5 +443,23 @@ describe('reportItemSchema new optional keys (D-731)', () => {
       false,
     );
     expect(reportItemSchema.safeParse({ ...base, conversationId: ID }).success).toBe(false);
+  });
+});
+
+describe('blockMembershipParamsSchema (11-27, D-733)', () => {
+  const ID = '0e0f8f3a-1b6c-4d7e-9a21-5c3b2d1e4f60';
+
+  it('takes one membership uuid and nothing else, so no user id can ride the path', () => {
+    expect(blockMembershipParamsSchema.safeParse({ membershipId: ID }).success).toBe(true);
+    expect(blockMembershipParamsSchema.safeParse({ membershipId: 'nope' }).success).toBe(false);
+    expect(blockMembershipParamsSchema.safeParse({}).success).toBe(false);
+    expect(blockMembershipParamsSchema.safeParse({ membershipId: ID, userId: ID }).success).toBe(
+      false,
+    );
+  });
+
+  it('the answer of both membership routes is the shipped `{ changed }` and nothing more', () => {
+    expect(blockChangeAnswerSchema.safeParse({ changed: true }).success).toBe(true);
+    expect(blockChangeAnswerSchema.safeParse({ changed: true, userId: ID }).success).toBe(false);
   });
 });

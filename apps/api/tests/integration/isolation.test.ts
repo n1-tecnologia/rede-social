@@ -14219,3 +14219,100 @@ describe('phase 11 sweep (11-08)', () => {
     }
   });
 });
+
+/**
+ * 11-27 (D-733, T-11-34, T-11-01): the block and unblock by MEMBERSHIP id, asked the isolation question with a session
+ * of each tenant. Written BEFORE the two inventory entries of `isolation-inventory.ts`.
+ */
+describe('phase 11 sweep (11-27)', () => {
+  it('phase 11 sweep: block by membership — tenant B’s session on tenant A’s membership id is the CANNOT_BLOCK of an unknown id and blocks nobody, its unblock is the changed false of nobody, beside each tenant’s own 200 and the wrong host (11-27)', async () => {
+    const prefix = 'p11blkm';
+    await removeDirectRows([prefix]);
+    try {
+      const identity = await sharedDirectIdentity(prefix);
+      const demoOther = await membershipIdOf(tenantIds.demo, 'member@rede-demo.local');
+      const labOther = await membershipIdOf(tenantIds.lab, 'member@rede-lab.local');
+      const blockPath = (membershipId: string) => `/v1/blocks/members/${membershipId}`;
+      const blockRows = async () =>
+        adminSql<{ tenant_id: string }[]>`
+          select tenant_id::text from public.member_blocks
+           where blocker_user_id = ${identity.userId}::uuid`;
+
+      // Negatives first: the other tenant's membership id is the same 400 as an unknown one, on either lane.
+      const refusal = async (res: Response, label: string): Promise<string> => {
+        const text = await res.text();
+        expect(res.status, `${label}: ${text}`).toBe(400);
+        expect(JSON.parse(text).error.code, label).toBe('CANNOT_BLOCK');
+        return sansRequestId(text);
+      };
+      const unknownAnswer = await refusal(
+        await send('POST', blockPath(crypto.randomUUID()), identity.lab.token, HOSTS.lab),
+        'unknown id',
+      );
+      expect(
+        await refusal(
+          await send('POST', blockPath(demoOther), identity.lab.token, HOSTS.lab),
+          'lab session, demo membership id',
+        ),
+      ).toBe(unknownAnswer);
+      expect(
+        await refusal(
+          await send('POST', blockPath(labOther), identity.demo.token, HOSTS.demo),
+          'demo session, lab membership id',
+        ),
+      ).toBe(unknownAnswer);
+      expect(await blockRows()).toEqual([]);
+
+      // The wrong host: a session of one tenant on the other tenant's host is refused before any read.
+      await expectHostRefused(
+        await send('POST', blockPath(labOther), tokens.demoMember, HOSTS.lab),
+        'POST block by membership, demo session on the lab host',
+      );
+      await expectHostRefused(
+        await send('DELETE', blockPath(labOther), tokens.demoMember, HOSTS.lab),
+        'DELETE block by membership, demo session on the lab host',
+      );
+      await expectHostRefused(
+        await send('POST', blockPath(demoOther), tokens.labMember, HOSTS.demo),
+        'POST block by membership, lab session on the demo host',
+      );
+      expect(await blockRows()).toEqual([]);
+
+      // Positive controls: each tenant's own membership id blocks, in that tenant only.
+      for (const [host, token, target] of [
+        [HOSTS.demo, identity.demo.token, demoOther],
+        [HOSTS.lab, identity.lab.token, labOther],
+      ] as const) {
+        const done = await send('POST', blockPath(target), token, host);
+        expect(done.status, host).toBe(200);
+        expect(await done.json(), host).toEqual({ changed: true });
+      }
+      expect((await blockRows()).map((row) => row.tenant_id).sort()).toEqual(
+        [tenantIds.demo, tenantIds.lab].sort(),
+      );
+
+      // The unblock across the tenants lifts nothing and says the same as an unknown id.
+      const unknownLift = await send(
+        'DELETE',
+        blockPath(crypto.randomUUID()),
+        identity.lab.token,
+        HOSTS.lab,
+      );
+      expect(await unknownLift.json()).toEqual({ changed: false });
+      const crossLift = await send('DELETE', blockPath(demoOther), identity.lab.token, HOSTS.lab);
+      expect(crossLift.status).toBe(200);
+      expect(await crossLift.json()).toEqual({ changed: false });
+      expect(await blockRows()).toHaveLength(2);
+
+      // Each tenant lifts its own and only its own.
+      const labLift = await send('DELETE', blockPath(labOther), identity.lab.token, HOSTS.lab);
+      expect(await labLift.json()).toEqual({ changed: true });
+      expect((await blockRows()).map((row) => row.tenant_id)).toEqual([tenantIds.demo]);
+      const demoLift = await send('DELETE', blockPath(demoOther), identity.demo.token, HOSTS.demo);
+      expect(await demoLift.json()).toEqual({ changed: true });
+      expect(await blockRows()).toEqual([]);
+    } finally {
+      await removeDirectRows([prefix]);
+    }
+  });
+});

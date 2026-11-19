@@ -1,7 +1,8 @@
 import type { BlockListAnswer, BlockListQuery } from '@rede-social/contracts/moderation';
 import { sql } from 'drizzle-orm';
-import { withTenantTx } from '../../db/tenant-tx';
+import { type Tx, withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
+import { ApiError } from '../http/api-error';
 import { moduleLogger } from '../logging';
 import { decodeCursor, encodeCursor, keysetComparison } from '../paging';
 import { mapReportError } from './reports';
@@ -75,6 +76,93 @@ export async function unblockMember(
       'member unblocked',
     );
     return { changed };
+  } catch (error) {
+    throw mapReportError(error);
+  }
+}
+
+/**
+ * The user behind a membership id of the CALLER's tenant, or null. No liveness predicate on purpose: the block
+ * definer enforces who may be blocked (a live `member` of the tenant), and an unblock must still find a member
+ * removed since. The `memberships_tenant_select` policy and the explicit tenant predicate both pin the lane, so another
+ * tenant's membership id is a miss exactly like an unknown one. The id never leaves the transaction.
+ */
+async function userOfMembership(
+  tx: Tx,
+  ctx: RequestContext,
+  membershipId: string,
+): Promise<string | null> {
+  const rows = await tx.execute<{ user_id: string }>(sql`
+    select m.user_id::text as user_id
+      from memberships m
+     where m.id = ${membershipId}::uuid
+       and m.tenant_id = ${ctx.tenantId}::uuid
+     limit 1`);
+  return rows[0]?.user_id ?? null;
+}
+
+/**
+ * `POST /v1/blocks/members/{membershipId}` (Phase 11 plan 27, D-733): the same block, keyed by membership id so a menu
+ * needs no user id. The target resolves INSIDE the caller's tenant transaction and the shipped definer decides; a miss
+ * (unknown, another tenant's) throws the SAME `400 CANNOT_BLOCK` the definer's `BL001` maps to, so every refusal (self,
+ * staff, removed, blocked, foreign, unknown) is one body and the route is no oracle. Answers `{ changed }` only.
+ */
+export async function blockMemberByMembership(
+  ctx: RequestContext,
+  membershipId: string,
+): Promise<{ changed: boolean }> {
+  try {
+    const created = await withTenantTx(ctx, async (tx) => {
+      const userId = await userOfMembership(tx, ctx, membershipId);
+      if (userId === null) throw new ApiError(400, 'CANNOT_BLOCK');
+      const rows = await tx.execute<{ created: boolean }>(
+        sql`select app.member_block_create(${userId}::uuid) as created`,
+      );
+      return rows[0]?.created === true;
+    });
+    log.info(
+      {
+        event: 'block.created',
+        tenantId: ctx.tenantId,
+        requestId: ctx.requestId,
+        changed: created,
+      },
+      'member blocked',
+    );
+    return { changed: created };
+  } catch (error) {
+    throw mapReportError(error);
+  }
+}
+
+/**
+ * `DELETE /v1/blocks/members/{membershipId}`: lifts the caller's OWN block of the member behind that membership id. The
+ * lookup has no liveness predicate (a member removed since can still be unblocked); a miss is `changed: false` like an
+ * unblock of nobody, so the answer never says whether the id exists.
+ */
+export async function unblockMemberByMembership(
+  ctx: RequestContext,
+  membershipId: string,
+): Promise<{ changed: boolean }> {
+  try {
+    const removed = await withTenantTx(ctx, async (tx) => {
+      const userId = await userOfMembership(tx, ctx, membershipId);
+      if (userId === null) return false;
+      const rows = await tx.execute<{ removed: boolean }>(
+        sql`select app.member_block_delete(${userId}::uuid) as removed`,
+      );
+      return rows[0]?.removed === true;
+    });
+    log.info(
+      {
+        event: 'block.removed',
+        tenantId: ctx.tenantId,
+        requestId: ctx.requestId,
+        changed: removed,
+      },
+      'member unblocked',
+    );
+    return { changed: removed };
   } catch (error) {
     throw mapReportError(error);
   }

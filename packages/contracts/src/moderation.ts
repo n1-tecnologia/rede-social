@@ -296,6 +296,14 @@ export const blockBodySchema = z.object({ userId: z.uuid() }).strict();
 export type BlockBody = z.infer<typeof blockBodySchema>;
 
 /**
+ * `POST` and `DELETE /v1/blocks/members/{membershipId}` (Phase 11 plan 27, D-733; T-11-34): the member to block or
+ * unblock, by MEMBERSHIP id, the id every author card and the directory already carry. No user id travels in the
+ * request and none comes back (a user id is the identity shared across communities, stories rule A7).
+ */
+export const blockMembershipParamsSchema = z.object({ membershipId: z.uuid() }).strict();
+export type BlockMembershipParams = z.infer<typeof blockMembershipParamsSchema>;
+
+/**
  * One member the caller blocked (UI-D-635), with the name and avatar the "Membros bloqueados" page shows. Only the
  * CALLER's own blocks are ever listed; a block never reveals the blocker to the blocked (T-13-32).
  */

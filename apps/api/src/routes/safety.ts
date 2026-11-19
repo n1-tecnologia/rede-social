@@ -5,6 +5,7 @@ import {
   blockChangeAnswerSchema,
   blockListAnswerSchema,
   blockListQuerySchema,
+  blockMembershipParamsSchema,
   reportCreateAnswerSchema,
   reportCreateBodySchema,
 } from '@rede-social/contracts/moderation';
@@ -13,11 +14,13 @@ import { ApiError } from '@rede-social/core/server/http/api-error';
 import {
   blockLimiter,
   blockMember,
+  blockMemberByMembership,
   createReport,
   listBlocks,
   reportLimiter,
   safetyLimiterKey,
   unblockMember,
+  unblockMemberByMembership,
 } from '@rede-social/core/server/safety/index';
 import { createOpenApiApp } from '../http/openapi';
 
@@ -130,6 +133,38 @@ const unblockRoute = createRoute({
   },
 });
 
+const blockByMembershipRoute = createRoute({
+  method: 'post',
+  path: '/members/{membershipId}',
+  request: { params: blockMembershipParamsSchema },
+  responses: {
+    200: {
+      description:
+        'The member behind that membership id is blocked for the caller (Phase 11 plan 27): `changed` is true when this call created the block and false for the idempotent repeat. The id is resolved in the caller’s tenant; no user id is sent or returned. Nobody is told',
+      content: { 'application/json': { schema: blockChangeAnswerSchema } },
+    },
+    400: envelope(
+      'CANNOT_BLOCK — the SAME body as `POST /v1/blocks` for every miss: a staff account, oneself, a person of another tenant, an unknown, blocked or removed member; VALIDATION_FAILED — a malformed id',
+    ),
+    429: envelope('RATE_LIMITED — more than 60 block or unblock attempts in an hour'),
+  },
+});
+
+const unblockByMembershipRoute = createRoute({
+  method: 'delete',
+  path: '/members/{membershipId}',
+  request: { params: blockMembershipParamsSchema },
+  responses: {
+    200: {
+      description:
+        'The caller’s block of the member behind that membership id is lifted: `changed` is true when a block was removed and false when there was none, for any id (unknown, another tenant’s, never blocked). A member removed since can still be unblocked',
+      content: { 'application/json': { schema: blockChangeAnswerSchema } },
+    },
+    400: envelope('VALIDATION_FAILED — a malformed membership id'),
+    429: envelope('RATE_LIMITED — more than 60 block or unblock attempts in an hour'),
+  },
+});
+
 export const blockRoutes = blocks
   .openapi(listBlocksRoute, async (c) => {
     const page = await listBlocks(c.get('ctx'), c.req.valid('query'));
@@ -147,6 +182,22 @@ export const blockRoutes = blocks
   .openapi(unblockRoute, async (c) => {
     const { userId } = c.req.valid('param');
     const done = await unblockMember(c.get('ctx'), userId);
+    c.header('Cache-Control', 'no-store');
+    return c.json(done, 200);
+  })
+  .openapi(blockByMembershipRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const { membershipId } = c.req.valid('param');
+    if (!blockLimiter.consume(safetyLimiterKey(ctx))) throw new ApiError(429, 'RATE_LIMITED');
+    const done = await blockMemberByMembership(ctx, membershipId);
+    c.header('Cache-Control', 'no-store');
+    return c.json(done, 200);
+  })
+  .openapi(unblockByMembershipRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const { membershipId } = c.req.valid('param');
+    if (!blockLimiter.consume(safetyLimiterKey(ctx))) throw new ApiError(429, 'RATE_LIMITED');
+    const done = await unblockMemberByMembership(ctx, membershipId);
     c.header('Cache-Control', 'no-store');
     return c.json(done, 200);
   });

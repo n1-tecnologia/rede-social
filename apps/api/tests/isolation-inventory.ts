@@ -83,6 +83,11 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/blocks': { case: 'phase 13 sweep: reports and blocks' },
   'POST /v1/blocks': { case: 'phase 13 sweep: reports and blocks' },
   'DELETE /v1/blocks/:userId': { case: 'phase 13 sweep: reports and blocks' },
+  // 11-27 (D-733, T-11-34): the block and unblock keyed by MEMBERSHIP id (no user id on the wire); one case proves both
+  // (tenant B's session on tenant A's membership id is the same CANNOT_BLOCK as an unknown id and blocks nobody, the unblock of
+  // it is the changed:false of nobody, beside both positive controls and the wrong-host 403).
+  'POST /v1/blocks/members/:membershipId': { case: 'phase 11 sweep: block by membership' },
+  'DELETE /v1/blocks/members/:membershipId': { case: 'phase 11 sweep: block by membership' },
   'GET /v1/me/bootstrap': { case: 'f' },
   'GET /v1/me/counters': { case: 'phase 7 sweep' },
   'GET /v1/me/profile': { case: 'inventory sweep: me and media' },

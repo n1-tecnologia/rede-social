@@ -1,4 +1,10 @@
-export { blockMember, listBlocks, unblockMember } from './blocks';
+export {
+  blockMember,
+  blockMemberByMembership,
+  listBlocks,
+  unblockMember,
+  unblockMemberByMembership,
+} from './blocks';
 export {
   BLOCKS_PER_HOUR,
   blockLimiter,
