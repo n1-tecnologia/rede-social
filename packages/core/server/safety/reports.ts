@@ -37,9 +37,18 @@ const log = moduleLogger('reports');
  * admin block of Phase 8, each writing its own log row through `recordModerationAction` in the resolution's
  * transaction. This file never writes the log itself.
  *
- * NOBODY IS TOLD (T-13-32). No notification is created for the author, no event names a report, and no answer a
- * member can read carries the reporter's identity: `createReport` answers the new id and nothing else. The
- * reporter's name appears only in the admin queue.
+ * NOBODY IS TOLD (T-13-32). No notification is created for the AUTHOR and no answer a member can read carries the
+ * reporter's identity: `createReport` answers the new id and nothing else. The reporter's name appears only in the
+ * admin queue. The one event the filing emits, `report.created` (Phase 11, D-729), carries IDS ONLY (tenant, report,
+ * reporter, author) and exists for the moderators' notice (plan 17: the notifications module's source subscribes to it
+ * and tells the people who hold `moderation.manage`); the reporter's name, the note, the reason and the excerpt never
+ * ride it.
+ *
+ * SIX SUBJECTS (Phase 11, D-730, D-731). A post, a post comment, a story, a story comment, a community and one direct
+ * message. The filing is READABLE-FIRST through the reporter's own lane for every one of them, and the queue projects
+ * every one of them with an exhaustive switch, so a seventh subject is a compile error here before it is a silent
+ * fallthrough. A message report stores only its own copy (the SQL definer, plan 09): the queue never carries a
+ * conversation, a counterpart or another message.
  */
 
 const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
@@ -63,51 +72,145 @@ function decodeInstantCursor(raw: string | undefined) {
  * (this reporter already reported this item) 409 `ALREADY_REPORTED`; `22023` (an unknown subject type, which the
  * schema already refuses) 400 `VALIDATION_FAILED`; `42501` (a caller who is not a live member) 403 `FORBIDDEN`.
  * A note over 500 characters would hit the table CHECK (23514); the body schema refuses it first.
+ *
+ * After the filing commits the call queues `report.created` (ids only, delivered by the request's flush).
  */
 export async function createReport(
   ctx: RequestContext,
   input: ReportCreateBody,
 ): Promise<{ id: string }> {
   try {
-    const rows = await withTenantTx(ctx, async (tx) => {
+    const filed = await withTenantTx(ctx, async (tx) => {
       // The reporter must be able to READ the subject (13-08's open design note, decided here): the SQL definer
       // resolves it with the live predicate only, so without this read a member who learned the uuid of a
       // followers-only post they may not read, or of a post in a community locked for them, would get a 201 and so
-      // learn that the uuid exists. The read goes through the reporter's own lane, so the social gate and the
-      // community gate apply; a miss is the SAME 404 (`RP002`) a missing subject gives.
-      const readable =
-        input.subjectType === 'feed_post'
-          ? await tx.execute<{ one: number }>(sql`
-              select 1 as one from feed_posts p
-               where p.id = ${input.subjectId}::uuid and p.deleted_at is null`)
-          : await tx.execute<{ one: number }>(sql`
-              select 1 as one
-                from feed_comments c
-                join feed_posts p on p.id = c.post_id and p.deleted_at is null
-               where c.id = ${input.subjectId}::uuid and c.deleted_at is null`);
-      if (readable.length === 0) throw new ApiError(404, 'NOT_FOUND');
-      return tx.execute<{ id: string }>(sql`
+      // learn that the uuid exists. The read goes through the reporter's own lane, so the social gate, the story
+      // audience gate, the community gates and the participant-only chat policies apply; a miss is the SAME 404
+      // (`RP002`) a missing subject gives.
+      if (!(await subjectIsReadable(tx, ctx, input.subjectType, input.subjectId))) {
+        throw new ApiError(404, 'NOT_FOUND');
+      }
+      const rows = await tx.execute<{ id: string }>(sql`
         select app.content_report_create(
           ${input.subjectType}::text, ${input.subjectId}::uuid, ${input.reason}::text, ${input.note ?? null}::text
         ) as id`);
+      const id = rows[0]?.id;
+      if (!id) throw new ApiError(500, 'INTERNAL');
+      // The author, read back through the reporter's OWN new row (the select policy admits it): the event names
+      // the two people by id and nothing else.
+      const stored = await tx.execute<{ author_user_id: string }>(sql`
+        select author_user_id::text as author_user_id from content_reports where id = ${id}::uuid`);
+      const authorUserId = stored[0]?.author_user_id;
+      if (!authorUserId) throw new ApiError(500, 'INTERNAL');
+      return { id, authorUserId };
     });
-    const id = rows[0]?.id;
-    if (!id) throw new ApiError(500, 'INTERNAL');
     // Ids and the closed vocabulary only: never the note, never the excerpt.
     log.info(
       {
         event: 'report.created',
         tenantId: ctx.tenantId,
         requestId: ctx.requestId,
-        reportId: id,
+        reportId: filed.id,
         subjectType: input.subjectType,
         reason: input.reason,
       },
       'report filed',
     );
-    return { id };
+    // After the commit: the request's flush delivers it, and a rollback never announces a report.
+    emit(ctx, 'report.created', {
+      tenantId: ctx.tenantId,
+      reportId: filed.id,
+      reporterUserId: ctx.userId,
+      authorUserId: filed.authorUserId,
+    });
+    return { id: filed.id };
   } catch (error) {
     throw mapReportError(error);
+  }
+}
+
+/**
+ * One row read per subject THROUGH THE REPORTER'S LANE (RLS applies), EXHAUSTIVE over the six subjects: a seventh
+ * subject added to `REPORT_SUBJECT_TYPES` is a compile error on the `never` below.
+ *
+ * - `feed_post`, `post_comment`: the live row, through the feed and community gates (a comment joins its undeleted post).
+ * - `story`: the live row through the restrictive `stories_audience_gate` (followers-only needs `social` and a follow).
+ * - `story_comment`: the live comment of a live story, through the story gate.
+ * - `community`: the live row that the member-hidden gate admits AND that is not locked for the reporter by the store
+ *   (`app.community_locked_ids`, the same list the community's posts are gated by).
+ * - `direct_message`: the live message through `chat_messages_select` (which needs the conversation readable, so
+ *   `social` off hides it), AND the reporter's OWN participant row of that conversation: never a staff read.
+ */
+async function subjectIsReadable(
+  tx: Tx,
+  ctx: RequestContext,
+  type: ReportSubjectType,
+  id: string,
+): Promise<boolean> {
+  switch (type) {
+    case 'feed_post':
+      return (
+        (
+          await tx.execute<{ one: number }>(sql`
+            select 1 as one from feed_posts p
+             where p.id = ${id}::uuid and p.deleted_at is null`)
+        ).length > 0
+      );
+    case 'post_comment':
+      return (
+        (
+          await tx.execute<{ one: number }>(sql`
+            select 1 as one
+              from feed_comments c
+              join feed_posts p on p.id = c.post_id and p.deleted_at is null
+             where c.id = ${id}::uuid and c.deleted_at is null`)
+        ).length > 0
+      );
+    case 'story':
+      return (
+        (
+          await tx.execute<{ one: number }>(sql`
+            select 1 as one from stories s
+             where s.id = ${id}::uuid and s.deleted_at is null`)
+        ).length > 0
+      );
+    case 'story_comment':
+      return (
+        (
+          await tx.execute<{ one: number }>(sql`
+            select 1 as one
+              from feed_comments c
+              join stories s on s.id = c.story_id and s.deleted_at is null
+             where c.id = ${id}::uuid and c.deleted_at is null`)
+        ).length > 0
+      );
+    case 'community':
+      return (
+        (
+          await tx.execute<{ one: number }>(sql`
+            select 1 as one from communities c
+             where c.id = ${id}::uuid
+               and c.deleted_at is null
+               and c.id <> all (coalesce((select app.community_locked_ids()), '{}'::uuid[]))`)
+        ).length > 0
+      );
+    case 'direct_message':
+      return (
+        (
+          await tx.execute<{ one: number }>(sql`
+            select 1 as one
+              from chat_messages m
+              join chat_participants p
+                on p.conversation_id = m.conversation_id
+               and p.tenant_id = m.tenant_id
+               and p.user_id = ${ctx.userId}::uuid
+             where m.id = ${id}::uuid and m.deleted_at is null`)
+        ).length > 0
+      );
+    default: {
+      const unreachable: never = type;
+      throw new Error(`a report subject without a readable check: ${String(unreachable)}`);
+    }
   }
 }
 
@@ -218,8 +321,18 @@ export async function listReports(
              (case r.subject_type
                 when 'feed_post' then exists (
                   select 1 from feed_posts p where p.id = r.subject_id and p.deleted_at is null)
-                else exists (
-                  select 1 from feed_comments c where c.id = r.subject_id and c.deleted_at is null)
+                when 'post_comment' then exists (
+                  select 1 from feed_comments c
+                   where c.id = r.subject_id and c.post_id is not null and c.deleted_at is null)
+                when 'story' then exists (
+                  select 1 from stories s where s.id = r.subject_id and s.deleted_at is null)
+                when 'story_comment' then exists (
+                  select 1 from feed_comments c
+                   where c.id = r.subject_id and c.story_id is not null and c.deleted_at is null)
+                when 'community' then exists (
+                  select 1 from communities m where m.id = r.subject_id and m.deleted_at is null)
+                when 'direct_message' then true
+                else false
               end) as content_available,
              case when rm.id is null then null else rp.display_name end as reporter_name,
              case when rm.id is null then null else rp.avatar_asset_id end as reporter_avatar,

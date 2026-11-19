@@ -24,7 +24,9 @@ import {
   moderationLogEntrySchema,
   moderationLogPageSchema,
   moderationLogQuerySchema,
+  REPORT_NOTIFICATION_KIND,
   REPORT_SUBJECT_TYPES,
+  reportItemSchema,
 } from '../src/moderation';
 import { MEMBERS_MAX_QUERY_LENGTH } from '../src/profiles';
 
@@ -376,5 +378,68 @@ describe('membership.blocked', () => {
     };
     expect(name).toBe('membership.blocked');
     expect(Object.keys(payload).sort()).toEqual(['membershipId', 'tenantId', 'userId']);
+  });
+});
+
+describe('report.created (D-729)', () => {
+  it('is a typed domain event carrying ids only, and the notice kind is a constant', () => {
+    const name: DomainEventName = 'report.created';
+    const payload: EventMap['report.created'] = {
+      tenantId: 'a',
+      reportId: 'b',
+      reporterUserId: 'c',
+      authorUserId: 'd',
+    };
+    expect(name).toBe('report.created');
+    expect(Object.keys(payload).sort()).toEqual([
+      'authorUserId',
+      'reportId',
+      'reporterUserId',
+      'tenantId',
+    ]);
+    expect(REPORT_NOTIFICATION_KIND).toBe('moderation.report_created');
+  });
+});
+
+describe('reportItemSchema new optional keys (D-731)', () => {
+  const ID = '0e000000-0000-4000-8000-000000000001';
+  const base = {
+    id: ID,
+    createdAt: '2026-11-19T10:00:00.000000Z',
+    subjectType: 'direct_message',
+    subjectId: ID,
+    reason: 'spam',
+    note: null,
+    excerpt: 'oi',
+    status: 'open',
+    resolvedAt: null,
+    contentAvailable: true,
+    reporter: { displayName: 'A', avatarAssetId: null },
+    author: { displayName: 'B', avatarAssetId: null, isMember: true },
+  };
+
+  it('a row without the three keys parses (the new web tolerates the old API, and the reverse)', () => {
+    expect(reportItemSchema.safeParse(base).success).toBe(true);
+  });
+
+  it('accepts community, voice and ref and keeps each strict', () => {
+    const ok = reportItemSchema.safeParse({
+      ...base,
+      community: { name: 'Clube', description: 'Leitura' },
+      voice: { mediaId: ID, durationSeconds: 7, gone: false },
+      ref: { postId: ID, storyId: ID },
+    });
+    expect(ok.success).toBe(true);
+    expect(
+      reportItemSchema.safeParse({ ...base, community: { name: 'a', description: '', x: 1 } })
+        .success,
+    ).toBe(false);
+    expect(
+      reportItemSchema.safeParse({ ...base, voice: { mediaId: ID, durationSeconds: 7 } }).success,
+    ).toBe(false);
+    expect(reportItemSchema.safeParse({ ...base, ref: { conversationId: ID } }).success).toBe(
+      false,
+    );
+    expect(reportItemSchema.safeParse({ ...base, conversationId: ID }).success).toBe(false);
   });
 });

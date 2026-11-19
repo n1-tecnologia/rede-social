@@ -235,9 +235,31 @@ export const reportItemSchema = z
         isMember: z.boolean(),
       })
       .strict(),
+    /**
+     * Phase 11 (D-731), all OPTIONAL so the new web tolerates the old API and the reverse (RESEARCH Pitfall 5).
+     * `community`: a community report's stored snapshot split at its first line break (name, then description).
+     * `voice`: a recorded message's asset and stored length; `gone` is true once the asset is retired. A MESSAGE
+     * answer carries no conversation id, counterpart, link or neighbouring message anywhere. `ref`: the post or
+     * story the item belongs to, so the web builds the item's own href (the API knows no web route).
+     */
+    community: z.object({ name: z.string(), description: z.string() }).strict().optional(),
+    voice: z
+      .object({ mediaId: z.uuid(), durationSeconds: z.number().int(), gone: z.boolean() })
+      .strict()
+      .optional(),
+    ref: z
+      .object({ postId: z.uuid().optional(), storyId: z.uuid().optional() })
+      .strict()
+      .optional(),
   })
   .strict();
 export type ReportItem = z.infer<typeof reportItemSchema>;
+
+/**
+ * The kind of the moderators' notice a new report raises (Phase 11 plan 17 consumes `report.created`). A constant of
+ * the contract so the producer (this plan) and the notifications module's source agree on the one spelling.
+ */
+export const REPORT_NOTIFICATION_KIND = 'moderation.report_created';
 
 /** One keyset page of the queue, newest first. `nextCursor` is non-null EXACTLY when another row exists. */
 export const reportListAnswerSchema = z
@@ -588,8 +610,21 @@ export type MemberAdminRefusal = (typeof MEMBER_ADMIN_REFUSALS)[number];
  */
 export type MembershipBlocked = { tenantId: string; userId: string; membershipId: string };
 
+/**
+ * `report.created` — emitted by the kernel AFTER a report is filed and committed (D-729). IDS ONLY: the reporter's
+ * name, the note, the reason and the excerpt never ride the event. It exists for the moderators' notice (plan 17,
+ * the notifications module's source subscribes to it); nothing a member can read changes.
+ */
+export type ReportCreated = {
+  tenantId: string;
+  reportId: string;
+  reporterUserId: string;
+  authorUserId: string;
+};
+
 declare module '@rede-social/contracts' {
   interface EventMap {
     'membership.blocked': MembershipBlocked;
+    'report.created': ReportCreated;
   }
 }
