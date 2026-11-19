@@ -1,7 +1,7 @@
 begin;
--- 238-direct-block-effects.sql — Phase 11 plan 06 (CHAT-06, CHAT-07; D-719, D-721, D-722, D-728; T-11-01, T-11-02, T-11-03,
--- T-11-04, T-11-08), executed inside Postgres. The send path of a direct conversation in the database. Plan 07 appends the
--- effects of a block itself (sections 6 and up).
+-- 238-direct-block-effects.sql — Phase 11 plans 06 and 07 (CHAT-06, CHAT-07; D-719, D-721, D-722, D-728; T-11-01, T-11-02, T-11-03,
+-- T-11-04, T-11-08), executed inside Postgres. The send path of a direct conversation in the database (plan 06, sections 1 to 5)
+-- and the effects of a member block (plan 07, sections 6 to 9).
 --
 -- 1. THE PATH (task 1, CHAT-06, D-728): two members open ONE conversation through `app.direct_conversation_open`; the first
 --    message gets seq 1 and advances the AUTHOR's `last_read_seq` to 1 (the empty edge: the first message of a fresh
@@ -34,7 +34,7 @@ begin;
 --    idempotency and the blocker-only read of `member_blocks`.
 --
 -- Fixture ids use the `1e380000-…` prefix (`tests.d38('a1')` spells one). Like its siblings, this file ROLLS BACK.
-select plan(89);
+select plan(109);
 
 create function tests.d38(p text) returns uuid language sql immutable as
   $$ select ('1e380000-0000-4000-8000-0000000000' || p)::uuid $$;
@@ -605,6 +605,62 @@ reset role;
 select tests.as_tenant(tests.d38('01'), tests.d38('c5'));
 select is(tests.fol38(tests.d38('01'), tests.d38('c5'), tests.d38('c4')), 'ok',
   'D-724: …and from the other side');
+reset role;
+
+-- ── 9. the preserved Phase 13 behaviours of the replaced definer (plan 07 task 3) ───────────────
+-- Calls the definer as the CURRENT lane and answers 'true' / 'false' or the SQLSTATE, so one assertion pins each refusal.
+create function tests.blk38(p_target uuid) returns text language plpgsql as $$
+begin
+  return app.member_block_create(p_target)::text;
+exception when others then
+  return sqlstate;
+end
+$$;
+-- an administrator-blocked target (a7) and a removed target (a8); a8 also serves as a removed CALLER below.
+update public.memberships set blocked_at = now() where tenant_id = tests.d38('01') and user_id = tests.d38('a7');
+update public.memberships set deleted_at = now() where tenant_id = tests.d38('01') and user_id = tests.d38('a8');
+select tests.as_tenant(tests.d38('01'), tests.d38('c3'));
+select is(tests.blk38(null), 'BL001', 'preserved: a null target is BL001');
+select is(tests.blk38(tests.d38('c3')), 'BL001', 'preserved: the caller as target is BL001');
+select is(tests.blk38(tests.d38('a6')), 'BL001', 'preserved (AD-1): an administrator target is BL001');
+select is(tests.blk38(tests.d38('a5')), 'BL001', 'preserved (AD-1): a support target is BL001');
+select is(tests.blk38(tests.d38('a8')), 'BL001', 'preserved: a removed target is BL001');
+select is(tests.blk38(tests.d38('a7')), 'BL001', 'preserved: an administrator-blocked target is BL001');
+select is(tests.blk38(tests.d38('b1')), 'BL001', 'preserved (T-11-01): another tenant''s member is BL001');
+select is(tests.blk38(tests.d38('ff')), 'BL001', 'preserved: an unknown target is BL001, the same code as every other cause');
+reset role;
+select tests.as_tenant_without_claims();
+select is(tests.blk38(tests.d38('c8')), '42501', 'preserved: a lane with no claims is refused 42501');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('a8'));
+select is(tests.blk38(tests.d38('c8')), '42501', 'preserved: a removed caller is refused 42501');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('a7'));
+select is(tests.blk38(tests.d38('c8')), '42501', 'preserved: an administrator-blocked caller is refused 42501');
+reset role;
+select ok(
+  (select prosecdef and proconfig @> array['search_path=""'] and prorettype = 'boolean'::regtype
+     from pg_proc where oid = 'app.member_block_create(uuid)'::regprocedure),
+  'preserved: the block definer is a security definer, pins an empty search_path and still returns boolean');
+select ok(not has_function_privilege('anon', 'app.member_block_create(uuid)', 'execute'),
+  'preserved: anon cannot execute the block definer');
+select ok(has_function_privilege('authenticated', 'app.member_block_create(uuid)', 'execute'),
+  'preserved: authenticated can execute the block definer');
+select tests.as_tenant(tests.d38('01'), tests.d38('c3'));
+select is(tests.blk38(tests.d38('c8')), 'true', 'preserved: the first block answers true');
+select is(tests.blk38(tests.d38('c8')), 'false', 'preserved: the second block answers false (idempotent)');
+select is((select count(*)::int from public.member_blocks where blocker_user_id = tests.d38('c3') and blocked_user_id = tests.d38('c8')), 1,
+  'preserved (T-11-03, positive control): the blocker reads their one block row');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('c8'));
+select is((select count(*)::int from public.member_blocks), 0,
+  'T-11-03: the blocked member reads no member_blocks row at all');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('c1'));
+select is((select count(*)::int from public.member_blocks), 0, 'T-11-03: a third member reads no member_blocks row');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('a6'), 'admin_tenant');
+select is((select count(*)::int from public.member_blocks), 0, 'T-11-03: the administrator reads no member_blocks row');
 reset role;
 
 select * from finish();
