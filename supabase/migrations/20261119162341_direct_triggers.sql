@@ -99,3 +99,66 @@ begin
   return new;
 end
 $$;
+--> statement-breakpoint
+
+-- ── app.chat_messages_after_insert (REPLACED) ──────────────────────────────────────────────────────────────────────
+-- Starts from its newest (and only) body, `20260930190229_chat_functions.sql`: the `chat.message` signal on the
+-- conversation topic, the same signal on the support inbox for a support case, and `chat.unread` on the member's user
+-- topic for a staff message. All three are unchanged. For a PAIRED direct it adds one more (D-719, D-728): `chat.unread`
+-- on the RECIPIENT's `tenant:<t>:user:<u>` topic, the pair member that is not the author, so the badge refetches the
+-- moment the message commits. The payload is the same ids-only `{ conversationId, seq }` (the installed `realtime.send`
+-- adds the message-row `id`, still an id): the text, a name and the pair never travel on a topic (T-07-53). The author is
+-- never signalled by its own message. The function stays a definer (`realtime.send` is SECURITY INVOKER and a lane has no
+-- insert policy on `realtime.messages`, so only the owner can publish) with `set search_path = ''` and the same trigger.
+create or replace function app.chat_messages_after_insert() returns trigger
+  language plpgsql security definer set search_path = '' as $$
+declare
+  v_kind text;
+  v_member uuid;
+  v_low uuid;
+  v_high uuid;
+  v_signal jsonb;
+begin
+  select c.kind, c.created_by_user_id, c.direct_low_user_id, c.direct_high_user_id
+    into v_kind, v_member, v_low, v_high
+    from public.chat_conversations c
+   where c.id = new.conversation_id
+     and c.tenant_id = new.tenant_id;
+
+  v_signal := jsonb_build_object('conversationId', new.conversation_id, 'seq', new.seq);
+
+  perform realtime.send(
+    v_signal,
+    'chat.message',
+    'tenant:' || new.tenant_id::text || ':conv:' || new.conversation_id::text,
+    true
+  );
+  if v_kind = 'support' then
+    perform realtime.send(
+      v_signal,
+      'chat.message',
+      'tenant:' || new.tenant_id::text || ':support-inbox',
+      true
+    );
+  end if;
+  if new.author_side = 'staff' and v_member is not null then
+    perform realtime.send(
+      v_signal,
+      'chat.unread',
+      'tenant:' || new.tenant_id::text || ':user:' || v_member::text,
+      true
+    );
+  end if;
+  -- D-719, D-728: the recipient of a paired direct message.
+  if v_low is not null then
+    perform realtime.send(
+      v_signal,
+      'chat.unread',
+      'tenant:' || new.tenant_id::text || ':user:' ||
+        (case when new.author_user_id = v_low then v_high else v_low end)::text,
+      true
+    );
+  end if;
+  return null;
+end
+$$;

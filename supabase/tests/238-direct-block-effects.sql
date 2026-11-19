@@ -21,7 +21,7 @@ begin;
 --    notifications worker (the zero system user).
 --
 -- Fixture ids use the `1e380000-…` prefix (`tests.d38('a1')` spells one). Like its siblings, this file ROLLS BACK.
-select plan(25);
+select plan(32);
 
 create function tests.d38(p text) returns uuid language sql immutable as
   $$ select ('1e380000-0000-4000-8000-0000000000' || p)::uuid $$;
@@ -222,6 +222,81 @@ select results_eq(
       where conversation_id = tests.d38('e3') order by user_id $$,
   $$ values (tests.d38('b1')::text, 0), (tests.d38('b3')::text, 0) $$,
   'D-728: an unpaired row does not touch participant rows (the shipped path)');
+
+-- ── 4. the signals ─────────────────────────────────────────────────────────────────────────────
+-- Everything above inserted at now(), so each topic's rows are read as the migration role. 'on' only when a Realtime
+-- partition covers now() (152's rule: Realtime evidence never passes vacuously).
+select set_config(
+  'tests.now_partition',
+  case when exists (
+    select 1
+      from pg_inherits i
+      join pg_class c on c.oid = i.inhrelid
+     where i.inhparent = 'realtime.messages'::regclass
+       and pg_get_expr(c.relpartbound, c.oid) like
+           '%FROM (''' || to_char(date_trunc('day', now() at time zone 'utc'), 'YYYY-MM-DD HH24:MI:SS') || ''')%'
+  ) then 'on' else '' end,
+  true
+);
+-- A support case of a4 and one staff reply (the shipped support branch), written as the table owner.
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+values (tests.d38('f1'), tests.d38('01'), 'support', tests.d38('a4'));
+insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+values (tests.d38('f1'), tests.d38('01'), tests.d38('a4'), 'member');
+select is(tests.send38(tests.d38('01'), tests.d38('f1'), tests.d38('a5'), 'staff', 'resposta'), 'ok',
+  'the shipped support path: a staff reply to a support case is still accepted');
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$select (payload->>'seq')::int
+       from realtime.messages
+      where topic = 'tenant:' || tests.d38('01')::text || ':user:' || tests.d38('a2')::text
+        and event = 'chat.unread'
+        and payload->>'conversationId' = tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2'))::text
+      order by 1$$,
+  ARRAY[1],
+  'D-719/D-728: the recipient of the first message gets exactly one chat.unread (seq 1) on its own user topic'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$select (payload->>'seq')::int
+       from realtime.messages
+      where topic = 'tenant:' || tests.d38('01')::text || ':user:' || tests.d38('a1')::text
+        and event = 'chat.unread'
+        and payload->>'conversationId' = tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2'))::text
+      order by 1$$,
+  ARRAY[2],
+  'D-719/D-728: the author never signals itself: a1''s user topic holds only the reply''s chat.unread (seq 2)'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$select (payload->>'seq')::int
+       from realtime.messages
+      where topic = 'tenant:' || tests.d38('01')::text || ':conv:' || tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2'))::text
+        and event = 'chat.message'
+      order by 1$$,
+  ARRAY[1, 2],
+  'D-719: the chat.message signal on the conv: topic is unchanged (one per insert, in seq order)'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$select distinct array(select jsonb_object_keys(payload) order by 1)
+       from realtime.messages
+      where payload->>'conversationId' = tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2'))::text$$,
+  $$ values (array['conversationId', 'id', 'seq']) $$,
+  'T-07-53: every signal of the pair carries exactly conversationId, id, seq (no body, no name, no pair)'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$select distinct topic
+       from realtime.messages
+      where event = 'chat.unread'
+        and payload->>'conversationId' = tests.d38('f1')::text$$,
+  ARRAY['tenant:' || tests.d38('01')::text || ':user:' || tests.d38('a4')::text],
+  'D-237 kept: a support staff reply still signals only the member''s user topic'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+select case when current_setting('tests.now_partition') <> '' then results_eq(
+  $$select count(*)::int
+       from realtime.messages
+      where event = 'chat.unread'
+        and payload->>'conversationId' = tests.d38('e3')::text$$,
+  ARRAY[0],
+  'RESEARCH finding 5: a bare unpaired direct signals nothing to any user topic'
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 
 select * from finish();
 rollback;
