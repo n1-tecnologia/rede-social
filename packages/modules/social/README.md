@@ -21,8 +21,8 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 | Subpath | What it holds |
 |---|---|
 | `./module` | `socialModule`, the manifest |
-| `./contracts` | `SOCIAL_MODULE_KEY`, `SOCIAL_PERMISSIONS` (`social.participate`), `SOCIAL_FOLLOW_ISSUES`, `followResultSchema`, the list, batch state and social profile schemas, and the member media settings: `socialSettingsSchema` (tolerant read), `socialSettingsPatchSchema` (strict), `socialSettingsAnswerSchema`, `SOCIAL_SETTINGS_DEFAULTS` and the four caps taken from the admin limits |
-| `./server` | `socialRoutes` (`PUT` and `DELETE /v1/social/follows/{membershipId}`, `POST /v1/social/follows/state`, `GET /v1/social/me/followers`, `GET /v1/social/me/following`, `GET /v1/social/members/{membershipId}`) and the service functions behind them |
+| `./contracts` | `SOCIAL_MODULE_KEY`, `SOCIAL_PERMISSIONS` (`social.participate`), `SOCIAL_FOLLOW_ISSUES`, `SOCIAL_NOTIFICATION_KINDS` (`social.followed`, 11-11), `followResultSchema`, the list, batch state and social profile schemas, and the member media settings: `socialSettingsSchema` (tolerant read), `socialSettingsPatchSchema` (strict), `socialSettingsAnswerSchema`, `SOCIAL_SETTINGS_DEFAULTS` and the four caps taken from the admin limits |
+| `./server` | `socialRoutes` (`PUT` and `DELETE /v1/social/follows/{membershipId}`, `POST /v1/social/follows/state`, `GET /v1/social/me/followers`, `GET /v1/social/me/following`, `GET /v1/social/members/{membershipId}`), the service functions behind them and `socialNotificationSources` (11-11) |
 | `./db` | `socialFollows`, the follow table with its own-row policies |
 | `./ui` | `FollowButton`, `FollowCounts`, `FollowListRow`, `LockedPost`: props-only Seguir / Seguindo button, counts row and person row (09-10) and the "Siga para ver" card (09-11); no words, no route, no fetch, the host owns the optimistic state, the refresh and the actions |
 
@@ -66,7 +66,14 @@ A member post notifies nobody (D-476); the author's comment notice is a notifica
 ## Events consumed
 
 - Manifest subscriptions: none.
-- Notification sources: none.
+- Notification sources: `social.followed` (11-11, D-727). The resolver runs in the notifications worker and builds ONE
+  intent for the followee: `kind` `social.followed`, `audience` the followee, `excludeUserIds` the follower,
+  `dedupeKey` `social.followed:{follower}:{followee}` (so a follow, an unfollow and a follow again is ONE row per ordered
+  pair within the 90-day prune horizon), `subject` the follower's membership, `facts` exactly their membership id,
+  `channels` `['in_app']` and `push: null` (a like's shape: never a push). It is dropped unless
+  `app.social_pair_open(follower, followee)` answers true at fan-out time (`social` on, both live members, no block
+  either way), so a pair blocked in between, a tenant that turned `social` off and a removed member produce no row.
+  The row is never retracted when the follow is undone.
 - Notification retractions: none.
 
 ## Flag key
@@ -89,11 +96,12 @@ only through a confirmation that points at the "Ativar a Rede social" go-live it
 - `@rede-social/core/server/logging`
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
+- `@rede-social/core/server/notifications/source`
 - `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
 
 The list above is the imports of this package: `withTenantTx` (every read and write in the caller's
-tenant lane), `events/bus` (`emit` of `social.followed`), `paging` (the keyset cursor of the two private lists), `requireAuth`, `requireModule`
+tenant lane), `events/bus` (`emit` of `social.followed`), `notifications/source` (the shape of the one source), `paging` (the keyset cursor of the two private lists), `requireAuth`, `requireModule`
 and `requirePermission` (the route guards), and the `social-gate` constants the follow policies and
 the seam bodies share. The member media policy seam (`packages/core/server/media/member-policy.ts`)
 is a kernel contract this package does not import: the host fills it.

@@ -5,7 +5,7 @@ import { socialModule } from '../module';
 /**
  * 09-01 (SOCIAL-01, SOCIAL-02, D-482, D-121) - the `social` manifest, as data (MOD-01).
  *
- * The module owns one permission and no navigation. Each omitted key is asserted ABSENT, not
+ * The module owns one permission, one notification source (11-11) and no navigation. Each omitted key is asserted ABSENT, not
  * `undefined`, so "declares none" and "declares an empty one" stay two different statements.
  */
 describe('socialModule - the manifest (D-482)', () => {
@@ -25,18 +25,19 @@ describe('socialModule - the manifest (D-482)', () => {
     expect(socialModule.defaultRolePermissions).not.toHaveProperty('support_tenant');
   });
 
-  it('declares a routes loader (09-02) and no navigation, jobs, events, home slot or notification sources', () => {
+  it('declares a routes loader (09-02) and no navigation, jobs, events or home slot', () => {
     expect(typeof socialModule.routes).toBe('function');
-    for (const key of [
-      'nav',
-      'jobs',
-      'events',
-      'home',
-      'notificationSources',
-      'notificationRetractions',
-    ]) {
+    for (const key of ['nav', 'jobs', 'events', 'home', 'notificationRetractions']) {
       expect(socialModule, key).not.toHaveProperty(key);
     }
+  });
+
+  // 11-11 (D-727): the one source of the module, "começou a te seguir". No retraction: the row is never taken back.
+  it('declares exactly one notification source, for social.followed, and no retraction', () => {
+    expect(socialModule.notificationSources?.map((source) => source.event)).toEqual([
+      'social.followed',
+    ]);
+    expect(socialModule).not.toHaveProperty('notificationRetractions');
   });
 
   it('does not name a feed permission (that edge belongs to the app-tier registry, MOD-02)', () => {

@@ -1,5 +1,6 @@
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { SOCIAL_PERMISSIONS } from './contracts/index';
+import { socialNotificationSources } from './server/notifications';
 
 /**
  * The manifest: everything the kernel needs to know about this module, as data (MOD-01).
@@ -16,8 +17,9 @@ import { SOCIAL_PERMISSIONS } from './contracts/index';
  * `apps/api/src/modules/registry.ts`). It is the first module with BOTH routes (plan 02) and
  * `requires`, so its routes chain `requireModule('feed')` beside `requireModule('social')`.
  *
- * No `nav` (D-479 adds no tab: the Explorar chip lives in the web's Inicio), no `home` slot, no jobs
- * and no notification sources of its own. `routes` (09-02) loads the `/v1/social` router, whose guard
+ * No `nav` (D-479 adds no tab: the Explorar chip lives in the web's Inicio), no `home` slot and no jobs.
+ * ONE notification source (11-11, D-727): `social.followed`, the followee's "começou a te seguir" bell row, once per
+ * ordered pair, in-app only and never pushed; the app registry registers it on the kernel seam. `routes` (09-02) loads the `/v1/social` router, whose guard
  * chain names BOTH `requireModule('feed')` and `requireModule('social')`.
  *
  * `defaultRolePermissions`: only `member` holds `social.participate`. **It is member-only BY
@@ -32,6 +34,7 @@ export const socialModule = defineModule({
   key: 'social',
   requires: ['feed'],
   routes: () => import('./server/routes').then((m) => m.socialRoutes),
+  notificationSources: socialNotificationSources,
   defaultRolePermissions: {
     member: [SOCIAL_PERMISSIONS.participate],
   },
