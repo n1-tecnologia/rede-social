@@ -564,8 +564,9 @@ export const feedPostSchema = z
     canManage: z.boolean(),
     /**
      * 13-14 (D-616, UI-D-632): the viewer may report this post (they did not write it) and may block its
-     * author (they did not write it AND the author is a `member`, never staff, AD-1). SERVER-DERIVED like
-     * `canManage`; the web never compares a role. OPTIONAL on purpose (the 08.2 Pitfall 10 rule): a web that
+     * author (they did not write it AND the author is a `member`, never staff, AD-1, AND, since 11-15 / A-11-ROLE,
+     * the viewer's own role of record is `member`: a staff account is offered Denunciar and never Bloquear).
+     * SERVER-DERIVED like `canManage`; the web never compares a role. OPTIONAL on purpose (the 08.2 Pitfall 10 rule): a web that
      * ships before this API, or an API older than the web, simply omits them and the web reads them as `false`.
      */
     canReport: z.boolean().optional(),
@@ -823,7 +824,8 @@ export const commentSchema = z
     removal: commentRemovalSchema.optional(),
     /**
      * 13-14 (D-616, UI-D-632): the same two riders as on a post. `canReport`: the viewer did not write the
-     * comment. `canBlock`: not their own AND the author is a `member` (a removed author has no role, so false).
+     * comment. `canBlock`: not their own AND the author is a `member` (a removed author has no role, so false)
+     * AND, since 11-15 / A-11-ROLE, the viewer's own role of record is `member` (staff never get Bloquear).
      * OPTIONAL on purpose: an absent value reads as `false`.
      */
     canReport: z.boolean().optional(),

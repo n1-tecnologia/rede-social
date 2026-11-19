@@ -263,19 +263,32 @@ function toLinkPreview(row: FeedRow): LinkPreview | null {
  * 13-14 (D-616, UI-D-632): the two rider booleans every post and comment answer carries, computed on the server
  * exactly like `canManage` so the web never compares a role. `canReport`: the viewer did not write it.
  * `canBlock`: the viewer did not write it AND the author's role is `member` (AD-1: staff can be reported, never
- * blocked by a member). OPTIONAL in the contract, so an API older than the web simply omits them and the web reads
- * them as false. They say nothing about whether anyone reported or blocked anyone.
+ * blocked by a member).
+ *
+ * 11-15 (D-733, A-11-ROLE): the viewer's OWN role of record is the third input. `canBlock` is also false when the
+ * viewer is not a `member`: staff accounts see Denunciar and never Bloquear {nome}. Read from the request context
+ * by the caller (`viewerIsMember`, `ctx.role === 'member'`); a caller that forgets it reads false, so the control
+ * is hidden, never shown. The SQL definer `app.member_block_create` is NOT narrowed by role: the rider and the
+ * screen are the enforcement (the recorded residual of A-11-ROLE). OPTIONAL in the contract, so an API older than
+ * the web simply omits them and the web reads them as false. They say nothing about whether anyone reported or
+ * blocked anyone.
  */
 const reportRiders = (
   authorUserId: string,
   authorRole: string | null,
   viewerUserId: string,
+  viewerIsMember = false,
 ): { canReport: boolean; canBlock: boolean } => {
   const notOwn = authorUserId !== viewerUserId;
-  return { canReport: notOwn, canBlock: notOwn && authorRole === 'member' };
+  return { canReport: notOwn, canBlock: notOwn && authorRole === 'member' && viewerIsMember };
 };
 
-const toPost = (row: FeedRow, viewerUserId: string, canModerate = false): FeedPost => ({
+const toPost = (
+  row: FeedRow,
+  viewerUserId: string,
+  canModerate = false,
+  viewerIsMember = false,
+): FeedPost => ({
   id: row.id,
   createdAt: row.created_at,
   editedAt: row.edited_at,
@@ -297,7 +310,7 @@ const toPost = (row: FeedRow, viewerUserId: string, canModerate = false): FeedPo
       ? { id: row.community_id, name: row.community_name, slug: row.community_slug }
       : null,
   canManage: row.author_user_id === viewerUserId,
-  ...reportRiders(row.author_user_id, row.author_role, viewerUserId),
+  ...reportRiders(row.author_user_id, row.author_role, viewerUserId, viewerIsMember),
   mediaKind: row.media_kind,
   // `coalesce(..., '[]'::json)` inside the lateral means the array is always present; the `?? []`
   // guards only the `left join` miss (a post row with no lateral match cannot happen, but a future
@@ -502,7 +515,10 @@ async function feedPage(
   // `removal` never rides Início or Reels. 10 review WR-01: the community page does, because a
   // moderator may remove one post inside a member community.
   const canModerate = options.canModerate === true;
-  return { items: page.map((row) => toPost(row, ctx.userId, canModerate)), nextCursor };
+  return {
+    items: page.map((row) => toPost(row, ctx.userId, canModerate, ctx.role === 'member')),
+    nextCursor,
+  };
 }
 
 /**
@@ -911,7 +927,7 @@ export async function getPost(
   });
 
   if (found.row) {
-    const post = toPost(found.row, ctx.userId, opts.canModerate);
+    const post = toPost(found.row, ctx.userId, opts.canModerate, ctx.role === 'member');
     // The sample of a locked community: readable, marked, never interactive (D-356).
     return found.row.locked ? { ...post, access: SAMPLE } : post;
   }
@@ -1413,7 +1429,7 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
     'post created',
   );
 
-  return toPost(created, ctx.userId);
+  return toPost(created, ctx.userId, false, ctx.role === 'member');
 }
 
 /**
@@ -1660,7 +1676,7 @@ export async function updatePost(
     'post edited',
   );
 
-  return toPost(updated, ctx.userId);
+  return toPost(updated, ctx.userId, false, ctx.role === 'member');
 }
 
 /**
@@ -1893,7 +1909,12 @@ const removalFor = (
  * (D-60: a reply shows no "Responder" and no replies toggle), read from the same column the
  * database enforces the cap with, so the UI and the constraint can never disagree.
  */
-const toComment = (row: CommentRow, viewerUserId: string, canModerate: boolean): FeedComment => ({
+const toComment = (
+  row: CommentRow,
+  viewerUserId: string,
+  canModerate: boolean,
+  viewerIsMember = false,
+): FeedComment => ({
   id: row.id,
   createdAt: row.created_at,
   body: row.body,
@@ -1912,7 +1933,7 @@ const toComment = (row: CommentRow, viewerUserId: string, canModerate: boolean):
   isReply: row.depth === 1,
   canDelete: removalFor(row, viewerUserId, canModerate) !== null,
   removal: removalFor(row, viewerUserId, canModerate),
-  ...reportRiders(row.author_user_id, row.author_role, viewerUserId),
+  ...reportRiders(row.author_user_id, row.author_role, viewerUserId, viewerIsMember),
 });
 
 /**
@@ -2335,7 +2356,7 @@ export async function createComment(
   );
 
   // The caller wrote this row, so its removal is `'own'` whatever they hold: no permission read here.
-  return toComment(created, ctx.userId, false);
+  return toComment(created, ctx.userId, false, ctx.role === 'member');
 }
 
 /**
@@ -2591,7 +2612,10 @@ export async function listComments(
     'comments listed',
   );
 
-  return { items: page.map((row) => toComment(row, ctx.userId, opts.canModerate)), nextCursor };
+  return {
+    items: page.map((row) => toComment(row, ctx.userId, opts.canModerate, ctx.role === 'member')),
+    nextCursor,
+  };
 }
 
 /**
@@ -2682,7 +2706,10 @@ export async function listReplies(
     'replies listed',
   );
 
-  return { items: page.map((row) => toComment(row, ctx.userId, opts.canModerate)), nextCursor };
+  return {
+    items: page.map((row) => toComment(row, ctx.userId, opts.canModerate, ctx.role === 'member')),
+    nextCursor,
+  };
 }
 
 /**
@@ -2780,9 +2807,9 @@ export async function getCommentThread(
 
   return {
     postId,
-    root: toComment(root, ctx.userId, opts.canModerate),
+    root: toComment(root, ctx.userId, opts.canModerate, ctx.role === 'member'),
     replies: [...replies.rows, ...(extra ? [extra] : [])].map((row) =>
-      toComment(row, ctx.userId, opts.canModerate),
+      toComment(row, ctx.userId, opts.canModerate, ctx.role === 'member'),
     ),
     repliesCursor,
     targetId: commentId,

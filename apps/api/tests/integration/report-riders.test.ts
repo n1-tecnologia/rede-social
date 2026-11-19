@@ -96,6 +96,7 @@ async function sweep(): Promise<void> {
     await adminSql`delete from public.media_assets where id = any (${createdAssets}::uuid[])`;
   }
   await adminSql`delete from public.communities where name like ${`${PREFIX}%`}`;
+  await adminSql`delete from public.feed_posts where caption like ${`${PREFIX}%`}`;
 }
 
 beforeAll(async () => {
@@ -342,5 +343,106 @@ describe('community riders', () => {
     const res = await request(`/v1/communities/${randomUUID()}`, tokens.alvaro);
     expect(res.status).toBe(404);
     expect(JSON.stringify(await res.json())).not.toContain('canBlock');
+  });
+});
+
+describe('post and comment riders', () => {
+  const made = { byHelena: '', byAdmin: '', commentByHelena: '', commentByAdmin: '' };
+
+  const insertPost = async (author: string, label: string): Promise<string> => {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, caption, author_user_id)
+      values (${labTenantId}::uuid, ${`${PREFIX}${label}`}, ${author}::uuid)
+      returning id`;
+    return row?.id ?? '';
+  };
+
+  const insertComment = async (postId: string, author: string, body: string): Promise<string> => {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth)
+      values (${labTenantId}::uuid, ${postId}::uuid, ${author}::uuid, ${`${PREFIX}${body}`}, 0)
+      returning id`;
+    return row?.id ?? '';
+  };
+
+  const postRiders = async (token: string, id: string): Promise<Riders> => {
+    const res = await request(`/v1/feed/posts/${id}`, token);
+    expect(res.status).toBe(200);
+    return (await res.json()) as Riders;
+  };
+
+  const commentRiders = async (token: string, postId: string, id: string): Promise<Riders> => {
+    const res = await request(`/v1/feed/posts/${postId}/comments?limit=50`, token);
+    expect(res.status).toBe(200);
+    const page = (await res.json()) as { items: Array<Riders & { id: string }> };
+    return page.items.find((item) => item.id === id) ?? {};
+  };
+
+  it('1. a member viewer: both riders true on a member’s post and comment; canBlock false on the organization’s', async () => {
+    made.byHelena = await insertPost(userIds.helena, 'post da helena');
+    made.byAdmin = await insertPost(userIds.labAdmin, 'post do admin');
+    made.commentByHelena = await insertComment(
+      made.byAdmin,
+      userIds.helena,
+      'comentario da helena',
+    );
+    made.commentByAdmin = await insertComment(
+      made.byAdmin,
+      userIds.labAdmin,
+      'comentario do admin',
+    );
+    expect(await postRiders(tokens.alvaro, made.byHelena)).toMatchObject({
+      canReport: true,
+      canBlock: true,
+    });
+    expect(await postRiders(tokens.alvaro, made.byAdmin)).toMatchObject({
+      canReport: true,
+      canBlock: false,
+    });
+    expect(await commentRiders(tokens.alvaro, made.byAdmin, made.commentByHelena)).toMatchObject({
+      canReport: true,
+      canBlock: true,
+    });
+    expect(await commentRiders(tokens.alvaro, made.byAdmin, made.commentByAdmin)).toMatchObject({
+      canReport: true,
+      canBlock: false,
+    });
+  });
+
+  it('2. A-11-ROLE: staff viewers (the administrator and a support member) read canReport true and canBlock false on a member’s post and comment', async () => {
+    for (const token of [tokens.labAdmin, tokens.support]) {
+      expect(await postRiders(token, made.byHelena)).toMatchObject({
+        canReport: true,
+        canBlock: false,
+      });
+      expect(await commentRiders(token, made.byAdmin, made.commentByHelena)).toMatchObject({
+        canReport: true,
+        canBlock: false,
+      });
+    }
+  });
+
+  it('3. the viewer’s own content reads both false for everybody, the organization’s author included', async () => {
+    expect(await postRiders(tokens.helena, made.byHelena)).toMatchObject({
+      canReport: false,
+      canBlock: false,
+    });
+    expect(await postRiders(tokens.labAdmin, made.byAdmin)).toMatchObject({
+      canReport: false,
+      canBlock: false,
+    });
+    expect(await commentRiders(tokens.labAdmin, made.byAdmin, made.commentByAdmin)).toMatchObject({
+      canReport: false,
+      canBlock: false,
+    });
+  });
+
+  it('4. the feed list and the reply path carry the same rule (one projection)', async () => {
+    const res = await request('/v1/feed?limit=25', tokens.labAdmin);
+    expect(res.status).toBe(200);
+    const page = (await res.json()) as { items: Array<Riders & { id: string }> };
+    const row = page.items.find((item) => item.id === made.byHelena);
+    expect(row?.canReport).toBe(true);
+    expect(row?.canBlock).toBe(false);
   });
 });
