@@ -250,6 +250,11 @@ type ReportRow = {
   status: ReportStatus;
   resolved_at: string | null;
   content_available: boolean;
+  media_asset_id: string | null;
+  voice_seconds: number | null;
+  voice_gone: boolean;
+  ref_post_id: string | null;
+  ref_story_id: string | null;
   reporter_name: string | null;
   reporter_avatar: string | null;
   author_name: string | null;
@@ -257,24 +262,70 @@ type ReportRow = {
   author_is_member: boolean;
 };
 
-const toItem = (row: ReportRow): ReportItem => ({
-  id: row.id,
-  createdAt: row.created_at,
-  subjectType: row.subject_type,
-  subjectId: row.subject_id,
-  reason: row.reason,
-  note: row.note,
-  excerpt: row.excerpt,
-  status: row.status,
-  resolvedAt: row.resolved_at,
-  contentAvailable: row.content_available,
-  reporter: { displayName: row.reporter_name, avatarAssetId: row.reporter_avatar },
-  author: {
-    displayName: row.author_name,
-    avatarAssetId: row.author_avatar,
-    isMember: row.author_is_member,
-  },
-});
+/**
+ * The community's stored snapshot is `name`, a line break and the description (or the name alone): split it at the
+ * FIRST line break. A name has no line break, so the first one is the seam.
+ */
+function splitCommunity(excerpt: string): { name: string; description: string } {
+  const at = excerpt.indexOf('\n');
+  return at === -1
+    ? { name: excerpt, description: '' }
+    : { name: excerpt.slice(0, at), description: excerpt.slice(at + 1) };
+}
+
+/**
+ * One row to one item, EXHAUSTIVE over the subjects for the optional projections (D-731). A message answer carries
+ * its copy (`excerpt`) or, for a recording, `voice`, and NOTHING of the conversation: the row never held it.
+ */
+function toItem(row: ReportRow): ReportItem {
+  const item: ReportItem = {
+    id: row.id,
+    createdAt: row.created_at,
+    subjectType: row.subject_type,
+    subjectId: row.subject_id,
+    reason: row.reason,
+    note: row.note,
+    excerpt: row.excerpt,
+    status: row.status,
+    resolvedAt: row.resolved_at,
+    contentAvailable: row.content_available,
+    reporter: { displayName: row.reporter_name, avatarAssetId: row.reporter_avatar },
+    author: {
+      displayName: row.author_name,
+      avatarAssetId: row.author_avatar,
+      isMember: row.author_is_member,
+    },
+  };
+  switch (row.subject_type) {
+    case 'community':
+      item.community = splitCommunity(row.excerpt);
+      break;
+    case 'direct_message':
+      if (row.media_asset_id !== null && row.voice_seconds !== null) {
+        item.voice = {
+          mediaId: row.media_asset_id,
+          durationSeconds: row.voice_seconds,
+          gone: row.voice_gone,
+        };
+      }
+      break;
+    case 'feed_post':
+    case 'post_comment':
+    case 'story':
+    case 'story_comment': {
+      const ref: { postId?: string; storyId?: string } = {};
+      if (row.ref_post_id) ref.postId = row.ref_post_id;
+      if (row.ref_story_id) ref.storyId = row.ref_story_id;
+      if (ref.postId || ref.storyId) item.ref = ref;
+      break;
+    }
+    default: {
+      const unreachable: never = row.subject_type;
+      throw new Error(`a report subject without a projection: ${String(unreachable)}`);
+    }
+  }
+  return item;
+}
 
 /**
  * `GET /v1/admin/reports` — one keyset page of the tenant's reports, newest first, `(created_at desc, id desc)`
@@ -334,6 +385,17 @@ export async function listReports(
                 when 'direct_message' then true
                 else false
               end) as content_available,
+             r.media_asset_id,
+             r.voice_seconds,
+             coalesce(r.media_asset_id is not null and app.voice_asset_retired(r.media_asset_id), false) as voice_gone,
+             (case r.subject_type
+                when 'feed_post' then r.subject_id
+                when 'post_comment' then (select c.post_id from feed_comments c where c.id = r.subject_id)
+              end) as ref_post_id,
+             (case r.subject_type
+                when 'story' then r.subject_id
+                when 'story_comment' then (select c.story_id from feed_comments c where c.id = r.subject_id)
+              end) as ref_story_id,
              case when rm.id is null then null else rp.display_name end as reporter_name,
              case when rm.id is null then null else rp.avatar_asset_id end as reporter_avatar,
              case when am.id is null then null else ap.display_name end as author_name,

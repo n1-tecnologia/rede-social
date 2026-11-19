@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { ReportCreated } from '@rede-social/contracts/moderation';
 import { sqlClient } from '@rede-social/core/db';
@@ -6,8 +7,10 @@ import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { reportLimiter } from '@rede-social/core/server/safety/limits';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { caseKit, removeThrowaways, SEED_THREAD } from './chat-case-fixtures';
+import { readyVoiceAsset, removeVoiceRows } from './chat-voice-fixtures';
 import {
   directMember,
+  readMessages,
   removeDirectRows,
   resetDirectLimiters,
   sendDirect,
@@ -59,6 +62,7 @@ const createdCommunities: string[] = [];
 const createdStories: string[] = [];
 const createdComments: string[] = [];
 const events: ReportCreated[] = [];
+const voiceOwners: string[] = [];
 let unsubscribe: () => void = () => {};
 
 const request = (path: string, token: string, init: RequestInit = {}, host: string = HOSTS.lab) =>
@@ -277,6 +281,7 @@ beforeEach(() => {
 afterAll(async () => {
   unsubscribe();
   await sweep();
+  await removeVoiceRows(voiceOwners);
   await removeDirectRows();
   await removeThrowaways();
   await restoreDirect();
@@ -504,5 +509,242 @@ describe('report filing tracer', () => {
     });
     expect(unknown.status).toBe(400);
     expect((await errorOf(unknown)).code).toBe('VALIDATION_FAILED');
+  });
+});
+
+/** The voice cases need the real ffmpeg (the derive job normalizes the take); they skip with a message without it. */
+const HAS_FFMPEG = spawnSync('ffmpeg', ['-version']).status === 0;
+if (!HAS_FFMPEG)
+  console.warn('reports-new-subjects: ffmpeg is missing, the recording cases are skipped');
+
+/** Every key name found anywhere in a JSON value. */
+function keysOf(value: unknown, into = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) for (const v of value) keysOf(v, into);
+  else if (value && typeof value === 'object') {
+    for (const [key, v] of Object.entries(value)) {
+      into.add(key);
+      keysOf(v, into);
+    }
+  }
+  return into;
+}
+
+const original = (assetId: string, token: string, host: string = HOSTS.demo) =>
+  request(`/v1/media/${assetId}/original`, token, {}, host);
+
+describe('report queue projection', () => {
+  it('1. each subject lists with its own live predicate: a story, a story comment or a community removed after the report reads unavailable, a message never', async () => {
+    const storyId = await insertStory(userIds.marcos);
+    const commentStory = await insertStory(userIds.helena);
+    const commentId = await insertStoryComment(
+      commentStory,
+      userIds.marcos,
+      `${PREFIX}comentario vivo`,
+    );
+    const communityId = await insertCommunity(userIds.marcos, { name: `${PREFIX}Viva` });
+    const ids: Record<string, string> = {};
+    for (const [label, type, subject] of [
+      ['story', 'story', storyId],
+      ['comment', 'story_comment', commentId],
+      ['community', 'community', communityId],
+    ] as const) {
+      const res = await fileReport(tokens.helena, type, subject);
+      expect(res.status, label).toBe(201);
+      ids[label] = ((await res.json()) as { id: string }).id;
+    }
+    for (const label of Object.keys(ids)) {
+      expect((await queueItem(tokens.labAdmin, ids[label] ?? ''))?.contentAvailable, label).toBe(
+        true,
+      );
+    }
+
+    await adminSql`update public.stories set deleted_at = now() where id = ${storyId}::uuid`;
+    await adminSql`update public.feed_comments set deleted_at = now() where id = ${commentId}::uuid`;
+    await adminSql`update public.communities set deleted_at = now() where id = ${communityId}::uuid`;
+    for (const label of Object.keys(ids)) {
+      const item = await queueItem(tokens.labAdmin, ids[label] ?? '');
+      expect(item?.contentAvailable, `${label} after the removal`).toBe(false);
+      // The snapshot still reads: the queue never goes blank.
+      expect(item?.excerpt.length, `${label} excerpt`).toBeGreaterThan(0);
+    }
+
+    // A message is the copy itself: it reads available even when its message row is soft-deleted afterwards.
+    const a = await directMember('p1a');
+    const b = await directMember('p1b');
+    const sent = await sendDirect(a, b.membershipId, 'copia da mensagem');
+    const messageId = ((await sent.json()) as { message: { id: string } }).message.id;
+    const filed = await fileReport(b.token, 'direct_message', messageId, { host: HOSTS.demo });
+    const reportId = ((await filed.json()) as { id: string }).id;
+    await adminSql`update public.chat_messages set deleted_at = now() where id = ${messageId}::uuid`;
+    expect((await queueItem(tokens.demoAdmin, reportId, HOSTS.demo))?.contentAvailable).toBe(true);
+  });
+
+  it('2. a community lists name and description split at the first line break; a name alone gives an empty description; empty copies list empty', async () => {
+    const withDescription = await insertCommunity(userIds.marcos, {
+      name: `${PREFIX}Nome`,
+      description: 'Primeira linha\nSegunda linha',
+    });
+    const nameOnly = await insertCommunity(userIds.marcos, { name: `${PREFIX}So nome` });
+    const noCaption = await insertStory(userIds.marcos, { caption: '' });
+    const first = await fileReport(tokens.helena, 'community', withDescription);
+    const second = await fileReport(tokens.helena, 'community', nameOnly);
+    const third = await fileReport(tokens.helena, 'story', noCaption);
+    const [one, two, three] = await Promise.all(
+      [first, second, third].map(async (res) => {
+        expect(res.status).toBe(201);
+        return queueItem(tokens.labAdmin, ((await res.json()) as { id: string }).id);
+      }),
+    );
+    expect(one?.community).toEqual({
+      name: `${PREFIX}Nome`,
+      description: 'Primeira linha\nSegunda linha',
+    });
+    expect(two?.community).toEqual({ name: `${PREFIX}So nome`, description: '' });
+    expect(three?.excerpt).toBe('');
+    expect(three?.note).toBeNull();
+    expect(three?.community).toBeUndefined();
+    expect(three?.voice).toBeUndefined();
+  });
+
+  it('3. every item carries the reference its own href needs: post, post comment, story, story comment', async () => {
+    const [post] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, caption, author_user_id)
+      values (${labTenantId}::uuid, ${`${PREFIX}post de ref`}, ${userIds.marcos}::uuid) returning id::text as id`;
+    const postId = post?.id ?? '';
+    const [comment] = await adminSql<{ id: string }[]>`
+      insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+      values (${labTenantId}::uuid, ${postId}::uuid, ${userIds.marcos}::uuid, ${`${PREFIX}comentario de ref`})
+      returning id::text as id`;
+    const storyId = await insertStory(userIds.marcos);
+    const storyCommentId = await insertStoryComment(
+      storyId,
+      userIds.marcos,
+      `${PREFIX}comentario de story ref`,
+    );
+    try {
+      const out: Record<string, QueueItem | undefined> = {};
+      for (const [label, type, subject] of [
+        ['post', 'feed_post', postId],
+        ['comment', 'post_comment', comment?.id ?? ''],
+        ['story', 'story', storyId],
+        ['storyComment', 'story_comment', storyCommentId],
+      ] as const) {
+        const res = await fileReport(tokens.helena, type, subject);
+        expect(res.status, label).toBe(201);
+        out[label] = await queueItem(tokens.labAdmin, ((await res.json()) as { id: string }).id);
+      }
+      expect(out.post?.ref).toEqual({ postId });
+      expect(out.comment?.ref).toEqual({ postId });
+      expect(out.story?.ref).toEqual({ storyId });
+      expect(out.storyComment?.ref).toEqual({ storyId });
+    } finally {
+      await adminSql`delete from public.content_reports where subject_id = any(${[postId, comment?.id ?? '']}::uuid[])`;
+      await adminSql`delete from public.feed_comments where post_id = ${postId}::uuid`;
+      await adminSql`delete from public.feed_posts where id = ${postId}::uuid`;
+    }
+  });
+
+  it.skipIf(!HAS_FFMPEG)(
+    '4. a reported recording lists with its asset and length; the administrator hears it only through its report; a retired asset reads gone; the answer names no conversation',
+    async () => {
+      const a = await directMember('p4a');
+      const b = await directMember('p4b');
+      const c = await directMember('p4c');
+      voiceOwners.push(a.userId);
+      const opening = await sendDirect(a, b.membershipId, 'abrindo a conversa');
+      const { conversationId } = (await opening.json()) as { conversationId: string };
+      const assetId = await readyVoiceAsset(a.token, 'voice-2s.webm', HOSTS.demo);
+      const [voice] = await adminSql<{ id: string }[]>`
+        insert into public.chat_messages
+          (tenant_id, conversation_id, author_user_id, author_side, body, media_asset_id, voice_seconds)
+        select ${(await caseKit()).ids.demo}::uuid, ${conversationId}::uuid, ${a.userId}::uuid, 'member', null,
+               ${assetId}::uuid, 2
+        returning id::text as id`;
+      const messageId = voice?.id ?? '';
+
+      // BEFORE the report the administrator cannot hear the recording: the same bare 404 as any unknown id.
+      const before = await original(assetId, tokens.demoAdmin);
+      expect(before.status).toBe(404);
+
+      const filed = await fileReport(b.token, 'direct_message', messageId, { host: HOSTS.demo });
+      expect(filed.status).toBe(201);
+      const reportId = ((await filed.json()) as { id: string }).id;
+
+      const page = await queue(tokens.demoAdmin, '?estado=todas&limit=50', HOSTS.demo);
+      const item = page.items.find((row) => row.id === reportId);
+      expect(item).toMatchObject({
+        subjectType: 'direct_message',
+        excerpt: '',
+        contentAvailable: true,
+        voice: { mediaId: assetId, durationSeconds: 2, gone: false },
+      });
+
+      // The whole answer of a message report names no conversation, counterpart or neighbouring message.
+      const names = [...keysOf(item)].join(' ').toLowerCase();
+      expect(names).not.toMatch(/conversation|counterpart|participant|neighbour|thread/);
+      expect(JSON.stringify(item)).not.toContain(conversationId);
+      expect(JSON.stringify(item)).not.toContain(b.userId);
+
+      // AFTER the report: the administrator is redirected to the signed bytes; a third member of the tenant and the
+      // other tenant's user still get the bare 404.
+      expect((await original(assetId, tokens.demoAdmin)).status).toBe(302);
+      expect((await original(assetId, c.token)).status).toBe(404);
+      expect((await original(assetId, tokens.alvaro, HOSTS.lab)).status).toBe(404);
+
+      // The administrator reads no chat row: the conversation is not theirs to open.
+      const history = await readMessages({ token: tokens.demoAdmin }, conversationId);
+      expect(history.status).toBe(404);
+
+      // Once the asset is retired the report says so and the link is the bare 404 for everyone.
+      await adminSql`update public.media_assets set deleted_at = now() where id = ${assetId}::uuid`;
+      const gone = (await queueItem(tokens.demoAdmin, reportId, HOSTS.demo))?.voice;
+      expect(gone).toEqual({ mediaId: assetId, durationSeconds: 2, gone: true });
+      expect((await original(assetId, tokens.demoAdmin)).status).toBe(404);
+    },
+    60_000,
+  );
+
+  it('5. the queue keeps (created_at desc, id desc): a page boundary inside a tie of identical instants neither repeats nor skips a row', async () => {
+    const storyId = await insertStory(userIds.marcos);
+    const commentId = await insertStoryComment(storyId, userIds.marcos, `${PREFIX}empate`);
+    const communityId = await insertCommunity(userIds.marcos, { name: `${PREFIX}Empate` });
+    const mine: string[] = [];
+    for (const [type, subject] of [
+      ['story', storyId],
+      ['story_comment', commentId],
+      ['community', communityId],
+    ] as const) {
+      const res = await fileReport(tokens.helena, type, subject);
+      expect(res.status).toBe(201);
+      mine.push(((await res.json()) as { id: string }).id);
+    }
+    await adminSql`
+      update public.content_reports set created_at = now() + interval '1 hour'
+       where id = any(${mine}::uuid[])`;
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 200; guard++) {
+      const next: string = cursor
+        ? `?estado=todas&limit=1&cursor=${encodeURIComponent(cursor)}`
+        : '?estado=todas&limit=1';
+      const got = await queue(tokens.labAdmin, next);
+      expect(got.items.length).toBeLessThanOrEqual(1);
+      seen.push(...got.items.map((row) => row.id));
+      cursor = got.nextCursor;
+      if (cursor === null) break;
+    }
+    expect(new Set(seen).size, 'no row repeats').toBe(seen.length);
+    for (const id of mine)
+      expect(
+        seen.filter((x) => x === id),
+        id,
+      ).toHaveLength(1);
+    const positions = mine.map((id) => seen.indexOf(id)).sort((x, y) => x - y);
+    expect(positions[2], 'the three tied rows are adjacent').toBe((positions[0] ?? 0) + 2);
+    expect(
+      seen.slice(positions[0], (positions[0] ?? 0) + 3),
+      'ties break on id descending',
+    ).toEqual([...mine].sort().reverse());
   });
 });
