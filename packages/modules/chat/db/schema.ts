@@ -233,6 +233,9 @@ export const chatConversations = pgTable(
     // deliberately NOT tenant-first: the documented exception to the tenant-first rule, like
     // `notifications_created_idx`.
     index('chat_conversations_resolved_sweep_idx').on(t.resolvedAt).where(sql`state = 'resolved'`),
+    // Phase 11 (D-721, D-482): a PAIRED direct (`direct_low_user_id` set) is readable only while the pair is open
+    // (`app.direct_pair_readable`: `social` on, both users role `member`, live or anonymised), as one more AND on top of the
+    // participant term. No staff branch reaches a direct: the staff term is `kind = 'support'`.
     // Fact 7: staff see every SUPPORT thread of their tenant; anyone else only what they created or
     // take part in. Per command (07 review A-CR-01 / A-WR-01 / B-WR-04): a lane may create only its
     // OWN conversation with untouched counters, only staff may UPDATE (and only the column the
@@ -241,15 +244,16 @@ export const chatConversations = pgTable(
     pgPolicy('chat_conversations_select', {
       for: 'select',
       to: authenticatedRole,
-      using: sql`tenant_id = app.tenant_id() and ((kind = 'support' and ${STAFF_ROLE}) or created_by_user_id = app.user_id() or exists (select 1 from public.chat_participants p where p.conversation_id = chat_conversations.id and p.tenant_id = app.tenant_id() and p.user_id = app.user_id()))`,
+      using: sql`tenant_id = app.tenant_id() and ((kind = 'support' and ${STAFF_ROLE}) or created_by_user_id = app.user_id() or exists (select 1 from public.chat_participants p where p.conversation_id = chat_conversations.id and p.tenant_id = app.tenant_id() and p.user_id = app.user_id())) and (direct_low_user_id is null or (select app.direct_pair_readable(direct_low_user_id, direct_high_user_id)))`,
     }),
     pgPolicy('chat_conversations_insert', {
       for: 'insert',
       to: authenticatedRole,
       // D-836, T-12.4-01: a lane may create ONLY a born-open case of its own: no number, no owner, no
       // instants, a priority of null or normal and a state of null or open (the defaults trigger fills
-      // them before this check runs). A row that is not `support` carries no case column at all.
-      withCheck: sql`tenant_id = app.tenant_id() and created_by_user_id = app.user_id() and last_seq = 0 and last_staff_seq = 0 and staff_last_read_seq = 0 and last_message_side is null and last_message_at is null and case_number is null and owner_user_id is null and resolved_at is null and closed_at is null and ((kind = 'support' and (priority is null or priority = 'normal') and (state is null or state = 'open')) or (kind <> 'support' and state is null and category is null and priority is null))`,
+      // them before this check runs). Phase 11 (D-720, T-11-05): a lane creates ONLY a `support` row; a
+      // `direct` row is created by `app.direct_conversation_open` alone.
+      withCheck: sql`tenant_id = app.tenant_id() and created_by_user_id = app.user_id() and last_seq = 0 and last_staff_seq = 0 and staff_last_read_seq = 0 and last_message_side is null and last_message_at is null and case_number is null and owner_user_id is null and resolved_at is null and closed_at is null and kind = 'support' and (priority is null or priority = 'normal') and (state is null or state = 'open')`,
     }),
     pgPolicy('chat_conversations_staff_update', {
       for: 'update',
