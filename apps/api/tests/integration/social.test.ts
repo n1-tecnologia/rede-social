@@ -313,12 +313,16 @@ describe('09 reads', () => {
     expect(await list('followers', tokens.labMember)).toEqual({ items: [], nextCursor: null });
     expect(await list('following', tokens.labMember)).toEqual({ items: [], nextCursor: null });
     const seen = await social(ids.labMember, tokens.alvaro);
+    // 11-11 (D-722): the three profile facts ride on the same strict answer; an unblocked live member is offered both.
     expect(seen).toEqual({
       membershipId: ids.labMember,
       followerCount: 0,
       followingCount: 0,
       viewerFollows: false,
       self: false,
+      canFollow: true,
+      canMessage: true,
+      blockedByViewer: false,
     });
   });
 
@@ -400,6 +404,9 @@ describe('09 reads', () => {
       followingCount: 1,
       viewerFollows: false,
       self: true,
+      canFollow: false,
+      canMessage: false,
+      blockedByViewer: false,
     });
 
     for (const target of [ids.labAdmin, ids.demoMember, '99999999-9999-4999-8999-999999999999']) {
@@ -423,12 +430,16 @@ describe('09 reads', () => {
     const res = await postJson('/v1/social/follows/state', tokens.alvaro, { membershipIds: asked });
     expect(res.status).toBe(200);
     const body = followStateSchema.parse(await res.json());
+    // 11-11 (D-722): a live member is offered both; staff, another tenant's id and an unknown id are all the same
+    // false-false-false answer, so the facts say nothing about which of them exists.
+    const offered = { canFollow: true, canMessage: true, blockedByViewer: false };
+    const cannot = { canFollow: false, canMessage: false, blockedByViewer: false };
     expect(body.items).toEqual([
-      { membershipId: ids.helena, following: true },
-      { membershipId: ids.marcos, following: false },
-      { membershipId: ids.labAdmin, following: false },
-      { membershipId: ids.demoMember, following: false },
-      { membershipId: unknown, following: false },
+      { membershipId: ids.helena, following: true, ...offered },
+      { membershipId: ids.marcos, following: false, ...offered },
+      { membershipId: ids.labAdmin, following: false, ...cannot },
+      { membershipId: ids.demoMember, following: false, ...cannot },
+      { membershipId: unknown, following: false, ...cannot },
     ]);
 
     const one = await postJson('/v1/social/follows/state', tokens.alvaro, {

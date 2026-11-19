@@ -259,6 +259,93 @@ describe('social block tracer', () => {
   });
 });
 
+type ListPage = { items: { membershipId: string }[]; nextCursor: string | null };
+
+const listOf = async (
+  from: { token: string },
+  side: 'followers' | 'following',
+  query = '',
+): Promise<ListPage> => {
+  const res = await request(`/v1/social/me/${side}${query}`, from.token);
+  expect(res.status).toBe(200);
+  return (await res.json()) as ListPage;
+};
+
+describe('social block cross-checks (D-725)', () => {
+  it('5. the two private lists never show a blocked pair and still page correctly', async () => {
+    const a = await directMember('sb5a');
+    const blocked = await directMember('sb5b');
+    const others = [
+      await directMember('sb5c'),
+      await directMember('sb5d'),
+      await directMember('sb5e'),
+    ];
+    // Everyone follows `a` and `a` follows everyone, `blocked` included, so both lists have four rows.
+    for (const other of [blocked, ...others]) {
+      expect((await follow(other, a.membershipId)).status).toBe(200);
+      expect((await follow(a, other.membershipId)).status).toBe(200);
+    }
+    expect((await listOf(a, 'followers')).items).toHaveLength(4);
+    expect((await listOf(a, 'following')).items).toHaveLength(4);
+
+    expect((await blockUser(a.token, blocked.userId)).status).toBeLessThan(300);
+
+    for (const side of ['followers', 'following'] as const) {
+      const all = await listOf(a, side);
+      expect(all.items.map((item) => item.membershipId).sort()).toEqual(
+        others.map((other) => other.membershipId).sort(),
+      );
+      // Paging by one still walks every remaining row exactly once and never meets the blocked member.
+      const walked: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 5; page += 1) {
+        const query: string = cursor ? `?limit=1&cursor=${encodeURIComponent(cursor)}` : '?limit=1';
+        const next = await listOf(a, side, query);
+        walked.push(...next.items.map((item) => item.membershipId));
+        cursor = next.nextCursor;
+        if (!cursor) break;
+      }
+      expect(walked.sort()).toEqual(others.map((other) => other.membershipId).sort());
+      expect(walked).not.toContain(blocked.membershipId);
+    }
+    // The blocked member's own lists lose the blocker as well (the rows are gone, nothing hides them).
+    expect((await listOf(blocked, 'followers')).items).toEqual([]);
+    expect((await listOf(blocked, 'following')).items).toEqual([]);
+  });
+
+  it('6. an unfollow of a blocked or removed target still answers 200, and a profile count carries no deleted follow', async () => {
+    const a = await directMember('sb6a');
+    const b = await directMember('sb6b');
+    const c = await directMember('sb6c');
+    const watcher = await directMember('sb6w');
+    expect((await follow(a, b.membershipId)).status).toBe(200);
+    expect((await follow(watcher, b.membershipId)).status).toBe(200);
+    expect((await socialOf(watcher, b.membershipId)).followerCount).toBe(2);
+
+    expect((await blockUser(a.token, b.userId)).status).toBeLessThan(300);
+    // a's follow was deleted by the block: the count a third member reads drops from 2 to 1.
+    expect((await socialOf(watcher, b.membershipId)).followerCount).toBe(1);
+    expect((await socialOf(a, b.membershipId)).followerCount).toBe(1);
+
+    // Unfollowing the blocked target, the blocker and a removed target all stay 200 with following false.
+    for (const [caller, target] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      const res = await unfollow(caller, target.membershipId);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { following: boolean }).following).toBe(false);
+    }
+    expect((await follow(a, c.membershipId)).status).toBe(200);
+    await adminSql`
+      update public.memberships set deleted_at = now() where id = ${c.membershipId}::uuid`;
+    const removed = await unfollow(a, c.membershipId);
+    expect(removed.status).toBe(200);
+    expect(((await removed.json()) as { following: boolean }).following).toBe(false);
+    expect(await followRows(a.userId, c.userId)).toBe(0);
+  });
+});
+
 describe('social block cross-tenant', () => {
   it('a block in the demo tenant leaves the same two users follow in the lab tenant alone (T-11-01)', async () => {
     const a = await sharedDirectIdentity(`${SHARED_PREFIX}-a`);
