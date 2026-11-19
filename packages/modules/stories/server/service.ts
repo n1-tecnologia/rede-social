@@ -1374,6 +1374,8 @@ type StoryCommentRow = {
   membership_id: string | null;
   display_name: string | null;
   avatar_asset_id: string | null;
+  /** 11-15 (D-733): the author's role of record from the projection's existing `memberships` join; NULL when removed. */
+  author_role?: string | null;
 };
 
 /**
@@ -1406,7 +1408,8 @@ function storyCommentProjection() {
            (ms.id is null) as author_removed,
            ms.id as membership_id,
            mp.display_name,
-           mp.avatar_asset_id
+           mp.avatar_asset_id,
+           ms.role as author_role
       from feed_comments c
       left join memberships ms on ms.user_id = c.author_user_id and ms.deleted_at is null
       left join member_profiles mp on mp.membership_id = ms.id`;
@@ -1431,6 +1434,7 @@ const toStoryComment = (
   row: StoryCommentRow,
   viewerUserId: string,
   canModerate: boolean,
+  viewerRole = '',
 ): StoryComment => ({
   id: row.id,
   createdAt: row.created_at,
@@ -1446,6 +1450,7 @@ const toStoryComment = (
   },
   canDelete: storyRemovalFor(row, viewerUserId, canModerate) !== null,
   removal: storyRemovalFor(row, viewerUserId, canModerate),
+  ...reportRiders(row.author_user_id, row.author_role, { userId: viewerUserId, role: viewerRole }),
 });
 
 /**
@@ -1583,7 +1588,7 @@ export async function listStoryComments(
   );
 
   return {
-    items: page.map((row) => toStoryComment(row, ctx.userId, opts.canModerate)),
+    items: page.map((row) => toStoryComment(row, ctx.userId, opts.canModerate, ctx.role)),
     nextCursor,
   };
 }
@@ -1683,7 +1688,7 @@ export async function createStoryComment(
   );
 
   // The caller wrote this row, so its removal is `'own'` whatever they hold: no permission read here.
-  return toStoryComment(created, ctx.userId, false);
+  return toStoryComment(created, ctx.userId, false, ctx.role);
 }
 
 /**

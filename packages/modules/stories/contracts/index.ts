@@ -537,6 +537,14 @@ export const storyCommentSchema = z
      * it falls back to `canDelete ? 'own' : null`. The delete re-decides it under a row lock.
      */
     removal: commentRemovalSchema.optional(),
+    /**
+     * 11-15 (D-733, MODER-05, A-11-ROLE): the same two riders as on a story and on a feed comment. `canReport`:
+     * the viewer did not write the comment. `canBlock`: not their own, the author is a live `member` (a removed
+     * author has no role, so false) AND the viewer's own role of record is `member`. OPTIONAL: absent reads as
+     * `false`.
+     */
+    canReport: z.boolean().optional(),
+    canBlock: z.boolean().optional(),
   })
   .strict();
 export type StoryComment = z.infer<typeof storyCommentSchema>;

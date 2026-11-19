@@ -124,3 +124,32 @@ describe('storyCommentSchema — the removed author keeps the row (UI-D-24)', ()
     ).toBe(false);
   });
 });
+
+/**
+ * 11-15 (D-733, MODER-05): `canReport` and `canBlock` ride a story comment as OPTIONAL booleans on the strict
+ * schema (a fixture from an API that predates them parses), and the flat-list shape does not move.
+ */
+describe('storyCommentSchema — the report riders (11-15)', () => {
+  const row = {
+    id: UUID,
+    createdAt: '2026-09-24T00:00:00.000001Z',
+    body: 'oi',
+    author: { membershipId: UUID, displayName: 'Helena', avatarAssetId: null },
+    authorRemoved: false,
+    canDelete: false,
+  };
+
+  it('13. a row without the riders parses and leaves them absent; with them it parses as booleans', () => {
+    const bare = storyCommentSchema.parse(row);
+    expect(bare).not.toHaveProperty('canReport');
+    expect(bare).not.toHaveProperty('canBlock');
+    const ridden = storyCommentSchema.parse({ ...row, canReport: true, canBlock: false });
+    expect(ridden.canReport).toBe(true);
+    expect(ridden.canBlock).toBe(false);
+  });
+
+  it('14. a non-boolean rider and any other new key are still refused (`.strict()`)', () => {
+    expect(storyCommentSchema.safeParse({ ...row, canBlock: 1 }).success).toBe(false);
+    expect(storyCommentSchema.safeParse({ ...row, canMute: true }).success).toBe(false);
+  });
+});

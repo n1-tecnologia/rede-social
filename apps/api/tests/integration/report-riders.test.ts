@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { sqlClient } from '@rede-social/core/db';
+import { communityCreateLimiter } from '@rede-social/core/server/safety/limits';
+import type { CommunitySummary } from '@rede-social/module-communities/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -93,6 +95,7 @@ async function sweep(): Promise<void> {
   if (createdAssets.length > 0) {
     await adminSql`delete from public.media_assets where id = any (${createdAssets}::uuid[])`;
   }
+  await adminSql`delete from public.communities where name like ${`${PREFIX}%`}`;
 }
 
 beforeAll(async () => {
@@ -194,5 +197,150 @@ describe('story riders', () => {
     const res = await request(`/v1/stories/${demo.id}`, tokens.alvaro);
     expect(res.status).toBe(404);
     expect(await res.json()).not.toHaveProperty('canBlock');
+  });
+});
+
+describe('story comment riders', () => {
+  const made: { story: string; byHelena: string; byAdmin: string; byStranger: string } = {
+    story: '',
+    byHelena: '',
+    byAdmin: '',
+    byStranger: '',
+  };
+
+  const insertComment = async (author: string, body: string): Promise<string> => {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.feed_comments (tenant_id, story_id, author_user_id, body, depth)
+      values (${labTenantId}::uuid, ${made.story}::uuid, ${author}::uuid, ${`${PREFIX}${body}`}, 0)
+      returning id`;
+    return row?.id ?? '';
+  };
+
+  const commentsFor = async (token: string): Promise<Map<string, Riders>> => {
+    const res = await request(`/v1/stories/${made.story}/comments?limit=50`, token);
+    expect(res.status).toBe(200);
+    const page = (await res.json()) as { items: Array<Riders & { id: string }> };
+    return new Map(page.items.map((item) => [item.id, item]));
+  };
+
+  it('1. the comments of an organization story: a member reads both riders true on a member’s comment, canBlock false on the administrator’s', async () => {
+    made.story = await insertStory(userIds.labAdmin, 'tenant', 'comentarios');
+    made.byHelena = await insertComment(userIds.helena, 'da helena');
+    made.byAdmin = await insertComment(userIds.labAdmin, 'do admin');
+    // A comment whose author has no live membership in this tenant (a user of another tenant): the author is "removed".
+    const [stranger] = await adminSql<{ user_id: string }[]>`
+      select m.user_id from public.memberships m
+        join public.tenants t on t.id = m.tenant_id
+       where t.slug = 'rede-demo' and m.deleted_at is null limit 1`;
+    made.byStranger = await insertComment(stranger?.user_id ?? '', 'de quem saiu');
+    const seen = await commentsFor(tokens.alvaro);
+    expect(seen.get(made.byHelena)?.canReport).toBe(true);
+    expect(seen.get(made.byHelena)?.canBlock).toBe(true);
+    expect(seen.get(made.byAdmin)?.canReport).toBe(true);
+    expect(seen.get(made.byAdmin)?.canBlock).toBe(false);
+  });
+
+  it('2. the author reads both false on their own comment (and the others as any member would)', async () => {
+    const seen = await commentsFor(tokens.helena);
+    expect(seen.get(made.byHelena)?.canReport).toBe(false);
+    expect(seen.get(made.byHelena)?.canBlock).toBe(false);
+    expect(seen.get(made.byAdmin)?.canReport).toBe(true);
+    expect(seen.get(made.byAdmin)?.canBlock).toBe(false);
+  });
+
+  it('3. A-11-ROLE: the administrator reads canReport true and canBlock false on a member’s comment; on their own both false', async () => {
+    const seen = await commentsFor(tokens.labAdmin);
+    expect(seen.get(made.byHelena)?.canReport).toBe(true);
+    expect(seen.get(made.byHelena)?.canBlock).toBe(false);
+    expect(seen.get(made.byAdmin)?.canReport).toBe(false);
+    expect(seen.get(made.byAdmin)?.canBlock).toBe(false);
+  });
+
+  it('4. MODER-05 empty: a comment whose author is removed reads canReport true and canBlock false, never an error', async () => {
+    for (const token of [tokens.alvaro, tokens.labAdmin]) {
+      const seen = await commentsFor(token);
+      expect(seen.get(made.byStranger)?.canReport).toBe(true);
+      expect(seen.get(made.byStranger)?.canBlock).toBe(false);
+    }
+  });
+
+  it('5. a comment just published answers its own riders (both false for the author)', async () => {
+    const res = await request(`/v1/stories/${made.story}/comments`, tokens.alvaro, {
+      method: 'POST',
+      body: JSON.stringify({ body: `${PREFIX}nova` }),
+    });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as Riders;
+    expect(created.canReport).toBe(false);
+    expect(created.canBlock).toBe(false);
+  });
+});
+
+describe('community riders', () => {
+  const made: { member: string; org: string } = { member: '', org: '' };
+  const detail = async (token: string, id: string): Promise<CommunitySummary> => {
+    const res = await request(`/v1/communities/${id}`, token);
+    expect(res.status).toBe(200);
+    return (await res.json()) as CommunitySummary;
+  };
+  type ViewerRiders = CommunitySummary['viewer'] & Riders;
+
+  it('1. a member community of Marcos: Alvaro reads both riders true; Marcos, the creator, both false', async () => {
+    communityCreateLimiter.reset();
+    const created = await request('/v1/communities', tokens.marcos, {
+      method: 'POST',
+      body: JSON.stringify({ name: `${PREFIX}do marcos` }),
+    });
+    expect(created.status).toBe(201);
+    made.member = ((await created.json()) as CommunitySummary).id;
+    const viewer = (await detail(tokens.alvaro, made.member)).viewer as ViewerRiders;
+    expect(viewer.canReport).toBe(true);
+    expect(viewer.canBlock).toBe(true);
+    const creator = (await detail(tokens.marcos, made.member)).viewer as ViewerRiders;
+    expect(creator.canReport).toBe(false);
+    expect(creator.canBlock).toBe(false);
+  });
+
+  it('2. A-11-ROLE: the administrator reads canReport true and canBlock false on a member community', async () => {
+    const viewer = (await detail(tokens.labAdmin, made.member)).viewer as ViewerRiders;
+    expect(viewer.canReport).toBe(true);
+    expect(viewer.canBlock).toBe(false);
+  });
+
+  it('3. an organization community the administrator created: a member reads canReport true and canBlock false; its creator both false', async () => {
+    const created = await request('/v1/communities', tokens.labAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ name: `${PREFIX}da organizacao` }),
+    });
+    expect(created.status).toBe(201);
+    made.org = ((await created.json()) as CommunitySummary).id;
+    const member = (await detail(tokens.alvaro, made.org)).viewer as ViewerRiders;
+    expect(member.canReport).toBe(true);
+    expect(member.canBlock).toBe(false);
+    const creator = (await detail(tokens.labAdmin, made.org)).viewer as ViewerRiders;
+    expect(creator.canReport).toBe(false);
+    expect(creator.canBlock).toBe(false);
+  });
+
+  it('4. the list carries the same riders as the detail (one projection) and the answer of a create names its own', async () => {
+    const res = await request('/v1/communities?limit=50', tokens.alvaro);
+    expect(res.status).toBe(200);
+    const page = (await res.json()) as { items: CommunitySummary[] };
+    const row = page.items.find((item) => item.id === made.member);
+    expect((row?.viewer as ViewerRiders | undefined)?.canBlock).toBe(true);
+    const creating = await request('/v1/communities', tokens.helena, {
+      method: 'POST',
+      body: JSON.stringify({ name: `${PREFIX}da helena` }),
+    });
+    expect(creating.status).toBe(201);
+    const own = ((await creating.json()) as CommunitySummary).viewer as ViewerRiders;
+    expect(own.canReport).toBe(false);
+    expect(own.canBlock).toBe(false);
+  });
+
+  it('5. T-11-01: a community id of nothing is the bare 404 and carries no rider', async () => {
+    const res = await request(`/v1/communities/${randomUUID()}`, tokens.alvaro);
+    expect(res.status).toBe(404);
+    expect(JSON.stringify(await res.json())).not.toContain('canBlock');
   });
 });

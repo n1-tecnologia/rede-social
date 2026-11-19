@@ -204,6 +204,18 @@ export const communityViewerSchema = z
     canEdit: z.boolean(),
     canCurate: z.boolean(),
     actions: communityActionsSchema,
+    /**
+     * 11-15 (D-733, MODER-05, A-11-ROLE): the two riders the community menu is built from, computed on the SERVER
+     * so the web never compares a role or an id (the 13-14 post and comment riders, restated). `canReport`: the
+     * viewer did not create the community (so it is false for the administrator who created an ORGANIZATION
+     * community too: the report definer refuses a creator's own content). `canBlock`: a MEMBER community of
+     * another member whose creator is a live `member`, AND the viewer's own role of record is `member` (staff are
+     * offered Denunciar and never Bloquear; an organization community has no member creator). OPTIONAL on purpose
+     * (the 08.2 Pitfall 10 rule): an API older than the web omits them and the web reads them as `false`; the
+     * viewer object stays `.strict()`. They say nothing about whether anyone reported or blocked anyone.
+     */
+    canReport: z.boolean().optional(),
+    canBlock: z.boolean().optional(),
   })
   .strict();
 export type CommunityViewer = z.infer<typeof communityViewerSchema>;

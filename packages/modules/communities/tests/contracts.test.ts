@@ -320,3 +320,47 @@ describe('10-06: the community read contract (kind, createdBy, viewer.actions, m
     expect(communityPageSchema.safeParse({ items, nextCursor: null }).success).toBe(false);
   });
 });
+
+/**
+ * 11-15 (D-733, MODER-05): the viewer object gains OPTIONAL `canReport` and `canBlock` (the report riders), stays
+ * `.strict()`, and an entry from an API that predates them still parses.
+ */
+describe('11-15: the community viewer report riders', () => {
+  const actions = { like: true, comment: true, share: true, post: false, story: false };
+  const viewer = { isOwner: false, canPublish: false, canEdit: false, canCurate: false, actions };
+  const base = {
+    id: A,
+    name: 'Corrida',
+    slug: 'corrida',
+    description: '',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    postCount: 0,
+    status: 'active',
+    lastActivityAt: '2026-11-11T10:00:00.000000Z',
+    kind: 'organization',
+    createdBy: null,
+    viewer,
+  };
+
+  it('an entry without the riders parses and leaves them absent', () => {
+    const parsed = communitySummarySchema.parse(base);
+    expect(parsed.viewer).not.toHaveProperty('canReport');
+    expect(parsed.viewer).not.toHaveProperty('canBlock');
+  });
+
+  it('both riders parse as booleans; a non-boolean or another new key is refused', () => {
+    const parsed = communitySummarySchema.parse({
+      ...base,
+      viewer: { ...viewer, canReport: true, canBlock: false },
+    });
+    expect(parsed.viewer.canReport).toBe(true);
+    expect(parsed.viewer.canBlock).toBe(false);
+    expect(
+      communitySummarySchema.safeParse({ ...base, viewer: { ...viewer, canBlock: 'sim' } }).success,
+    ).toBe(false);
+    expect(
+      communitySummarySchema.safeParse({ ...base, viewer: { ...viewer, canMute: true } }).success,
+    ).toBe(false);
+  });
+});

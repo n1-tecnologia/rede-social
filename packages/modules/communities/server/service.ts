@@ -61,6 +61,17 @@ type CommunityRow = {
    */
   is_owner: boolean;
   /**
+   * 11-15 (D-733): "the viewer created this community", for EITHER kind (an organization community's creator is
+   * the administrator who made it), computed IN the statement so the creator's user id is still never selected.
+   * Only the `canReport` rider reads it. Optional so a hand-written row of a test still types.
+   */
+  is_creator?: boolean;
+  /**
+   * 11-15 (D-733): the live creator's role of record, from the projection's existing `memberships` join (a MEMBER
+   * community's only); NULL for an organization community and for a creator who is not live.
+   */
+  creator_role?: string | null;
+  /**
    * 10-06 (D-703): the creator's three safe fields, from their LIVE membership and profile; all three are
    * null for an organization community (the join never matches it) and for a creator who is not live.
    */
@@ -223,6 +234,8 @@ function communityProjection(ctx: RequestContext, extra: SQL | null = null) {
            to_char(c.last_activity_at at time zone 'utc', ${ISO_MICROSECONDS}) as last_activity_at,
            c.kind,
            (c.kind = 'member' and c.created_by_user_id = ${ctx.userId}::uuid) as is_owner,
+           coalesce(c.created_by_user_id = ${ctx.userId}::uuid, false) as is_creator,
+           am.role as creator_role,
            am.id as creator_membership_id,
            ap.display_name as creator_display_name,
            ap.avatar_asset_id as creator_avatar_asset_id
@@ -258,12 +271,22 @@ export type CommunityViewerFlags = {
   canPublishStory: boolean;
   /** `communities.community.create`: may create (and therefore has a quota). */
   canCreate: boolean;
+  /**
+   * 11-15 (D-733, A-11-ROLE): the viewer's own role of record is `member`, read from the request context by the
+   * route (never from the permission set, which cannot tell a member who holds a staff key from staff). Only the
+   * `canBlock` rider reads it; absent reads as `false`, so a caller that forgets it hides Bloquear, never shows it.
+   */
+  isMember?: boolean;
 };
 
 /** The composed permission set to the module's own flags; the only place that names the strings. */
-export function communityViewerFlags(granted: readonly string[]): CommunityViewerFlags {
+export function communityViewerFlags(
+  granted: readonly string[],
+  role?: string,
+): CommunityViewerFlags {
   const has = (key: string) => granted.includes(key);
   return {
+    isMember: role === 'member',
     canManage: has('communities.community.manage'),
     canPostOrg: has('feed.post.create') && has('content.publish'),
     canCurateOrg: has('stories.story.manage'),
@@ -306,6 +329,12 @@ function viewerOf(row: CommunityRow, flags: CommunityViewerFlags): CommunityView
     canEdit,
     canCurate,
     actions: { like: true, comment: true, share: true, post: canPublish, story: canStory },
+    // 11-15 (D-733, A-11-ROLE; the feed's `reportRiders` in the same words): `canReport` when the viewer did not
+    // create it (either kind); `canBlock` only for another member's MEMBER community whose live creator is a
+    // `member`, and only for a viewer whose own role of record is `member`.
+    canReport: row.is_creator !== true,
+    canBlock:
+      row.is_creator !== true && member && row.creator_role === 'member' && flags.isMember === true,
   };
 }
 

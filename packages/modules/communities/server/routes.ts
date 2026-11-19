@@ -283,7 +283,7 @@ export const communitiesRoutes = communities
     // 10-06: the permission set is read ONCE and handed to the service as booleans (`viewer`), so the
     // per-viewer flags of every item (`isOwner`, `canPublish`, `canEdit`, `canCurate`, `actions`) and the
     // caller's `memberQuota` are decided on the server and the host never compares a role or an id.
-    const viewer = communityViewerFlags(await permissionsForRequest(ctx));
+    const viewer = communityViewerFlags(await permissionsForRequest(ctx), ctx.role);
     let ownOnly = false;
     if (query.status === 'archived' && !viewer.canManage) {
       if (!viewer.canManageOwn) throw new ApiError(403, 'FORBIDDEN');
@@ -294,23 +294,23 @@ export const communitiesRoutes = communities
   .openapi(getCommunityRoute, async (c) => {
     const { communityId } = c.req.valid('param');
     const ctx = c.get('ctx');
-    const viewer = communityViewerFlags(await permissionsForRequest(ctx));
+    const viewer = communityViewerFlags(await permissionsForRequest(ctx), ctx.role);
     return c.json(await getCommunity(ctx, communityId, viewer), 200);
   })
   .openapi(createCommunityRoute, async (c) => {
     const ctx = c.get('ctx');
-    const viewer = communityViewerFlags(await permissionsForRequest(ctx));
+    const viewer = communityViewerFlags(await permissionsForRequest(ctx), ctx.role);
     return c.json(await createCommunity(ctx, c.req.valid('json'), viewer), 201);
   })
   .openapi(updateCommunityRoute, async (c) => {
     const { communityId } = c.req.valid('param');
     const ctx = c.get('ctx');
-    const viewer = communityViewerFlags(await permissionsForRequest(ctx));
+    const viewer = communityViewerFlags(await permissionsForRequest(ctx), ctx.role);
     return c.json(await updateCommunity(ctx, communityId, c.req.valid('json'), viewer), 200);
   })
   .openapi(reorderCommunitiesRoute, async (c) => {
     const ctx = c.get('ctx');
-    const viewer = communityViewerFlags(await permissionsForRequest(ctx));
+    const viewer = communityViewerFlags(await permissionsForRequest(ctx), ctx.role);
     return c.json(await reorderCommunities(ctx, c.req.valid('json'), viewer), 200);
   })
   .openapi(deleteCommunityRoute, async (c) => {

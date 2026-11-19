@@ -154,9 +154,9 @@ describe('the ACTIVE list — position first, and a cursor that carries it', () 
     const [statement] = seen;
     expect(statement?.kind).toBe('active-page');
     expect(statement?.sql).toContain("c.status = 'active'");
-    // Page 1: every cursor parameter (the position thrice, the instant, the id) is null. Parameters 0 and 1 are the
-    // viewer (10-06, the projection's `is_owner`) and the tenant.
-    expect(statement?.params.slice(2, 7)).toEqual([null, null, null, null, null]);
+    // Page 1: every cursor parameter (the position thrice, the instant, the id) is null. Parameters 0, 1 and 2 are the
+    // viewer twice (10-06's `is_owner`, 11-15's `is_creator`, both of the projection) and the tenant.
+    expect(statement?.params.slice(3, 8)).toEqual([null, null, null, null, null]);
   });
 
   it('2. the cursor fed back binds exactly (position, instant, id) — mixed directions, one boundary', async () => {
@@ -193,7 +193,7 @@ describe('the ACTIVE list — position first, and a cursor that carries it', () 
       await listCommunities(context(), query({ cursor }), { viewer: NO_FLAGS });
       const params = seen[0]?.params ?? [];
       // Every cursor parameter is null: the statement ran as page 1.
-      expect(params.slice(2, 7), cursor).toEqual([null, null, null, null, null]);
+      expect(params.slice(3, 8), cursor).toEqual([null, null, null, null, null]);
     }
   });
 });
@@ -231,7 +231,7 @@ describe('the ARCHIVED list — unchanged, and safe from the active cursor', () 
     });
 
     expect(seen[0]?.kind).toBe('archived-page');
-    expect(seen[0]?.params.slice(2, 5)).toEqual([null, null, null]);
+    expect(seen[0]?.params.slice(3, 6)).toEqual([null, null, null]);
   });
 });
 
