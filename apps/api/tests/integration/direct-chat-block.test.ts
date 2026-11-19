@@ -1,3 +1,4 @@
+import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { caseKit, removeThrowaways, request } from './chat-case-fixtures';
 import {
@@ -472,4 +473,214 @@ describe('hidden parity', () => {
     ]);
     expect(thread.conversation).toBeNull();
   });
+});
+
+/**
+ * Phase 11 plan 12 (CHAT-07; D-722, T-11-04): a send and a block serialise on the conversation row lock, proved with TWO
+ * real connections and no wall-clock timing.
+ *
+ * The holder connection plays an in-flight send: a transaction that inserts a message of the pair (so the send guard took
+ * the conversation row lock) and does not commit. The block goes through the API on its own pooled connection. The barrier
+ * is `pg_blocking_pids`: the test proceeds only once Postgres itself says the block's backend waits on the holder's pid, so
+ * a slow machine changes nothing. The whole describe is bounded by a timeout: a deadlock fails it, it never hangs.
+ */
+describe('send versus block', () => {
+  const HOLDER_URL = 'postgres://postgres:postgres@127.0.0.1:54322/postgres';
+
+  /**
+   * Resolves once `count` backends wait, directly or through one another, on `holderPid` (a lock wait the database
+   * reports, not a sleep). A row lock queues the second waiter behind the first waiter's tuple lock, so the chain is
+   * followed with a recursive walk of `pg_blocking_pids`.
+   */
+  async function waitUntilBlocked(holderPid: number, count: number): Promise<void> {
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      const [row] = await adminSql<{ n: number }[]>`
+        with recursive waiting(pid) as (
+          select a.pid
+            from pg_stat_activity a
+           where a.datname = current_database()
+             and ${holderPid}::int = any(pg_blocking_pids(a.pid))
+          union
+          select a.pid
+            from pg_stat_activity a
+            join waiting w on w.pid = any(pg_blocking_pids(a.pid))
+           where a.datname = current_database()
+        )
+        select count(*)::int as n from waiting`;
+      if ((row?.n ?? 0) >= count) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(`no backend ever waited behind ${holderPid}`);
+  }
+
+  /** An open transaction on its own connection that holds the conversation row lock until `release()`. */
+  async function holdLockWith(work: (tx: postgres.TransactionSql) => Promise<void>) {
+    const connection = postgres(HOLDER_URL, { prepare: false, max: 1 });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let taken: (pid: number) => void = () => undefined;
+    const lockTaken = new Promise<number>((resolve) => {
+      taken = resolve;
+    });
+    const running = connection.begin(async (tx) => {
+      await work(tx);
+      const [pid] = await tx<{ pid: number }[]>`select pg_backend_pid()::int as pid`;
+      taken(pid?.pid ?? 0);
+      await held;
+    });
+    running.catch(() => undefined);
+    const holderPid = await lockTaken;
+    // `work` ran inside the open transaction, so its row lock is held by this very backend.
+    expect(holderPid).toBeGreaterThan(0);
+    return {
+      holderPid,
+      commit: async () => {
+        release();
+        await running;
+        await connection.end();
+      },
+      abort: async () => {
+        release();
+        await running.catch(() => undefined);
+        await connection.end();
+      },
+    };
+  }
+
+  const followBoth = async (tenantId: string, a: DirectMember, b: DirectMember) => {
+    await adminSql`
+      insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+      values (${tenantId}::uuid, ${a.userId}::uuid, ${b.userId}::uuid),
+             (${tenantId}::uuid, ${b.userId}::uuid, ${a.userId}::uuid)
+      on conflict do nothing`;
+  };
+  const followsOf = async (a: DirectMember, b: DirectMember) => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.social_follows
+       where (follower_user_id = ${a.userId}::uuid and followee_user_id = ${b.userId}::uuid)
+          or (follower_user_id = ${b.userId}::uuid and followee_user_id = ${a.userId}::uuid)`;
+    return row?.n ?? 0;
+  };
+  const messagesOf = async (conversationId: string) => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.chat_messages where conversation_id = ${conversationId}::uuid`;
+    return row?.n ?? 0;
+  };
+  const blocksOf = async (a: DirectMember, b: DirectMember) => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.member_blocks
+       where blocker_user_id = ${a.userId}::uuid and blocked_user_id = ${b.userId}::uuid`;
+    return row?.n ?? 0;
+  };
+
+  it('12. CHAT-07, T-11-04: a send in flight holds the lock, the block WAITS for it, then applies; the next send of either side is `direct_closed`', async () => {
+    const { ids } = await caseKit();
+    const { a, b, conversationId } = await pairOf('sb1');
+    await followBoth(ids.demo, a, b);
+    expect(await messagesOf(conversationId)).toBe(2);
+
+    // The in-flight send: a message of A in the pair, inserted and NOT committed.
+    const holder = await holdLockWith(async (tx) => {
+      await tx`
+        insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+        values (${ids.demo}::uuid, ${conversationId}::uuid, ${a.userId}::uuid, 'member', 'Em voo')`;
+    });
+    try {
+      let answeredAt = 0;
+      const blocking = blockUser(a.token, b.userId).then((res) => {
+        answeredAt = performance.now();
+        return res;
+      });
+      // Postgres itself says the block's backend waits behind the holder; nothing is answered yet.
+      await waitUntilBlocked(holder.holderPid, 1);
+      expect(answeredAt).toBe(0);
+      expect(await blocksOf(a, b)).toBe(0);
+      expect(await followsOf(a, b)).toBe(2);
+
+      const committedAt = performance.now();
+      await holder.commit();
+      const res = await blocking;
+      expect(res.status).toBeLessThan(300);
+      // The block answered only AFTER the held transaction committed.
+      expect(answeredAt).toBeGreaterThanOrEqual(committedAt);
+    } finally {
+      await holder.abort();
+    }
+
+    // The in-flight message was accepted, the block exists, both follow rows are gone.
+    expect(await messagesOf(conversationId)).toBe(3);
+    expect(await blocksOf(a, b)).toBe(1);
+    expect(await followsOf(a, b)).toBe(0);
+
+    // The NEXT send of either side meets the block: one neutral word, nothing stored.
+    for (const [from, to] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      const refused = await sendDirect(from, to.membershipId, 'Depois do bloqueio');
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as Envelope).error.details).toEqual({
+        chat: 'direct_closed',
+      });
+    }
+    expect(await messagesOf(conversationId)).toBe(3);
+  }, 30_000);
+
+  it('13. CHAT-07, T-11-04: the block commits first, then a send is `direct_closed` and no row of that send exists', async () => {
+    const { a, b, conversationId } = await pairOf('sb2');
+    expect((await blockUser(b.token, a.userId)).status).toBeLessThan(300);
+    const before = await messagesOf(conversationId);
+    const refused = await sendDirect(a, b.membershipId, 'Tarde demais');
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as Envelope).error.details).toEqual({ chat: 'direct_closed' });
+    expect(await messagesOf(conversationId)).toBe(before);
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.chat_messages
+       where conversation_id = ${conversationId}::uuid and body = 'Tarde demais'`;
+    expect(row?.n).toBe(0);
+  }, 30_000);
+
+  it('14. CHAT-07, T-11-04: a send and a block queued behind the same lock never deadlock and never both win; every later send is refused', async () => {
+    const { a, b, conversationId } = await pairOf('sb3');
+    const holder = await holdLockWith(async (tx) => {
+      await tx`
+        select id from public.chat_conversations where id = ${conversationId}::uuid for update`;
+    });
+    let sent: Response | undefined;
+    let blocked: Response | undefined;
+    try {
+      const sending = sendDirect(a, b.membershipId, 'Corrida').then((res) => {
+        sent = res;
+        return res;
+      });
+      const blocking = blockUser(b.token, a.userId).then((res) => {
+        blocked = res;
+        return res;
+      });
+      await waitUntilBlocked(holder.holderPid, 2);
+      expect(sent).toBeUndefined();
+      expect(blocked).toBeUndefined();
+      await holder.commit();
+      await Promise.all([sending, blocking]);
+    } finally {
+      await holder.abort();
+    }
+    expect(blocked?.status).toBeLessThan(300);
+    expect(await blocksOf(b, a)).toBe(1);
+    // Either order is lawful, but the message is stored exactly when its answer was 201, never after the block.
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.chat_messages
+       where conversation_id = ${conversationId}::uuid and body = 'Corrida'`;
+    expect(row?.n).toBe(sent?.status === 201 ? 1 : 0);
+    if (sent?.status !== 201) expect(sent?.status).toBe(409);
+    // Whatever won, the pair is closed now for both sides.
+    for (const [from, to] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      expect((await sendDirect(from, to.membershipId, 'Fechado')).status).toBe(409);
+    }
+  }, 30_000);
 });
