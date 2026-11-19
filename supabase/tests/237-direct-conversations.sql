@@ -17,8 +17,20 @@ begin;
 --    OTHER participant and lifting the block returns it; an anonymised other member keeps it readable; the 12.4 case
 --    triggers leave it alone.
 --
+-- 5. THE ELIGIBILITY MATRIX (task 3, CHAT-06, D-482, D-483; T-11-01, T-11-03): every ineligible opening is the ONE SQLSTATE
+--    DM001 with the same message and writes nothing: a staff target, self, a target of another tenant, a target the caller
+--    blocked, a caller the target blocked, an administrator-blocked target, a removed target, social off and a null target;
+--    a lane with no claims or a caller who is not live is 42501; a staff caller is DM001; the positive control stands beside.
+--
+-- 6. CONCURRENCY BY CONSTRUCTION (task 3, D-720): two calls for one pair inside one transaction leave one row, and the
+--    function's `on conflict` arbiter is the pair index.
+--
+-- 7. THE INVARIANT AND THE GRANTS (task 3, D-719, T-11-19): every paired direct has exactly its two pair users as
+--    participants and no staff participant; `app.pair_open_in` is not executable by a lane; `app.social_pair_open` answers
+--    only the zero system user; `app.members_blocked_between` is caller-relative.
+--
 -- Fixture ids use the `1e370000-…` prefix (`tests.d37('a1')` spells one). Like its siblings, this file ROLLS BACK.
-select plan(52);
+select plan(86);
 
 create function tests.d37(p text) returns uuid language sql immutable as
   $$ select ('1e370000-0000-4000-8000-0000000000' || p)::uuid $$;
@@ -37,6 +49,8 @@ select tests.auth_user('m3@direct-a.local', tests.d37('a3'));
 select tests.auth_user('m4@direct-a.local', tests.d37('a4'));
 select tests.auth_user('support@direct-a.local', tests.d37('a5'));
 select tests.auth_user('admin@direct-a.local', tests.d37('a6'));
+select tests.auth_user('m5@direct-a.local', tests.d37('a7'));
+select tests.auth_user('m6@direct-a.local', tests.d37('a8'));
 select tests.auth_user('m3@direct-b.local', tests.d37('b3'));
 select tests.member(tests.d37('01'), tests.d37('a1'));
 select tests.member(tests.d37('01'), tests.d37('a2'));
@@ -44,6 +58,8 @@ select tests.member(tests.d37('01'), tests.d37('a3'));
 select tests.member(tests.d37('01'), tests.d37('a4'));
 select tests.member(tests.d37('01'), tests.d37('a5'), 'support_tenant');
 select tests.member(tests.d37('01'), tests.d37('a6'), 'admin_tenant');
+select tests.member(tests.d37('01'), tests.d37('a7'));
+select tests.member(tests.d37('01'), tests.d37('a8'));
 select tests.member(tests.d37('02'), tests.d37('a1'));
 select tests.member(tests.d37('02'), tests.d37('a2'));
 select tests.member(tests.d37('02'), tests.d37('b3'));
@@ -310,6 +326,141 @@ select results_eq(
 select is(
   (select last_number from public.chat_case_counters where tenant_id = tests.d37('01')), 1,
   'D-800: the tenant counter moved only for the one support case, never for the direct');
+
+-- ── 5. the eligibility matrix ──────────────────────────────────────────────────────────────────
+-- Section 4 ended with a2 anonymised; restore it, then set the scene: a7 removed, a8 blocked by the administrator, a1
+-- blocked a3 and a4 blocked a1.
+update public.memberships
+   set deleted_at = null, deletion_requested_at = null, deletion_due_at = null, anonymised_at = null
+ where tenant_id = tests.d37('01') and user_id = tests.d37('a2');
+update public.memberships set deleted_at = now() where tenant_id = tests.d37('01') and user_id = tests.d37('a7');
+update public.memberships set blocked_at = now(), status = 'blocked' where tenant_id = tests.d37('01') and user_id = tests.d37('a8');
+insert into public.member_blocks (tenant_id, blocker_user_id, blocked_user_id) values
+  (tests.d37('01'), tests.d37('a1'), tests.d37('a3')),
+  (tests.d37('01'), tests.d37('a4'), tests.d37('a1'));
+create function tests.dm37(p_other uuid) returns text language plpgsql as $$
+begin
+  perform * from app.direct_conversation_open(p_other);
+  return 'opened';
+exception when others then
+  return sqlstate || ':' || sqlerrm;
+end $$;
+
+select tests.as_tenant(tests.d37('01'), tests.d37('a1'));
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('a5')) $$, 'DM001', 'direct_conversation_open: not available',
+  'D-482/T-11-03: a staff target is DM001');
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('a1')) $$, 'DM001', 'direct_conversation_open: not available',
+  'T-11-03: opening a conversation with yourself is DM001');
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('b3')) $$, 'DM001', 'direct_conversation_open: not available',
+  'T-11-01/T-11-03: a target who belongs only to another tenant is DM001');
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('a3')) $$, 'DM001', 'direct_conversation_open: not available',
+  'T-11-03: a target the caller blocked is DM001');
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('a4')) $$, 'DM001', 'direct_conversation_open: not available',
+  'T-11-03: a caller the target blocked is DM001 (the same code, no way to tell which side blocked)');
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('a7')) $$, 'DM001', 'direct_conversation_open: not available',
+  'T-11-03: a removed target is DM001');
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('a8')) $$, 'DM001', 'direct_conversation_open: not available',
+  'T-11-03: an administrator-blocked target is DM001');
+select throws_ok($$ select * from app.direct_conversation_open(null::uuid) $$, 'DM001', 'direct_conversation_open: not available',
+  'T-11-03: a null target is DM001');
+select is(
+  (select count(distinct tests.dm37(t))::int
+     from unnest(array[tests.d37('a5'), tests.d37('a1'), tests.d37('b3'), tests.d37('a3'), tests.d37('a4'), tests.d37('a7'), tests.d37('a8'), null::uuid]) as t),
+  1, 'T-11-03: the eight causes answer ONE identical SQLSTATE and message');
+reset role;
+update public.tenant_modules set enabled = false where tenant_id = tests.d37('01') and module_key = 'social';
+select tests.as_tenant(tests.d37('01'), tests.d37('a1'));
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('a2')) $$, 'DM001', 'direct_conversation_open: not available',
+  'D-483/T-11-03: with social off even an existing pair cannot be opened (DM001)');
+reset role;
+update public.tenant_modules set enabled = true where tenant_id = tests.d37('01') and module_key = 'social';
+select tests.as_tenant(tests.d37('01'), tests.d37('a5'), 'support_tenant');
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('a1')) $$, 'DM001', 'direct_conversation_open: not available',
+  'D-482: a staff caller is DM001 (staff take no part in a direct)');
+reset role;
+select tests.as_tenant_without_claims();
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('a2')) $$, '42501', 'direct_conversation_open: refused',
+  'a lane with no claims is refused 42501');
+reset role;
+select tests.as_tenant(tests.d37('01'), tests.d37('a8'));
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('a2')) $$, '42501', 'direct_conversation_open: refused',
+  'a caller the administrator blocked is refused 42501');
+reset role;
+select tests.as_tenant(tests.d37('01'), tests.d37('a7'));
+select throws_ok($$ select * from app.direct_conversation_open(tests.d37('a2')) $$, '42501', 'direct_conversation_open: refused',
+  'a removed caller is refused 42501');
+reset role;
+select is(
+  (select count(*)::int from public.chat_conversations where tenant_id = tests.d37('01') and direct_low_user_id is not null), 1,
+  'T-11-03: every refusal wrote nothing (still the one pair of section 1)');
+select tests.as_tenant(tests.d37('01'), tests.d37('a2'));
+select is(
+  (select created from app.direct_conversation_open(tests.d37('a3'))), true,
+  'positive control: with nothing in the way another pair opens and is created');
+reset role;
+select is(
+  (select count(*)::int from public.chat_participants where conversation_id = tests.pair37(tests.d37('01'), tests.d37('a2'), tests.d37('a3'))), 2,
+  'positive control: …with both participants enrolled');
+
+-- members_blocked_between is caller-relative: either side of a block gets true, a stranger false, another tenant false.
+select tests.as_tenant(tests.d37('01'), tests.d37('a1'));
+select is((select app.members_blocked_between(tests.d37('a3'))), true, 'T-11-03: the blocker sees the block');
+select is((select app.members_blocked_between(tests.d37('a2'))), false, 'positive control: no block with a2');
+reset role;
+select tests.as_tenant(tests.d37('01'), tests.d37('a3'));
+select is((select app.members_blocked_between(tests.d37('a1'))), true, 'T-11-03: the BLOCKED side asks without reading member_blocks and sees it too');
+reset role;
+select tests.as_tenant(tests.d37('02'), tests.d37('a1'));
+select is((select app.members_blocked_between(tests.d37('a3'))), false, 'T-11-01: a tenant B claim does not see tenant A''s block');
+reset role;
+
+-- ── 6. concurrency by construction ─────────────────────────────────────────────────────────────
+select tests.as_tenant(tests.d37('01'), tests.d37('a4'));
+select is(
+  (select array_agg(created order by n) from (select 1 as n, created from app.direct_conversation_open(tests.d37('a3'))) x), array[true],
+  'D-720: the first of two calls for a fresh pair creates it');
+select is(
+  (select created from app.direct_conversation_open(tests.d37('a3'))), false,
+  'D-720: the second call in the same transaction creates nothing');
+reset role;
+select is(
+  (select count(*)::int from public.chat_conversations
+    where tenant_id = tests.d37('01') and direct_low_user_id = tests.d37('a3') and direct_high_user_id = tests.d37('a4')), 1,
+  'D-720: two calls for one pair leave exactly one row');
+select ok(
+  pg_get_functiondef('app.direct_conversation_open(uuid)'::regprocedure)
+    like '%on conflict (tenant_id, direct_low_user_id, direct_high_user_id) where direct_low_user_id is not null do nothing%',
+  'D-720: the arbiter of the insert is the pair index, so concurrent first calls collapse to one row');
+
+-- ── 7. the invariant and the grants ────────────────────────────────────────────────────────────
+select is(
+  (select count(*)::int from public.chat_conversations c
+    where c.direct_low_user_id is not null
+      and (select array_agg(p.user_id order by p.user_id) from public.chat_participants p where p.conversation_id = c.id)
+          is distinct from array[c.direct_low_user_id, c.direct_high_user_id]), 0,
+  'assumption delta: every paired direct has exactly its two pair users as participants, nobody else');
+select is(
+  (select count(*)::int from public.chat_participants p join public.chat_conversations c on c.id = p.conversation_id
+    where c.kind = 'direct' and p.user_id in (tests.d37('a5'), tests.d37('a6'))), 0,
+  'D-482: no staff user holds a participant row of a direct');
+select is(has_function_privilege('authenticated', 'app.pair_open_in(uuid, uuid, uuid)', 'execute'), false,
+  'T-11-19: authenticated cannot execute app.pair_open_in');
+select is(has_function_privilege('anon', 'app.pair_open_in(uuid, uuid, uuid)', 'execute'), false,
+  'T-11-19: anon cannot execute app.pair_open_in');
+select is(has_function_privilege('anon', 'app.direct_conversation_open(uuid)', 'execute'), false,
+  'anon cannot execute app.direct_conversation_open');
+select is(has_function_privilege('authenticated', 'app.direct_conversation_open(uuid)', 'execute'), true,
+  'positive control: authenticated can execute app.direct_conversation_open');
+select tests.as_tenant(tests.d37('01'), '00000000-0000-0000-0000-000000000000');
+select is((select app.social_pair_open(tests.d37('a2'), tests.d37('a3'))), true,
+  'D-719: the zero system user (the worker) gets the open-pair answer true for an open pair');
+select is((select app.social_pair_open(tests.d37('a1'), tests.d37('a4'))), false,
+  'D-719: …and false for a pair with a block between them');
+reset role;
+select tests.as_tenant(tests.d37('01'), tests.d37('a1'));
+select throws_ok($$ select app.social_pair_open(tests.d37('a3'), tests.d37('a4')) $$, '42501', 'social_pair_open: system lane only',
+  'T-11-03: a member lane asking about two OTHER members is refused 42501');
+reset role;
 
 select * from finish();
 rollback;
