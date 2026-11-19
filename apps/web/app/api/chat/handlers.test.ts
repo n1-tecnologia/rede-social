@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { createClient } from '@/lib/supabase/server';
 import { GET as getHistory } from './conversations/[conversationId]/case/history/route';
+import { GET as getDirectDetail } from './direct/[conversationId]/route';
 import { GET as getDirectList } from './direct/route';
 import { GET as getInbox } from './inbox/route';
 import { GET as getStaff } from './staff/route';
@@ -99,6 +100,10 @@ const HANDLERS = [
   ['my cases', (site?: string | null) => getMyCases(get('/api/chat/support/cases', site)[0])],
   ['inbox', (site?: string | null) => getInbox(get('/api/chat/inbox', site)[0])],
   ['direct list', (site?: string | null) => getDirectList(get('/api/chat/direct', site)[0])],
+  [
+    'direct detail',
+    (site?: string | null) => getDirectDetail(...get(`/api/chat/direct/${CONVERSATION}`, site)),
+  ],
 ] as const;
 
 describe.each(HANDLERS)('%s handler: the shared gates (T-12.4-51, T-12.4-52)', (_name, call) => {
@@ -578,6 +583,111 @@ describe('GET /api/chat/direct (11-18, CHAT-06, D-719, UI-D-862, UI-D-866)', () 
     Object.assign(leaky.rows[0] as object, { blockedMe: true });
     vi.mocked(apiFetch).mockResolvedValue(json(200, leaky));
     const res = await getDirectList(get('/api/chat/direct')[0]);
+    expect(res.status).toBe(502);
+    expect(await res.text()).toBe('');
+    spy.mockRestore();
+  });
+});
+
+describe('GET /api/chat/direct/{conversationId} (11-18, CHAT-07, D-722, UI-D-865)', () => {
+  const OTHER = '0e000000-0000-4000-8000-0000000000e1';
+  const detail = (composer: string, extra: Record<string, unknown> = {}) => ({
+    conversationId: CONVERSATION,
+    other: { membershipId: OTHER, displayName: 'Ana Lima', avatarAssetId: null, removed: false },
+    composer,
+    canBlock: composer === 'open',
+    lastSeq: 7,
+    lastReadSeq: 5,
+    ...extra,
+  });
+
+  it('answers the FINISHED composer state in ONE call, no-store', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, detail('blocker', { canBlock: false })));
+    const res = await getDirectDetail(...get(`/api/chat/direct/${CONVERSATION}`));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(`/v1/chat/direct/${CONVERSATION}`);
+    expect(await res.json()).toEqual({
+      conversationId: CONVERSATION,
+      other: {
+        membershipId: OTHER,
+        name: 'Ana Lima',
+        avatar: null,
+        removed: false,
+        profileHref: `/membros/${OTHER}`,
+      },
+      state: 'blocker',
+      strip: {
+        kind: 'blocker',
+        glyph: 'Ban',
+        role: 'status',
+        text: 'Você bloqueou Ana Lima',
+        label: 'Você bloqueou Ana Lima',
+        unblock: {
+          label: 'Desbloquear',
+          pendingLabel: 'Desbloqueando…',
+          toast: 'Ana Lima foi desbloqueado.',
+        },
+      },
+      canBlock: false,
+      lastSeq: 7,
+      lastReadSeq: 5,
+    });
+  });
+
+  it('the closed strip reaches the blocked member as one sentence and nothing else', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, detail('closed')));
+    const res = await getDirectDetail(...get(`/api/chat/direct/${CONVERSATION}`));
+    const body = (await res.json()) as { state: string; strip: Record<string, unknown> };
+    expect(body.state).toBe('closed');
+    expect(body.strip).toEqual({
+      kind: 'closed',
+      glyph: 'Lock',
+      role: 'status',
+      text: 'Esta conversa não aceita novas mensagens.',
+      label: 'Esta conversa não aceita novas mensagens.',
+      unblock: null,
+    });
+  });
+
+  it('a path id that is not a uuid is 404 with zero API calls and zero session reads', async () => {
+    const res = await getDirectDetail(
+      new Request('http://rede-demo.localhost:3000/x', {
+        headers: { host: 'rede-demo.localhost:3000', 'sec-fetch-site': 'same-origin' },
+      }),
+      { params: Promise.resolve({ conversationId: '../support' }) },
+    );
+    expect(res.status).toBe(404);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('the API bare 404 (a foreign or hidden conversation) is the bare 404, empty and no-store', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(404, { error: { code: 'NOT_FOUND' } }));
+    const res = await getDirectDetail(...get(`/api/chat/direct/${CONVERSATION}`));
+    expect(res.status).toBe(404);
+    expect(await res.text()).toBe('');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('an upper-case id is lower-cased before the forward', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, detail('open')));
+    await getDirectDetail(
+      new Request('http://rede-demo.localhost:3000/x', {
+        headers: { host: 'rede-demo.localhost:3000', 'sec-fetch-site': 'same-origin' },
+      }),
+      { params: Promise.resolve({ conversationId: CONVERSATION.toUpperCase() }) },
+    );
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(`/v1/chat/direct/${CONVERSATION}`);
+  });
+
+  it('T-11-03: a detail carrying a "blocked me" key is refused by the strict contract, nothing leaks', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(apiFetch).mockResolvedValue(json(200, detail('closed', { blockedMe: true })));
+    const res = await getDirectDetail(...get(`/api/chat/direct/${CONVERSATION}`));
     expect(res.status).toBe(502);
     expect(await res.text()).toBe('');
     spy.mockRestore();

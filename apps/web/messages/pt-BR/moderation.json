@@ -111,6 +111,15 @@
         "notActive": "Disponível depois que o convite for aceito.",
         "generic": "Não foi possível concluir. Tente novamente."
       }
+    },
+    "report": {
+      "resolve": {
+        "dismiss": "Ignorar denúncia",
+        "remove": "Remover conteúdo",
+        "archive": "Arquivar comunidade",
+        "block": "Bloquear autor",
+        "helperMessage": "Uma mensagem enviada não pode ser removida."
+      }
     }
   }
 }

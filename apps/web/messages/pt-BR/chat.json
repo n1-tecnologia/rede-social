@@ -26,7 +26,15 @@
       }
     },
     "direct": {
-      "removedName": "Membro removido"
+      "removedName": "Membro removido",
+      "closed": "Esta conversa não aceita novas mensagens.",
+      "blocker": {
+        "text": "Você bloqueou {nome}",
+        "unblock": "Desbloquear",
+        "unblocking": "Desbloqueando…",
+        "unblocked": "{nome} foi desbloqueado."
+      },
+      "removed": "Este membro não está mais na comunidade. A conversa fica só para leitura."
     },
     "member": {
       "title": "Equipe {tenant}",

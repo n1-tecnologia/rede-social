@@ -8,11 +8,14 @@ import {
   type ChatCaseCategory,
   type ChatCasePriority,
   type ChatCaseState,
+  type DirectComposerState,
+  type DirectDetail,
   type DirectListAnswer,
   type DirectListRow,
   type DirectOther,
   type DirectPreview,
   type DirectSupportSummary,
+  type DirectWithAnswer,
   type InboxRow,
   type MemberCase,
   type MessageRow,
@@ -1197,5 +1200,127 @@ export function conversationsPageView(
     ...(answer.support ? { support: supportRowView(answer.support, { tenant, t }) } : {}),
     rows: answer.rows.map((row) => conversationRowView(row, { timeZone, keys, t })),
     nextCursor: answer.nextCursor,
+  };
+}
+
+/**
+ * ---------------------------------------------------------------------------------------------------
+ * The composer area of a direct conversation (11-18, CHAT-07, D-722, D-723, UI-D-865).
+ *
+ * ONE finished enum: `open`, `closed` (the strip the BLOCKED side reads), `blocker` (the strip with the way
+ * to unblock) and `removed` (the read-only strip of a departed account). The server chooses the word; this
+ * function only dresses it, so the client never computes a state. The `closed` strip is the blocked
+ * member's whole experience of a block: ONE sentence with a constant glyph, role and name, and NO name, no
+ * reason, no date and no block word anywhere (T-11-03, UI-D-860). A unit test scans its whole output.
+ * ---------------------------------------------------------------------------------------------------
+ */
+
+/** The lucide glyph NAMES of the strips (the screen maps a name to the icon, MOD-02). */
+export type ComposerStripGlyph = 'Lock' | 'Ban';
+
+/** The way out of the blocker's strip: the button, its pending word and the toast after it (UI-D-865). */
+export interface ComposerUnblockView {
+  label: string;
+  pendingLabel: string;
+  toast: string;
+}
+
+/** One strip under the message list, finished. `role` is always `status` (polite, spoken once). */
+export interface ComposerStripView {
+  kind: 'closed' | 'blocker' | 'removed';
+  glyph: ComposerStripGlyph;
+  role: 'status';
+  text: string;
+  /** The accessible name: the very same sentence (the blocked side hears only the one sentence). */
+  label: string;
+  /** The blocker's button; `null` on the two other strips. */
+  unblock: ComposerUnblockView | null;
+}
+
+/** The composer slot: exactly one state; `strip` is `null` for `open` (the shipped composer is drawn). */
+export interface ComposerStateView {
+  state: DirectComposerState;
+  strip: ComposerStripView | null;
+}
+
+/**
+ * UI-D-865: the composer state and its strip. The precedence is removed, then blocker, then closed, else
+ * open (the server applies it too; an account that left wins here whatever else the word says).
+ */
+export function composerStateView(
+  composer: DirectComposerState,
+  other: { removed: boolean; displayName: string | null },
+  t: Translator,
+): ComposerStateView {
+  if (other.removed || composer === 'removed') {
+    const text = t('direct.removed');
+    return {
+      state: 'removed',
+      strip: { kind: 'removed', glyph: 'Lock', role: 'status', text, label: text, unblock: null },
+    };
+  }
+  if (composer === 'blocker') {
+    const nome = other.displayName ?? t('direct.removedName');
+    const text = t('direct.blocker.text', { nome });
+    return {
+      state: 'blocker',
+      strip: {
+        kind: 'blocker',
+        glyph: 'Ban',
+        role: 'status',
+        text,
+        label: text,
+        unblock: {
+          label: t('direct.blocker.unblock'),
+          pendingLabel: t('direct.blocker.unblocking'),
+          toast: t('direct.blocker.unblocked', { nome }),
+        },
+      },
+    };
+  }
+  if (composer === 'closed') {
+    const text = t('direct.closed');
+    return {
+      state: 'closed',
+      strip: { kind: 'closed', glyph: 'Lock', role: 'status', text, label: text, unblock: null },
+    };
+  }
+  return { state: 'open', strip: null };
+}
+
+/** One conversation's screen facts, finished (UI-D-864, UI-D-865): the contact, the strip and the positions. */
+export interface DirectDetailView extends ComposerStateView {
+  conversationId: string;
+  other: DirectOtherView;
+  /** The server's own answer to "may the viewer block this person" (a member viewer, a live other, not blocked yet). */
+  canBlock: boolean;
+  lastSeq: number;
+  lastReadSeq: number;
+}
+
+/** `GET /v1/chat/direct/{conversationId}` as the finished view the BFF read and the page both return. */
+export function directDetailView(detail: DirectDetail, t: Translator): DirectDetailView {
+  return {
+    conversationId: detail.conversationId,
+    other: directOtherView(detail.other, t),
+    ...composerStateView(detail.composer, detail.other, t),
+    canBlock: detail.canBlock,
+    lastSeq: detail.lastSeq,
+    lastReadSeq: detail.lastReadSeq,
+  };
+}
+
+/** The "start a conversation" read, finished: the existing conversation id (or `null`), the contact, the strip. */
+export interface DirectWithView extends ComposerStateView {
+  conversationId: string | null;
+  other: DirectOtherView;
+}
+
+/** `GET /v1/chat/direct/with/{membershipId}` as a finished view (the lazy first send, UI-D-864). */
+export function directWithView(answer: DirectWithAnswer, t: Translator): DirectWithView {
+  return {
+    conversationId: answer.conversationId,
+    other: directOtherView(answer.other, t),
+    ...composerStateView(answer.composer, answer.other, t),
   };
 }

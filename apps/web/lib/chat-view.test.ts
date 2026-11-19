@@ -1,8 +1,10 @@
 import { fileURLToPath } from 'node:url';
 import type {
   CaseCard,
+  DirectDetail,
   DirectListRow,
   DirectSupportSummary,
+  DirectWithAnswer,
   InboxRow,
   MemberCase,
   MessageRow,
@@ -24,7 +26,10 @@ import {
   chatDayLabel,
   chatMessageView,
   chatRuns,
+  composerStateView,
   conversationRowView,
+  directDetailView,
+  directWithView,
   firstNameOf,
   formatVoiceDuration,
   inboxRowView,
@@ -1618,5 +1623,187 @@ describe('supportRowView (UI-D-862)', () => {
     });
     expect(unread.unread).toBe(true);
     expect(unread.label).toBe('Equipe Rede Demo. Equipe: Já verificamos., mensagem nova');
+  });
+});
+
+/**
+ * Phase 11-18 (CHAT-07, D-722, D-723, UI-D-865) — the composer area is ONE enum, finished. The `closed`
+ * strip is the blocked member's whole experience of a block: one sentence, no name, no reason, no block
+ * word (T-11-03).
+ */
+describe('composerStateView (UI-D-865)', () => {
+  const live = { removed: false, displayName: 'Ana Lima' };
+  const gone = { removed: true, displayName: null };
+
+  it('1. open draws no strip', () => {
+    expect(composerStateView('open', live, t)).toEqual({ state: 'open', strip: null });
+  });
+
+  it('2. closed is the one sentence with the lock glyph and role "status"', () => {
+    expect(composerStateView('closed', live, t)).toEqual({
+      state: 'closed',
+      strip: {
+        kind: 'closed',
+        glyph: 'Lock',
+        role: 'status',
+        text: 'Esta conversa não aceita novas mensagens.',
+        label: 'Esta conversa não aceita novas mensagens.',
+        unblock: null,
+      },
+    });
+  });
+
+  it('3. the closed strip carries no name, no reason and no block word anywhere in its output', () => {
+    const names = ['Ana Lima', 'Marina Costa Bloqueadora'];
+    for (const displayName of names) {
+      const out = JSON.stringify(composerStateView('closed', { removed: false, displayName }, t));
+      expect(out).not.toContain(displayName);
+      expect(out).not.toMatch(/bloque|motivo|denunci|desde|porque/i);
+    }
+    // every other field of the strip is a plain constant, the same for every conversation
+    expect(composerStateView('closed', live, t)).toEqual(
+      composerStateView('closed', { removed: false, displayName: 'Outra Pessoa' }, t),
+    );
+    expect(Object.keys(composerStateView('closed', live, t).strip ?? {}).sort()).toEqual([
+      'glyph',
+      'kind',
+      'label',
+      'role',
+      'text',
+      'unblock',
+    ]);
+  });
+
+  it('4. the blocker reads "Você bloqueou {nome}" with the unblock button, its pending label and its toast', () => {
+    expect(composerStateView('blocker', live, t)).toEqual({
+      state: 'blocker',
+      strip: {
+        kind: 'blocker',
+        glyph: 'Ban',
+        role: 'status',
+        text: 'Você bloqueou Ana Lima',
+        label: 'Você bloqueou Ana Lima',
+        unblock: {
+          label: 'Desbloquear',
+          pendingLabel: 'Desbloqueando…',
+          toast: 'Ana Lima foi desbloqueado.',
+        },
+      },
+    });
+  });
+
+  it('5. a removed account reads the read-only sentence', () => {
+    expect(composerStateView('removed', gone, t)).toEqual({
+      state: 'removed',
+      strip: {
+        kind: 'removed',
+        glyph: 'Lock',
+        role: 'status',
+        text: 'Este membro não está mais na comunidade. A conversa fica só para leitura.',
+        label: 'Este membro não está mais na comunidade. A conversa fica só para leitura.',
+        unblock: null,
+      },
+    });
+  });
+
+  it('6. the precedence is removed, then blocker, then closed', () => {
+    // an account that left wins over whatever the word says
+    expect(composerStateView('blocker', gone, t).state).toBe('removed');
+    expect(composerStateView('closed', gone, t).state).toBe('removed');
+    expect(composerStateView('open', gone, t).state).toBe('removed');
+    // the server's own word `removed` is trusted even when the flag lags
+    expect(composerStateView('removed', live, t).state).toBe('removed');
+    expect(composerStateView('blocker', live, t).state).toBe('blocker');
+    expect(composerStateView('closed', live, t).state).toBe('closed');
+  });
+
+  it('7. the blocker strip names a member with no profile through the neutral word', () => {
+    const view = composerStateView('blocker', { removed: false, displayName: null }, t);
+    expect(view.strip?.text).toBe('Você bloqueou Membro removido');
+  });
+
+  it('8. a name of combining marks and emoji is placed whole in the blocker sentence', () => {
+    const name = `${'A\u0301'.repeat(40)} 👩🏽‍💻`;
+    expect(composerStateView('blocker', { removed: false, displayName: name }, t).strip?.text).toBe(
+      `Você bloqueou ${name}`,
+    );
+  });
+});
+
+describe('directDetailView and directWithView (UI-D-864, UI-D-865)', () => {
+  const MEMBER = '0e000000-0000-4000-8000-000000000001';
+  const detail = (overrides: Partial<DirectDetail> = {}): DirectDetail => ({
+    conversationId: '0d000000-0000-4000-8000-000000000001',
+    other: { membershipId: MEMBER, displayName: 'Ana Lima', avatarAssetId: null, removed: false },
+    composer: 'open',
+    canBlock: true,
+    lastSeq: 9,
+    lastReadSeq: 4,
+    ...overrides,
+  });
+
+  it('1. the detail is the other member, the finished state and the viewer positions', () => {
+    expect(directDetailView(detail(), t)).toEqual({
+      conversationId: '0d000000-0000-4000-8000-000000000001',
+      other: {
+        membershipId: MEMBER,
+        name: 'Ana Lima',
+        avatar: null,
+        removed: false,
+        profileHref: `/membros/${MEMBER}`,
+      },
+      state: 'open',
+      strip: null,
+      canBlock: true,
+      lastSeq: 9,
+      lastReadSeq: 4,
+    });
+  });
+
+  it('2. the blocked member reads the closed strip and no "blocked me" field exists in the view', () => {
+    const view = directDetailView(detail({ composer: 'closed', canBlock: false }), t);
+    expect(view.state).toBe('closed');
+    expect(view.strip?.text).toBe('Esta conversa não aceita novas mensagens.');
+    expect(Object.keys(view).sort()).toEqual([
+      'canBlock',
+      'conversationId',
+      'lastReadSeq',
+      'lastSeq',
+      'other',
+      'state',
+      'strip',
+    ]);
+  });
+
+  it('3. a removed account has the neutral name, no link and the read-only strip', () => {
+    const view = directDetailView(
+      detail({
+        composer: 'removed',
+        canBlock: false,
+        other: { membershipId: null, displayName: null, avatarAssetId: null, removed: true },
+      }),
+      t,
+    );
+    expect(view.other).toEqual({
+      membershipId: null,
+      name: 'Membro removido',
+      avatar: null,
+      removed: true,
+      profileHref: null,
+    });
+    expect(view.state).toBe('removed');
+  });
+
+  it('4. the "with" answer is the same finished state, with the conversation id or null', () => {
+    const answer: DirectWithAnswer = {
+      conversationId: null,
+      other: { membershipId: MEMBER, displayName: 'Ana Lima', avatarAssetId: null, removed: false },
+      composer: 'closed',
+    };
+    const view = directWithView(answer, t);
+    expect(view.conversationId).toBeNull();
+    expect(view.state).toBe('closed');
+    expect(view.strip?.text).toBe('Esta conversa não aceita novas mensagens.');
+    expect(view.other.name).toBe('Ana Lima');
   });
 });

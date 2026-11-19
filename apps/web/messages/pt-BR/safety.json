@@ -1,0 +1,58 @@
+{
+  "safety": {
+    "subject": {
+      "feedPost": {
+        "pill": "Publicação",
+        "title": "Denunciar publicação"
+      },
+      "postComment": {
+        "pill": "Comentário",
+        "title": "Denunciar comentário"
+      },
+      "story": {
+        "pill": "Story",
+        "title": "Denunciar story"
+      },
+      "storyComment": {
+        "pill": "Comentário de story",
+        "title": "Denunciar comentário"
+      },
+      "community": {
+        "pill": "Comunidade",
+        "title": "Denunciar comunidade"
+      },
+      "directMessage": {
+        "pill": "Mensagem",
+        "title": "Denunciar mensagem",
+        "titleVoice": "Denunciar mensagem de voz",
+        "privacy": "A equipe vê só esta mensagem, não o resto da conversa.",
+        "privacyVoice": "A equipe ouve só esta mensagem de voz, não o resto da conversa."
+      }
+    },
+    "reasons": {
+      "offensive": "Conteúdo ofensivo ou de ódio",
+      "harassment": "Assédio ou bullying",
+      "spam": "Spam ou propaganda",
+      "sexualViolent": "Conteúdo sexual ou violento",
+      "other": "Outro motivo"
+    },
+    "queue": {
+      "removedMember": "Membro removido",
+      "meta": "Motivo: {motivo} · por {nome} · {data}",
+      "viewContent": "Ver conteúdo",
+      "state": {
+        "open": "Aberta",
+        "dismissed": "Ignorada",
+        "contentRemoved": "Conteúdo removido",
+        "communityArchived": "Comunidade arquivada",
+        "authorBlocked": "Autor bloqueado"
+      },
+      "body": {
+        "storyEmpty": "Story sem texto.",
+        "messageNote": "Só esta mensagem é mostrada.",
+        "voiceGone": "Mensagem de voz apagada",
+        "unavailable": "Conteúdo não está mais disponível"
+      }
+    }
+  }
+}
