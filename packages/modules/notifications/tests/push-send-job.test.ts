@@ -440,6 +440,28 @@ describe('notifications.push-send, bounded-parallel send', () => {
     );
   });
 
+  it('D-728: a hint with a literal titleText is delivered with that title and still the badge sum', async () => {
+    const { job, rows } = makeJob(3, 1, () => 201);
+    await runPushSend({ ...job, push: { ...HINT, titleText: 'Marina Costa' } });
+
+    const outbox = fakePushOutbox();
+    expect(outbox).toHaveLength(3);
+    const ownerOf = new Map(rows.map((row) => [row.endpoint, row.user_id]));
+    for (const entry of outbox) {
+      const payload = JSON.parse(entry.payload);
+      expect(payload.title).toBe('Marina Costa');
+      expect(payload.badge).toBe(expectedBadge(ownerOf.get(entry.endpoint) ?? ''));
+    }
+  });
+
+  it('a blank titleText sends the tenant name, never an empty title', async () => {
+    const { job } = makeJob(2, 1, () => 201);
+    await runPushSend({ ...job, push: { ...HINT, titleText: '   ' } });
+    const outbox = fakePushOutbox();
+    expect(outbox).toHaveLength(2);
+    for (const entry of outbox) expect(JSON.parse(entry.payload).title).toBe('Rede Demo');
+  });
+
   it('a failing counters resolver sends every subscription with badge 0', async () => {
     h.state.countersFail = true;
     const { job } = makeJob(20, 2, () => 201);

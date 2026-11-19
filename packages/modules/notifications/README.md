@@ -24,6 +24,11 @@ Main contract names (`./contracts`): `notificationQuerySchema`, `notificationRow
 `NOTIF_RETENTION_DAYS`, `NOTIF_SECTIONS` and the push limits (`PUSH_SEND_CHUNK`,
 `PUSH_PAYLOAD_MAX_BYTES`, `PUSH_MAX_ATTEMPTS`).
 
+`notificationPushHintSchema` carries an optional literal `titleText` (1 to 200 characters, D-728 and
+D-729: the writer's name for a message, `Nova denúncia` for a report) beside the closed `title`
+(`tenant | team`); the payload builder cuts it at `PUSH_TITLE_TEXT_MAX` (60) graphemes and falls back
+to the tenant name when it is blank. A hint without it renders as before.
+
 Main server names (`./server`): `notificationsRoutes`, `notificationsSink`,
 `notificationsFanoutJob`, `pushSendJob`, `runPushSend`, `registerChannel`, `registeredChannels`,
 `deliverIntent`, `inAppChannel`, `pushChannel`, `listNotifications`, `countUnseen`, `markRead`,

@@ -125,6 +125,34 @@ describe('pushChannel', () => {
     );
   });
 
+  it('D-728: a hint with a literal titleText reaches the job whole, no field-by-field copy', async () => {
+    const { tx } = txWithDevices([uuid(2)]);
+    const literal = { ...hint, titleText: 'Marina Costa', renotify: true };
+    await pushChannel.deliver(tx, {
+      tenantId: T,
+      intent: intent({ push: literal }),
+      recipients: [uuid(2)],
+    });
+    expect(enqueueInTx).toHaveBeenCalledTimes(1);
+    const calls = enqueueInTx.mock.calls as unknown as [Tx, string, { push: unknown }, unknown][];
+    expect(calls[0]?.[2].push).toEqual(literal);
+  });
+
+  it('a literal titleText of 201 characters is rejected like any bad hint and never enqueued', async () => {
+    const { tx } = txWithDevices([uuid(2)]);
+    const result = await pushChannel.deliver(tx, {
+      tenantId: T,
+      intent: intent({ push: { ...hint, titleText: 'a'.repeat(201) } }),
+      recipients: [uuid(2)],
+    });
+    expect(result).toEqual({ delivered: [], skipped: 0 });
+    expect(enqueueInTx).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'notifications.push.bad_hint' }),
+      expect.any(String),
+    );
+  });
+
   it('chunks 250 recipients into jobs of at most 100 users, one key per chunk', async () => {
     const all = Array.from({ length: 250 }, (_, i) => uuid(i + 1));
     const { tx } = txWithDevices(all);
