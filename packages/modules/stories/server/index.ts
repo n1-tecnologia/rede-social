@@ -10,4 +10,6 @@ export {
   listActiveStories,
   listOwnStories,
   publishStory,
+  type ReportedRemoval,
+  removeReportedStoryInTx,
 } from './service';

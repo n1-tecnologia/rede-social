@@ -1015,58 +1015,79 @@ export async function deleteStory(
   storyId: string,
   opts: { canManage: boolean; canModerate: boolean },
 ): Promise<void> {
-  const removed = await withTenantTx(ctx, async (tx) => {
-    const locked = await tx.execute<{
-      id: string;
-      author_user_id: string;
-      visibility: 'tenant' | 'followers';
-      caption: string;
-    }>(sql`
+  const removed = await withTenantTx(ctx, (tx) => deleteStoryInTx(tx, ctx, storyId, opts));
+  announceStoryRemoved(ctx, removed);
+}
+
+/**
+ * The body of `deleteStory`, in the CALLER's tenant transaction (11-05, D-732): the locked read, the permission
+ * test, the soft delete and the `story_removed` row, exactly as the route has always done them. Both the route
+ * (through `deleteStory`) and a report's removal (`removeReportedStoryInTx`) call THIS function, so the two can
+ * never disagree about who may take what. It writes nothing before it throws: a 404 or a 403 leaves the
+ * transaction clean.
+ */
+async function deleteStoryInTx(
+  tx: Tx,
+  ctx: RequestContext,
+  storyId: string,
+  opts: { canManage: boolean; canModerate: boolean },
+): Promise<{ id: string; author_user_id: string }> {
+  const locked = await tx.execute<{
+    id: string;
+    author_user_id: string;
+    visibility: 'tenant' | 'followers';
+    caption: string;
+  }>(sql`
       select s.id, s.author_user_id, s.visibility, s.caption
         from stories s
        where s.tenant_id = ${ctx.tenantId}::uuid
          and s.id = ${storyId}::uuid
          and s.deleted_at is null
          for update`);
-    const target = locked[0];
-    // Unknown, another tenant's, one the audience gate hides from this lane, or ALREADY deleted — one
-    // bare 404, no details (D-23). "Already deleted" answering 404 is deliberate: the alternative tells a
-    // caller that an id they cannot see exists, which is the existence oracle the whole posture removes.
-    if (!target) throw new ApiError(404, 'NOT_FOUND');
+  const target = locked[0];
+  // Unknown, another tenant's, one the audience gate hides from this lane, or ALREADY deleted — one
+  // bare 404, no details (D-23). "Already deleted" answering 404 is deliberate: the alternative tells a
+  // caller that an id they cannot see exists, which is the existence oracle the whole posture removes.
+  if (!target) throw new ApiError(404, 'NOT_FOUND');
 
-    const isAuthor = target.author_user_id === ctx.userId;
-    const permitted =
-      isAuthor ||
-      (opts.canModerate && target.visibility === 'followers') ||
-      (opts.canManage && target.visibility === 'tenant');
-    if (!permitted) throw new ApiError(403, 'FORBIDDEN');
+  const isAuthor = target.author_user_id === ctx.userId;
+  const permitted =
+    isAuthor ||
+    (opts.canModerate && target.visibility === 'followers') ||
+    (opts.canManage && target.visibility === 'tenant');
+  if (!permitted) throw new ApiError(403, 'FORBIDDEN');
 
-    const rows = await tx.execute<{ id: string; author_user_id: string }>(sql`
+  const rows = await tx.execute<{ id: string; author_user_id: string }>(sql`
       update stories
          set deleted_at = now()
        where tenant_id = ${ctx.tenantId}::uuid
          and id = ${storyId}::uuid
          and deleted_at is null
       returning id, author_user_id`);
-    const row = rows[0];
-    if (!row) throw new ApiError(404, 'NOT_FOUND');
+  const row = rows[0];
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
 
-    // 10-07 (D-711): a moderator removing a MEMBER story leaves its trace in the SAME transaction. The
-    // excerpt source is the caption read under the lock (the kernel caps it). The author's own delete
-    // and an organization story's delete write nothing.
-    if (!isAuthor && target.visibility === 'followers') {
-      await recordModerationAction(tx, ctx, {
-        action: 'story_removed',
-        targetUserId: target.author_user_id,
-        subjectType: 'story',
-        subjectId: target.id,
-        excerptSource: target.caption,
-        reason: null,
-      });
-    }
-    return row;
-  });
+  // 10-07 (D-711): a moderator removing a MEMBER story leaves its trace in the SAME transaction. The
+  // excerpt source is the caption read under the lock (the kernel caps it). The author's own delete
+  // and an organization story's delete write nothing.
+  if (!isAuthor && target.visibility === 'followers') {
+    await recordModerationAction(tx, ctx, {
+      action: 'story_removed',
+      targetUserId: target.author_user_id,
+      subjectType: 'story',
+      subjectId: target.id,
+      excerptSource: target.caption,
+      reason: null,
+    });
+  }
+  return row;
+}
 
+/** The event and the log line of a story removal; the caller runs it once the transaction has committed. */
+function announceStoryRemoved(
+  ctx: RequestContext,
+  removed: { id: string; author_user_id: string },
+): void {
   emit(ctx, 'story.deleted', {
     tenantId: ctx.tenantId,
     storyId: removed.id,
@@ -1084,6 +1105,61 @@ export async function deleteStory(
     },
     'story soft-deleted',
   );
+}
+
+/**
+ * What a report's `remove_content` resolution did (11-05, D-732) — the SAME structural type the feed declares
+ * for `removeReportedContentInTx` (13-14), restated here because a module never imports another module's server
+ * code; the API tier hands these functions to the kernel's `resolveReport`:
+ *  - `removed`: the item was live and the moderation path took it down, with its log row in the caller's
+ *    transaction (the actor being the author writes no row, as always);
+ *  - `already_gone`: nothing to take down (removed since the report was filed), no second log row;
+ *  - `not_removable`: it is live but the moderation path may not take it, so the resolution is refused.
+ * `afterCommit` is the event and log line half; the caller runs it once the transaction has committed.
+ */
+export type ReportedRemoval = {
+  outcome: 'removed' | 'already_gone' | 'not_removable';
+  afterCommit: () => void;
+};
+
+const NOTHING_AFTER_COMMIT = () => undefined;
+
+/**
+ * Removes the story a report points at, in the CALLER's tenant transaction (11-05, D-732, T-11-11). The permission
+ * flags are inputs the API route read through `permissionsForRequest` BEFORE it opened the transaction (the pool
+ * is `max: 5`); this function never reads a permission itself.
+ *
+ * A missing, deleted or foreign-tenant story is `already_gone`. A live story the moderation path may not take (an
+ * ORGANIZATION story met by a holder of `moderation.manage` without `stories.story.manage`) is `not_removable`
+ * and nothing is written, so the kernel refuses the whole resolution and the report stays open.
+ */
+export async function removeReportedStoryInTx(
+  tx: Tx,
+  ctx: RequestContext,
+  storyId: string,
+  flags: { canManage: boolean; canModerate: boolean },
+): Promise<ReportedRemoval> {
+  const isLive = async (): Promise<boolean> => {
+    const live = await tx.execute<{ one: number }>(sql`
+      select 1 as one from stories
+       where tenant_id = ${ctx.tenantId}::uuid and id = ${storyId}::uuid and deleted_at is null`);
+    return live.length > 0;
+  };
+  if (!(await isLive())) return { outcome: 'already_gone', afterCommit: NOTHING_AFTER_COMMIT };
+
+  try {
+    const removed = await deleteStoryInTx(tx, ctx, storyId, flags);
+    return { outcome: 'removed', afterCommit: () => announceStoryRemoved(ctx, removed) };
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+      // A 404 after the live check is a removal that landed in between (the lock read nothing): nothing to take.
+      if (error.status === 404 && !(await isLive())) {
+        return { outcome: 'already_gone', afterCommit: NOTHING_AFTER_COMMIT };
+      }
+      return { outcome: 'not_removable', afterCommit: NOTHING_AFTER_COMMIT };
+    }
+    throw error;
+  }
 }
 
 /* ── Likes (STORY-05, first half) ─────────────────────────────────────────────────────────────── */
