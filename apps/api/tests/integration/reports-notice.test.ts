@@ -7,11 +7,13 @@ import {
   resetFakePushOutbox,
 } from '@rede-social/module-notifications/server';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { caseKit, removeThrowaways, request } from './chat-case-fixtures';
+import { caseKit, removeThrowaways, request, throwawayMember } from './chat-case-fixtures';
 import {
   directMember,
   removeDirectRows,
   resetDirectLimiters,
+  sendDirect,
+  setModule,
   withDirectModules,
 } from './direct-fixtures';
 import {
@@ -21,7 +23,11 @@ import {
   pushSendJobsOf,
   runNotificationJobs,
   runPushSendJobs,
+  SEED_PASSWORD,
+  signInAs,
+  withCommunitiesEnabled,
   withModuleEnabled,
+  withStoriesEnabled,
 } from './setup';
 
 /**
@@ -70,6 +76,10 @@ const tokens = { admin: '' };
 const restores: Array<() => Promise<void>> = [];
 const createdPosts: string[] = [];
 const createdReports: string[] = [];
+const createdStories: string[] = [];
+const createdAssets: string[] = [];
+const createdComments: string[] = [];
+const createdCommunities: string[] = [];
 
 /** A post of the demo tenant written by hand, authored by `authorId`. */
 async function seedPost(authorId: string, label: string): Promise<string> {
@@ -170,6 +180,8 @@ beforeAll(async () => {
   // with it off and the demo may too): every flag goes back in `afterAll`.
   restores.push(await withDirectModules('demo'));
   restores.push(await withModuleEnabled('demo', 'notifications'));
+  restores.push(await withStoriesEnabled('demo'));
+  restores.push(await withCommunitiesEnabled('demo'));
   await closeWaitingJobs();
   resetFakePushOutbox();
 });
@@ -185,7 +197,21 @@ afterAll(async () => {
     await adminSql`delete from public.notifications where subject_id = any(${createdReports}::uuid[])`;
     await adminSql`delete from public.content_reports where id = any(${createdReports}::uuid[])`;
   }
+  if (createdComments.length > 0) {
+    await adminSql`delete from public.feed_comments where id = any(${createdComments}::uuid[])`;
+  }
+  if (createdStories.length > 0) {
+    await adminSql`delete from public.feed_comments where story_id = any(${createdStories}::uuid[])`;
+    await adminSql`delete from public.stories where id = any(${createdStories}::uuid[])`;
+  }
+  if (createdAssets.length > 0) {
+    await adminSql`delete from public.media_assets where id = any(${createdAssets}::uuid[])`;
+  }
+  if (createdCommunities.length > 0) {
+    await adminSql`delete from public.communities where id = any(${createdCommunities}::uuid[])`;
+  }
   if (createdPosts.length > 0) {
+    await adminSql`delete from public.feed_comments where post_id = any(${createdPosts}::uuid[])`;
     await adminSql`delete from public.feed_posts where id = any(${createdPosts}::uuid[])`;
   }
   if (endpoints.length > 0) {
@@ -306,5 +332,260 @@ describe('report notice tracer', () => {
     );
     expect(await noticesOf(first)).toHaveLength(rowsBefore);
     expect((await pushSendJobsOf(ids.demo)).length).toBe(jobsBefore);
+  });
+});
+
+/* ── fixtures of the other subjects (the six-subject comparison) ─────────────────────────────────── */
+
+async function insertStory(authorId: string, caption: string): Promise<string> {
+  const assetId = randomUUID();
+  createdAssets.push(assetId);
+  await adminSql`
+    insert into public.media_assets
+      (id, tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths)
+    values (${assetId}::uuid, ${ids.demo}::uuid, ${authorId}::uuid, 'image', 'story', 'ready', 'supabase',
+            'image/webp', 1024, '{640,1080}'::int[])`;
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.stories (tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility)
+    values (${ids.demo}::uuid, ${authorId}::uuid, ${assetId}::uuid, 'image', ${caption}, 'tenant')
+    returning id::text as id`;
+  const id = row?.id ?? '';
+  createdStories.push(id);
+  return id;
+}
+
+async function insertPostComment(postId: string, authorId: string, body: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+    values (${ids.demo}::uuid, ${postId}::uuid, ${authorId}::uuid, ${body})
+    returning id::text as id`;
+  const id = row?.id ?? '';
+  createdComments.push(id);
+  return id;
+}
+
+async function insertStoryComment(
+  storyId: string,
+  authorId: string,
+  body: string,
+): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.feed_comments (tenant_id, story_id, author_user_id, body)
+    values (${ids.demo}::uuid, ${storyId}::uuid, ${authorId}::uuid, ${body})
+    returning id::text as id`;
+  const id = row?.id ?? '';
+  createdComments.push(id);
+  return id;
+}
+
+async function insertCommunity(creatorId: string, name: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.communities (tenant_id, created_by_user_id, name, slug, description, kind, position)
+    values (${ids.demo}::uuid, ${creatorId}::uuid, ${name}, ${`rn-${randomUUID().slice(0, 8)}`}, '',
+            'member', 1000000)
+    returning id::text as id`;
+  const id = row?.id ?? '';
+  createdCommunities.push(id);
+  return id;
+}
+
+/** The recipients' ids of a report's notice rows, sorted. */
+const recipientsOf = async (reportId: string): Promise<string[]> =>
+  (await noticesOf(reportId)).map((row) => row.user_id).sort();
+
+describe('every subject', () => {
+  it('a report of a post, a post comment, a story, a story comment, a community and a message gives the moderators the SAME row and push, byte-identical apart from the report id and tag', async () => {
+    const reporter = await directMember('rn-sub-rep');
+    const author = await directMember('rn-sub-aut');
+    await subscribeDevice(tokens.admin, 'admin-subjects');
+
+    const postId = await seedPost(author.userId, 'sujeitos');
+    const storyId = await insertStory(author.userId, `${PREFIX}historia`);
+    const sent = await sendDirect(author, reporter.membershipId, 'mensagem que sera denunciada');
+    expect(sent.status).toBe(201);
+    const messageId = ((await sent.json()) as { message: { id: string } }).message.id;
+    const subjects: Array<[string, string]> = [
+      ['feed_post', postId],
+      ['post_comment', await insertPostComment(postId, author.userId, `${PREFIX}comentario`)],
+      ['story', storyId],
+      ['story_comment', await insertStoryComment(storyId, author.userId, `${PREFIX}resposta`)],
+      ['community', await insertCommunity(author.userId, `${PREFIX}Clube`)],
+      ['direct_message', messageId],
+    ];
+
+    const shapes: string[] = [];
+    for (const [subjectType, subjectId] of subjects) {
+      const reportId = await fileReport(reporter.token, subjectType, subjectId);
+      await play(reportId);
+      const rows = await noticesOf(reportId);
+      const jobs = await pushJobsOf(reportId);
+      expect(rows.length, `${subjectType}: one row per administrator`).toBe(
+        (await liveAdministrators(ids.demo)).length,
+      );
+      expect(jobs, `${subjectType}: one push job`).toHaveLength(1);
+      const tag = reportId.replaceAll('-', '');
+      shapes.push(
+        JSON.stringify({
+          rows: rows.map((row) => ({ ...row, subject_id: '<report>', seen_at: null })),
+          push: { ...jobs[0]?.data.push, tag: '<tag>', topic: '<tag>' },
+          dedupe: (jobs[0]?.data.dedupeKey ?? '').replace(reportId, '<report>'),
+          userIds: [...(jobs[0]?.data.userIds ?? [])].sort(),
+          tagIsReport: jobs[0]?.data.push.tag === tag,
+        }),
+      );
+      // Nothing of the subject, the reporter or the reported member rides any part of it.
+      const everything = JSON.stringify({ rows, jobs: jobs.map((job) => job.data) });
+      for (const secret of [subjectId, subjectType, author.userId, reporter.userId, PREFIX]) {
+        expect(everything, `${subjectType}: ${secret}`).not.toContain(secret);
+      }
+    }
+    expect(shapes).toHaveLength(6);
+    expect(new Set(shapes).size).toBe(1);
+  });
+});
+
+describe('exclusions', () => {
+  it('when the only administrator is the reported author nobody is told: no row, no push job (MODER-05 empty)', async () => {
+    expect(await liveAdministrators(ids.demo)).toEqual([ids.admin]);
+    const reporter = await directMember('rn-emp-rep');
+    const reportId = await fileReport(
+      reporter.token,
+      'feed_post',
+      await seedPost(ids.admin, 'unico administrador'),
+    );
+    await awaitFanoutJob(ids.demo, reportId);
+    await runNotificationJobs(ids.demo);
+    await runPushSendJobs(ids.demo);
+    expect(await noticesOf(reportId)).toEqual([]);
+    expect(await pushJobsOf(reportId)).toEqual([]);
+  });
+
+  it('an administrator whose own content is reported is not told, a second administrator is; a support member, a blocked and a removed administrator are not (D-729, T-11-31)', async () => {
+    const reporter = await directMember('rn-exc-rep');
+    const second = await throwawayMember('rn-adm2', 'admin_tenant');
+    const support = await throwawayMember('rn-sup', 'support_tenant');
+    const blocked = await throwawayMember('rn-adm-blocked', 'admin_tenant');
+    const removed = await throwawayMember('rn-adm-removed', 'admin_tenant');
+    await adminSql`
+      update public.memberships set status = 'blocked', blocked_at = now()
+       where tenant_id = ${ids.demo}::uuid and user_id = ${blocked.id}::uuid`;
+    await adminSql`
+      update public.memberships set deleted_at = now()
+       where tenant_id = ${ids.demo}::uuid and user_id = ${removed.id}::uuid`;
+    await subscribeDevice(second.token, 'second-admin');
+    await subscribeDevice(support.token, 'support');
+
+    const reportId = await fileReport(
+      reporter.token,
+      'feed_post',
+      await seedPost(ids.admin, 'conteudo do administrador'),
+    );
+    await play(reportId);
+
+    const told = await recipientsOf(reportId);
+    expect(told).toContain(second.id);
+    expect(told).not.toContain(ids.admin);
+    expect(told).not.toContain(reporter.userId);
+    for (const out of [support.id, blocked.id, removed.id, ids.demoSupport]) {
+      expect(told).not.toContain(out);
+    }
+    expect(told.sort()).toEqual(
+      (await liveAdministrators(ids.demo)).filter((id) => id !== ids.admin).sort(),
+    );
+    const pushed = (await pushJobsOf(reportId)).flatMap((job) => job.data.userIds);
+    expect(pushed).toContain(second.id);
+    expect(pushed).not.toContain(ids.admin);
+    expect(pushed).not.toContain(support.id);
+  });
+
+  it('a reporter who is staff is not told of their own report, the other administrator is', async () => {
+    const author = await directMember('rn-stf-aut');
+    const second = await throwawayMember('rn-adm3', 'admin_tenant');
+    await subscribeDevice(second.token, 'second-reporter-admin');
+    const reportId = await fileReport(
+      second.token,
+      'feed_post',
+      await seedPost(author.userId, 'staff'),
+    );
+    await play(reportId);
+    const told = await recipientsOf(reportId);
+    expect(told).toContain(ids.admin);
+    expect(told).not.toContain(second.id);
+    expect(told).not.toContain(author.userId);
+  });
+});
+
+describe('notifications off', () => {
+  it('a tenant with notifications off gets no row and no job, and the report still files and lists (D-229)', async () => {
+    const restore = await setModule('demo', 'notifications', false);
+    try {
+      const reporter = await directMember('rn-off-rep');
+      const author = await directMember('rn-off-aut');
+      const jobsBefore = (await notificationJobsOf(ids.demo)).length;
+      const reportId = await fileReport(
+        reporter.token,
+        'feed_post',
+        await seedPost(author.userId, 'sem notificacoes'),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect((await notificationJobsOf(ids.demo)).length).toBe(jobsBefore);
+      await runNotificationJobs(ids.demo);
+      await runPushSendJobs(ids.demo);
+      expect(await noticesOf(reportId)).toEqual([]);
+      expect(await pushJobsOf(reportId)).toEqual([]);
+
+      const queue = await request('/v1/admin/reports?estado=todas&limit=50', tokens.admin);
+      expect(queue.status).toBe(200);
+      const page = (await queue.json()) as { items: Array<{ id: string }> };
+      expect(page.items.map((item) => item.id)).toContain(reportId);
+    } finally {
+      await restore();
+    }
+  });
+});
+
+describe('tenant isolation', () => {
+  it("tenant A's report never notifies tenant B's administrator, and tenant B's administrator is told of their own report (T-11-01)", async () => {
+    const restoreLab = await withModuleEnabled('lab', 'notifications');
+    restores.push(restoreLab);
+    const labAdmin = await adminSql<{ id: string }[]>`
+      select u.id::text as id from public.users u join public.memberships m on m.user_id = u.id
+       where m.tenant_id = ${ids.lab}::uuid and m.role = 'admin_tenant' and u.email = 'admin@rede-lab.local'`;
+    const labAdminId = labAdmin[0]?.id ?? '';
+    expect(labAdminId).not.toBe('');
+
+    // Tenant A's report: the lab administrator gets nothing.
+    const reporter = await directMember('rn-iso-rep');
+    const author = await directMember('rn-iso-aut');
+    const demoReport = await fileReport(
+      reporter.token,
+      'feed_post',
+      await seedPost(author.userId, 'isolamento'),
+    );
+    await play(demoReport);
+    expect(await recipientsOf(demoReport)).toContain(ids.admin);
+    expect(await recipientsOf(demoReport)).not.toContain(labAdminId);
+    expect(
+      await adminSql`
+      select 1 from public.notifications where user_id = ${labAdminId}::uuid and subject_id = ${demoReport}::uuid`,
+    ).toHaveLength(0);
+
+    // The positive control: a report filed in tenant B notifies tenant B's administrator and not tenant A's.
+    const labReporter = await signInAs('helena.kuster@rede-lab.local', SEED_PASSWORD);
+    const [labAuthor] = await adminSql<{ id: string }[]>`
+      select u.id::text as id from public.users u where u.email = 'marcos.vinicius@rede-lab.local'`;
+    const [labPost] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, caption, author_user_id)
+      values (${ids.lab}::uuid, ${`${PREFIX}lab`}, ${labAuthor?.id}::uuid)
+      returning id::text as id`;
+    createdPosts.push(labPost?.id ?? '');
+    const labReport = await fileReport(labReporter, 'feed_post', labPost?.id ?? '', HOSTS.lab);
+    await play(labReport, ids.lab);
+    const labTold = await recipientsOf(labReport);
+    expect(labTold).toContain(labAdminId);
+    expect(labTold).not.toContain(ids.admin);
+    await adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name in ('notifications.fanout', 'notifications.push-send') and state = 'created'`;
   });
 });
