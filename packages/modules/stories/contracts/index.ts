@@ -204,6 +204,17 @@ export const storySummarySchema = z
      * the admin's "quem viu" list is V2, on the same table.
      */
     viewerSeen: z.boolean(),
+    /**
+     * 11-15 (D-733, MODER-05, A-11-ROLE): the two riders the story menu is built from, computed on the SERVER
+     * so the web never compares a role or an id (the 13-14 post and comment riders, restated). `canReport`: the
+     * viewer did not write the story (true for an organization story). `canBlock`: not the viewer's own, the
+     * author is a live `member` AND the viewer's own role of record is `member` (staff are offered Denunciar and
+     * never Bloquear; an organization story has no member author). OPTIONAL on purpose (the 08.2 Pitfall 10 rule):
+     * an API older than the web omits them and the web reads them as `false`. They say nothing about whether
+     * anyone reported or blocked anyone.
+     */
+    canReport: z.boolean().optional(),
+    canBlock: z.boolean().optional(),
   })
   .strict();
 export type StorySummary = z.infer<typeof storySummarySchema>;

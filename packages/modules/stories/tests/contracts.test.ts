@@ -178,3 +178,31 @@ describe('10-08 storyAuthorCircleSchema: the Explorar circle', () => {
     expect(storyAuthorsQuerySchema.safeParse({ extra: 1 }).success).toBe(false);
   });
 });
+
+/**
+ * 11-15 (D-733, MODER-05): `canReport` and `canBlock` ride the story summary as OPTIONAL booleans on the strict
+ * schema, so a new web tolerates an old API (a fixture without them parses) and nothing else about the shape moves.
+ */
+describe('11-15 storySummarySchema: the report riders', () => {
+  it('parses a fixture without the riders (an API that predates them) and leaves them absent', () => {
+    const parsed = storySummarySchema.parse(summary());
+    expect(parsed).not.toHaveProperty('canReport');
+    expect(parsed).not.toHaveProperty('canBlock');
+  });
+
+  it('parses both riders as booleans and refuses any other type or any other new key', () => {
+    const parsed = storySummarySchema.parse(summary({ canReport: true, canBlock: false }));
+    expect(parsed.canReport).toBe(true);
+    expect(parsed.canBlock).toBe(false);
+    expect(storySummarySchema.safeParse(summary({ canBlock: 'yes' })).success).toBe(false);
+    expect(storySummarySchema.safeParse(summary({ canBlocked: true })).success).toBe(false);
+  });
+
+  it('a page whose items carry the riders still parses (the strip and the author read)', () => {
+    const page = storyPageSchema.parse({
+      items: [summary({ canReport: true, canBlock: true }), summary()],
+      nextCursor: null,
+    });
+    expect(page.items.map((item) => item.canBlock)).toEqual([true, undefined]);
+  });
+});

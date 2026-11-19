@@ -79,6 +79,11 @@ type StoryRow = {
    * the author has no photo or no ACTIVE membership in the story's tenant (blocked, invited, removed).
    */
   author_avatar_asset_id: string | null;
+  /**
+   * 11-15 (D-733): the live author's role of record, from the SAME `left join memberships` the projection
+   * already makes (no new statement). NULL for an author with no live membership; only the rider reads it.
+   */
+  author_role?: string | null;
   media_asset_id: string;
   media_kind: StoryMediaKind;
   media_variant_widths: number[] | null;
@@ -173,6 +178,7 @@ function storyProjection(ctx: RequestContext) {
            am.id as author_membership_id,
            ap.display_name as author_display_name,
            ap.avatar_asset_id as author_avatar_asset_id,
+           am.role as author_role,
            s.media_asset_id,
            s.media_kind,
            a.variant_widths as media_variant_widths,
@@ -220,9 +226,29 @@ function storyProjection(ctx: RequestContext) {
  * carries no author object either (a blocked or departed author's story is hidden by the audience gate
  * before it gets here).
  */
-const toStory = (row: StoryRow, viewerUserId: string): StorySummary => ({
+/**
+ * 11-15 (D-733, A-11-ROLE; the feed's `reportRiders`, in the same words): the two rider booleans every story and
+ * story comment answer carries, computed on the server so the web never compares a role. `canReport`: the viewer
+ * did not write it. `canBlock`: the viewer did not write it, the author's role of record is `member` (AD-1: staff
+ * and the organization's voice can be reported, never blocked; a removed author has no role) AND the viewer's own
+ * role of record is `member` (A-11-ROLE: staff are offered Denunciar and never Bloquear). A function of the
+ * viewer's role and the item's author only: no block or report state is read (T-11-03).
+ */
+const reportRiders = (
+  authorUserId: string,
+  authorRole: string | null | undefined,
+  viewer: { userId: string; role: string },
+): { canReport: boolean; canBlock: boolean } => {
+  const notOwn = authorUserId !== viewer.userId;
+  return {
+    canReport: notOwn,
+    canBlock: notOwn && authorRole === 'member' && viewer.role === 'member',
+  };
+};
+
+const toStory = (row: StoryRow, viewer: { userId: string; role: string }): StorySummary => ({
   id: row.id,
-  authorUserId: row.author_user_id === viewerUserId ? row.author_user_id : null,
+  authorUserId: row.author_user_id === viewer.userId ? row.author_user_id : null,
   author:
     row.visibility === 'followers' &&
     row.author_membership_id !== null &&
@@ -254,15 +280,20 @@ const toStory = (row: StoryRow, viewerUserId: string): StorySummary => ({
   viewerLiked: row.viewer_liked,
   highlightCount: row.highlight_count ?? 0,
   viewerSeen: row.viewer_seen,
+  ...reportRiders(row.author_user_id, row.author_role, viewer),
 });
 
 /** The over-fetch page split, shared by both list reads so the two cannot disagree about `nextCursor`. */
-function toPage(rows: StoryRow[], limit: number, viewerUserId: string): StoryPage {
+function toPage(
+  rows: StoryRow[],
+  limit: number,
+  viewer: { userId: string; role: string },
+): StoryPage {
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   const nextCursor =
     rows.length > limit && last ? encodeCursor({ n: last.expires_at, id: last.id }) : null;
-  return { items: page.map((row) => toStory(row, viewerUserId)), nextCursor };
+  return { items: page.map((row) => toStory(row, viewer)), nextCursor };
 }
 
 /**
@@ -350,7 +381,7 @@ export async function listActiveStories(
        limit ${limit + 1}`),
   );
 
-  const page = toPage(rows, limit, ctx.userId);
+  const page = toPage(rows, limit, ctx);
 
   // The SHAPE of the read — counts, ids and flags. A story CAPTION is member-facing content and
   // never reaches a log line, an error `details` payload or an OpenAPI example (T-05-29).
@@ -417,7 +448,7 @@ export async function listOwnStories(
        limit ${limit + 1}`),
   );
 
-  const page = toPage(rows, limit, ctx.userId);
+  const page = toPage(rows, limit, ctx);
 
   log.info(
     {
@@ -461,7 +492,7 @@ export async function getStory(
   });
 
   if (!row) throw new ApiError(404, 'NOT_FOUND');
-  return toStory(row, ctx.userId);
+  return toStory(row, ctx);
 }
 
 /* ── Explorar's story row (10-08, D-714, D-717; MSTORY-03, MSTORY-04, MSTORY-08) ────────────────── */
@@ -729,7 +760,7 @@ export async function listAuthorStories(
     'author stories listed',
   );
 
-  return { items: rows.map((row) => toStory(row, ctx.userId)) };
+  return { items: rows.map((row) => toStory(row, ctx)) };
 }
 
 /**
@@ -980,7 +1011,7 @@ export async function publishStory(
     'story published',
   );
 
-  return toStory(created, ctx.userId);
+  return toStory(created, ctx);
 }
 
 /**
@@ -2532,7 +2563,7 @@ export async function getHighlight(
 
   return {
     highlight: toHighlight(detail.highlight),
-    items: detail.items.map((row) => toStory(row, ctx.userId)),
+    items: detail.items.map((row) => toStory(row, ctx)),
   };
 }
 
