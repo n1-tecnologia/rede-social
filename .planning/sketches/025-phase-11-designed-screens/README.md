@@ -68,11 +68,11 @@ screens:
   - estados-rede-social-ligada-e-desligada
   - leitor-de-tela-fase-11
   - defaults-a-confirmar-fase-11
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: Igor
+approved_at: 2026-11-19
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-11, design-review, D-33, D-365, D-417, UI-04, direct-messages, reports, D-616]
