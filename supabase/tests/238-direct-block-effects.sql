@@ -20,8 +20,21 @@ begin;
 -- 5. THE NOTICE DEFINER (task 3, D-728, D-731; T-11-01, T-11-02, T-11-08): `app.direct_message_notice` answers only the
 --    notifications worker (the zero system user).
 --
+-- 6. THE BLOCK'S EFFECT ON FOLLOWS (plan 07 task 1, CHAT-07; D-722, D-723, D-724; T-11-01, T-11-21): `app.member_block_create`
+--    deletes the two follow rows between the pair in the claim's tenant, keeps the conversation, its messages and its
+--    participants, and leaves every other follow (a third member's, the same two users' in another tenant) alone.
+--
+-- 7. EMPTY, IDEMPOTENCY, UNBLOCK (plan 07 task 1): a block with no follow and no conversation answers true and deletes
+--    nothing; a second call answers false and still clears a follow that reappeared; unblocking restores nothing.
+--
+-- 8. THE FOLLOW INSERT POLICY (plan 07 task 2, D-724): a follow across a block is refused from BOTH sides, with a
+--    positive control beside each negative, in another tenant, and after the block is lifted.
+--
+-- 9. PRESERVED PHASE 13 BEHAVIOURS (plan 07 task 3): BL001 and 42501 refusals, the definer hardening, the grants,
+--    idempotency and the blocker-only read of `member_blocks`.
+--
 -- Fixture ids use the `1e380000-…` prefix (`tests.d38('a1')` spells one). Like its siblings, this file ROLLS BACK.
-select plan(51);
+select plan(77);
 
 create function tests.d38(p text) returns uuid language sql immutable as
   $$ select ('1e380000-0000-4000-8000-0000000000' || p)::uuid $$;
@@ -415,6 +428,136 @@ select ok(
 select ok(
   (select prosecdef and proconfig @> array['search_path=""'] from pg_proc where oid = 'app.direct_message_notice(uuid)'::regprocedure),
   'the notice is a security definer that pins search_path');
+
+-- Plan 07 fixture: eight more members of tenant A (`c1`..`c8`), a third tenant (`03`, social on) where `c1`, `c2`, `c4` and
+-- `c5` also hold a membership, so the same two users exist in two tenants with `social` on.
+select tests.tenant('pgtap-block-c', 'Bloqueio C', tests.d38('03'));
+select tests.auth_user('c1@block-a.local', tests.d38('c1'));
+select tests.auth_user('c2@block-a.local', tests.d38('c2'));
+select tests.auth_user('c3@block-a.local', tests.d38('c3'));
+select tests.auth_user('c4@block-a.local', tests.d38('c4'));
+select tests.auth_user('c5@block-a.local', tests.d38('c5'));
+select tests.auth_user('c6@block-a.local', tests.d38('c6'));
+select tests.auth_user('c7@block-a.local', tests.d38('c7'));
+select tests.auth_user('c8@block-a.local', tests.d38('c8'));
+select tests.member(tests.d38('01'), tests.d38('c1'));
+select tests.member(tests.d38('01'), tests.d38('c2'));
+select tests.member(tests.d38('01'), tests.d38('c3'));
+select tests.member(tests.d38('01'), tests.d38('c4'));
+select tests.member(tests.d38('01'), tests.d38('c5'));
+select tests.member(tests.d38('01'), tests.d38('c6'));
+select tests.member(tests.d38('01'), tests.d38('c7'));
+select tests.member(tests.d38('01'), tests.d38('c8'));
+select tests.member(tests.d38('03'), tests.d38('c1'));
+select tests.member(tests.d38('03'), tests.d38('c2'));
+select tests.member(tests.d38('03'), tests.d38('c4'));
+select tests.member(tests.d38('03'), tests.d38('c5'));
+insert into public.tenant_modules (tenant_id, module_key, enabled) values
+  (tests.d38('03'), 'social', true),
+  (tests.d38('03'), 'chat', true);
+-- Follow rows seeded as the table owner (the policy is exercised in section 8): c1 and c2 follow each other in tenants
+-- A and C, c1 follows c3 and c3 follows c2 in tenant A (the survivors).
+insert into public.social_follows (tenant_id, follower_user_id, followee_user_id) values
+  (tests.d38('01'), tests.d38('c1'), tests.d38('c2')),
+  (tests.d38('01'), tests.d38('c2'), tests.d38('c1')),
+  (tests.d38('01'), tests.d38('c1'), tests.d38('c3')),
+  (tests.d38('01'), tests.d38('c3'), tests.d38('c2')),
+  (tests.d38('03'), tests.d38('c1'), tests.d38('c2')),
+  (tests.d38('03'), tests.d38('c2'), tests.d38('c1'));
+create function tests.follows38(p_tenant uuid, p_a uuid, p_b uuid) returns int language sql security definer as
+  $$ select count(*)::int from public.social_follows
+      where tenant_id = p_tenant
+        and ((follower_user_id = p_a and followee_user_id = p_b) or (follower_user_id = p_b and followee_user_id = p_a)) $$;
+
+-- ── 6. the block clears the follows both ways and keeps the conversation ─────────────────────────
+select tests.as_tenant(tests.d38('01'), tests.d38('c1'));
+select is(
+  (select created from app.direct_conversation_open(tests.d38('c2'))), true,
+  'CHAT-07: the pair c1/c2 opens its direct before the block');
+select is(tests.send38(tests.d38('01'), tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2')), tests.d38('c1')), 'ok',
+  'CHAT-07: c1 sends the first message');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('c2'));
+select is(tests.send38(tests.d38('01'), tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2')), tests.d38('c2')), 'ok',
+  'CHAT-07: c2 replies');
+reset role;
+select is(tests.follows38(tests.d38('01'), tests.d38('c1'), tests.d38('c2')), 2,
+  'D-724 (before): c1 and c2 follow each other in tenant A');
+select tests.as_tenant(tests.d38('01'), tests.d38('c1'));
+select is(app.member_block_create(tests.d38('c2')), true, 'D-724: c1 blocks c2 and the call answers true (this call made the block)');
+reset role;
+select is(tests.follows38(tests.d38('01'), tests.d38('c1'), tests.d38('c2')), 0,
+  'D-724: the block deleted BOTH follow rows between c1 and c2 (the caller''s and the blocked member''s)');
+select results_eq(
+  $$ select follower_user_id::text, followee_user_id::text from public.social_follows
+      where tenant_id = tests.d38('01') order by follower_user_id $$,
+  $$ values (tests.d38('c1')::text, tests.d38('c3')::text), (tests.d38('c3')::text, tests.d38('c2')::text) $$,
+  'T-11-21: only the two rows between the pair went; c1 -> c3 and c3 -> c2 survive');
+select is(tests.follows38(tests.d38('03'), tests.d38('c1'), tests.d38('c2')), 2,
+  'T-11-01: the same two users keep both follow rows in tenant C');
+select is(
+  (select count(*)::int from public.chat_conversations where id = tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2'))), 1,
+  'D-723: the conversation is not deleted');
+select is(
+  (select count(*)::int from public.chat_messages where conversation_id = tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2'))), 2,
+  'D-723: both messages are intact');
+select is(
+  (select count(*)::int from public.chat_participants where conversation_id = tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2'))), 2,
+  'D-723: both participant rows are intact');
+select tests.as_tenant(tests.d38('01'), tests.d38('c1'));
+select is(
+  (select count(*)::int from public.chat_messages where conversation_id = tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2'))), 2,
+  'D-723: the blocker still reads the whole history');
+select is(tests.send38(tests.d38('01'), tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2')), tests.d38('c1')), 'DM001:direct_closed',
+  'D-722: the composer closes for the blocker (the send guard)');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('c2'));
+select is(
+  (select count(*)::int from public.chat_messages where conversation_id = tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2'))), 2,
+  'D-723: the blocked member still reads the whole history');
+select is(tests.send38(tests.d38('01'), tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2')), tests.d38('c2')), 'DM001:direct_closed',
+  'D-722: the composer closes for the blocked member with the SAME refusal');
+reset role;
+select ok(
+  (select position('for update' in lower(prosrc)) > 0
+      and position('for update' in lower(prosrc)) < position('insert into public.member_blocks' in lower(prosrc))
+      and position('insert into public.member_blocks' in lower(prosrc)) < position('delete from public.social_follows' in lower(prosrc))
+    from pg_proc where oid = 'app.member_block_create(uuid)'::regprocedure),
+  'T-11-04: the body takes the pair''s conversation lock (for update) BEFORE it writes the block, and deletes the follows after');
+
+-- ── 7. empty, idempotency, unblock ─────────────────────────────────────────────────────────────
+select tests.as_tenant(tests.d38('01'), tests.d38('c6'));
+select is(app.member_block_create(tests.d38('c7')), true,
+  'CHAT-07 (empty): blocking a member with no follow and no conversation answers true, no error');
+reset role;
+select is(
+  (select count(*)::int from public.chat_conversations
+    where tenant_id = tests.d38('01') and direct_low_user_id = tests.d38('c6') and direct_high_user_id = tests.d38('c7')), 0,
+  'CHAT-07 (empty): no conversation was created by the block');
+select is((select count(*)::int from public.social_follows where tenant_id = tests.d38('01')), 2,
+  'CHAT-07 (empty): the block deleted zero follow rows (the two survivors of section 6 are all that is left)');
+insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+  values (tests.d38('01'), tests.d38('c7'), tests.d38('c6'));
+select tests.as_tenant(tests.d38('01'), tests.d38('c6'));
+select is(app.member_block_create(tests.d38('c7')), false,
+  'CHAT-07 (idempotency): the second call answers false (the row existed)');
+reset role;
+select is(tests.follows38(tests.d38('01'), tests.d38('c6'), tests.d38('c7')), 0,
+  'CHAT-07 (idempotency): the second call still clears a follow row that reappeared out of band');
+select is((select count(*)::int from public.member_blocks where tenant_id = tests.d38('01') and blocker_user_id = tests.d38('c6')), 1,
+  'CHAT-07 (idempotency): one block row after two calls');
+select tests.as_tenant(tests.d38('01'), tests.d38('c1'));
+select is(app.member_block_delete(tests.d38('c2')), true, 'D-724: c1 lifts the block');
+reset role;
+select is(tests.follows38(tests.d38('01'), tests.d38('c1'), tests.d38('c2')), 0,
+  'D-724: unblocking restores nothing, the two follow rows stay deleted');
+select tests.as_tenant(tests.d38('01'), tests.d38('c1'));
+select is(tests.send38(tests.d38('01'), tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2')), tests.d38('c1'), 'member', 'volta'), 'ok',
+  'D-722: unblocking reopens the pair (the composer-facing facts reopen)');
+reset role;
+select is(
+  (select count(*)::int from public.chat_messages where conversation_id = tests.pair38(tests.d38('01'), tests.d38('c1'), tests.d38('c2'))), 3,
+  'D-723: the history held two messages through the block and now three');
 
 select * from finish();
 rollback;

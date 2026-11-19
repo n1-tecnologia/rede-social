@@ -1534,6 +1534,13 @@
       "when": 1795105680081,
       "tag": "20261119162800_direct_notice",
       "breakpoints": true
+    },
+    {
+      "idx": 219,
+      "version": "7",
+      "when": 1795109524371,
+      "tag": "20261119173204_block_effects",
+      "breakpoints": true
     }
   ]
 }
