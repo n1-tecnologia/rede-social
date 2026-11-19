@@ -5,6 +5,29 @@
       "member": "Suporte, nova resposta da equipe",
       "staff": "Suporte, {count} aguardando resposta"
     },
+    "navConversations": "Conversas",
+    "navConversationsBadge": "Conversas, {count, plural, one {# conversa com mensagem nova} other {# conversas com mensagem nova}}",
+    "conversations": {
+      "title": "Conversas",
+      "region": "Suas conversas",
+      "support": {
+        "name": "Equipe {tenant}",
+        "idle": "Fale com a equipe de {tenant}"
+      },
+      "prefix": {
+        "own": "Você: ",
+        "team": "Equipe: "
+      },
+      "row": {
+        "label": "{name}, {count, plural, one {# mensagem nova} other {# mensagens novas}}. {preview}",
+        "labelRead": "{name}. {preview}",
+        "supportLabel": "{name}. {preview}",
+        "supportLabelUnread": "{name}. {preview}, mensagem nova"
+      }
+    },
+    "direct": {
+      "removedName": "Membro removido"
+    },
     "member": {
       "title": "Equipe {tenant}",
       "back": "Voltar",

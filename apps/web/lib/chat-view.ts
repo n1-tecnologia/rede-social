@@ -1,15 +1,22 @@
 import { avatarUrlFor } from '@rede-social/contracts/profiles';
-import type {
-  CaseCard,
-  CaseEvent,
-  ChatCaseAction,
-  ChatCaseCategory,
-  ChatCasePriority,
-  ChatCaseState,
-  InboxRow,
-  MemberCase,
-  MessageRow,
-  StaffCase,
+import { cutOnWord } from '@rede-social/contracts/text';
+import {
+  type CaseCard,
+  type CaseEvent,
+  CHAT_PREVIEW_GRAPHEMES,
+  type ChatCaseAction,
+  type ChatCaseCategory,
+  type ChatCasePriority,
+  type ChatCaseState,
+  type DirectListAnswer,
+  type DirectListRow,
+  type DirectOther,
+  type DirectPreview,
+  type DirectSupportSummary,
+  type InboxRow,
+  type MemberCase,
+  type MessageRow,
+  type StaffCase,
 } from '@rede-social/module-chat/contracts';
 import type {
   InboxRowState,
@@ -1001,5 +1008,194 @@ export function caseHistoryView(
       date: caseDayWord(earlier.openedAt, keys, timeZone, t),
     })),
     hasMoreEarlier: history.hasMoreEarlier,
+  };
+}
+
+/**
+ * ---------------------------------------------------------------------------------------------------
+ * Phase 11 (11-18, CHAT-06, D-719, UI-D-862, UI-D-866): the Conversas rows as FINISHED views.
+ *
+ * Pure and serializable: the BFF read and the page both return these, the client list only draws them,
+ * and nothing here reads a clock (the caller's ONE `Date.now()` made `keys`). A view carries no "blocked
+ * me" fact and no block word: the API's list never says one (D-722), and no field exists to fill.
+ * ---------------------------------------------------------------------------------------------------
+ */
+
+/** The unread number of a row stops counting at 99 on screen; the API caps its own count at 100 (D-719). */
+const UNREAD_DISPLAY_CAP = 99;
+
+/** The other member of a direct conversation, finished (D-721): a departed account reads "Membro removido". */
+export interface DirectOtherView {
+  /** The public membership id; `null` for a departed account. */
+  membershipId: string | null;
+  name: string;
+  avatar: string | null;
+  removed: boolean;
+  /** `/membros/{membershipId}`; `null` for a departed account (no link, UI-D-864). */
+  profileHref: string | null;
+}
+
+/** The other member as the screens draw them: a departed one has no avatar, no link and the neutral name. */
+export function directOtherView(other: DirectOther, t: Translator): DirectOtherView {
+  const removed = other.removed;
+  return {
+    membershipId: removed ? null : other.membershipId,
+    name: removed ? t('direct.removedName') : (other.displayName ?? t('direct.removedName')),
+    avatar: removed ? null : avatarUrlFor(other.avatarAssetId),
+    removed,
+    profileHref: !removed && other.membershipId ? `/membros/${other.membershipId}` : null,
+  };
+}
+
+/**
+ * The finished words and kind of a direct preview (UI-D-866): a text is cut to the shipped preview length on
+ * GRAPHEMES (never inside an emoji or a combining sequence) and read as one line; a recording reads from its
+ * STORED length through the shipped `voicePreviewText` and, once retired, says so with no length (D-868).
+ */
+function directPreviewParts(
+  preview: DirectPreview,
+  t: Translator,
+): { text: string; kind: PreviewKind } {
+  if (preview.kind === 'voice') {
+    return previewParts(
+      {
+        preview: '',
+        voiceSeconds: preview.durationSeconds,
+        ...(preview.deleted ? { voiceDeleted: true as const } : {}),
+      },
+      t,
+    );
+  }
+  return { text: oneLine(cutOnWord(preview.text, CHAT_PREVIEW_GRAPHEMES)), kind: 'text' };
+}
+
+/** A prefix only in front of words: a blank message is a blank line, never a lone "Você:". */
+const withPrefix = (prefix: string, text: string) => (text === '' ? '' : `${prefix}${text}`);
+
+/** One Conversas row, finished (UI-D-862, UI-D-866). Serializable: the list client only draws it. */
+export interface ConversationRowView {
+  conversationId: string;
+  /** `/conversas/{conversationId}`. */
+  href: string;
+  name: string;
+  removed: boolean;
+  avatar: string | null;
+  profileHref: string | null;
+  /** "Você: " in front of the viewer's own last message and NOTHING in front of the other member's. */
+  preview: string;
+  /** The screen draws the `Mic` glyph for `voice` only (UI-D-866). */
+  previewKind: PreviewKind;
+  /** `HH:mm`, "Ontem" or `dd/MM` in the tenant zone. */
+  time: string;
+  /** The API's own instant, kept ONLY as the merge key of a refetch; never drawn. */
+  lastMessageAt: string;
+  /** The count `Badge`: the number as it prints (`99+` above 99); `null` when nothing is unread. */
+  unread: { count: number; text: string } | null;
+  /** The row's accessible name (UI-D-866): the count clause only when unread. */
+  label: string;
+}
+
+/**
+ * UI-D-862 and UI-D-866: one API list row as the Conversas list draws it. Integers and graphemes only:
+ * the `99+` cap is an integer comparison and the preview is cut by `Intl.Segmenter`.
+ */
+export function conversationRowView(
+  row: DirectListRow,
+  { timeZone, keys, t }: { timeZone: string; keys: ChatDayKeys; t: Translator },
+): ConversationRowView {
+  const other = directOtherView(row.other, t);
+  const parts = directPreviewParts(row.lastPreview, t);
+  const preview = withPrefix(row.lastPreview.own ? t('conversations.prefix.own') : '', parts.text);
+  const count = Number.isInteger(row.unreadCount) && row.unreadCount > 0 ? row.unreadCount : 0;
+  const label =
+    count > 0
+      ? t('conversations.row.label', { name: other.name, count, preview })
+      : t('conversations.row.labelRead', { name: other.name, preview });
+  return {
+    conversationId: row.conversationId,
+    href: `/conversas/${row.conversationId}`,
+    name: other.name,
+    removed: other.removed,
+    avatar: other.avatar,
+    profileHref: other.profileHref,
+    preview,
+    previewKind: parts.kind,
+    time: inboxTime(row.lastMessageAt, keys, timeZone, { yesterday: t('day.yesterday') }),
+    lastMessageAt: row.lastMessageAt,
+    unread:
+      count > 0
+        ? { count, text: count > UNREAD_DISPLAY_CAP ? `${UNREAD_DISPLAY_CAP}+` : String(count) }
+        : null,
+    label: label.trim(),
+  };
+}
+
+/** The pinned support row, finished (UI-D-862): its words, its dot (a flag, never a count) and its door. */
+export interface SupportRowView {
+  /** "Equipe {tenant}". */
+  name: string;
+  /** The row opens `/suporte`, exactly as the bubble does today. */
+  href: '/suporte';
+  preview: string;
+  previewKind: PreviewKind;
+  /** The member never wrote: the preview is the idle line, drawn in the tertiary tone. */
+  idle: boolean;
+  /** The shipped dot semantics (D-237): the team wrote past the member's position in an open case. */
+  unread: boolean;
+  /** "Equipe {tenant}. {preview}", with ", mensagem nova" when unread. */
+  label: string;
+}
+
+/** UI-D-862: the support summary as the pinned first row. "Você: " for the member's own, "Equipe: " otherwise. */
+export function supportRowView(
+  summary: DirectSupportSummary,
+  { tenant, t }: { tenant: string; t: Translator },
+): SupportRowView {
+  const name = t('conversations.support.name', { tenant });
+  let preview: string;
+  let previewKind: PreviewKind = 'text';
+  const idle = summary.lastPreview === null;
+  if (summary.lastPreview === null) {
+    preview = t('conversations.support.idle', { tenant });
+  } else {
+    const parts = directPreviewParts(summary.lastPreview, t);
+    previewKind = parts.kind;
+    preview = withPrefix(
+      summary.lastPreview.own ? t('conversations.prefix.own') : t('conversations.prefix.team'),
+      parts.text,
+    );
+  }
+  const label = t(
+    summary.unread ? 'conversations.row.supportLabelUnread' : 'conversations.row.supportLabel',
+    { name, preview },
+  );
+  return {
+    name,
+    href: '/suporte',
+    preview,
+    previewKind,
+    idle,
+    unread: summary.unread,
+    label: label.trim(),
+  };
+}
+
+/** One page of Conversas, finished: the support row on the FIRST page only, the rows and the opaque cursor. */
+export interface ConversationsPageView {
+  support?: SupportRowView;
+  rows: ConversationRowView[];
+  nextCursor: string | null;
+}
+
+/** The whole answer of `GET /v1/chat/direct` as finished views; a later page carries no support row. */
+export function conversationsPageView(
+  answer: DirectListAnswer,
+  context: { tenant: string; timeZone: string; keys: ChatDayKeys; t: Translator },
+): ConversationsPageView {
+  const { tenant, timeZone, keys, t } = context;
+  return {
+    ...(answer.support ? { support: supportRowView(answer.support, { tenant, t }) } : {}),
+    rows: answer.rows.map((row) => conversationRowView(row, { timeZone, keys, t })),
+    nextCursor: answer.nextCursor,
   };
 }

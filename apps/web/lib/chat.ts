@@ -13,6 +13,12 @@ import {
   caseHistorySchema,
   caseResultSchema,
   conversationDetailSchema,
+  type DirectDetail,
+  type DirectListAnswer,
+  type DirectWithAnswer,
+  directDetailSchema,
+  directListAnswerSchema,
+  directWithAnswerSchema,
   type InboxPage,
   inboxPageSchema,
   type MessagePage,
@@ -424,4 +430,44 @@ export async function editCase(conversationId: string, input: CaseEditInput): Pr
   });
   if (!res.ok) throw await apiError(res);
   return caseResultSchema.parse(await res.json());
+}
+
+/**
+ * `GET /v1/chat/direct?cursor=` (11-18, CHAT-06, D-719): the Conversas list, the pinned support summary on
+ * page 1 only. `cursor: null` is page 1; the cursor is opaque and forwarded as is. The strict
+ * `directListAnswerSchema` refuses any key the contract does not name (a "blocked me" flag included), so a
+ * non-conforming answer never reaches a view. Throws `ApiClientError` on a non-2xx.
+ */
+export async function fetchDirectList({
+  cursor,
+}: {
+  cursor: string | null;
+}): Promise<DirectListAnswer> {
+  const query = cursor ? `?${new URLSearchParams({ cursor }).toString()}` : '';
+  const res = await apiFetch(`/v1/chat/direct${query}`);
+  if (!res.ok) throw await apiError(res);
+  return directListAnswerSchema.parse(await res.json());
+}
+
+/**
+ * `GET /v1/chat/direct/{conversationId}` (11-18, CHAT-07, D-722): one conversation's other member, the
+ * composer enum and the viewer's positions. A conversation that is not the caller's (foreign, unknown,
+ * hidden by the administrator's block, `social` off) is the API's bare 404, which the screens map to the
+ * single not-found. Throws `ApiClientError` on a non-2xx.
+ */
+export async function fetchDirectDetail(conversationId: string): Promise<DirectDetail> {
+  const res = await apiFetch(`/v1/chat/direct/${encodeURIComponent(conversationId)}`);
+  if (!res.ok) throw await apiError(res);
+  return directDetailSchema.parse(await res.json());
+}
+
+/**
+ * `GET /v1/chat/direct/with/{membershipId}` (11-18, D-720): the existing conversation with that member
+ * (or `null`), who the member is and the composer enum. The start of a conversation by membership id; a
+ * target that is staff, removed, foreign or unknown is the API's one bare 404. Throws `ApiClientError`.
+ */
+export async function fetchDirectWith(membershipId: string): Promise<DirectWithAnswer> {
+  const res = await apiFetch(`/v1/chat/direct/with/${encodeURIComponent(membershipId)}`);
+  if (!res.ok) throw await apiError(res);
+  return directWithAnswerSchema.parse(await res.json());
 }

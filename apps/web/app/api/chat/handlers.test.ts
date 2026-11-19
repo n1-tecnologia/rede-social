@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { createClient } from '@/lib/supabase/server';
 import { GET as getHistory } from './conversations/[conversationId]/case/history/route';
+import { GET as getDirectList } from './direct/route';
 import { GET as getInbox } from './inbox/route';
 import { GET as getStaff } from './staff/route';
 import { GET as getMyCases } from './support/cases/route';
@@ -39,7 +40,7 @@ vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
 vi.mock('@/lib/bootstrap', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/bootstrap')>()),
   getBootstrap: vi.fn(async () => ({
-    tenant: { timezone: 'America/Sao_Paulo' },
+    tenant: { timezone: 'America/Sao_Paulo', displayName: 'Rede Demo' },
     permissions: ['chat.support'],
   })),
 }));
@@ -97,6 +98,7 @@ const HANDLERS = [
   ['staff', (site?: string | null) => getStaff(get('/api/chat/staff', site)[0])],
   ['my cases', (site?: string | null) => getMyCases(get('/api/chat/support/cases', site)[0])],
   ['inbox', (site?: string | null) => getInbox(get('/api/chat/inbox', site)[0])],
+  ['direct list', (site?: string | null) => getDirectList(get('/api/chat/direct', site)[0])],
 ] as const;
 
 describe.each(HANDLERS)('%s handler: the shared gates (T-12.4-51, T-12.4-52)', (_name, call) => {
@@ -448,5 +450,136 @@ describe('GET /api/chat/inbox with the case filters', () => {
     vi.mocked(apiFetch).mockResolvedValue(json(200, { items: [], nextCursor: null }));
     await getInbox(get('/api/chat/inbox')[0]);
     expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe('/v1/chat/inbox');
+  });
+});
+
+describe('GET /api/chat/direct (11-18, CHAT-06, D-719, UI-D-862, UI-D-866)', () => {
+  const OTHER = '0e000000-0000-4000-8000-0000000000e1';
+  const CONV_2 = '0c000000-0000-4000-8000-0000000000c2';
+  const CONV_3 = '0c000000-0000-4000-8000-0000000000c3';
+  const list = () => ({
+    support: { lastPreview: { kind: 'text', text: 'Já verificamos.', own: false }, unread: true },
+    rows: [
+      {
+        conversationId: CONVERSATION,
+        other: {
+          membershipId: OTHER,
+          displayName: 'Ana Lima',
+          avatarAssetId: null,
+          removed: false,
+        },
+        lastPreview: { kind: 'text', text: 'Combinado, até lá', own: true },
+        lastMessageAt: '2026-11-17T19:30:00.000000Z',
+        unreadCount: 0,
+      },
+      {
+        conversationId: CONV_2,
+        other: {
+          membershipId: OTHER,
+          displayName: 'Bruno Reis',
+          avatarAssetId: null,
+          removed: false,
+        },
+        lastPreview: { kind: 'voice', durationSeconds: 42, own: false, deleted: true },
+        lastMessageAt: '2026-11-17T18:30:00.000000Z',
+        // the API's own cap: 100 prints 99+
+        unreadCount: 100,
+      },
+      {
+        conversationId: CONV_3,
+        other: { membershipId: null, displayName: null, avatarAssetId: null, removed: true },
+        lastPreview: { kind: 'voice', durationSeconds: 42, own: false },
+        lastMessageAt: '2026-11-16T18:30:00.000000Z',
+        unreadCount: 2,
+      },
+    ],
+    nextCursor: 'c-next',
+  });
+
+  it('answers the FINISHED support row and rows, in ONE call, no-store', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, list()));
+    const res = await getDirectList(get('/api/chat/direct')[0]);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe('/v1/chat/direct');
+    const body = (await res.json()) as {
+      support: Record<string, unknown>;
+      rows: Record<string, unknown>[];
+      nextCursor: string | null;
+    };
+    expect(body.nextCursor).toBe('c-next');
+    expect(body.support).toMatchObject({
+      name: 'Equipe Rede Demo',
+      href: '/suporte',
+      preview: 'Equipe: Já verificamos.',
+      unread: true,
+      idle: false,
+    });
+    expect(body.rows[0]).toMatchObject({
+      name: 'Ana Lima',
+      href: `/conversas/${CONVERSATION}`,
+      preview: 'Você: Combinado, até lá',
+      previewKind: 'text',
+      time: '16:30',
+      unread: null,
+    });
+    expect(body.rows[1]).toMatchObject({
+      preview: 'Mensagem de voz apagada',
+      previewKind: 'voiceDeleted',
+      unread: { count: 100, text: '99+' },
+      label: 'Bruno Reis, 100 mensagens novas. Mensagem de voz apagada',
+    });
+    expect(body.rows[2]).toMatchObject({
+      name: 'Membro removido',
+      avatar: null,
+      profileHref: null,
+      previewKind: 'voice',
+      preview: 'Mensagem de voz · 0:42',
+      unread: { count: 2, text: '2' },
+      time: 'Ontem',
+    });
+  });
+
+  it('a page after the first has no support row and forwards the cursor', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, { rows: [], nextCursor: null }));
+    const res = await getDirectList(get('/api/chat/direct?cursor=abc')[0]);
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe('/v1/chat/direct?cursor=abc');
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ rows: [], nextCursor: null });
+    expect(body).not.toHaveProperty('support');
+  });
+
+  it('the blank view: a member with no conversation and no support message', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(200, { support: { lastPreview: null, unread: false }, rows: [], nextCursor: null }),
+    );
+    const res = await getDirectList(get('/api/chat/direct')[0]);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { support: Record<string, unknown>; rows: unknown[] };
+    expect(body.rows).toEqual([]);
+    expect(body.support).toMatchObject({
+      idle: true,
+      preview: 'Fale com a equipe de Rede Demo',
+      unread: false,
+    });
+  });
+
+  it('an over-long cursor is 400 with zero API calls', async () => {
+    const res = await getDirectList(get(`/api/chat/direct?cursor=${'x'.repeat(513)}`)[0]);
+    expect(res.status).toBe(400);
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('T-11-03: a row carrying a "blocked me" key is refused by the strict contract, nothing leaks', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const leaky = list();
+    Object.assign(leaky.rows[0] as object, { blockedMe: true });
+    vi.mocked(apiFetch).mockResolvedValue(json(200, leaky));
+    const res = await getDirectList(get('/api/chat/direct')[0]);
+    expect(res.status).toBe(502);
+    expect(await res.text()).toBe('');
+    spy.mockRestore();
   });
 });

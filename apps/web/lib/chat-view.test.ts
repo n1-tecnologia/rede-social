@@ -1,6 +1,8 @@
 import { fileURLToPath } from 'node:url';
 import type {
   CaseCard,
+  DirectListRow,
+  DirectSupportSummary,
   InboxRow,
   MemberCase,
   MessageRow,
@@ -22,6 +24,7 @@ import {
   chatDayLabel,
   chatMessageView,
   chatRuns,
+  conversationRowView,
   firstNameOf,
   formatVoiceDuration,
   inboxRowView,
@@ -30,6 +33,7 @@ import {
   playbackRateLabel,
   reconcileInboxPage,
   spokenVoiceDuration,
+  supportRowView,
   tenantDayKeys,
   voiceDeletedText,
   voicePreviewText,
@@ -1407,5 +1411,212 @@ describe('12.5-15 chatRuns with recordings and the member-side blocked sentence'
     expect(t('blocked.notice', { name: 'Marina Costa' })).toBe(
       'Marina Costa está bloqueado. A conversa fica disponível só para leitura.',
     );
+  });
+});
+
+/**
+ * Phase 11-18 (CHAT-06, D-719, UI-D-862, UI-D-866) — the Conversas rows as FINISHED views. The real
+ * catalog, the real translator, a fixed clock: nothing here reads the system time.
+ */
+describe('conversationRowView (UI-D-866)', () => {
+  const NOW = at('2026-11-17T20:00:00Z');
+  const ctx = () => ({ timeZone: SP, keys: tenantDayKeys(NOW, SP), t });
+  const ID = '0d000000-0000-4000-8000-000000000001';
+  const MEMBER = '0e000000-0000-4000-8000-000000000001';
+  const AVATAR = '0f000000-0000-4000-8000-000000000001';
+
+  function directRow(overrides: Partial<DirectListRow> = {}): DirectListRow {
+    return {
+      conversationId: ID,
+      other: {
+        membershipId: MEMBER,
+        displayName: 'Ana Lima',
+        avatarAssetId: AVATAR,
+        removed: false,
+      },
+      lastPreview: { kind: 'text', text: 'Oi, tudo bem?', own: false },
+      lastMessageAt: '2026-11-17T17:30:00.000000Z',
+      unreadCount: 0,
+      ...overrides,
+    };
+  }
+
+  it('1. the other member text carries NO prefix, the own text carries "Você: "', () => {
+    expect(conversationRowView(directRow(), ctx())).toMatchObject({
+      preview: 'Oi, tudo bem?',
+      previewKind: 'text',
+    });
+    expect(
+      conversationRowView(
+        directRow({ lastPreview: { kind: 'text', text: 'Oi, tudo bem?', own: true } }),
+        ctx(),
+      ),
+    ).toMatchObject({ preview: 'Você: Oi, tudo bem?', previewKind: 'text' });
+  });
+
+  it('2. a recording reads "Mensagem de voz · 0:42" with the voice kind, with the same prefix rule', () => {
+    const voice = (own: boolean) =>
+      directRow({ lastPreview: { kind: 'voice', durationSeconds: 42, own } });
+    expect(conversationRowView(voice(false), ctx())).toMatchObject({
+      preview: 'Mensagem de voz · 0:42',
+      previewKind: 'voice',
+    });
+    expect(conversationRowView(voice(true), ctx())).toMatchObject({
+      preview: 'Você: Mensagem de voz · 0:42',
+      previewKind: 'voice',
+    });
+  });
+
+  it('3. a retired recording says so with the deleted kind and never prints its length', () => {
+    const view = conversationRowView(
+      directRow({
+        lastPreview: { kind: 'voice', durationSeconds: 42, own: false, deleted: true },
+      }),
+      ctx(),
+    );
+    expect(view).toMatchObject({ preview: 'Mensagem de voz apagada', previewKind: 'voiceDeleted' });
+    expect(JSON.stringify(view)).not.toContain('0:42');
+  });
+
+  it('4. a removed member reads "Membro removido" with no avatar and no profile link', () => {
+    const view = conversationRowView(
+      directRow({
+        other: { membershipId: null, displayName: null, avatarAssetId: null, removed: true },
+      }),
+      ctx(),
+    );
+    expect(view).toMatchObject({
+      name: 'Membro removido',
+      removed: true,
+      avatar: null,
+      profileHref: null,
+      href: `/conversas/${ID}`,
+    });
+  });
+
+  it('5. a live member keeps the name, the photo and the profile link', () => {
+    const view = conversationRowView(directRow(), ctx());
+    expect(view.name).toBe('Ana Lima');
+    expect(view.removed).toBe(false);
+    expect(view.avatar).toContain(AVATAR);
+    expect(view.profileHref).toBe(`/membros/${MEMBER}`);
+  });
+
+  it.each([
+    [0, null, 'Ana Lima. Oi'],
+    [1, { count: 1, text: '1' }, 'Ana Lima, 1 mensagem nova. Oi'],
+    [3, { count: 3, text: '3' }, 'Ana Lima, 3 mensagens novas. Oi'],
+    [99, { count: 99, text: '99' }, 'Ana Lima, 99 mensagens novas. Oi'],
+    [100, { count: 100, text: '99+' }, 'Ana Lima, 100 mensagens novas. Oi'],
+    [120, { count: 120, text: '99+' }, 'Ana Lima, 120 mensagens novas. Oi'],
+  ])('6. unread %i prints %j and names the row "%s"', (unreadCount, unread, label) => {
+    const view = conversationRowView(
+      directRow({ unreadCount, lastPreview: { kind: 'text', text: 'Oi', own: false } }),
+      ctx(),
+    );
+    expect(view.unread).toEqual(unread);
+    expect(view.label).toBe(label);
+  });
+
+  it('7. the time is the tenant-zone inbox time (today HH:mm, yesterday, dd/MM)', () => {
+    expect(conversationRowView(directRow(), ctx()).time).toBe('14:30');
+    expect(
+      conversationRowView(directRow({ lastMessageAt: '2026-11-16T17:30:00.000000Z' }), ctx()).time,
+    ).toBe('Ontem');
+    expect(
+      conversationRowView(directRow({ lastMessageAt: '2026-10-12T17:30:00.000000Z' }), ctx()).time,
+    ).toBe('12/10');
+  });
+
+  it('8. a name of combining marks and emoji passes through whole, never split', () => {
+    const name = `${'A\u0301\u0323'.repeat(20)} 👩🏽‍💻 ${'Ñandú '.repeat(6)}`.trim();
+    const view = conversationRowView(
+      directRow({ other: { ...directRow().other, displayName: name } }),
+      ctx(),
+    );
+    expect(view.name).toBe(name);
+    expect(view.label.startsWith(`${name}.`)).toBe(true);
+  });
+
+  it('9. a message of only line breaks previews as one blank-safe line', () => {
+    const view = conversationRowView(
+      directRow({ lastPreview: { kind: 'text', text: '\n\n \r\n', own: false } }),
+      ctx(),
+    );
+    expect(view.preview).toBe('');
+    expect(view.preview).not.toMatch(/[\r\n]/);
+    const own = conversationRowView(
+      directRow({ lastPreview: { kind: 'text', text: '\n\n', own: true } }),
+      ctx(),
+    );
+    expect(own.preview).not.toMatch(/[\r\n]/);
+  });
+
+  it('10. a multi-line text previews as one line, cut on graphemes and never mid-emoji', () => {
+    const view = conversationRowView(
+      directRow({ lastPreview: { kind: 'text', text: 'primeira\nsegunda', own: false } }),
+      ctx(),
+    );
+    expect(view.preview).toBe('primeira segunda');
+    const long = conversationRowView(
+      directRow({ lastPreview: { kind: 'text', text: '👩🏽‍💻'.repeat(150), own: false } }),
+      ctx(),
+    );
+    const segments = [
+      ...new Intl.Segmenter('pt-BR', { granularity: 'grapheme' }).segment(long.preview),
+    ];
+    expect(segments.length).toBeLessThanOrEqual(100);
+    expect(long.preview.endsWith('…')).toBe(true);
+    expect(long.preview.replace('…', '').replaceAll('👩🏽‍💻', '')).toBe('');
+  });
+});
+
+describe('supportRowView (UI-D-862)', () => {
+  const tenant = 'Rede Demo';
+  const view = (summary: DirectSupportSummary) => supportRowView(summary, { tenant, t });
+
+  it('1. a member who never wrote reads the idle line and the dot stays off', () => {
+    expect(view({ lastPreview: null, unread: false })).toEqual({
+      name: 'Equipe Rede Demo',
+      href: '/suporte',
+      preview: 'Fale com a equipe de Rede Demo',
+      previewKind: 'text',
+      idle: true,
+      unread: false,
+      label: 'Equipe Rede Demo. Fale com a equipe de Rede Demo',
+    });
+  });
+
+  it('2. the prefix is "Você: " for the own message and "Equipe: " for the team message', () => {
+    expect(
+      view({ lastPreview: { kind: 'text', text: 'Preciso de ajuda', own: true }, unread: false }),
+    ).toMatchObject({ preview: 'Você: Preciso de ajuda', idle: false });
+    expect(
+      view({ lastPreview: { kind: 'text', text: 'Já verificamos.', own: false }, unread: false }),
+    ).toMatchObject({ preview: 'Equipe: Já verificamos.' });
+  });
+
+  it('3. a recording keeps the voice kind and the prefix', () => {
+    expect(
+      view({
+        lastPreview: { kind: 'voice', durationSeconds: 42, own: false },
+        unread: false,
+      }),
+    ).toMatchObject({ preview: 'Equipe: Mensagem de voz · 0:42', previewKind: 'voice' });
+    expect(
+      view({
+        lastPreview: { kind: 'voice', durationSeconds: 7, own: true, deleted: true },
+        unread: false,
+      }),
+    ).toMatchObject({ preview: 'Você: Mensagem de voz apagada', previewKind: 'voiceDeleted' });
+  });
+
+  it('4. unread is a flag (never a count) and adds ", mensagem nova" to the name', () => {
+    const unread = view({
+      lastPreview: { kind: 'text', text: 'Já verificamos.', own: false },
+      unread: true,
+    });
+    expect(unread.unread).toBe(true);
+    expect(unread.label).toBe('Equipe Rede Demo. Equipe: Já verificamos., mensagem nova');
   });
 });
