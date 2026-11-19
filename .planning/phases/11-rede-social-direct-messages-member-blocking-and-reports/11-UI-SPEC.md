@@ -1,7 +1,8 @@
 ---
 phase: "11"
 slug: "rede-social-direct-messages-member-blocking-and-reports"
-status: draft
+status: approved
+reviewed_at: "2026-11-19"
 shadcn_initialized: false
 preset: none
 created: "2026-11-19"
@@ -298,6 +299,92 @@ All strings live in host catalogs (UI-D-880), pt-BR, short. Keys are proposals; 
 
 ---
 
+## UI Considerations
+
+**Probe run (2026-11-19).** The ui-consideration engine ran over ten surfaces, with Igor's confirmation of their kinds: E1 the Conversas list (list, media), E2 the direct conversation screen (list, static content), E3 the composer area with its five states (form, list, interactive control), E4 the profile action zone (interactive control), E5 the /membros row (list, media, interactive control), E6 the context menus of Denunciar and Bloquear (list, nav, media, interactive control), E7 the report sheet (form, list, interactive control, static content), E8 the block dialog and the blocked list (list, interactive control, static content), E9 the admin queue and the resolve sheet (list, static content) and E10 the two new bell rows and the three pushes (list, media, static content). The engine's heuristic read E1, E2 and E9 short, so Igor agreed to add by hand: interactive control to E1, and media and interactive control to E2 and E9 (the voice player, the row links and the filter chips). It raised **75** applicable considerations and each one is a row below, with no consideration left to the engine as unresolved.
+
+Applicable state considerations resolved: 61 covered, 4 backstop, 0 unresolved, 10 dismissed (reason given)
+
+| Category | Element(s) | Status | Resolution / Reason |
+|----------|------------|--------|---------------------|
+| empty | E1 Conversas list, no direct conversation | ✅ covered | The support row stays and the card "Você ainda não conversou com outros membros" with "Encontrar pessoas" sits under it (UI-D-863). |
+| loading | E1 Conversas list, first read | ✅ covered | Three skeleton rows at the row geometry, `aria-busy`, the header renders at once (UI-D-863). |
+| error | E1 Conversas list, failed read | ✅ covered | Card "Não foi possível carregar suas conversas." with "Tentar novamente", the support row is not drawn from a failed read; a failed later page keeps the rows and shows the inline retry line (UI-D-863). |
+| populated | E1 Conversas list, normal volume | ✅ covered | Pinned support row, then direct rows by recency with avatar, name, one-line preview, time and the unread count badge (UI-D-862, UI-D-866). |
+| partial | E1 row with a deleted account or no photo or a member who never wrote to support | ✅ covered | "Membro removido" with the neutral avatar stays in the list; the support row reads "Fale com a equipe de {tenant}" before the first message; a missing photo uses the neutral `User` fallback (UI-D-862). |
+| overflow | E1 row text and the badge number | ✅ covered | Name and preview each cut on one line, the count caps at `99+`, the row keeps its 44px minimum (UI-D-862, UI-D-866). |
+| zero-one-many | E1 zero, one or many direct conversations | ✅ covered | Zero is the blank card, one and many are plain rows, the bubble and row names use ICU plurals "# conversa com mensagem nova" (UI-D-861, UI-D-866). |
+| long-text | E1 a very long display name or preview | ✅ covered | One truncated line each in the row and the full text in the accessible name (UI-D-862, UI-D-879). |
+| empty | E2 conversation that does not exist yet | ✅ covered | "Escreva para {nome}" with the 80px avatar and "A conversa aparece na sua lista depois da primeira mensagem." (UI-D-864). |
+| loading | E2 conversation first read | ✅ covered | The shipped thread `loading.tsx`: header bar and bubbles (UI-D-878). |
+| error | E2 failed read, unknown or inaccessible conversation | ✅ covered | Thread error card "Não foi possível carregar a conversa." with "Tentar novamente"; any miss (staff, removed, other tenant, `social` off, administrator block) is the one not-found screen that never says why (UI-D-864, UI-D-878). |
+| populated | E2 conversation with text and voice messages | ✅ covered | Own bubbles right in brand, the other member left in neutral, day separators, no sender label in a 1:1, the 12.5 voice player on both sides (UI-D-864). |
+| partial | E2 first send, failed first send, deleted account header | ✅ covered | The first send creates the conversation and swaps the address in place with no toast; a failed first send keeps the draft; a deleted account shows "Membro removido" with no link (UI-D-864). |
+| overflow | E2 bubbles at 320px with a 2000-character text or an unbroken string | 🧪 backstop | The bubble keeps `max-w-[85%]` and wraps, the incoming gutter trigger keeps its 40px; held-out visual test at 320 and 390px with the longest text and a long unbroken URL (UI-D-864, UI-D-870). |
+| zero-one-many | E2 zero, one and many messages | ✅ covered | Zero is the empty thread, one and many are the shipped log with the "N novas mensagens" pill (UI-D-864). |
+| long-text | E2 long contact name in the header and a long message | 🧪 backstop | The header name truncates as the shipped `ThreadHeader` does and the bubble wraps; held-out visual test at 320px with a 60-character name and a 2000-character message (UI-D-864). |
+| empty | E3 composer, field empty | ✅ covered | The open state shows the microphone in the send slot and the placeholder "Escreva uma mensagem" (UI-D-865, 12.5 UI-D-841). |
+| loading | E3 unblock in progress and composer state being read | ✅ covered | The strip button shows "Desbloqueando…"; the state is read with the thread and re-read on every signal, (re)subscribe and `visibilitychange` (UI-D-865). |
+| error | E3 refused send, failed unblock | ✅ covered | A refused send removes the optimistic bubble, shows the toast "Esta conversa não aceita novas mensagens." and draws the strip; a failed unblock keeps the strip with the generic error toast (UI-D-865). |
+| populated | E3 the five states and their precedence | ✅ covered | Open, closed, blocker, removed account and not drawn; removed wins over blocker, which wins over closed (UI-D-865). |
+| partial | E3 state changing while the screen is open | ✅ covered | The strip swaps with no toast, no announcement beyond its own `role="status"`, no scroll and no focus move (UI-D-865). |
+| overflow | E3 strip text and the Desbloquear button at 320px | ✅ covered | The name is `min-w-0 line-clamp-2 break-words` and the button is full width on its own line below 360px (UI-D-865). |
+| zero-one-many | E3 composer area as a collection | ✖ dismissed | It is one slot under the list, never a collection. |
+| long-text | E3 long name in the blocker strip and long typed text | ✅ covered | The name is clamped to two lines; typed text keeps the 1 to 2000 character rule of the shipped field (UI-D-865). |
+| loading | E4 profile action zone while the social read is pending | ✅ covered | Two skeleton blocks, never a missing button that then appears (UI-D-878). |
+| error | E4 failed social read and refused follow | ✅ covered | A failed read keeps the shipped inline line of UI-D-501 and no buttons; a refused follow reverts with the shipped failure toast that never names a reason (UI-D-878, UI-D-868). |
+| long-text | E4 long names in the labels of the buttons | ✅ covered | The visible labels are fixed words; the name appears only in the `aria-label`, and the pair stacks below 360px (UI-D-867). |
+| empty | E5 members list with no rows | ✖ dismissed | Unchanged by this phase: the shipped empty state of UI-D-492 and UI-D-503; the new control exists only on a loaded row. |
+| loading | E5 members list first read | ✖ dismissed | Unchanged: the shipped skeleton rows; the message control is part of a loaded row. |
+| error | E5 refused follow and the message link | ✅ covered | A refused follow reverts the button, shows the shipped failure toast and refreshes, after which the controls are gone; the message control is a plain link (UI-D-868). |
+| populated | E5 row with the two controls | ✅ covered | A 44px outline message control left of Seguir inside a 148px cluster (UI-D-868). |
+| partial | E5 own row, staff row and a pair with a block | ✅ covered | The control is absent, not disabled, on those rows and the row keeps its link (UI-D-868). |
+| overflow | E5 name link at 320px | ✅ covered | The name link keeps about 128px and names and the bio line truncate as today, the full name is on the profile (UI-D-868, A-UI-10). |
+| zero-one-many | E5 zero, one or many members | ✖ dismissed | Unchanged: the counts and paging belong to Phase 9 (UI-D-503) and this phase adds no total. |
+| long-text | E5 long display name | ✅ covered | The name truncates on one line and the control keeps its 44px (UI-D-868). |
+| empty | E6 menu with no rows | ✖ dismissed | It cannot happen: the trigger is absent on a viewer's own content and a row not legal for the subject is not rendered, so an opened sheet always has "Denunciar". |
+| loading | E6 menu opening | ✖ dismissed | The sheets open from data already on the page (`canReport` and `canBlock` ride each item), so nothing loads inside them. |
+| error | E6 an action from the menu failing | ✅ covered | The report sheet and block dialog carry their own failure states, including "Este conteúdo não está mais disponível." (UI-D-871, UI-D-872). |
+| populated | E6 rows per subject | ✅ covered | Story, story comment, community and message each get the rows listed, with the destructive row last (UI-D-869, UI-D-870). |
+| partial | E6 rows that depend on the viewer and the author | ✅ covered | Staff never see "Bloquear {nome}", the row is not drawn when the viewer already blocked the person, and a removed account drops it (UI-D-869, UI-D-870). |
+| overflow | E6 incoming bubble trigger and a long name in a row | ✅ covered | The trigger sits in the free gutter (40x44 at 320px, the one declared exception, A-UI-6); "Bloquear {nome}" truncates visually and its accessible name is complete (UI-D-870, UI-D-879). |
+| zero-one-many | E6 menu as a collection | ✖ dismissed | One subject per menu; a menu never lists several items of the same kind. |
+| long-text | E6 long names in the rows | ✅ covered | The visual label truncates and the name stays complete for assistive technology (UI-D-879). |
+| empty | E7 sheet with no reason chosen | ✅ covered | The send button is disabled until a reason is chosen and the note is optional (UI-D-633, unchanged by UI-D-871). |
+| loading | E7 sending | ✅ covered | "Enviando…" with the fields locked and the sheet not closable (UI-D-633, unchanged). |
+| error | E7 failure, already reported, item gone | ✅ covered | The failure alert, the already-reported toast and "Este conteúdo não está mais disponível." which never says why for a message (UI-D-871). |
+| populated | E7 sheet per subject | ✅ covered | Six titles, the shared intro and the privacy line for a message or a voice message (UI-D-871). |
+| partial | E7 a note left empty, and the voice variant | ✅ covered | The note is optional; "Denunciar mensagem de voz" and its own privacy line apply to a recording (UI-D-871). |
+| overflow | E7 sheet at 320px with the longest title and a 500-character note | 🧪 backstop | Held-out visual test of "Denunciar mensagem de voz" with the note filled to 500 characters at 320px. |
+| zero-one-many | E7 reasons and reports | ✖ dismissed | Five fixed reasons and one report per reporter and item (AD-5, AD-6). |
+| long-text | E7 the note | ✅ covered | The 500-character limit and counter of UI-D-633 are unchanged (UI-D-871). |
+| empty | E8 "Membros bloqueados" with nobody blocked | ✅ covered | The shipped empty body stays (UI-D-635, kept by UI-D-872). |
+| loading | E8 block or unblock in progress | ✅ covered | The shipped pending state of the dialog and "Desbloqueando…" on the unblock buttons (UI-D-878, UI-D-865). |
+| error | E8 failed block or unblock | ✅ covered | The shipped error toast, the row or strip stays (UI-D-878). |
+| populated | E8 two bodies of the dialog | ✅ covered | The `social`-off body is the shipped one and the `social`-on body adds that both follows are deleted and do not come back (UI-D-872). |
+| partial | E8 dialog from a content menu with `social` on or off | ✅ covered | The body variant is chosen from data, never from a role (UI-D-872). |
+| overflow | E8 long name inside the dialog | ✅ covered | The name wraps with `break-words` (UI-D-872). |
+| zero-one-many | E8 blocked list at zero, one or many | ✅ covered | The list and its row are unchanged from UI-D-635 (UI-D-872). |
+| long-text | E8 long name in title and body | ✅ covered | The title and body wrap with `break-words` (UI-D-872). |
+| empty | E9 queue with no reports or none in a filter | ✅ covered | The wider empty copy and one empty state per filter (UI-D-873, UI-D-878). |
+| loading | E9 queue first read and the voice row | ✅ covered | `loading.tsx` rows at the new geometries, the voice row skeleton has the 56px player bar (UI-D-878). |
+| error | E9 failed read, failed action, voice player | ✅ covered | `error.tsx` card, a failed row action is a toast and the row stays, "Esta denúncia já foi resolvida." refreshes the row, the player keeps its own error state with retry (UI-D-874, UI-D-878). |
+| populated | E9 rows for six subjects and the resolve sheet | ✅ covered | Type pill and state pill, the body per subject, the meta line, "Ver conteúdo" except for a message, and the rows legal for each subject only (UI-D-873, UI-D-874). |
+| partial | E9 recording gone, item gone, story with no text, deleted author | ✅ covered | "Mensagem de voz apagada" with no player, "Conteúdo não está mais disponível" with no link, "Story sem texto.", and "Bloquear autor" hidden for a deleted account (UI-D-873, UI-D-874). |
+| overflow | E9 pills and long bodies at 320px | ✅ covered | The pill line wraps instead of clipping, bodies clamp per subject and a message copy shows whole with `whitespace-pre-wrap` (UI-D-873). |
+| zero-one-many | E9 zero, one and many reports | ✅ covered | Keyset paging by 20, a failed page keeps the rows, filters "Abertas", "Resolvidas" and "Todas" (UI-D-878, UI-D-637). |
+| long-text | E9 a 280-character message copy and a 500-character note | ✅ covered | The copy shows whole without a clamp, text is `break-words` and always React text (UI-D-873, UI-D-881). |
+| empty | E10 bell list with no row | ✖ dismissed | Unchanged: the shipped empty state of Phase 7; this phase adds two row kinds. |
+| loading | E10 bell list first read | ✖ dismissed | Unchanged: the shipped skeleton of the notification list. |
+| error | E10 a row whose target is missing or malformed | ✅ covered | A missing or non-uuid id degrades to `/membros`, and a follow row stays readable with `social` off (UI-D-875). |
+| populated | E10 the two rows and the three pushes | ✅ covered | Anatomy, sentences and targets of both rows and the copy of the message and report pushes (UI-D-875, UI-D-876). |
+| partial | E10 "Nova denúncia" that names nothing | ✅ covered | The row and the push never say what was reported, by whom or of whom (UI-D-875, UI-D-876). |
+| overflow | E10 row sentence with a long actor name at 320px | 🧪 backstop | Held-out visual test of "{actor} começou a te seguir." with a 60-character name at 320px. |
+| zero-one-many | E10 repeated events | ✅ covered | One follow row per pair, one report push per report, and one message push per conversation through the tag (UI-D-875, UI-D-876). |
+| long-text | E10 push body and title | ✅ covered | The body is cut on a word at 100 characters and the voice body is the fixed "Mensagem de voz · 0:42" (UI-D-876). |
+
+**What the engine cannot see (the planner and Igor carry these).** The phrases VoiceOver and TalkBack speak for the new rows, strips and menus (UI-D-879) and the real-phone proofs listed in the sketch gate are not engine considerations. The one declared touch-target exception, the 40px-wide trigger at 320px (A-UI-6), is Igor's call at the sketch review.
+
 ## Motion & Accessibility
 
 - **Nothing new animates.** Sheets, dialogs and the list reorder use the shipped springs or none; a row changing place and a strip swapping for the composer are instant.
@@ -391,12 +478,17 @@ Per `.planning/sketches/MANIFEST.md` (D-33, D-365, D-417, UI-04; every prototype
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
-- [ ] Dimension 7 Inventory Provenance: PASS
+- [x] Dimension 1 Copywriting: FLAG (non-blocking, see below)
+- [x] Dimension 2 Visuals: FLAG (non-blocking, see below)
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: FLAG (non-blocking, see below)
+- [x] Dimension 6 Registry Safety: PASS
+- [x] Dimension 7 Inventory Provenance: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-11-19 by gsd-ui-checker (UI-SPEC VERIFIED, no BLOCK, 3 FLAGs). This is the contract's approval only, not the sketch's: the approval of sketch 025 is a separate line that only Igor writes.
+
+**Non-blocking FLAGs left for the planner and the sketch:**
+- Dimension 1: "Desbloquear" is a single verb in the strip and on the profile button (the adjacent text names the person and the profile button has the `aria-label` "Desbloquear {nome}"); the block dialog keeps the shipped generic "Cancelar" while the archive dialog says "Manter comunidade".
+- Dimension 2: say one primary visual anchor per new screen in sketch 025 (the pinned support row or the unread rows on Conversas, the message list of the open conversation, the single brand "Seguir" fill on the profile).
+- Dimension 5: the exceptions of 12px, 40px and 44px and 80px are declared and justified; the 40px gutter trigger at 320px is below the 44px minimum used elsewhere, and Igor confirms it at the sketch review (A-UI-6).
