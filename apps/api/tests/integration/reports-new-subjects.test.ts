@@ -6,7 +6,7 @@ import { subscribe } from '@rede-social/core/server/events/bus';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { reportLimiter } from '@rede-social/core/server/safety/limits';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { caseKit, removeThrowaways, SEED_THREAD } from './chat-case-fixtures';
+import { caseKit, removeThrowaways, SEED_THREAD, throwawayMember } from './chat-case-fixtures';
 import { readyVoiceAsset, removeVoiceRows } from './chat-voice-fixtures';
 import {
   directList,
@@ -1410,5 +1410,196 @@ describe('resolve block author', () => {
       expect(await blockRowsOf(userId)).toHaveLength(0);
     }
     expect(await blockRowsOf(demoAdminId)).toHaveLength(adminBlocksBefore);
+  });
+});
+
+describe('resolve race', () => {
+  it('1. two administrators removing the same reported story at once leave ONE 200, one 409 REPORT_ALREADY_RESOLVED and ONE log row', async () => {
+    const second = await throwawayMember('rc-adm1', 'admin_tenant');
+    const author = await directMember('k1a');
+    const reporter = await directMember('k1r');
+    const { storyId, reportId } = await reportedStory(author.userId, reporter);
+
+    const answers = await Promise.all([
+      resolve(tokens.demoAdmin, reportId, 'remove_content'),
+      resolve(second.token, reportId, 'remove_content'),
+    ]);
+    expect(answers.map((res) => res.status).sort()).toEqual([200, 409]);
+    const loser = answers.find((res) => res.status === 409);
+    expect(((await (loser as Response).json()) as ResolveBody).error?.code).toBe(
+      'REPORT_ALREADY_RESOLVED',
+    );
+    expect(await reportStatus(reportId)).toBe('content_removed');
+    expect(await deletedAtOf('stories', storyId)).not.toBeNull();
+    expect(await logRowsOfSubject(storyId)).toHaveLength(1);
+  });
+
+  it('2. two administrators blocking the same reported author at once leave ONE 200, one 409 and ONE member_blocked row', async () => {
+    const second = await throwawayMember('rc-adm2', 'admin_tenant');
+    const author = await directMember('k2a');
+    const reporter = await directMember('k2r');
+    const { reportId } = await reportedStory(author.userId, reporter);
+
+    const answers = await Promise.all([
+      resolve(tokens.demoAdmin, reportId, 'block_author'),
+      resolve(second.token, reportId, 'block_author'),
+    ]);
+    expect(answers.map((res) => res.status).sort()).toEqual([200, 409]);
+    const loser = answers.find((res) => res.status === 409);
+    expect(((await (loser as Response).json()) as ResolveBody).error?.code).toBe(
+      'REPORT_ALREADY_RESOLVED',
+    );
+    expect(await reportStatus(reportId)).toBe('author_blocked');
+    expect(await membershipStatusOf(author.userId)).toBe('blocked');
+    expect(await blockRowsOf(author.userId)).toHaveLength(1);
+  });
+
+  it('3. a resolve racing the author deleting their own story is content_removed with at most ONE row, and the row exists exactly when the author lost', async () => {
+    const author = await directMember('k3a');
+    const reporter = await directMember('k3r');
+    const { storyId, reportId } = await reportedStory(author.userId, reporter);
+
+    const [resolved, deleted] = await Promise.all([
+      resolve(tokens.demoAdmin, reportId, 'remove_content'),
+      request(`/v1/stories/${storyId}`, author.token, { method: 'DELETE' }, HOSTS.demo),
+    ]);
+    expect(resolved.status).toBe(200);
+    expect(await resolved.json()).toEqual({ id: reportId, status: 'content_removed' });
+    expect(await deletedAtOf('stories', storyId)).not.toBeNull();
+    const rows = await logRowsOfSubject(storyId);
+    expect(rows.length).toBeLessThanOrEqual(1);
+    // The author's delete wins (204) -> already_gone, no row; the administrator wins -> the author's delete is 404.
+    expect(deleted.status === 404 ? 1 : 0, `author delete answered ${deleted.status}`).toBe(
+      rows.length,
+    );
+  });
+});
+
+describe('resolve idempotent', () => {
+  it('1. resolving a resolved report is 409 REPORT_ALREADY_RESOLVED whatever the first resolution was, and changes nothing', async () => {
+    const author = await directMember('i1a');
+    const reporter = await directMember('i1r');
+    const dismissed = await reportedStory(author.userId, reporter, { visibility: 'tenant' });
+    const removedStory = await reportedStory(author.userId, reporter);
+    const blockedAuthor = await directMember('i1b');
+    const blocked = await reportedStory(blockedAuthor.userId, reporter);
+
+    expect((await resolve(tokens.demoAdmin, dismissed.reportId, 'dismiss')).status).toBe(200);
+    expect((await resolve(tokens.demoAdmin, removedStory.reportId, 'remove_content')).status).toBe(
+      200,
+    );
+    expect((await resolve(tokens.demoAdmin, blocked.reportId, 'block_author')).status).toBe(200);
+    const rowsBefore = {
+      removed: (await logRowsOfSubject(removedStory.storyId)).length,
+      blocks: (await blockRowsOf(blockedAuthor.userId)).length,
+    };
+    expect(rowsBefore).toEqual({ removed: 1, blocks: 1 });
+
+    const expected: [string, string][] = [
+      [dismissed.reportId, 'dismissed'],
+      [removedStory.reportId, 'content_removed'],
+      [blocked.reportId, 'author_blocked'],
+    ];
+    for (const [reportId, status] of expected) {
+      for (const resolution of ['dismiss', 'remove_content', 'block_author'] as const) {
+        const again = await resolve(tokens.demoAdmin, reportId, resolution);
+        expect(again.status, `${status} then ${resolution}`).toBe(409);
+        expect(((await again.json()) as ResolveBody).error?.code).toBe('REPORT_ALREADY_RESOLVED');
+      }
+      expect(await reportStatus(reportId)).toBe(status);
+    }
+    expect(
+      await deletedAtOf('stories', dismissed.storyId),
+      'a dismissed report removed nothing',
+    ).toBeNull();
+    expect(await logRowsOfSubject(removedStory.storyId)).toHaveLength(rowsBefore.removed);
+    expect(await blockRowsOf(blockedAuthor.userId)).toHaveLength(rowsBefore.blocks);
+  });
+
+  it('2. an item its author already deleted resolves as content_removed with no log row; so does a community its creator archived first', async () => {
+    const author = await directMember('i2a');
+    const reporter = await directMember('i2r');
+    const { storyId, reportId } = await reportedStory(author.userId, reporter);
+    const ownDelete = await request(
+      `/v1/stories/${storyId}`,
+      author.token,
+      { method: 'DELETE' },
+      HOSTS.demo,
+    );
+    expect(ownDelete.status).toBe(204);
+    const res = await resolve(tokens.demoAdmin, reportId, 'remove_content');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: reportId, status: 'content_removed' });
+    expect(await logRowsOfSubject(storyId)).toHaveLength(0);
+
+    const creator = await directMember('i2c');
+    const communityId = await insertCommunity(creator.userId, {
+      name: `${PREFIX}Clube idempotente`,
+      tenantId: demoTenantId,
+    });
+    const communityReport = await fileDemo(reporter, 'community', communityId);
+    const archived = await request(
+      `/v1/communities/${communityId}`,
+      creator.token,
+      { method: 'PATCH', body: JSON.stringify({ status: 'archived' }) },
+      HOSTS.demo,
+    );
+    expect(archived.status).toBe(200);
+    const done = await resolve(tokens.demoAdmin, communityReport, 'remove_content');
+    expect(done.status).toBe(200);
+    expect(await done.json()).toEqual({ id: communityReport, status: 'content_removed' });
+    expect(await communityStatusOf(communityId)).toBe('archived');
+    expect(
+      await logRowsOfSubject(communityId),
+      'the creator archived it, no second row',
+    ).toHaveLength(0);
+  });
+});
+
+describe('resolve tenant', () => {
+  it("1. tenant B's administrator resolving tenant A's report is the bare 404 and changes nothing, and a report of A never removes B's item; each administrator resolves their own", async () => {
+    const author = await directMember('t1x');
+    const reporter = await directMember('t1y');
+    const demo = await reportedStory(author.userId, reporter);
+    // The lab's own story and report (Helena follows Marcos in the seed).
+    const labStory = await insertStory(userIds.marcos, {
+      visibility: 'followers',
+      caption: `${PREFIX}lab resolve`,
+    });
+    const labReport = (
+      (await (await fileReport(tokens.helena, 'story', labStory)).json()) as { id: string }
+    ).id;
+
+    const unknown = await resolve(tokens.labAdmin, randomUUID(), 'remove_content', HOSTS.lab);
+    expect(unknown.status).toBe(404);
+    const bareBody = await sansRequestId(unknown);
+
+    // Negatives, both ways: the report of the other tenant is the same bare 404.
+    const labOnDemo = await resolve(tokens.labAdmin, demo.reportId, 'remove_content', HOSTS.lab);
+    expect(labOnDemo.status).toBe(404);
+    expect(await sansRequestId(labOnDemo)).toBe(bareBody);
+    const demoOnLab = await resolve(tokens.demoAdmin, labReport, 'remove_content', HOSTS.demo);
+    expect(demoOnLab.status).toBe(404);
+    expect(await sansRequestId(demoOnLab)).toBe(bareBody);
+    for (const [reportId, storyId] of [
+      [demo.reportId, demo.storyId],
+      [labReport, labStory],
+    ] as const) {
+      expect(await reportStatus(reportId), 'the report stays open').toBe('open');
+      expect(await deletedAtOf('stories', storyId), 'nothing was removed').toBeNull();
+      expect(await logRowsOfSubject(storyId)).toHaveLength(0);
+    }
+
+    // Positive controls: each administrator resolves their own tenant's report.
+    expect(
+      (await resolve(tokens.demoAdmin, demo.reportId, 'remove_content', HOSTS.demo)).status,
+    ).toBe(200);
+    expect((await resolve(tokens.labAdmin, labReport, 'remove_content', HOSTS.lab)).status).toBe(
+      200,
+    );
+    expect(await deletedAtOf('stories', demo.storyId)).not.toBeNull();
+    expect(await deletedAtOf('stories', labStory)).not.toBeNull();
+    expect(await logRowsOfSubject(demo.storyId)).toHaveLength(1);
+    expect(await logRowsOfSubject(labStory)).toHaveLength(1);
   });
 });
