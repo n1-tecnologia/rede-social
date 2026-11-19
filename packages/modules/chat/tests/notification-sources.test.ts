@@ -562,3 +562,170 @@ describe('chat push copy', () => {
     expect(graphemes(tight)).toBeLessThanOrEqual(CHAT_PUSH_BODY_MAX);
   });
 });
+
+/* -- the direct branch (Phase 11 plan 13, CHAT-06; D-728, D-860; T-11-01, T-11-02, T-11-08) --------------------------- */
+
+/** What `app.direct_message_notice` answers: the recipient, the writer, the writer's name, the text or the recording. */
+type NoticeRow = {
+  recipient_user_id: string;
+  writer_user_id: string;
+  writer_name: string | null;
+  body: string | null;
+  voice_seconds: number | null;
+  voice_gone: boolean;
+  deliverable: boolean;
+};
+
+const WRITER = '55555555-5555-4555-8555-555555555555';
+const RECIPIENT = '66666666-6666-4666-8666-666666666666';
+
+const noticeRow = (over: Partial<NoticeRow> = {}): NoticeRow => ({
+  recipient_user_id: RECIPIENT,
+  writer_user_id: WRITER,
+  writer_name: 'Marina Souza',
+  body: 'Oi! Vamos marcar aquele café?',
+  voice_seconds: null,
+  voice_gone: false,
+  deliverable: true,
+  ...over,
+});
+
+const directPayload = { ...payload('member', WRITER, 3) };
+
+/** The shipped first read finds NO row for a direct (the worker lane cannot read it), then the definer answers. */
+const directTx = (...notice: NoticeRow[]) => fakeTx([], notice);
+
+describe('chat direct message push (CHAT-06, D-728)', () => {
+  it('the worker cannot read a direct, so the definer answers and ONE push-only intent goes to the other participant', async () => {
+    const tx = directTx(noticeRow());
+    const intents = await messageSource.resolve(tx, directPayload, meta);
+    expect(tx.calls).toBe(2);
+    expect(tx.statements[1]).toContain('app.direct_message_notice(');
+    expect(intents).toEqual([
+      {
+        kind: CHAT_NOTIFICATION_KINDS.directMessage,
+        audience: { type: 'users', userIds: [RECIPIENT] },
+        excludeUserIds: [WRITER],
+        dedupeKey: `chat.direct_message:${M}`,
+        subject: { type: 'conversation', id: C },
+        object: null,
+        actorUserId: WRITER,
+        facts: {},
+        channels: ['push'],
+        push: {
+          title: 'tenant',
+          titleText: 'Marina Souza',
+          body: 'Oi! Vamos marcar aquele café?',
+          url: `/conversas/${C}`,
+          tag: TAG,
+          topic: TAG,
+          ttlSeconds: CHAT_PUSH_TTL_SECONDS,
+          urgency: 'high',
+          renotify: true,
+        },
+      },
+    ]);
+    // Push only: a message never writes a bell row (D-228).
+    expect(intents[0]?.channels).not.toContain('in_app');
+  });
+
+  it('the definer is asked with the payload message id and nothing else', async () => {
+    const tx = directTx(noticeRow());
+    await messageSource.resolve(tx, directPayload, meta);
+    expect(tx.statements[1]).toContain('from app.direct_message_notice(');
+    expect(tx.statements[1]).not.toContain('chat_messages');
+  });
+
+  it('the body is cut on a word at 100 graphemes with an ellipsis only when it was cut', async () => {
+    const intents = await messageSource.resolve(
+      directTx(noticeRow({ body: 'palavra '.repeat(40) })),
+      directPayload,
+      meta,
+    );
+    const body = intents[0]?.push?.body ?? '';
+    expect(graphemes(body)).toBeLessThanOrEqual(CHAT_PUSH_BODY_MAX);
+    expect(body.endsWith('…')).toBe(true);
+  });
+
+  it('a recording pushes "Mensagem de voz · m:ss" from the STORED length', async () => {
+    const intents = await messageSource.resolve(
+      directTx(noticeRow({ body: null, voice_seconds: 42 })),
+      directPayload,
+      meta,
+    );
+    expect(intents[0]?.push?.body).toBe('Mensagem de voz · 0:42');
+  });
+
+  it('a recording whose asset is gone pushes nothing (D-868)', async () => {
+    expect(
+      await messageSource.resolve(
+        directTx(noticeRow({ body: null, voice_seconds: 42, voice_gone: true })),
+        directPayload,
+        meta,
+      ),
+    ).toEqual([]);
+  });
+
+  it('a blank or missing writer name sends the hint with NO titleText, never an empty or placeholder title', async () => {
+    for (const writer_name of [null, '', '   ']) {
+      const intents = await messageSource.resolve(
+        directTx(noticeRow({ writer_name })),
+        directPayload,
+        meta,
+      );
+      expect(intents).toHaveLength(1);
+      expect(intents[0]?.push).not.toHaveProperty('titleText');
+      expect(intents[0]?.push?.title).toBe('tenant');
+    }
+  });
+
+  it('a closed pair (deliverable false), zero rows and a foreign or deleted message yield []', async () => {
+    expect(
+      await messageSource.resolve(directTx(noticeRow({ deliverable: false })), directPayload, meta),
+    ).toEqual([]);
+    // Zero rows: a deleted message, a support case, another tenant's message id (T-11-01), an unknown id.
+    expect(await messageSource.resolve(directTx(), directPayload, meta)).toEqual([]);
+    expect(
+      await messageSource.resolve(
+        directTx(),
+        { ...directPayload, messageId: '99999999-9999-4999-8999-999999999999' },
+        meta,
+      ),
+    ).toEqual([]);
+  });
+
+  it('the writer never receives their own push: a row that names the writer as recipient yields []', async () => {
+    expect(
+      await messageSource.resolve(
+        directTx(noticeRow({ recipient_user_id: WRITER })),
+        directPayload,
+        meta,
+      ),
+    ).toEqual([]);
+  });
+
+  it('an event whose author is not the message author yields [] (a forged payload names no one)', async () => {
+    expect(
+      await messageSource.resolve(
+        directTx(noticeRow({ writer_user_id: MEMBER })),
+        directPayload,
+        meta,
+      ),
+    ).toEqual([]);
+  });
+
+  it('a first read that DOES return a non-support row (a lane that can read it) is still no support push, and asks no definer', async () => {
+    const tx = fakeTx([row({ kind: 'direct' })], [noticeRow()]);
+    expect(await messageSource.resolve(tx, payload('staff', STAFF), meta)).toEqual([]);
+    expect(tx.calls).toBe(1);
+  });
+
+  it('the support branch is unchanged: a support row never reaches the definer', async () => {
+    const tx = fakeTx([row({})], [noticeRow()]);
+    const intents = await messageSource.resolve(tx, payload('staff', STAFF), meta);
+    expect(intents).toHaveLength(1);
+    expect(intents[0]?.kind).toBe(CHAT_NOTIFICATION_KINDS.supportReply);
+    expect(intents[0]?.push).not.toHaveProperty('titleText');
+    expect(tx.calls).toBe(1);
+  });
+});

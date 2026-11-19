@@ -1,20 +1,34 @@
 import { randomUUID } from 'node:crypto';
 import { withTenantTx } from '@rede-social/core/db/tenant-tx';
-import { notificationsSystemCtx } from '@rede-social/module-notifications/server';
+import { chatNotificationSources } from '@rede-social/module-chat/server';
+import {
+  fakePushOutbox,
+  notificationsFanoutJob,
+  notificationsSystemCtx,
+  resetFakePushOutbox,
+} from '@rede-social/module-notifications/server';
 import { socialNotificationSources } from '@rede-social/module-social/server';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { caseKit, removeThrowaways, request } from './chat-case-fixtures';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { caseKit, post, removeThrowaways, request, throwawayMember } from './chat-case-fixtures';
 import {
   blockUser,
   type DirectMember,
   directMember,
   removeDirectRows,
   requestOn,
+  resetDirectLimiters,
+  sendDirect,
   setModule,
   sharedDirectIdentity,
   withDirectModules,
 } from './direct-fixtures';
-import { adminSql, notificationJobsOf, pushSendJobsOf, runNotificationJobs } from './setup';
+import {
+  adminSql,
+  notificationJobsOf,
+  pushSendJobsOf,
+  runNotificationJobs,
+  runPushSendJobs,
+} from './setup';
 
 /**
  * Phase 11 plan 11 (CHAT-06, CHAT-07; D-726, D-727; T-11-15, T-11-13, T-11-01): the notices of the direct-messages phase,
@@ -332,5 +346,339 @@ describe('follow notice cross-tenant', () => {
     expect(rows.map((row) => row.tenant_id)).toEqual([labTenantId]);
     expect(rows[0]?.subject_id).toBe(a.lab.membershipId);
     expect(rows[0]?.payload).toEqual({ membershipId: a.lab.membershipId });
+  });
+});
+
+/* -- the direct message push (Phase 11 plan 13, CHAT-06; D-728, D-860; T-11-08, T-11-02, T-11-01) ------------------------- */
+
+type SendBody = { conversationId: string; message: { id: string; seq: number } };
+
+const HEX32 = /^[0-9a-f]{32}$/;
+const MESSAGE_KIND = 'chat.direct_message';
+
+/** The member's device, with an endpoint the test can find again in the fake outbox. */
+async function addNamedDevice(userId: string, label: string): Promise<string> {
+  const endpoint = `https://push.fake.test/dirnotif/${label}-${randomUUID()}`;
+  await adminSql`
+    insert into public.push_subscriptions (tenant_id, user_id, endpoint, p256dh, auth)
+    values (${demoTenantId}::uuid, ${userId}::uuid, ${endpoint}, 'k', 'a')`;
+  return endpoint;
+}
+
+/** A writer with a name and a recipient with a device; the writer also has a device to prove they are never pushed. */
+async function messagePair(label: string): Promise<{
+  a: DirectMember;
+  b: DirectMember;
+  endpointA: string;
+  endpointB: string;
+}> {
+  const a = await directMember(`${label}a`, { displayName: `Marina ${label}` });
+  const b = await directMember(`${label}b`, { displayName: `Bruno ${label}` });
+  return {
+    a,
+    b,
+    endpointA: await addNamedDevice(a.userId, `${label}-a`),
+    endpointB: await addNamedDevice(b.userId, `${label}-b`),
+  };
+}
+
+async function writeTo(from: DirectMember, to: DirectMember, body: string): Promise<SendBody> {
+  const res = await sendDirect(from, to.membershipId, body);
+  expect(res.status).toBe(201);
+  return (await res.json()) as SendBody;
+}
+
+/** The push-send jobs of a message (by its dedupe key), whoever they name. */
+async function messageJobs(messageId: string) {
+  return (await pushSendJobsOf(demoTenantId)).filter(
+    (job) => job.data.dedupeKey === `${MESSAGE_KIND}:${messageId}`,
+  );
+}
+
+/** Plays the fan-out of one `chat.message_sent` event through the real handler (as the worker does). */
+async function fanOut(event: {
+  conversationId: string;
+  messageId: string;
+  seq: number;
+  authorUserId: string;
+  tenantId?: string;
+}): Promise<void> {
+  const { tenantId = demoTenantId, ...rest } = event;
+  await notificationsFanoutJob.handler({
+    event: 'chat.message_sent',
+    tenantId,
+    payload: { tenantId, authorSide: 'member', ...rest },
+    sinkAt: new Date().toISOString(),
+  });
+}
+
+async function bellCount(userId: string): Promise<number> {
+  const [row] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from public.notifications
+     where user_id = ${userId}::uuid and kind like 'chat.%'`;
+  return row?.n ?? -1;
+}
+
+describe('direct message push', () => {
+  let restoreChat: () => Promise<void> = async () => {};
+  const assetIds: string[] = [];
+
+  beforeAll(async () => {
+    restoreChat = await withDirectModules('demo', ['chat']);
+  });
+
+  beforeEach(async () => {
+    resetDirectLimiters();
+    await closeWaitingJobs();
+    resetFakePushOutbox();
+  });
+
+  afterAll(async () => {
+    if (assetIds.length > 0) {
+      await adminSql`delete from public.chat_messages where media_asset_id = any(${assetIds}::uuid[])`;
+      await adminSql`delete from public.media_assets where id = any(${assetIds}::uuid[])`;
+    }
+    await closeWaitingJobs();
+    await restoreChat();
+  });
+
+  it("1. the path: A writes, B gets exactly ONE push titled with A's name, no bell row appears and A gets nothing", async () => {
+    const { a, b, endpointA, endpointB } = await messagePair('m1');
+    const sent = await writeTo(a, b, 'Oi Bruno, tudo bem? Vamos marcar aquele café?');
+    expect(await runNotificationJobs(demoTenantId)).toBeGreaterThanOrEqual(1);
+
+    const jobs = await messageJobs(sent.message.id);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.data.kind).toBe(MESSAGE_KIND);
+    expect(jobs[0]?.data.userIds).toEqual([b.userId]);
+    const tag = sent.conversationId.replaceAll('-', '');
+    expect(tag).toMatch(HEX32);
+    expect(jobs[0]?.data.push).toMatchObject({
+      titleText: a.displayName,
+      body: 'Oi Bruno, tudo bem? Vamos marcar aquele café?',
+      url: `/conversas/${sent.conversationId}`,
+      tag,
+      topic: tag,
+      renotify: true,
+      urgency: 'high',
+      ttlSeconds: 259_200,
+    });
+
+    // Push only: no bell row for either side, and the writer is told nothing.
+    expect(await bellCount(b.userId)).toBe(0);
+    expect(await bellCount(a.userId)).toBe(0);
+    expect(
+      (await pushSendJobsOf(demoTenantId)).some((job) => job.data.userIds.includes(a.userId)),
+    ).toBe(false);
+
+    // The device sees the writer's name as the title and the message start as the body.
+    await runPushSendJobs(demoTenantId);
+    const toB = fakePushOutbox().find((out) => out.endpoint === endpointB);
+    expect(toB).toBeDefined();
+    expect(JSON.parse(toB?.payload ?? '{}')).toMatchObject({
+      title: a.displayName,
+      body: 'Oi Bruno, tudo bem? Vamos marcar aquele café?',
+      url: `/conversas/${sent.conversationId}`,
+      tag,
+      renotify: true,
+    });
+    expect(fakePushOutbox().some((out) => out.endpoint === endpointA)).toBe(false);
+  });
+
+  it('2. one banner per conversation: the second message carries the SAME tag, another conversation another tag', async () => {
+    const { a, b } = await messagePair('m2');
+    const c = await directMember('m2c', { displayName: 'Carla m2' });
+    const first = await writeTo(a, b, 'primeira');
+    const second = await writeTo(a, b, 'segunda');
+    const other = await writeTo(c, b, 'outra conversa');
+    expect(second.conversationId).toBe(first.conversationId);
+    expect(other.conversationId).not.toBe(first.conversationId);
+    await runNotificationJobs(demoTenantId);
+
+    const tagOf = async (messageId: string) => {
+      const jobs = await messageJobs(messageId);
+      expect(jobs).toHaveLength(1);
+      return ((jobs[0]?.data.push ?? {}) as { tag: string }).tag;
+    };
+    const t1 = await tagOf(first.message.id);
+    const t2 = await tagOf(second.message.id);
+    const t3 = await tagOf(other.message.id);
+    expect(t1).toBe(t2);
+    expect(t1).toMatch(HEX32);
+    expect(t3).not.toBe(t1);
+    expect(t3).toMatch(HEX32);
+  });
+
+  it('3. voice: a 42 second recording pushes "Mensagem de voz · 0:42" and a retired asset pushes nothing', async () => {
+    const { a, b } = await messagePair('m3');
+    const text = await writeTo(a, b, 'texto antes');
+    await closeWaitingJobs();
+    const { ids } = await caseKit();
+
+    const voiceMessage = async (): Promise<{ id: string; assetId: string }> => {
+      const [asset] = await adminSql<{ id: string }[]>`
+        insert into public.media_assets (tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds, ready_at)
+        values (${ids.demo}::uuid, ${a.userId}::uuid, 'audio', 'voice', 'ready', 'audio/mp4', 70, 42, now())
+        returning id::text as id`;
+      if (!asset) throw new Error('fixture asset');
+      assetIds.push(asset.id);
+      const [message] = await adminSql<{ id: string; seq: number }[]>`
+        insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body, media_asset_id, voice_seconds)
+        values (${ids.demo}::uuid, ${text.conversationId}::uuid, ${a.userId}::uuid, 'member', null, ${asset.id}::uuid, 42)
+        returning id::text as id, seq::int as seq`;
+      if (!message) throw new Error('fixture message');
+      return { id: message.id, assetId: asset.id };
+    };
+
+    const live = await voiceMessage();
+    await fanOut({
+      conversationId: text.conversationId,
+      messageId: live.id,
+      seq: 2,
+      authorUserId: a.userId,
+    });
+    const liveJobs = await messageJobs(live.id);
+    expect(liveJobs).toHaveLength(1);
+    expect(liveJobs[0]?.data.push).toMatchObject({
+      titleText: a.displayName,
+      body: 'Mensagem de voz · 0:42',
+    });
+
+    // The same event once the asset was retired: nothing is pushed and no length leaks (D-868).
+    const gone = await voiceMessage();
+    await adminSql`update public.media_assets set status = 'deleted', deleted_at = now() where id = ${gone.assetId}::uuid`;
+    await fanOut({
+      conversationId: text.conversationId,
+      messageId: gone.id,
+      seq: 3,
+      authorUserId: a.userId,
+    });
+    expect(await messageJobs(gone.id)).toHaveLength(0);
+  });
+
+  it('4a. a block between A and B, in either direction, after the event produces no job', async () => {
+    const first = await messagePair('m4a');
+    const sentFirst = await writeTo(first.a, first.b, 'antes do bloqueio');
+    expect((await blockUser(first.b.token, first.a.userId)).status).toBeLessThan(300);
+    await runNotificationJobs(demoTenantId);
+    expect(await messageJobs(sentFirst.message.id)).toHaveLength(0);
+
+    const second = await messagePair('m4b');
+    const sentSecond = await writeTo(second.a, second.b, 'antes do bloqueio');
+    expect((await blockUser(second.a.token, second.b.userId)).status).toBeLessThan(300);
+    await runNotificationJobs(demoTenantId);
+    expect(await messageJobs(sentSecond.message.id)).toHaveLength(0);
+  });
+
+  it('4b. social turned off between the send and the fan-out produces no job', async () => {
+    const { a, b } = await messagePair('m4c');
+    const sent = await writeTo(a, b, 'social vai desligar');
+    const restore = await setModule('demo', 'social', false);
+    try {
+      await runNotificationJobs(demoTenantId);
+    } finally {
+      await restore();
+    }
+    expect(await messageJobs(sent.message.id)).toHaveLength(0);
+  });
+
+  it('4c. a recipient who was administrator-blocked, removed or anonymised receives nothing', async () => {
+    for (const [label, change] of [
+      ['blocked', 'blocked_at = now()'],
+      ['removed', 'deleted_at = now()'],
+      [
+        'anon',
+        "deleted_at = now(), anonymised_at = now(), deletion_requested_at = now() - interval '31 days', deletion_due_at = now() - interval '1 day'",
+      ],
+    ] as const) {
+      const { a, b } = await messagePair(`m4${label}`);
+      const sent = await writeTo(a, b, `para ${label}`);
+      await adminSql.unsafe(
+        `update public.memberships set ${change} where id = '${b.membershipId}'::uuid`,
+      );
+      await runNotificationJobs(demoTenantId);
+      expect(await messageJobs(sent.message.id), label).toHaveLength(0);
+    }
+  });
+
+  it('4d. a stale event of a deleted message produces no job', async () => {
+    const { a, b } = await messagePair('m4d');
+    const sent = await writeTo(a, b, 'vou apagar');
+    await adminSql`update public.chat_messages set deleted_at = now() where id = ${sent.message.id}::uuid`;
+    await runNotificationJobs(demoTenantId);
+    expect(await messageJobs(sent.message.id)).toHaveLength(0);
+  });
+
+  it('4e. an event of tenant A resolved in tenant B lane never reads the message (T-11-01)', async () => {
+    const { a, b } = await messagePair('m4e');
+    const sent = await writeTo(a, b, 'so no tenant demo');
+    await closeWaitingJobs();
+    const source = chatNotificationSources.find((entry) => entry.event === 'chat.message_sent');
+    if (!source) throw new Error('chat declares no chat.message_sent source');
+    const payload = {
+      tenantId: labTenantId,
+      conversationId: sent.conversationId,
+      messageId: sent.message.id,
+      seq: sent.message.seq,
+      authorUserId: a.userId,
+      authorSide: 'member' as const,
+    };
+    const inLab = await withTenantTx(notificationsSystemCtx(labTenantId), (tx) =>
+      source.resolve(tx, payload, { sinkAt: new Date().toISOString() }),
+    );
+    expect(inLab).toEqual([]);
+    // Positive control: the same event in its own tenant answers one intent.
+    const inDemo = await withTenantTx(notificationsSystemCtx(demoTenantId), (tx) =>
+      source.resolve(
+        tx,
+        { ...payload, tenantId: demoTenantId },
+        { sinkAt: new Date().toISOString() },
+      ),
+    );
+    expect(inDemo).toHaveLength(1);
+  });
+
+  it('4f. the support reply and the team pushes keep their shipped shapes, with no literal title', async () => {
+    const { tokens, ids } = await caseKit();
+    const member = await throwawayMember('m4f');
+    const memberEndpoint = await addNamedDevice(member.id, 'm4f-member');
+    await adminSql`
+      insert into public.push_subscriptions (tenant_id, user_id, endpoint, p256dh, auth)
+      values (${demoTenantId}::uuid, ${ids.demoSupport}::uuid, ${`https://push.fake.test/dirnotif/m4f-staff-${randomUUID()}`}, 'k', 'a')`;
+    await closeWaitingJobs();
+
+    const opened = await post('/v1/chat/support/messages', member.token, {
+      body: 'Preciso de ajuda',
+    });
+    expect(opened.status).toBe(201);
+    const first = (await opened.json()) as SendBody;
+    await runNotificationJobs(demoTenantId);
+    const toTeam = (await pushSendJobsOf(demoTenantId)).filter(
+      (job) => job.data.dedupeKey === `chat.case_new:${first.message.id}`,
+    );
+    expect(toTeam).toHaveLength(1);
+    expect(toTeam[0]?.data.push).toMatchObject({ title: 'tenant' });
+    expect(toTeam[0]?.data.push).not.toHaveProperty('titleText');
+
+    await closeWaitingJobs();
+    const replied = await post(
+      `/v1/chat/conversations/${first.conversationId}/messages`,
+      tokens.demoSupport,
+      { body: 'Resposta da equipe' },
+    );
+    expect(replied.status).toBe(201);
+    const reply = (await replied.json()) as SendBody;
+    await runNotificationJobs(demoTenantId);
+    const toMember = (await pushSendJobsOf(demoTenantId)).filter(
+      (job) => job.data.dedupeKey === `chat.support_reply:${reply.message.id}`,
+    );
+    expect(toMember).toHaveLength(1);
+    expect(toMember[0]?.data.userIds).toEqual([member.id]);
+    expect(toMember[0]?.data.push).toMatchObject({ title: 'team', url: '/suporte' });
+    expect(toMember[0]?.data.push).not.toHaveProperty('titleText');
+    expect(memberEndpoint).toContain('m4f-member');
+    // Neither support push is the direct kind.
+    expect(await messageJobs(first.message.id)).toHaveLength(0);
+    expect(await messageJobs(reply.message.id)).toHaveLength(0);
   });
 });

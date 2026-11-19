@@ -72,6 +72,25 @@ export const CHAT_PUSH_COPY = {
 const memberLabel = (memberName: string | null): string =>
   memberName?.trim() ? memberName.trim() : CHAT_PUSH_COPY.memberFallback;
 
+/**
+ * Direct message → the other participant (Phase 11 plan 13, D-728): the start of the message (or the recording's
+ * "Mensagem de voz · m:ss") cut on a word at `CHAT_PUSH_BODY_MAX` graphemes, `…` only when it was cut. The cut is by
+ * GRAPHEME, so an emoji, a ZWJ sequence or a combining mark is never split.
+ */
+export function directMessagePushCopy(body: string): string {
+  return cutOnWord(body, CHAT_PUSH_BODY_MAX);
+}
+
+/**
+ * The literal banner title of a direct message: the writer's display name, trimmed, or `undefined` when it is blank or
+ * missing, so the hint carries NO `titleText` and the banner is titled with the tenant name, never with an empty or
+ * placeholder string (D-728). The push builder cuts a long name at its own bound (plan 04).
+ */
+export function directPushTitleText(writerName: string | null | undefined): string | undefined {
+  const name = writerName?.trim();
+  return name ? name : undefined;
+}
+
 /** Support reply → member: the reply itself, cut on a word with `…` only when it cut. */
 export function supportReplyPushCopy(body: string): string {
   return cutOnWord(body, CHAT_PUSH_BODY_MAX);

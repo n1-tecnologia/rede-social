@@ -10,6 +10,8 @@ import {
   caseNewPushCopy,
   caseReopenedPushCopy,
   caseResolvedPushCopy,
+  directMessagePushCopy,
+  directPushTitleText,
   memberMessagePushCopy,
   supportReplyPushCopy,
   voicePreview,
@@ -49,10 +51,14 @@ import { voiceGoneSql } from './voice-sql';
  * "Mensagem de voz · m:ss" from the STORED length (no join to the asset), built in TypeScript. A recording whose asset
  * is gone (D-868) pushes nothing.
  *
+ * A DIRECT message (Phase 11 plan 13, D-728) is the same event with another reader: the worker cannot read it through
+ * RLS, so the resolver asks the worker-only definer `app.direct_message_notice` and pushes the other participant once
+ * per conversation, titled with the writer's name (see `resolveDirectMessageSent`); it never writes a bell row.
+ *
  * `resolve` runs in the WORKER, inside the event tenant's lane (`notificationsSystemCtx`, role `support_tenant`, so the
  * staff-aware chat policies admit it), and reads only chat's own tables plus the kernel's memberships and profiles,
- * every statement pinned to the payload's tenant. A non-support conversation (V2 `direct`/`group`) yields `[]` until
- * its own rule exists.
+ * every statement pinned to the payload's tenant. A conversation the lane reads that is not a support case (a V2
+ * `group`) yields `[]` until its own rule exists.
  */
 
 /** 72 hours: a support answer is still worth delivering to a phone that was off for a weekend. */
@@ -146,7 +152,11 @@ async function resolveMessageSent(tx: Tx, payload: ChatMessageSent): Promise<Not
        and m.conversation_id = ${payload.conversationId}::uuid
        and m.deleted_at is null`);
   const row = rows[0];
-  if (row?.kind !== 'support' || !row.member_user_id) return [];
+  // The worker lane is `support_tenant` with the zero user, and `chat_conversations_select` admits staff only on a
+  // support conversation, so a DIRECT message returns no row here (Pitfall 3, T-11-02): it is read through the
+  // worker-only definer, never through a widened policy. A row of any other kind is no push of this branch.
+  if (!row) return resolveDirectMessageSent(tx, payload);
+  if (row.kind !== 'support' || !row.member_user_id) return [];
 
   const common = {
     subject: { type: 'conversation', id: payload.conversationId },
@@ -222,6 +232,71 @@ async function resolveMessageSent(tx: Tx, payload: ChatMessageSent): Promise<Not
       dedupeKey: `${kind}:${payload.messageId}`,
       channels: ['push'],
       push: pushHint(payload.conversationId, 'tenant', body, `/suporte/${payload.conversationId}`),
+    },
+  ];
+}
+
+/** What `app.direct_message_notice` answers (plan 06): one row for a paired direct message of the claim's tenant. */
+type DirectNoticeRow = {
+  recipient_user_id: string;
+  writer_user_id: string;
+  writer_name: string | null;
+  body: string | null;
+  voice_seconds: number | null;
+  voice_gone: boolean;
+  deliverable: boolean;
+};
+
+/**
+ * D-728, T-11-01, T-11-02, T-11-08: the push of a direct message, ONE intent to the other participant, push only (a
+ * message never writes a bell row, D-228). The message is read through `app.direct_message_notice`, which answers only
+ * the worker's zero-user lane, pins the claim's tenant and RECOMPUTES `deliverable` now, so a pair that became blocked,
+ * a tenant that turned `social` off, a removed or administrator-blocked recipient and an anonymised member receive
+ * nothing. Zero rows (a deleted message, a support case, another tenant's id, an unknown id) is `[]`.
+ *
+ * The title is the writer's display name (`titleText`, absent when blank); the body is the start of the text cut on a
+ * word at 100 graphemes, or "Mensagem de voz · m:ss" from the STORED length, and a recording whose asset is gone pushes
+ * nothing (D-868). The banner is suppressed for a participant who is looking at the app by the shipped global
+ * service-worker rule (a window focused and visible), not by a per-conversation presence (Assumption A5).
+ */
+async function resolveDirectMessageSent(
+  tx: Tx,
+  payload: ChatMessageSent,
+): Promise<NotificationIntent[]> {
+  const rows = await tx.execute<DirectNoticeRow>(
+    sql`select * from app.direct_message_notice(${payload.messageId}::uuid)`,
+  );
+  const notice = rows[0];
+  if (notice?.deliverable !== true) return [];
+  // The event names its author; a notice whose author differs, or whose recipient is the writer, is nobody's push.
+  if (notice.writer_user_id !== payload.authorUserId) return [];
+  if (notice.recipient_user_id === notice.writer_user_id) return [];
+
+  const isVoice = notice.voice_seconds !== null && notice.voice_seconds !== undefined;
+  if (isVoice && notice.voice_gone === true) return [];
+  const text = isVoice ? voicePreview(Number(notice.voice_seconds)) : (notice.body ?? '');
+
+  const titleText = directPushTitleText(notice.writer_name);
+  return [
+    {
+      kind: CHAT_NOTIFICATION_KINDS.directMessage,
+      audience: { type: 'users', userIds: [notice.recipient_user_id] },
+      excludeUserIds: [notice.writer_user_id],
+      dedupeKey: `${CHAT_NOTIFICATION_KINDS.directMessage}:${payload.messageId}`,
+      subject: { type: 'conversation', id: payload.conversationId },
+      object: null,
+      actorUserId: notice.writer_user_id,
+      facts: {},
+      channels: ['push'],
+      push: {
+        ...pushHint(
+          payload.conversationId,
+          'tenant',
+          directMessagePushCopy(text),
+          `/conversas/${payload.conversationId}`,
+        ),
+        ...(titleText === undefined ? {} : { titleText }),
+      },
     },
   ];
 }
