@@ -48,6 +48,12 @@ so `social` off is `404 MODULE_DISABLED` and a staff caller is `403 FORBIDDEN`.
   2000 code points after trim); the message row, the `seq` and `chat.message_sent` are the support send's, with
   `authorSide: 'member'`. Every miss (staff, the caller, another tenant, an administrator-blocked or removed member, an
   unknown id) is ONE bare `404 NOT_FOUND`.
+- `GET /v1/chat/direct/with/{membershipId}` answers `200 { conversationId | null, other: { membershipId, displayName,
+  avatarAssetId, removed }, composer }` with `Cache-Control: no-store` and writes nothing. The conversation id is null before
+  the first message; `avatarAssetId` appears only while the asset is live; `composer` is `open`, `blocker` (the caller
+  blocked them) or `closed` (they blocked the caller, with no word of why): the two sides of a block differ in that word
+  alone and no field says "blocked me". Every miss is the same bare `404 NOT_FOUND` as the send; a pair with a block is not
+  a miss.
 - A send the database refuses with `DM001` (a block standing either way, `social` off, the other member no longer live) is
   `409 CONFLICT` with `details.chat = 'direct_closed'`, the one word appended to `CHAT_ISSUES`. It never says which cause,
   never reuses the staff-side `member_blocked`, never carries a name, and the conversation and the message roll back together.

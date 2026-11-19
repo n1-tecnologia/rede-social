@@ -15,6 +15,8 @@ import {
   conversationDetailSchema,
   directSendInputSchema,
   directSendResultSchema,
+  directWithAnswerSchema,
+  directWithParamsSchema,
   inboxPageSchema,
   inboxQuerySchema,
   messagePageSchema,
@@ -31,7 +33,7 @@ import {
   voiceSendInputSchema,
 } from '../contracts/index';
 import { getCaseHistory, getMyCases, getStaffRoster, runCaseAction, runCaseEdit } from './cases';
-import { sendDirectMessage } from './direct';
+import { getDirectWith, sendDirectMessage } from './direct';
 import {
   getConversation,
   getSupportThread,
@@ -504,6 +506,27 @@ const directSendRoute = createRoute({
   },
 });
 
+const directWithRoute = createRoute({
+  method: 'get',
+  path: '/direct/with/{membershipId}',
+  middleware: [requireModule('social'), requirePermission(CHAT_PERMISSIONS.direct)] as const,
+  request: { params: directWithParamsSchema },
+  responses: {
+    200: {
+      description:
+        "CHAT-06, D-720, D-722: the conversation of the caller and that member (`conversationId`, or null before the first message; a GET never creates one), who the other member is (`membershipId`, `displayName`, `avatarAssetId` only while the asset is live, `removed` always false here) and the `composer` the screen draws: `open`, `blocker` (the caller blocked them) or `closed` (they blocked the caller, said without saying why). The two sides of a block differ ONLY in that word; no field says 'blocked me'. `Cache-Control: no-store`.",
+      content: { 'application/json': { schema: directWithAnswerSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: a malformed membership id.' },
+    401: { description: '`UNAUTHENTICATED`: no session.' },
+    403: { description: '`FORBIDDEN` without `chat.direct`: a staff role never holds it.' },
+    404: {
+      description:
+        'ONE bare `NOT_FOUND` with an identical body for a staff target, the caller’s own membership, another tenant’s, an administrator-blocked or removed member and an unknown id (T-11-06); `MODULE_DISABLED` when `social` or `chat` is off.',
+    },
+  },
+});
+
 /** A 204 that no cache may keep: read positions are the caller's own state. */
 const noContent = () =>
   new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
@@ -628,4 +651,9 @@ export const chatRoutes = chat
     const sent = await sendDirectMessage(c.get('ctx'), c.req.valid('json'));
     c.header('Cache-Control', 'no-store');
     return c.json(sent, 201);
+  })
+  .openapi(directWithRoute, async (c) => {
+    const answer = await getDirectWith(c.get('ctx'), c.req.valid('param').membershipId);
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
   });

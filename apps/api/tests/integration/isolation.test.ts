@@ -13933,4 +13933,74 @@ describe('phase 11 sweep (11-08)', () => {
       resetDirectLimiters();
     }
   });
+
+  it('phase 11 sweep: direct with — tenant B’s session on tenant A’s membership id is the bare 404 of an unknown id, beside each tenant’s own 200 and the wrong host (11-08)', async () => {
+    const prefix = 'p11with';
+    await removeDirectRows([prefix]);
+    const restores = [
+      await withDirectModules('demo', ['social', 'chat']),
+      await withDirectModules('lab', ['social', 'chat']),
+    ];
+    resetDirectLimiters();
+    try {
+      const identity = await sharedDirectIdentity(prefix);
+      const demoOther = await membershipIdOf(tenantIds.demo, 'member@rede-demo.local');
+      const labOther = await membershipIdOf(tenantIds.lab, 'member@rede-lab.local');
+      const withPath = (id: string) => `/v1/chat/direct/with/${id}`;
+
+      // Positive controls: each tenant's own member answers 200 with that member's own name, on its own host.
+      const demoRead = await send('GET', withPath(demoOther), identity.demo.token, HOSTS.demo);
+      expect(demoRead.status).toBe(200);
+      const demoAnswer = (await demoRead.json()) as {
+        conversationId: string | null;
+        other: { membershipId: string };
+        composer: string;
+      };
+      expect(demoAnswer.other.membershipId).toBe(demoOther);
+      expect(demoAnswer.conversationId).toBeNull();
+      expect(demoAnswer.composer).toBe('open');
+      const labRead = await send('GET', withPath(labOther), identity.lab.token, HOSTS.lab);
+      expect(labRead.status).toBe(200);
+      expect(
+        ((await labRead.json()) as { other: { membershipId: string } }).other.membershipId,
+      ).toBe(labOther);
+
+      // Negatives: the other tenant's membership id is the bare 404 of an id that exists nowhere.
+      const unknown = sansRequestId(
+        await expectBareNotFound(
+          await send('GET', withPath(crypto.randomUUID()), identity.lab.token, HOSTS.lab),
+          'unknown id',
+        ),
+      );
+      const labAskingDemo = await expectBareNotFound(
+        await send('GET', withPath(demoOther), identity.lab.token, HOSTS.lab),
+        'lab session, demo membership id',
+      );
+      const demoAskingLab = await expectBareNotFound(
+        await send('GET', withPath(labOther), identity.demo.token, HOSTS.demo),
+        'demo session, lab membership id',
+      );
+      expect(sansRequestId(labAskingDemo)).toBe(unknown);
+      expect(sansRequestId(demoAskingLab)).toBe(unknown);
+      // The negatives carry no name or id of the other tenant.
+      for (const text of [labAskingDemo, demoAskingLab]) {
+        expect(text).not.toContain(demoOther);
+        expect(text).not.toContain(labOther);
+      }
+
+      // The wrong host: a session of one tenant on the other tenant's host is refused before any read.
+      await expectHostRefused(
+        await send('GET', withPath(labOther), tokens.demoMember, HOSTS.lab),
+        'demo session on the lab host',
+      );
+      await expectHostRefused(
+        await send('GET', withPath(demoOther), tokens.labMember, HOSTS.demo),
+        'lab session on the demo host',
+      );
+    } finally {
+      await removeDirectRows([prefix]);
+      for (const restore of restores.reverse()) await restore();
+      resetDirectLimiters();
+    }
+  });
 });

@@ -10,7 +10,12 @@ import {
 } from '@rede-social/core/server/safety/limits';
 import { sqlstateOf } from '@rede-social/core/server/safety/sqlstate';
 import { sql } from 'drizzle-orm';
-import type { DirectSendInput, DirectSendResult } from '../contracts/index';
+import type {
+  DirectComposerState,
+  DirectSendInput,
+  DirectSendResult,
+  DirectWithAnswer,
+} from '../contracts/index';
 import { bodyCheckViolated, insertMessage } from './service';
 
 const log = moduleLogger('module-chat');
@@ -176,4 +181,47 @@ export async function sendDirectMessage(
     'direct message sent',
   );
   return result;
+}
+
+/**
+ * `GET /v1/chat/direct/with/{membershipId}` (CHAT-06, D-720, D-722, UI-D-864, UI-D-865): what the screen of a person needs
+ * to draw the conversation or the empty start: the pair's conversation id or null (a GET never creates one), who the other
+ * member is and what the composer may do.
+ *
+ * Every miss (staff, the caller's own membership, another tenant's, an administrator-blocked or removed member, an unknown
+ * id) is the ONE bare `404 NOT_FOUND` of the resolver. A pair with a member block is NOT a miss: the answer is 200 and the
+ * `composer` word is the only thing that tells the two sides apart: `blocker` for the member who blocked (the strip offers
+ * the way to unblock), `closed` for the member who was blocked (a strip that never says why). `app.is_blocked_by_viewer`
+ * reads only the CALLER's own block rows, so the blocked side can never learn that a block exists from any field here; the
+ * answer carries no "blocked me" flag. A mutual block reads `blocker` (the member can still lift their own).
+ *
+ * The `removed` composer state is for the list and the detail of plan 10; here a removed member is a miss, so the key is
+ * always `false` on a 200.
+ */
+export async function getDirectWith(
+  ctx: RequestContext,
+  membershipId: string,
+): Promise<DirectWithAnswer> {
+  return withTenantTx(ctx, async (tx) => {
+    const target = await resolveDirectTarget(tx, ctx, membershipId);
+    const conversationId = await directConversationOf(tx, ctx, target.userId);
+    const flags = await tx.execute<{ blocker: boolean; closed: boolean }>(sql`
+      select app.is_blocked_by_viewer(${target.userId}::uuid) as blocker,
+             app.members_blocked_between(${target.userId}::uuid) as closed`);
+    const composer: DirectComposerState = flags[0]?.blocker
+      ? 'blocker'
+      : flags[0]?.closed
+        ? 'closed'
+        : 'open';
+    return {
+      conversationId,
+      other: {
+        membershipId: target.membershipId,
+        displayName: target.displayName,
+        avatarAssetId: target.avatarAssetId,
+        removed: false,
+      },
+      composer,
+    };
+  });
 }
