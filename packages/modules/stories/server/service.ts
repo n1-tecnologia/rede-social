@@ -1490,6 +1490,12 @@ function isStoryReplyViolation(error: unknown): boolean {
  * foreign-tenant story answers the same bare 404 the detail read gives, rather than an empty list
  * that would confirm nothing), and ONE hydrated keyset page. Expiry is deliberately NOT a predicate
  * here — an expired story kept in a highlight is a readable surface (A-4).
+ *
+ * 11-05 (CHAT-07, D-725, planner assumption A-11-SC): the viewer's OWN blocks are a predicate of the page
+ * statement (`app.is_blocked_by_viewer`, true only for the blocker, the same one the feed's comment lists carry),
+ * never a post-filter, so a page is never short and the cursor keeps paging. It is the comment LIST only: the
+ * story, the strip, the viewer, Explorar, the communities and the directory carry no block filter (D-725), and
+ * the blocked member, a third member and a moderator read the comment unchanged.
  */
 export async function listStoryComments(
   ctx: RequestContext,
@@ -1516,6 +1522,7 @@ export async function listStoryComments(
          and c.story_id = ${storyId}::uuid
          and c.parent_id is null
          and c.deleted_at is null
+         and not app.is_blocked_by_viewer(c.author_user_id)
          and (
            ${afterAt}::timestamptz is null
            or (c.created_at, c.id) ${sql.raw(STORY_COMMENT_KEYSET.operator)} (${afterAt}::timestamptz, ${afterId}::uuid)
