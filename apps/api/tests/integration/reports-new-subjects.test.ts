@@ -49,13 +49,25 @@ import {
 type Envelope = { error: { code: string; details?: Record<string, unknown> } };
 
 const PREFIX = 'Teste 11-14 ';
-const tokens = { helena: '', marcos: '', alvaro: '', labAdmin: '', demoAdmin: '', demoMember: '' };
+const tokens = {
+  helena: '',
+  marcos: '',
+  alvaro: '',
+  labAdmin: '',
+  demoAdmin: '',
+  demoMember: '',
+  demoSupport: '',
+};
 const userIds = { helena: '', marcos: '', alvaro: '', labAdmin: '', demoMember: '' };
 let labTenantId = '';
 let restoreSocialLab: () => Promise<void> = async () => {};
 let restoreStories: () => Promise<void> = async () => {};
 let restoreCommunities: () => Promise<void> = async () => {};
 let restoreDirect: () => Promise<void> = async () => {};
+let restoreDemoStories: () => Promise<void> = async () => {};
+let restoreDemoCommunities: () => Promise<void> = async () => {};
+let demoTenantId = '';
+let demoAdminId = '';
 
 const createdReports: string[] = [];
 const createdAssets: string[] = [];
@@ -162,13 +174,13 @@ async function userOf(email: string): Promise<string> {
 }
 
 /** A `purpose: 'story'` asset of rede-lab owned by `ownerId`. */
-async function makeAsset(ownerId: string): Promise<string> {
+async function makeAsset(ownerId: string, tenantId: string = labTenantId): Promise<string> {
   const id = randomUUID();
   createdAssets.push(id);
   await adminSql`
     insert into public.media_assets
       (id, tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths)
-    values (${id}::uuid, ${labTenantId}::uuid, ${ownerId}::uuid, 'image', 'story', 'ready', 'supabase',
+    values (${id}::uuid, ${tenantId}::uuid, ${ownerId}::uuid, 'image', 'story', 'ready', 'supabase',
             'image/webp', 1024, '{640,1080}'::int[])`;
   return id;
 }
@@ -176,12 +188,13 @@ async function makeAsset(ownerId: string): Promise<string> {
 /** A story written by hand: the caption carries PREFIX unless the case wants it empty. */
 async function insertStory(
   author: string,
-  options: { visibility?: 'tenant' | 'followers'; caption?: string } = {},
+  options: { visibility?: 'tenant' | 'followers'; caption?: string; tenantId?: string } = {},
 ): Promise<string> {
-  const asset = await makeAsset(author);
+  const tenantId = options.tenantId ?? labTenantId;
+  const asset = await makeAsset(author, tenantId);
   const [row] = await adminSql<{ id: string }[]>`
     insert into public.stories (tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility)
-    values (${labTenantId}::uuid, ${author}::uuid, ${asset}::uuid, 'image',
+    values (${tenantId}::uuid, ${author}::uuid, ${asset}::uuid, 'image',
             ${options.caption ?? `${PREFIX}legenda`}, ${options.visibility ?? 'tenant'})
     returning id::text as id`;
   const id = row?.id ?? '';
@@ -189,10 +202,15 @@ async function insertStory(
   return id;
 }
 
-async function insertStoryComment(storyId: string, author: string, body: string): Promise<string> {
+async function insertStoryComment(
+  storyId: string,
+  author: string,
+  body: string,
+  tenantId: string = labTenantId,
+): Promise<string> {
   const [row] = await adminSql<{ id: string }[]>`
     insert into public.feed_comments (tenant_id, story_id, author_user_id, body)
-    values (${labTenantId}::uuid, ${storyId}::uuid, ${author}::uuid, ${body})
+    values (${tenantId}::uuid, ${storyId}::uuid, ${author}::uuid, ${body})
     returning id::text as id`;
   const id = row?.id ?? '';
   createdComments.push(id);
@@ -201,11 +219,16 @@ async function insertStoryComment(storyId: string, author: string, body: string)
 
 async function insertCommunity(
   creator: string,
-  options: { name: string; description?: string; kind?: 'member' | 'organization' },
+  options: {
+    name: string;
+    description?: string;
+    kind?: 'member' | 'organization';
+    tenantId?: string;
+  },
 ): Promise<string> {
   const [row] = await adminSql<{ id: string }[]>`
     insert into public.communities (tenant_id, created_by_user_id, name, slug, description, kind, position)
-    values (${labTenantId}::uuid, ${creator}::uuid, ${options.name}, ${`t1114-${randomUUID().slice(0, 8)}`},
+    values (${options.tenantId ?? labTenantId}::uuid, ${creator}::uuid, ${options.name}, ${`t1114-${randomUUID().slice(0, 8)}`},
             ${options.description ?? ''}, ${options.kind ?? 'member'},
             ${(options.kind ?? 'member') === 'member' ? 1000000 : 0})
     returning id::text as id`;
@@ -221,6 +244,11 @@ const reportCount = async (reporter: string): Promise<number> => {
 };
 
 async function sweep(): Promise<void> {
+  for (const [follower, followee] of createdFollows.splice(0)) {
+    await adminSql`
+      delete from public.social_follows
+       where follower_user_id = ${follower}::uuid and followee_user_id = ${followee}::uuid`;
+  }
   if (createdReports.length > 0) {
     await adminSql`delete from public.content_reports where id = any(${createdReports}::uuid[])`;
     createdReports.length = 0;
@@ -254,11 +282,16 @@ beforeAll(async () => {
   restoreStories = await withStoriesEnabled('lab');
   restoreCommunities = await withCommunitiesEnabled('lab');
   restoreDirect = await withDirectModules('demo');
+  restoreDemoStories = await withStoriesEnabled('demo');
+  restoreDemoCommunities = await withCommunitiesEnabled('demo');
   const kit = await caseKit();
   tokens.demoAdmin = kit.tokens.demoAdmin;
   tokens.demoMember = kit.tokens.demoMember;
   userIds.demoMember = kit.ids.demoMember;
   labTenantId = kit.ids.lab;
+  demoTenantId = kit.ids.demo;
+  demoAdminId = kit.ids.demoAdmin;
+  tokens.demoSupport = kit.tokens.demoSupport;
   tokens.helena = await signInAs('helena.kuster@rede-lab.local', SEED_PASSWORD);
   tokens.marcos = await signInAs('marcos.vinicius@rede-lab.local', SEED_PASSWORD);
   tokens.alvaro = await signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD);
@@ -286,6 +319,8 @@ afterAll(async () => {
   await removeDirectRows();
   await removeThrowaways();
   await restoreDirect();
+  await restoreDemoCommunities();
+  await restoreDemoStories();
   await restoreCommunities();
   await restoreStories();
   await restoreSocialLab();
@@ -879,5 +914,223 @@ describe('report tenant isolation', () => {
     expect(labQueue.items.map((row) => row.id)).not.toContain(demoReportId);
     expect(demoQueue.items.map((row) => row.id)).toContain(demoReportId);
     expect(demoQueue.items.map((row) => row.id)).not.toContain(labReportId);
+  });
+});
+
+/* ── Phase 11 plan 16 (MODER-04; D-616, D-732; T-11-01, T-11-11, T-11-12, T-11-20, T-11-30): the resolve ───────────
+ *
+ * The administrator's resolution of a report of each subject, through `POST /v1/admin/reports/{id}/resolve`. These
+ * cases run on rede-demo (stories, communities, social and chat turned on for the span): the reporter, the author and
+ * the second administrator are THROWAWAY members, so a block never touches a seeded person. `moderation_log` is
+ * APPEND-ONLY, so no row is ever deleted and every assertion is scoped by the id of the item (or the blocked user) this
+ * file made. Rows the cases create carry PREFIX or an id kept in the sweep arrays.
+ */
+
+type ResolveBody = { id?: string; status?: string; error?: { code: string; details?: unknown } };
+
+const resolve = (
+  token: string,
+  reportId: string,
+  resolution: 'dismiss' | 'remove_content' | 'block_author',
+  host: string = HOSTS.demo,
+  reason?: string,
+) =>
+  request(
+    `/v1/admin/reports/${reportId}/resolve`,
+    token,
+    {
+      method: 'POST',
+      body: JSON.stringify({ resolution, ...(reason === undefined ? {} : { reason }) }),
+    },
+    host,
+  );
+
+const reportStatus = async (reportId: string): Promise<string | undefined> => {
+  const [row] = await adminSql<{ status: string }[]>`
+    select status from public.content_reports where id = ${reportId}::uuid`;
+  return row?.status;
+};
+
+type LogRow = {
+  action: string;
+  actor_user_id: string;
+  target_user_id: string;
+  subject_type: string | null;
+  subject_id: string | null;
+};
+
+/** The log rows ABOUT one item (a removal or an archive). */
+const logRowsOfSubject = (subjectId: string) =>
+  adminSql<LogRow[]>`
+    select action, actor_user_id::text, target_user_id::text, subject_type, subject_id::text
+      from public.moderation_log
+     where subject_id = ${subjectId}::uuid
+     order by created_at, id`;
+
+/** The block rows of one member (the target of a `member_blocked` row is the blocked user). */
+const blockRowsOf = (userId: string) =>
+  adminSql<LogRow[]>`
+    select action, actor_user_id::text, target_user_id::text, subject_type, subject_id::text
+      from public.moderation_log
+     where target_user_id = ${userId}::uuid and action = 'member_blocked'
+     order by created_at, id`;
+
+const membershipStatusOf = async (userId: string): Promise<string | undefined> => {
+  const [row] = await adminSql<{ status: string }[]>`
+    select status from public.memberships
+     where tenant_id = ${demoTenantId}::uuid and user_id = ${userId}::uuid`;
+  return row?.status;
+};
+
+const deletedAtOf = async (table: 'stories' | 'feed_comments' | 'communities', id: string) => {
+  const rows =
+    table === 'stories'
+      ? await adminSql<
+          { at: string | null }[]
+        >`select deleted_at::text as at from public.stories where id = ${id}::uuid`
+      : table === 'feed_comments'
+        ? await adminSql<
+            { at: string | null }[]
+          >`select deleted_at::text as at from public.feed_comments where id = ${id}::uuid`
+        : await adminSql<
+            { at: string | null }[]
+          >`select deleted_at::text as at from public.communities where id = ${id}::uuid`;
+  return rows[0]?.at;
+};
+
+const communityStatusOf = async (id: string): Promise<string | undefined> => {
+  const [row] = await adminSql<{ status: string }[]>`
+    select status from public.communities where id = ${id}::uuid`;
+  return row?.status;
+};
+
+/** Files a report on rede-demo as `reporter` and returns its id. */
+async function fileDemo(
+  reporter: { token: string },
+  type: Subject,
+  subjectId: string,
+): Promise<string> {
+  const res = await fileReport(reporter.token, type, subjectId, { host: HOSTS.demo });
+  expect(res.status, `file ${type}`).toBe(201);
+  return ((await res.json()) as { id: string }).id;
+}
+
+/** Follows kept for the sweep: [follower, followee] of the demo tenant. */
+const createdFollows: [string, string][] = [];
+
+async function follow(followerId: string, followeeId: string): Promise<void> {
+  await adminSql`
+    insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+    values (${demoTenantId}::uuid, ${followerId}::uuid, ${followeeId}::uuid)
+    on conflict do nothing`;
+  createdFollows.push([followerId, followeeId]);
+}
+
+/**
+ * A demo story written by `authorId`, filed on by `reporter`; returns both ids. A MEMBER story is a `followers` story
+ * (the moderation path logs only those, D-711), so the reporter follows the author first; `visibility: 'tenant'`
+ * makes an ORGANIZATION story, which any member reads.
+ */
+async function reportedStory(
+  authorId: string,
+  reporter: { token: string; userId?: string; id?: string },
+  options: { caption?: string; visibility?: 'tenant' | 'followers' } = {},
+) {
+  const visibility = options.visibility ?? 'followers';
+  const reporterId = reporter.userId ?? reporter.id;
+  if (visibility === 'followers' && reporterId) await follow(reporterId, authorId);
+  const storyId = await insertStory(authorId, {
+    tenantId: demoTenantId,
+    caption: options.caption ?? `${PREFIX}resolve`,
+    visibility,
+  });
+  return { storyId, reportId: await fileDemo(reporter, 'story', storyId) };
+}
+
+describe('report resolve tracer', () => {
+  it('1. the path: the administrator removes a reported story; the report, the story and ONE log row move together', async () => {
+    const author = await directMember('r1a');
+    const reporter = await directMember('r1r');
+    const { storyId, reportId } = await reportedStory(author.userId, reporter);
+    expect(await logRowsOfSubject(storyId)).toHaveLength(0);
+
+    const res = await resolve(tokens.demoAdmin, reportId, 'remove_content');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.json()).toEqual({ id: reportId, status: 'content_removed' });
+
+    expect(await reportStatus(reportId)).toBe('content_removed');
+    expect(await deletedAtOf('stories', storyId)).not.toBeNull();
+    const rows = await logRowsOfSubject(storyId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      action: 'story_removed',
+      subject_type: 'story',
+      target_user_id: author.userId,
+      actor_user_id: demoAdminId,
+    });
+
+    // The story no longer lists, for anyone (the author, the reporter or another member).
+    for (const who of [author, reporter]) {
+      const one = await request(`/v1/stories/${storyId}`, who.token, {}, HOSTS.demo);
+      expect(one.status, 'the removed story is the bare 404').toBe(404);
+      const page = (await (await request('/v1/stories', who.token, {}, HOSTS.demo)).json()) as {
+        items: { id: string }[];
+      };
+      expect(page.items.map((item) => item.id)).not.toContain(storyId);
+    }
+    // Nobody is told (T-11-12): no notification names the story.
+    const told = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications
+       where user_id = any(${[author.userId, reporter.userId]}::uuid[]) and created_at > now() - interval '1 minute'`;
+    expect(told[0]?.n).toBe(0);
+  });
+
+  it('2. the shipped subjects are unchanged: a reported member post and its comment are removed through the feed with their rows', async () => {
+    const author = await directMember('r2a');
+    const reporter = await directMember('r2r');
+    // A MEMBER post is a followers post: the one a moderator may take down.
+    await follow(reporter.userId, author.userId);
+    const [post] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, caption, author_user_id, visibility)
+      values (${demoTenantId}::uuid, ${`${PREFIX}post r2`}, ${author.userId}::uuid, 'followers')
+      returning id::text as id`;
+    const postId = post?.id ?? '';
+    const [comment] = await adminSql<{ id: string }[]>`
+      insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+      values (${demoTenantId}::uuid, ${postId}::uuid, ${author.userId}::uuid, ${`${PREFIX}comentario r2`})
+      returning id::text as id`;
+    const commentId = comment?.id ?? '';
+    try {
+      const postReport = await fileDemo(reporter, 'feed_post', postId);
+      const commentReport = await fileDemo(reporter, 'post_comment', commentId);
+
+      expect((await resolve(tokens.demoAdmin, commentReport, 'remove_content')).status).toBe(200);
+      expect((await resolve(tokens.demoAdmin, postReport, 'remove_content')).status).toBe(200);
+
+      expect((await logRowsOfSubject(commentId)).map((row) => row.action)).toEqual([
+        'comment_removed',
+      ]);
+      expect((await logRowsOfSubject(postId)).map((row) => row.action)).toEqual(['post_removed']);
+    } finally {
+      await adminSql`delete from public.content_reports where subject_id = any(${[postId, commentId]}::uuid[])`;
+      await adminSql`delete from public.feed_comments where post_id = ${postId}::uuid`;
+      await adminSql`delete from public.feed_posts where id = ${postId}::uuid`;
+    }
+  });
+
+  it('3. permissions: a member and a support_tenant are 403 on the resolve and change nothing', async () => {
+    const author = await directMember('r3a');
+    const reporter = await directMember('r3r');
+    const { storyId, reportId } = await reportedStory(author.userId, reporter);
+
+    for (const token of [reporter.token, tokens.demoSupport]) {
+      const res = await resolve(token, reportId, 'remove_content');
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as ResolveBody).error?.code).toBe('FORBIDDEN');
+    }
+    expect(await reportStatus(reportId)).toBe('open');
+    expect(await deletedAtOf('stories', storyId)).toBeNull();
+    expect(await logRowsOfSubject(storyId)).toHaveLength(0);
   });
 });

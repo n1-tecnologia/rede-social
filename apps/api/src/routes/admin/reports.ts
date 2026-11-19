@@ -8,14 +8,19 @@ import {
   reportResolveBodySchema,
 } from '@rede-social/contracts/moderation';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
-import { requirePermission } from '@rede-social/core/server/rbac/permissions';
+import {
+  permissionsForRequest,
+  requirePermission,
+} from '@rede-social/core/server/rbac/permissions';
 import { listReports, resolveReport } from '@rede-social/core/server/safety/index';
-import { removeReportedContentInTx } from '@rede-social/module-feed/server';
+import { COMMUNITY_PERMISSIONS } from '@rede-social/module-communities/contracts';
+import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { createOpenApiApp } from '../../http/openapi';
+import { buildReportRemover } from './report-removal';
 
 /**
  * `/v1/admin/reports` (Phase 13, plan 14, D-616; NATIVE-31; UI-D-637, UI-D-638) — the tenant admin's queue of
- * reported posts and comments, and the resolution of each.
+ * reported posts, comments, stories, story comments, communities and direct messages, and the resolution of each.
  *
  * TENANT LANE, PERMISSION NEVER ROLE (D-338): `requireAuth` makes `ctx.tenantId` the membership of record, and every
  * route needs `moderation.manage` exactly as the moderation log does (a member or a `support_tenant` is 403
@@ -23,8 +28,10 @@ import { createOpenApiApp } from '../../http/openapi';
  * and unknown to the resolve definer (the bare 404).
  *
  * The resolution removes content or blocks a person ONLY here, through the shipped paths in one transaction (T-13-33).
- * The post and comment removal is the feed module's own function, handed to the kernel because the kernel never
- * imports a module (MOD-02). Nothing here notifies the author or the reporter. Every answer is `no-store`.
+ * The removal is the owning module's own function, chosen by the subject type in `buildReportRemover` (Phase 11
+ * plan 16, D-732) and handed to the kernel because the kernel never imports a module (MOD-02): a post or comment
+ * through the feed, a story and a story comment through the stories module, a community ARCHIVED (reversible), and a
+ * direct message never (the chat is append only, so only ignore or block the author are offered for it). Nothing here notifies the author or the reporter. Every answer is `no-store`.
  */
 const reports = createOpenApiApp();
 reports.use('*', requireAuth);
@@ -63,7 +70,7 @@ const resolveRoute = createRoute({
   responses: {
     200: {
       description:
-        'The report after the resolution: `dismiss` -> `dismissed`; `remove_content` -> `content_removed` (the post or comment is removed through the moderation path, its log row written in the same transaction; an item already removed is not removed twice); `block_author` -> `author_blocked` (the author member is blocked through the admin block, `member_blocked` logged in the same transaction). Nobody is notified',
+        'The report after the resolution: `dismiss` -> `dismissed`; `remove_content` -> `content_removed` (a post, a comment, a story or a story comment is removed and a community is archived, through the moderation path, its log row written in the same transaction; an item already removed is not removed twice; a reported direct message is never removed: `409 CONFLICT` with `details.report = not_removable` and the report stays open); `block_author` -> `author_blocked` (the author member is blocked through the admin block, `member_blocked` logged in the same transaction). Nobody is notified',
       content: { 'application/json': { schema: reportResolveAnswerSchema } },
     },
     400: envelope(
@@ -85,9 +92,16 @@ export const adminReportsRoutes = reports
   })
   .openapi(resolveRoute, async (c) => {
     const { id } = c.req.valid('param');
-    const done = await resolveReport(c.get('ctx'), id, c.req.valid('json'), {
-      removeContent: removeReportedContentInTx,
+    const ctx = c.get('ctx');
+    // The flags are read BEFORE the resolution's transaction opens: the pool is `max: 5`, and a flag read inside it
+    // would hold two connections. The route is guarded by `moderation.manage`, so `canModerate` is true by here.
+    const granted = await permissionsForRequest(ctx);
+    const removeContent = buildReportRemover({
+      canManageStories: granted.includes(STORY_PERMISSIONS.manage),
+      canManageCommunities: granted.includes(COMMUNITY_PERMISSIONS.manage),
+      canModerate: true,
     });
+    const done = await resolveReport(ctx, id, c.req.valid('json'), { removeContent });
     c.header('Cache-Control', 'no-store');
     return c.json(done, 200);
   });
