@@ -646,7 +646,9 @@ describe('case counters', () => {
       new URL('../../../../packages/modules/chat/server/service.ts', import.meta.url),
       'utf8',
     );
-    const start = source.indexOf('export async function chatCounters');
+    // Plan 11-10 moved the member's dot into `memberSupportUnread`, which sits just above `chatCounters`: the encoding
+    // rule covers both statements, so the slice starts at the shared helper.
+    const start = source.indexOf('export async function memberSupportUnread');
     expect(start).toBeGreaterThan(-1);
     const body = source.slice(start);
     expect(body).toContain("c.state <> 'closed'");
