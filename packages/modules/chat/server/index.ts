@@ -14,6 +14,7 @@ export {
   staffCaseOf,
   subjectLabelOf,
 } from './cases';
+export { directConversationOf, resolveDirectTarget, sendDirectMessage } from './direct';
 export { firstNameOf } from './first-name';
 export {
   CHAT_PUSH_BODY_MAX,

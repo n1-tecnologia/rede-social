@@ -37,6 +37,12 @@ export const CHAT_PERMISSIONS = {
   contact: 'chat.support.contact',
   /** Hand a support case to a colleague (D-806, CASE-08). `admin_tenant` only, granted by the chat manifest. */
   assign: 'chat.support.assign',
+  /**
+   * 11-08 (D-719): write to ANOTHER member. Members only, and only while `social` AND `chat` are both effective. The
+   * chat manifest cannot name it (it would depend on `social`: MOD-02), so the app tier's `permissionsFor` composes it
+   * and no manifest grants it statically.
+   */
+  direct: 'chat.direct',
 } as const;
 
 /** D-811: the subject of a case, picked by the member from this closed list of areas. */
@@ -126,6 +132,11 @@ export const CHAT_ISSUES = [
   'case_nothing_to_edit',
   'voice_not_ready',
   'voice_invalid',
+  /**
+   * 11-08 (D-722): the ONE word of a direct send the database refused (a block either way, `social` off, the other
+   * member no longer live). It never says which, never reuses the staff-side `member_blocked`, never names anyone.
+   */
+  'direct_closed',
 ] as const;
 export type ChatIssue = (typeof CHAT_ISSUES)[number];
 export const CHAT_ISSUE_SET: ReadonlySet<string> = new Set(CHAT_ISSUES);
@@ -535,6 +546,66 @@ export const sendResultSchema = z
   .strict();
 export type SendResult = z.infer<typeof sendResultSchema>;
 
+/* ── Phase 11, plan 08: the direct conversation (CHAT-06; D-719, D-720, D-722) ───────────────────────── */
+
+/**
+ * What the composer of a direct conversation may do, decided by the server (UI-D-864): `open` writes, `closed` is the
+ * strip the BLOCKED side reads, `blocker` is the strip the blocker reads (with the way to unblock), `removed` is the
+ * read-only strip of an other member who left. Closed ORDERED tuple, pinned by a contract test. The `with` answer never
+ * carries `removed` (a removed member is a bare 404 there); the list and detail of plan 10 do.
+ */
+export const DIRECT_COMPOSER_STATES = ['open', 'closed', 'blocker', 'removed'] as const;
+export type DirectComposerState = (typeof DIRECT_COMPOSER_STATES)[number];
+
+/**
+ * `POST /v1/chat/direct/messages` (D-720): the target is a MEMBERSHIP id (public in the directory), never a user id, a
+ * conversation id, a tenant id or an author side; the tenant and the author come from the claims. Strict: any other key
+ * is the plain `VALIDATION_FAILED`. The body is the one shared rule (D-734): 1 to 2000 code points after trim.
+ */
+export const directSendInputSchema = z
+  .object({
+    toMembershipId: z.uuid(),
+    body: chatBodySchema,
+  })
+  .strict();
+export type DirectSendInput = z.infer<typeof directSendInputSchema>;
+
+/** `GET /v1/chat/direct/with/{membershipId}`: a strict path parameter; a malformed id is a 400 before any read. */
+export const directWithParamsSchema = z.object({ membershipId: z.uuid() }).strict();
+export type DirectWithParams = z.infer<typeof directWithParamsSchema>;
+
+/**
+ * `GET /v1/chat/direct/with/{membershipId}` (D-720, D-722): the existing conversation with that member or null, who the
+ * other member is, and what the composer may do. No flag says "blocked me": the blocked side and the blocker differ ONLY
+ * in the `composer` word. `other.displayName` is null only for a member with no profile; `avatarAssetId` is null when
+ * there is none or the asset is gone.
+ */
+export const directWithAnswerSchema = z
+  .object({
+    conversationId: z.uuid().nullable(),
+    other: z
+      .object({
+        membershipId: z.uuid(),
+        displayName: z.string().nullable(),
+        avatarAssetId: z.uuid().nullable(),
+        removed: z.boolean(),
+      })
+      .strict(),
+    composer: z.enum(DIRECT_COMPOSER_STATES),
+  })
+  .strict();
+export type DirectWithAnswer = z.infer<typeof directWithAnswerSchema>;
+
+/** The answer to a direct send: the conversation, whether THIS call created it, and the stored message. */
+export const directSendResultSchema = z
+  .object({
+    conversationId: z.uuid(),
+    created: z.boolean(),
+    message: messageRowSchema,
+  })
+  .strict();
+export type DirectSendResult = z.infer<typeof directSendResultSchema>;
+
 /** `POST /v1/chat/conversations/{id}/read`: the highest seq the reader has seen. */
 export const readInputSchema = z.object({ seq: z.int().min(0) }).strict();
 export type ReadInput = z.infer<typeof readInputSchema>;
@@ -688,6 +759,8 @@ export const CHAT_NOTIFICATION_KINDS = {
   caseNew: 'chat.case_new',
   /** D-809: a Resolvido case came back to Aberto by a member message, pushed to the team. */
   caseReopened: 'chat.case_reopened',
+  /** 11-08 (D-719): a member wrote to another member. Push only, to the recipient; produced by plan 13. */
+  directMessage: 'chat.direct_message',
 } as const;
 
 /**

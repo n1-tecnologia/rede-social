@@ -40,6 +40,27 @@ export const storyPublishLimiter: AttemptLimiter = createAttemptLimiter({
   windowMs: HOUR_MS,
 });
 
+/**
+ * 11-08 (D-719, D-720; T-11-07; Claude's discretion, assumption A6, the numbers are the planner's, not Igor's): the abuse
+ * ceilings of the direct conversation. A member may send 30 direct messages a MINUTE (a fast typist stays well under)
+ * and open 20 NEW conversations an HOUR (a member rarely starts more than a handful). Both are the same in-process
+ * limiter and the same `user:{tenant}:{user}` key as the report limiter, consumed BEFORE any write; every ATTEMPT counts,
+ * a refused one included, so guessing membership ids is not free. The new-conversation limiter is consumed only when the
+ * pair has no conversation yet. Per process, like its siblings: the effective ceiling is the number times the instances.
+ */
+export const DIRECT_MESSAGES_PER_MINUTE = 30;
+export const DIRECT_CONVERSATIONS_PER_HOUR = 20;
+
+export const directMessageLimiter: AttemptLimiter = createAttemptLimiter({
+  max: DIRECT_MESSAGES_PER_MINUTE,
+  windowMs: 60_000,
+});
+
+export const directConversationLimiter: AttemptLimiter = createAttemptLimiter({
+  max: DIRECT_CONVERSATIONS_PER_HOUR,
+  windowMs: HOUR_MS,
+});
+
 /** The limiter key of one member in their tenant. */
 export const safetyLimiterKey = (input: { tenantId: string; userId: string }): string[] => [
   `user:${input.tenantId}:${input.userId}`,

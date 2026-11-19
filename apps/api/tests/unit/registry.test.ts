@@ -831,3 +831,42 @@ describe('10-10 MPUB-05/MPUB-07: the member keys against the seed tenants module
     expect(first).toEqual(frozen);
   });
 });
+
+describe('11-08 D-719: `chat.direct` is composed in the app tier for a member with social AND chat effective', () => {
+  const DIRECT = 'chat.direct';
+
+  it('28. the member holds it only while `social` and `chat` are both effective; the chat manifest never names it', () => {
+    // MOD-02: the manifest cannot name a string that needs `social`, so the registry composes it.
+    expect(JSON.stringify(MODULE_REGISTRY.chat?.defaultRolePermissions)).not.toContain(DIRECT);
+    expect(JSON.stringify(MODULE_REGISTRY.social?.defaultRolePermissions)).not.toContain(DIRECT);
+
+    const both = new Set<ModuleKey>(['feed', 'social', 'chat']);
+    expect(permissionsFor('member', both)).toContain(DIRECT);
+    // The seed split: rede-demo has chat and no social, rede-lab has social and no chat. Neither holds it.
+    expect(permissionsFor('member', new Set<ModuleKey>(['feed', 'chat']))).not.toContain(DIRECT);
+    expect(permissionsFor('member', new Set<ModuleKey>(['feed', 'social']))).not.toContain(DIRECT);
+    expect(permissionsFor('member', new Set<ModuleKey>())).not.toContain(DIRECT);
+    // `social` requires `feed` (D-121): with `feed` off, `social` is not effective, so the key is absent.
+    expect(permissionsFor('member', new Set<ModuleKey>(['social', 'chat']))).not.toContain(DIRECT);
+    // The member set with `chat` alone is unchanged (the shipped support right only).
+    expect(permissionsFor('member', new Set<ModuleKey>(['chat']))).toEqual([
+      'chat.support.contact',
+    ]);
+  });
+
+  it('29. no staff role ever holds it, whatever is enabled, and the composition is once, sorted and idempotent', () => {
+    const everything = new Set<ModuleKey>(TOGGLEABLE_MODULES);
+    for (const role of TENANT_ROLES) {
+      expect(permissionsFor(role, everything).includes(DIRECT), `${role}: ${DIRECT}`).toBe(
+        role === 'member',
+      );
+    }
+    const member = permissionsFor('member', everything);
+    expect(member.filter((permission) => permission === DIRECT)).toHaveLength(1);
+    expect(member).toEqual([...member].sort());
+    expect(permissionsFor('member', everything)).toEqual(member);
+    // Turning `social` off revokes it together with the authoring keys.
+    const noSocial = new Set<ModuleKey>(TOGGLEABLE_MODULES.filter((key) => key !== 'social'));
+    expect(permissionsFor('member', noSocial)).not.toContain(DIRECT);
+  });
+});

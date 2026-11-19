@@ -6,12 +6,15 @@ import { requireModule } from '@rede-social/core/server/modules/require-module';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 import {
   CHAT_ISSUE_SET,
+  CHAT_PERMISSIONS,
   caseActionInputSchema,
   caseAssignInputSchema,
   caseEditInputSchema,
   caseHistorySchema,
   caseResultSchema,
   conversationDetailSchema,
+  directSendInputSchema,
+  directSendResultSchema,
   inboxPageSchema,
   inboxQuerySchema,
   messagePageSchema,
@@ -28,6 +31,7 @@ import {
   voiceSendInputSchema,
 } from '../contracts/index';
 import { getCaseHistory, getMyCases, getStaffRoster, runCaseAction, runCaseEdit } from './cases';
+import { sendDirectMessage } from './direct';
 import {
   getConversation,
   getSupportThread,
@@ -455,6 +459,51 @@ const editRoute = createRoute({
   },
 });
 
+/* ── Phase 11, plan 08: the direct conversation between two members (CHAT-06; D-719, D-720, D-722) ───── */
+
+/**
+ * The direct routes carry TWO guards beyond the router's `chat` module (spelled on each route): `requireModule('social')` (404 `MODULE_DISABLED`,
+ * never 403) and the permission `chat.direct`, which the app tier composes for a `member` only when `social` AND `chat`
+ * are both effective (D-719, `apps/api/src/modules/registry.ts`). A staff caller is therefore 403 `FORBIDDEN`, never
+ * offered a direct conversation.
+ */
+const directSendRoute = createRoute({
+  method: 'post',
+  path: '/direct/messages',
+  middleware: [requireModule('social'), requirePermission(CHAT_PERMISSIONS.direct)] as const,
+  request: {
+    body: {
+      required: true,
+      content: { 'application/json': { schema: directSendInputSchema } },
+    },
+  },
+  responses: {
+    201: {
+      description:
+        "CHAT-06, D-720: the caller writes to another member, named by MEMBERSHIP id. The conversation of the pair is created lazily by the first message, in the SAME transaction (`created: true`); the second message of the pair, from either side, reuses it (`created: false`). There is at most one conversation per pair, even under twenty concurrent first sends. `message` is the support message shape (`side: 'member'`, `authorIsViewer: true`); the `seq` is the database's. Emits the ids-only `chat.message_sent`.",
+      content: { 'application/json': { schema: directSendResultSchema } },
+    },
+    400: bodyRefusal,
+    401: { description: '`UNAUTHENTICATED`: no session.' },
+    403: {
+      description:
+        '`FORBIDDEN` without `chat.direct`: a staff role never holds it (a module that is off is the 404 below).',
+    },
+    404: {
+      description:
+        'ONE bare `NOT_FOUND` with an identical body for a staff target, the caller’s own membership, another tenant’s, an administrator-blocked or removed member and an unknown id (T-11-06); `MODULE_DISABLED` when `social` or `chat` is off.',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.chat = direct_closed`: the database refused the send (a member block standing either way, `social` off or the other member no longer live). The word never says which, never names a block or a member, and the conversation and the message are rolled back together (D-722).',
+    },
+    429: {
+      description:
+        '`RATE_LIMITED`: more than 30 direct messages a minute or 20 new conversations an hour.',
+    },
+  },
+});
+
 /** A 204 that no cache may keep: read positions are the caller's own state. */
 const noContent = () =>
   new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
@@ -574,4 +623,9 @@ export const chatRoutes = chat
       await runCaseEdit(c.get('ctx'), c.req.valid('param').conversationId, c.req.valid('json')),
       200,
     ),
-  );
+  )
+  .openapi(directSendRoute, async (c) => {
+    const sent = await sendDirectMessage(c.get('ctx'), c.req.valid('json'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(sent, 201);
+  });

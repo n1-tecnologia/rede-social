@@ -28,6 +28,7 @@ import {
 import { setPermissionResolver } from '@rede-social/core/server/rbac/permissions';
 import { KERNEL_ROLE_PERMISSIONS } from '@rede-social/core/server/rbac/require-role';
 import { registerDailyTenantJobs } from '@rede-social/core/server/tenancy/daily-dispatch';
+import { CHAT_PERMISSIONS } from '@rede-social/module-chat/contracts';
 import { chatModule } from '@rede-social/module-chat/module';
 import { COMMUNITY_PERMISSIONS } from '@rede-social/module-communities/contracts';
 import { communitiesModule } from '@rede-social/module-communities/module';
@@ -247,6 +248,10 @@ export function permissionsFor(
       permissions.add(COMMUNITY_PERMISSIONS.manageOwn);
     }
     if (effective.has('stories')) permissions.add(STORY_PERMISSIONS.publish);
+    // 11-08 (D-719): the direct conversation needs BOTH modules (the chat module owns the conversation, `social` owns
+    // the member circle). The chat manifest cannot name this string without a `social` edge (MOD-02), so it is composed
+    // here, member only: no staff role holds it and no manifest grants it statically (cases 28 and 29).
+    if (effective.has('chat')) permissions.add(CHAT_PERMISSIONS.direct);
   }
 
   return [...permissions].sort();

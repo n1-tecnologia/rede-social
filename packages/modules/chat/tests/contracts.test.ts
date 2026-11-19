@@ -30,11 +30,13 @@ const issuesOf = (value: unknown): string[] => {
 };
 
 describe('chat contracts', () => {
-  it('names the three permissions and the closed issue vocabulary', () => {
+  it('names the four permissions and the closed issue vocabulary', () => {
     expect(CHAT_PERMISSIONS).toEqual({
       answer: 'chat.support',
       contact: 'chat.support.contact',
       assign: 'chat.support.assign',
+      // 11-08 (D-719): composed in the app tier, never granted by the manifest.
+      direct: 'chat.direct',
     });
     expect(CHAT_ISSUES).toEqual([
       'body_required',
@@ -51,8 +53,10 @@ describe('chat contracts', () => {
       // 12.5 (D-862): appended last, the list only ever grows at the end.
       'voice_not_ready',
       'voice_invalid',
+      // 11-08 (D-722): the neutral word of a closed direct pair, appended last.
+      'direct_closed',
     ]);
-    expect(CHAT_ISSUES).toHaveLength(13);
+    expect(CHAT_ISSUES).toHaveLength(14);
     for (const issue of CHAT_ISSUES) expect(CHAT_ISSUE_SET.has(issue)).toBe(true);
   });
 

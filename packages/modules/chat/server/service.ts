@@ -198,7 +198,7 @@ async function pageOf(
 }
 
 /** A body the database refused by its CHECK is the same `body_required` the API would have said. */
-function bodyCheckViolated(error: unknown): boolean {
+export function bodyCheckViolated(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
   while (current !== null && current !== undefined && !seen.has(current)) {
@@ -230,7 +230,9 @@ async function insertedMessage(
 }
 
 /** What a message holds (D-846): plain text, or ONE recording named by the id of its asset. */
-type MessageContent = { kind: 'text'; body: string } | { kind: 'voice'; mediaAssetId: string };
+export type MessageContent =
+  | { kind: 'text'; body: string }
+  | { kind: 'voice'; mediaAssetId: string };
 
 /**
  * Inserts one message as the caller. No `seq` is sent: the column is NOT NULL, and Postgres checks
@@ -241,7 +243,7 @@ type MessageContent = { kind: 'text'; body: string } | { kind: 'voice'; mediaAss
  * is no longer there (retired between the validation and this statement) nothing is inserted and the answer
  * is the same `voice_invalid` as an unknown id.
  */
-async function insertMessage(
+export async function insertMessage(
   tx: Tx,
   ctx: RequestContext,
   conversationId: string,

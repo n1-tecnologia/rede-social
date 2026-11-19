@@ -18,6 +18,12 @@ import {
   removeDashboardFixtures,
   removeFixtureProduct,
 } from './dashboard-fixture';
+import {
+  removeDirectRows,
+  resetDirectLimiters,
+  sharedDirectIdentity,
+  withDirectModules,
+} from './direct-fixtures';
 import { buildLearnFixture, learnRequest, removeLearnFixture } from './learn-fixture';
 import { removeTicketEvents, ticketEvent, ticketMapping } from './payments-apply-fixtures';
 import {
@@ -13788,6 +13794,143 @@ describe('phase 10 sweep (10-10)', () => {
       }
       await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
       await restore();
+    }
+  });
+});
+
+/**
+ * 11-08 (CHAT-06, T-11-01, T-11-06): the direct conversation asked the isolation question. One throwaway identity holds a
+ * membership in BOTH seed tenants (a shared identity, 08.1) and opens one conversation in each, with the seeded member
+ * of that tenant. Tenant A is rede-demo, tenant B is rede-lab; `social` and `chat` are switched on for both for the span.
+ * Written BEFORE the inventory entry points at this title, with every negative beside its positive control and the
+ * wrong-host 403, and each crossing compared with the same call on an id that exists nowhere (no existence oracle).
+ */
+describe('phase 11 sweep (11-08)', () => {
+  it('phase 11 sweep: direct chat — tenant B’s session cannot send to tenant A’s membership id nor read A’s conversation id, each a bare 404 identical to an unknown id, beside the positive controls and the wrong host (11-08)', async () => {
+    const prefix = 'p11iso';
+    await removeDirectRows([prefix]);
+    const since = await dbNow();
+    const restores = [
+      await withDirectModules('demo', ['social', 'chat']),
+      await withDirectModules('lab', ['social', 'chat']),
+    ];
+    resetDirectLimiters();
+    try {
+      const identity = await sharedDirectIdentity(prefix);
+      const demoOther = await membershipIdOf(tenantIds.demo, 'member@rede-demo.local');
+      const labOther = await membershipIdOf(tenantIds.lab, 'member@rede-lab.local');
+      const path = '/v1/chat/direct/messages';
+      const unknown = crypto.randomUUID();
+
+      // Positive controls: the same shape inside each tenant is accepted, and creates one conversation per tenant.
+      const inDemo = await send('POST', path, identity.demo.token, HOSTS.demo, {
+        toMembershipId: demoOther,
+        body: 'Oi, demo',
+      });
+      expect(inDemo.status).toBe(201);
+      const demoConversation = ((await inDemo.json()) as { conversationId: string }).conversationId;
+      const inLab = await send('POST', path, identity.lab.token, HOSTS.lab, {
+        toMembershipId: labOther,
+        body: 'Oi, lab',
+      });
+      expect(inLab.status).toBe(201);
+      const labConversation = ((await inLab.json()) as { conversationId: string }).conversationId;
+      expect(labConversation).not.toBe(demoConversation);
+      const counts = await adminSql<{ tenant_id: string; n: number }[]>`
+        select c.tenant_id::text, count(*)::int as n
+          from public.chat_conversations c
+         where c.kind = 'direct'
+           and (c.direct_low_user_id = ${identity.userId}::uuid or c.direct_high_user_id = ${identity.userId}::uuid)
+         group by c.tenant_id`;
+      expect(counts.map((row) => row.n).sort()).toEqual([1, 1]);
+
+      // Negatives, send: tenant B's session on tenant A's membership id (and the mirror) is the bare 404 of an unknown id.
+      const unknownAnswer = sansRequestId(
+        await expectBareNotFound(
+          await send('POST', path, identity.lab.token, HOSTS.lab, {
+            toMembershipId: unknown,
+            body: 'Oi',
+          }),
+          'unknown id',
+        ),
+      );
+      const labToDemo = await expectBareNotFound(
+        await send('POST', path, identity.lab.token, HOSTS.lab, {
+          toMembershipId: demoOther,
+          body: 'Oi, atravessando',
+        }),
+        'lab session, demo membership id',
+      );
+      const demoToLab = await expectBareNotFound(
+        await send('POST', path, identity.demo.token, HOSTS.demo, {
+          toMembershipId: labOther,
+          body: 'Oi, atravessando',
+        }),
+        'demo session, lab membership id',
+      );
+      expect(sansRequestId(labToDemo)).toBe(unknownAnswer);
+      expect(sansRequestId(demoToLab)).toBe(unknownAnswer);
+
+      // Negatives, read: tenant B's session on tenant A's conversation id is the bare 404 of an unknown id.
+      for (const route of ['messages', ''] as const) {
+        const suffix = route === '' ? '' : `/${route}`;
+        const label = route === '' ? 'detail' : route;
+        const unknownRead = sansRequestId(
+          await expectBareNotFound(
+            await send(
+              'GET',
+              `/v1/chat/conversations/${unknown}${suffix}`,
+              identity.lab.token,
+              HOSTS.lab,
+            ),
+            `unknown ${label}`,
+          ),
+        );
+        const crossing = await expectBareNotFound(
+          await send(
+            'GET',
+            `/v1/chat/conversations/${demoConversation}${suffix}`,
+            identity.lab.token,
+            HOSTS.lab,
+          ),
+          `lab session, demo conversation ${label}`,
+        );
+        expect(sansRequestId(crossing), label).toBe(unknownRead);
+        // Positive control: the owning tenant's participant reads its own conversation.
+        const own = await send(
+          'GET',
+          `/v1/chat/conversations/${demoConversation}${suffix}`,
+          identity.demo.token,
+          HOSTS.demo,
+        );
+        expect(own.status, `demo participant, own ${label}`).toBe(200);
+      }
+      // Nothing crossed: tenant A's conversation still holds its one message and tenant B's never got a second.
+      const [held] = await adminSql<{ a: number; b: number }[]>`
+        select (select count(*)::int from public.chat_messages where conversation_id = ${demoConversation}::uuid) as a,
+               (select count(*)::int from public.chat_messages where conversation_id = ${labConversation}::uuid) as b`;
+      expect(held).toEqual({ a: 1, b: 1 });
+
+      // The wrong host: a session of one tenant on the other tenant's host is refused before any read.
+      await expectHostRefused(
+        await send('POST', path, tokens.demoMember, HOSTS.lab, {
+          toMembershipId: labOther,
+          body: 'Oi',
+        }),
+        'demo session on the lab host',
+      );
+      await expectHostRefused(
+        await send('POST', path, tokens.labMember, HOSTS.demo, {
+          toMembershipId: demoOther,
+          body: 'Oi',
+        }),
+        'lab session on the demo host',
+      );
+    } finally {
+      await removeDirectRows([prefix]);
+      await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
+      for (const restore of restores.reverse()) await restore();
+      resetDirectLimiters();
     }
   });
 });

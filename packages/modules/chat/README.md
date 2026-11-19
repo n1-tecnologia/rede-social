@@ -33,6 +33,33 @@ owner is refused), `memberCaseSchema` (no priority, owner or history), `staffCas
 `staffRosterSchema`, and the closed lists `CHAT_CASE_STATES`, `CHAT_CASE_CATEGORIES`,
 `CHAT_CASE_PRIORITIES` and `CHAT_CASE_ACTIONS`.
 
+### Direct conversation between two members (Phase 11, plan 08)
+
+A member writes to another member of the same tenant (CHAT-06). The permission `chat.direct` is added to
+`CHAT_PERMISSIONS` but the chat manifest never grants it: it would depend on `social` (MOD-02), so the app tier's
+`permissionsFor` composes it for the `member` role only, when `social` AND `chat` are both effective (no staff role holds
+it, and a tenant without `social` never does). The routes carry `requireModule('social')` and `requirePermission('chat.direct')`,
+so `social` off is `404 MODULE_DISABLED` and a staff caller is `403 FORBIDDEN`.
+
+- `POST /v1/chat/direct/messages` `{ toMembershipId, body }` (strict) answers `201 { conversationId, created, message }`.
+  The target is a MEMBERSHIP id resolved in the caller's lane (a live `member` of the tenant who is not the caller); the
+  conversation is created lazily by the first message, in the SAME transaction (`app.direct_conversation_open`, then the
+  shared `insertMessage`), once per pair, even under twenty concurrent first sends. The body is the support rule (1 to
+  2000 code points after trim); the message row, the `seq` and `chat.message_sent` are the support send's, with
+  `authorSide: 'member'`. Every miss (staff, the caller, another tenant, an administrator-blocked or removed member, an
+  unknown id) is ONE bare `404 NOT_FOUND`.
+- A send the database refuses with `DM001` (a block standing either way, `social` off, the other member no longer live) is
+  `409 CONFLICT` with `details.chat = 'direct_closed'`, the one word appended to `CHAT_ISSUES`. It never says which cause,
+  never reuses the staff-side `member_blocked`, never carries a name, and the conversation and the message roll back together.
+- Abuse limits (Claude's discretion, assumption A6): `directMessageLimiter` (30 messages a minute) and
+  `directConversationLimiter` (20 new conversations an hour), both in `@rede-social/core/server/safety/limits`, keyed by the
+  member inside the tenant, consumed before any write; a refusal is `429 RATE_LIMITED`.
+
+New contracts, all strict and all NEW (no existing response schema gained a required key): `CHAT_PERMISSIONS.direct`,
+`'direct_closed'`, `CHAT_NOTIFICATION_KINDS.directMessage` (`chat.direct_message`, push only, produced by plan 13),
+`DIRECT_COMPOSER_STATES`, `directSendInputSchema`, `directWithParamsSchema`, `directWithAnswerSchema`,
+`directSendResultSchema`.
+
 ### Voice messages (Phase 12.5)
 
 A message can carry ONE recording instead of text. Contracts: `voiceSendInputSchema` (the member's
@@ -152,6 +179,7 @@ grant lives in this manifest rather than in the kernel.
 - `@rede-social/core/server/notifications/source`
 - `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
+- `@rede-social/core/server/safety/limits`
 - `@rede-social/core/server/safety/sqlstate`
 
 ## Navigation

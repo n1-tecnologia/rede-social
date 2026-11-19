@@ -598,9 +598,18 @@ const SEED_SLUGS: Record<keyof typeof HOSTS, string> = { demo: 'rede-demo', lab:
 /**
  * The modules a suite may toggle on a seed tenant: the ones that are OFF by default. 10-05 adds
  * `communities` and `stories`, which the seed leaves OFF on rede-lab (the member creator's suites run
- * there, beside `social`).
+ * there, beside `social`). 11-08 adds `chat` and `notifications`: the seed splits them from `social`
+ * (rede-demo has chat and no social, rede-lab has social and no chat), so every direct-conversation suite
+ * turns the ones it needs on for its span and puts them back.
  */
-export type ToggleableInTests = 'store' | 'courses' | 'social' | 'communities' | 'stories';
+export type ToggleableInTests =
+  | 'store'
+  | 'courses'
+  | 'social'
+  | 'communities'
+  | 'stories'
+  | 'chat'
+  | 'notifications';
 
 /**
  * 08.2 / 08.3: turns a module that is OFF by default (`store`, STORE-01; `courses`, COURSE-01) ON
