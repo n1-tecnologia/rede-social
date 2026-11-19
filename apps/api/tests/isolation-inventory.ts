@@ -338,6 +338,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // positive controls and the wrong-host 403).
   'GET /v1/chat/direct': { case: 'phase 11 sweep: direct list' },
   'GET /v1/chat/direct/:conversationId': { case: 'phase 11 sweep: direct list' },
+  // 11-12 (CHAT-06, D-734): the direct voice send by membership id and asset id; one case proves it (tenant B's session on tenant
+  // A's membership id is the bare 404 of an unknown id, tenant A's recording is the `voice_invalid` of an unknown asset for
+  // tenant B, beside both positive controls and the wrong-host 403).
+  'POST /v1/chat/direct/voice-messages': { case: 'phase 11 sweep: direct voice' },
   // ── /v1/store (08.2) ────────────────────────────────────────────────────────────────────────
   // 12.3-11 (NOVF-05, NOVF-11): the store front read; the category slug on create and edit is proved in
   // the same case beside it (a rede-demo slug from a rede-lab admin is a 400, never a link).

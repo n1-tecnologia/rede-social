@@ -19,6 +19,7 @@ import {
   directListQuerySchema,
   directSendInputSchema,
   directSendResultSchema,
+  directVoiceSendInputSchema,
   directWithAnswerSchema,
   directWithParamsSchema,
   inboxPageSchema,
@@ -37,7 +38,13 @@ import {
   voiceSendInputSchema,
 } from '../contracts/index';
 import { getCaseHistory, getMyCases, getStaffRoster, runCaseAction, runCaseEdit } from './cases';
-import { getDirectDetail, getDirectWith, listDirect, sendDirectMessage } from './direct';
+import {
+  getDirectDetail,
+  getDirectWith,
+  listDirect,
+  sendDirectMessage,
+  sendDirectVoiceMessage,
+} from './direct';
 import {
   getConversation,
   getSupportThread,
@@ -510,6 +517,46 @@ const directSendRoute = createRoute({
   },
 });
 
+const directVoiceSendRoute = createRoute({
+  method: 'post',
+  path: '/direct/voice-messages',
+  middleware: [requireModule('social'), requirePermission(CHAT_PERMISSIONS.direct)] as const,
+  request: {
+    body: {
+      required: true,
+      content: { 'application/json': { schema: directVoiceSendInputSchema } },
+    },
+  },
+  responses: {
+    201: {
+      description:
+        'CHAT-06, D-734: the caller sends ONE recording to another member, named by MEMBERSHIP id, by the id of a `ready` voice asset of their own. Same pair rules, `seq`, signals and answer shape as `POST /direct/messages` (`created` says whether THIS call created the conversation); `message.body` is the empty string and `message.voice` carries the asset id and the server-measured duration (no client duration is accepted). Idempotent per take: the same `mediaId` again answers the stored message with `created: false` and emits nothing, and two concurrent posts of one take store one message. Only the two participants can play the recording (`GET /v1/media/{id}/original`); everyone else, an administrator before any report included, gets the bare 404.',
+      content: { 'application/json': { schema: directSendResultSchema } },
+    },
+    400: {
+      description:
+        "`VALIDATION_FAILED`: `details.chat = voice_invalid` for ONE answer to every unusable asset (unknown, another member's, another tenant's, soft-deleted, not an `audio`/`voice` asset, `failed` or `rejected`); any other key or a malformed id is a plain `VALIDATION_FAILED`. The asset is asked BEFORE the pair, so this answer never depends on a block. Nothing is written.",
+    },
+    401: { description: '`UNAUTHENTICATED`: no session.' },
+    403: {
+      description:
+        '`FORBIDDEN` without `chat.direct`: a staff role never holds it (a module that is off is the 404 below).',
+    },
+    404: {
+      description:
+        'ONE bare `NOT_FOUND` with an identical body for a staff target, the caller’s own membership, another tenant’s, an administrator-blocked or removed member and an unknown id (T-11-06); `MODULE_DISABLED` when `social` or `chat` is off.',
+    },
+    409: {
+      description:
+        "`CONFLICT` with `details.chat = voice_not_ready` while the caller's own recording is still `pending` or `processing` (retriable), or `direct_closed`: the database refused the send exactly as for text (a member block standing either way, `social` off or the other member no longer live), the same body, no word that says which; the take stays unused.",
+    },
+    429: {
+      description:
+        '`RATE_LIMITED`: more than 30 direct messages a minute or 20 new conversations an hour.',
+    },
+  },
+});
+
 const directWithRoute = createRoute({
   method: 'get',
   path: '/direct/with/{membershipId}',
@@ -691,6 +738,11 @@ export const chatRoutes = chat
   )
   .openapi(directSendRoute, async (c) => {
     const sent = await sendDirectMessage(c.get('ctx'), c.req.valid('json'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(sent, 201);
+  })
+  .openapi(directVoiceSendRoute, async (c) => {
+    const sent = await sendDirectVoiceMessage(c.get('ctx'), c.req.valid('json'));
     c.header('Cache-Control', 'no-store');
     return c.json(sent, 201);
   })

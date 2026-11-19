@@ -570,6 +570,20 @@ export const directSendInputSchema = z
   .strict();
 export type DirectSendInput = z.infer<typeof directSendInputSchema>;
 
+/**
+ * `POST /v1/chat/direct/voice-messages` (D-734): ONE recording to another member, named by MEMBERSHIP id, by the id of a
+ * `ready` voice asset the caller owns. A NEW strict schema, never a union with the text input (the router's default hook
+ * lifts `body_required` from the issue message). No duration, side, author, user or conversation id is accepted: the
+ * duration is the asset's server-measured one and the author is the caller.
+ */
+export const directVoiceSendInputSchema = z
+  .object({
+    toMembershipId: z.uuid(),
+    mediaId: z.uuid(),
+  })
+  .strict();
+export type DirectVoiceSendInput = z.infer<typeof directVoiceSendInputSchema>;
+
 /** `GET /v1/chat/direct/with/{membershipId}`: a strict path parameter; a malformed id is a 400 before any read. */
 export const directWithParamsSchema = z.object({ membershipId: z.uuid() }).strict();
 export type DirectWithParams = z.infer<typeof directWithParamsSchema>;

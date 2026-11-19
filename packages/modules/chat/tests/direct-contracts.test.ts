@@ -16,6 +16,7 @@ import {
   directPreviewSchema,
   directSendInputSchema,
   directSendResultSchema,
+  directVoiceSendInputSchema,
   directWithAnswerSchema,
   directWithParamsSchema,
   messageRowSchema,
@@ -83,6 +84,36 @@ describe('direct chat contracts (11-08)', () => {
     expect(directSendInputSchema.safeParse({ body: 'Oi' }).success).toBe(false);
     expect(
       directSendInputSchema.safeParse({ toMembershipId: 'not-a-uuid', body: 'Oi' }).success,
+    ).toBe(false);
+  });
+
+  it('D-734: the direct voice send input is strict: a membership id and a media id, no duration, side or author', () => {
+    expect(directVoiceSendInputSchema.parse({ toMembershipId: ID, mediaId: ID2 })).toEqual({
+      toMembershipId: ID,
+      mediaId: ID2,
+    });
+    for (const extra of [
+      { durationSeconds: 3 },
+      { voiceSeconds: 3 },
+      { body: 'Oi' },
+      { userId: ID2 },
+      { conversationId: ID2 },
+      { tenantId: ID2 },
+      { side: 'staff' },
+      { authorSide: 'member' },
+    ]) {
+      expect(
+        directVoiceSendInputSchema.safeParse({ toMembershipId: ID, mediaId: ID2, ...extra })
+          .success,
+      ).toBe(false);
+    }
+    expect(directVoiceSendInputSchema.safeParse({ mediaId: ID2 }).success).toBe(false);
+    expect(directVoiceSendInputSchema.safeParse({ toMembershipId: ID }).success).toBe(false);
+    expect(
+      directVoiceSendInputSchema.safeParse({ toMembershipId: 'x', mediaId: ID2 }).success,
+    ).toBe(false);
+    expect(
+      directVoiceSendInputSchema.safeParse({ toMembershipId: ID, mediaId: 'not-a-uuid' }).success,
     ).toBe(false);
   });
 

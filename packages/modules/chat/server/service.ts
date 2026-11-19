@@ -213,7 +213,7 @@ export function bodyCheckViolated(error: unknown): boolean {
 }
 
 /** The stored message, projected as its author sees it. */
-async function insertedMessage(
+export async function insertedMessage(
   tx: Tx,
   ctx: RequestContext,
   conversationId: string,
@@ -434,7 +434,7 @@ export async function sendSupportMessage(
 }
 
 /** The `23505` of the single-use index: another request already stored this take (VOICE-18). */
-function assetIndexViolated(error: unknown): boolean {
+export function assetIndexViolated(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
   while (current !== null && current !== undefined && !seen.has(current)) {

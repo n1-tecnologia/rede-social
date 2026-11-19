@@ -25,17 +25,20 @@ import {
   type DirectSendInput,
   type DirectSendResult,
   type DirectSupportSummary,
+  type DirectVoiceSendInput,
   type DirectWithAnswer,
 } from '../contracts/index';
 import {
+  assetIndexViolated,
   bodyCheckViolated,
   CURSOR_NO_INSTANT,
   decodeInstantCursor,
   ISO_MICROSECONDS,
+  insertedMessage,
   insertMessage,
   memberSupportUnread,
 } from './service';
-import { voiceGoneSql } from './voice-sql';
+import { assertVoiceUsable, storedVoiceMessage, voiceGoneSql } from './voice-sql';
 
 const log = moduleLogger('module-chat');
 
@@ -199,6 +202,123 @@ export async function sendDirectMessage(
     },
     'direct message sent',
   );
+  return result;
+}
+
+/** The answer for a take that is ALREADY stored: the same shape, never opening anything (VOICE-18). */
+async function storedDirectVoiceResult(
+  tx: Tx,
+  ctx: RequestContext,
+  stored: { id: string; conversationId: string },
+): Promise<DirectSendResult> {
+  return {
+    conversationId: stored.conversationId,
+    created: false,
+    message: await insertedMessage(tx, ctx, stored.conversationId, stored.id),
+  };
+}
+
+/**
+ * One attempt of the direct voice send, in ITS OWN transaction. The order is the support voice send's (D-862): the
+ * idempotent read of the caller's own message for the asset, then the asset validation (every asset refusal BEFORE any
+ * conversation write and BEFORE the pair is looked at, so a refusal for the asset never reveals a block, T-11-27), then the
+ * target, the limiter for a new conversation, `app.direct_conversation_open` and the insert with the voice content.
+ * `fresh` tells the caller whether THIS call stored the message, so only a stored one emits `chat.message_sent`.
+ */
+async function sendDirectVoiceOnce(
+  ctx: RequestContext,
+  input: DirectVoiceSendInput,
+  limiterKey: string[],
+): Promise<{ result: DirectSendResult; fresh: boolean }> {
+  return withTenantTx(ctx, async (tx) => {
+    const prior = await storedVoiceMessage(tx, ctx, input.mediaId);
+    if (prior) return { result: await storedDirectVoiceResult(tx, ctx, prior), fresh: false };
+    await assertVoiceUsable(tx, ctx, input.mediaId);
+    const target = await resolveDirectTarget(tx, ctx, input.toMembershipId);
+    const existing = await directConversationOf(tx, ctx, target.userId);
+    if (!existing && !directConversationLimiter.consume(limiterKey)) {
+      throw new ApiError(429, 'RATE_LIMITED');
+    }
+    const opened = await tx.execute<{ conversation_id: string; created: boolean }>(sql`
+      select conversation_id, created from app.direct_conversation_open(${target.userId}::uuid)`);
+    const row = opened[0];
+    if (!row) throw new ApiError(500, 'INTERNAL');
+    const message = await insertMessage(tx, ctx, row.conversation_id, 'member', {
+      kind: 'voice',
+      mediaAssetId: input.mediaId,
+    });
+    return {
+      result: { conversationId: row.conversation_id, created: row.created, message },
+      fresh: true,
+    };
+  });
+}
+
+/**
+ * `POST /v1/chat/direct/voice-messages` (CHAT-06, D-734, D-722, VOICE-18): the caller sends ONE recording to another
+ * member, by membership id. Nothing is rebuilt: it is the support voice send over the same `storedVoiceMessage`,
+ * `assertVoiceUsable` and `insertMessage`, with the pair opened by the same definer as the text send. The duration is the
+ * asset's server-measured one (no client duration is accepted) and a recording is one message with no text.
+ *
+ * Idempotent per take, with no client key: a repeat answers the stored message with `created: false` and emits nothing.
+ * A concurrent double send loses on the single-use index (`23505`), which aborted its transaction, so the loser re-reads in
+ * a NEW one. A pair the database closed (`DM001`) is `409 CONFLICT { chat: 'direct_closed' }`, the same body as text, and
+ * the take stays unused (the orphan sweep of 12.5 retires it).
+ *
+ * `chat.message_sent` is queued AFTER the transaction returned and only when THIS call stored the message.
+ */
+export async function sendDirectVoiceMessage(
+  ctx: RequestContext,
+  input: DirectVoiceSendInput,
+): Promise<DirectSendResult> {
+  const limiterKey = safetyLimiterKey(ctx);
+  if (!directMessageLimiter.consume(limiterKey)) throw new ApiError(429, 'RATE_LIMITED');
+
+  let outcome: { result: DirectSendResult; fresh: boolean };
+  try {
+    try {
+      outcome = await sendDirectVoiceOnce(ctx, input, limiterKey);
+    } catch (error) {
+      if (!assetIndexViolated(error)) throw error;
+      const stored = await withTenantTx(ctx, async (tx) => {
+        const prior = await storedVoiceMessage(tx, ctx, input.mediaId);
+        return prior ? storedDirectVoiceResult(tx, ctx, prior) : null;
+      });
+      if (!stored) throw error;
+      outcome = { result: stored, fresh: false };
+    }
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    const state = sqlstateOf(error);
+    if (state === 'DM001') throw new ApiError(409, 'CONFLICT', { chat: 'direct_closed' });
+    if (state === '42501') throw new ApiError(403, 'FORBIDDEN');
+    throw error;
+  }
+
+  const { result, fresh } = outcome;
+  if (fresh) {
+    emit(ctx, 'chat.message_sent', {
+      tenantId: ctx.tenantId,
+      conversationId: result.conversationId,
+      messageId: result.message.id,
+      seq: result.message.seq,
+      authorUserId: ctx.userId,
+      authorSide: 'member',
+    });
+    log.info(
+      {
+        event: 'chat.message_sent',
+        tenantId: ctx.tenantId,
+        conversationId: result.conversationId,
+        seq: result.message.seq,
+        side: 'member',
+        direct: true,
+        voice: true,
+        created: result.created,
+      },
+      'direct voice message sent',
+    );
+  }
   return result;
 }
 

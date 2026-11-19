@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { PLATFORM_TERMS_VERSION, TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
@@ -8,6 +9,7 @@ import {
 } from '@rede-social/core/server/safety/limits';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readyVoiceAsset, removeVoiceRows } from './chat-voice-fixtures';
 import {
   insertFixtureProduct,
   insertLikeAt,
@@ -294,6 +296,10 @@ async function membershipIdOf(tenantId: string, email: string): Promise<string> 
   if (!row) throw new Error(`${email} is not a member of ${tenantId}`);
   return row.id;
 }
+
+/** The voice sweeps drive a real recording through the real ffmpeg; without it they skip with this message (pgTAP 236 and 240 cover the gate). */
+const hasFfmpeg = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
+if (!hasFfmpeg) console.warn('isolation: ffmpeg is not on PATH; the direct voice sweep is skipped');
 
 /* ── 08-10: the sweeps' shared shapes ───────────────────────────────────────────────────────── */
 
@@ -14078,6 +14084,135 @@ describe('phase 11 sweep (11-08)', () => {
         'lab session on the demo host, detail',
       );
     } finally {
+      await removeDirectRows([prefix]);
+      for (const restore of restores.reverse()) await restore();
+      resetDirectLimiters();
+    }
+  });
+
+  it('phase 11 sweep: direct voice — tenant B’s session cannot send a recording to tenant A’s membership id nor use tenant A’s recording, each the answer of an unknown id, beside the positive controls and the wrong host (11-12)', async ({
+    skip,
+  }) => {
+    skip(!hasFfmpeg, 'ffmpeg is not on PATH (pgTAP 236 and 240 cover the gate)');
+    const prefix = 'p11voice';
+    await removeDirectRows([prefix]);
+    const restores = [
+      await withDirectModules('demo', ['social', 'chat']),
+      await withDirectModules('lab', ['social', 'chat']),
+    ];
+    resetDirectLimiters();
+    let identityId = '';
+    try {
+      const identity = await sharedDirectIdentity(prefix);
+      identityId = identity.userId;
+      const demoOther = await membershipIdOf(tenantIds.demo, 'member@rede-demo.local');
+      const labOther = await membershipIdOf(tenantIds.lab, 'member@rede-lab.local');
+      const path = '/v1/chat/direct/voice-messages';
+      const demoTake = await readyVoiceAsset(identity.demo.token, 'voice-2s.webm', HOSTS.demo);
+      const labTake = await readyVoiceAsset(identity.lab.token, 'voice-2s.webm', HOSTS.lab);
+      const demoSpare = await readyVoiceAsset(identity.demo.token, 'voice-2s.mp4', HOSTS.demo);
+      const labSpare = await readyVoiceAsset(identity.lab.token, 'voice-2s.mp4', HOSTS.lab);
+      const unknown = crypto.randomUUID();
+
+      // Positive controls: the same shape inside each tenant is accepted and stores one message per tenant.
+      const inDemo = await send('POST', path, identity.demo.token, HOSTS.demo, {
+        toMembershipId: demoOther,
+        mediaId: demoTake,
+      });
+      expect(inDemo.status).toBe(201);
+      const inLab = await send('POST', path, identity.lab.token, HOSTS.lab, {
+        toMembershipId: labOther,
+        mediaId: labTake,
+      });
+      expect(inLab.status).toBe(201);
+
+      // Negatives, the target: tenant B's session on tenant A's membership id (and the mirror) is the bare 404 of an unknown id.
+      const unknownTarget = sansRequestId(
+        await expectBareNotFound(
+          await send('POST', path, identity.lab.token, HOSTS.lab, {
+            toMembershipId: unknown,
+            mediaId: labSpare,
+          }),
+          'unknown membership id',
+        ),
+      );
+      const labToDemo = await expectBareNotFound(
+        await send('POST', path, identity.lab.token, HOSTS.lab, {
+          toMembershipId: demoOther,
+          mediaId: labSpare,
+        }),
+        'lab session, demo membership id',
+      );
+      const demoToLab = await expectBareNotFound(
+        await send('POST', path, identity.demo.token, HOSTS.demo, {
+          toMembershipId: labOther,
+          mediaId: demoSpare,
+        }),
+        'demo session, lab membership id',
+      );
+      expect(sansRequestId(labToDemo)).toBe(unknownTarget);
+      expect(sansRequestId(demoToLab)).toBe(unknownTarget);
+
+      // Negatives, the recording: tenant A's take is the `voice_invalid` of an unknown asset for tenant B, and the mirror.
+      const voiceInvalid = async (res: Response, label: string): Promise<string> => {
+        const text = await res.text();
+        expect(res.status, `${label}: ${text}`).toBe(400);
+        const body = JSON.parse(text) as Envelope;
+        expect(body.error.code, label).toBe('VALIDATION_FAILED');
+        expect(body.error.details, label).toEqual({ chat: 'voice_invalid' });
+        return sansRequestId(text);
+      };
+      const unknownAsset = await voiceInvalid(
+        await send('POST', path, identity.lab.token, HOSTS.lab, {
+          toMembershipId: labOther,
+          mediaId: unknown,
+        }),
+        'unknown asset',
+      );
+      expect(
+        await voiceInvalid(
+          await send('POST', path, identity.lab.token, HOSTS.lab, {
+            toMembershipId: labOther,
+            mediaId: demoSpare,
+          }),
+          'lab session, demo recording',
+        ),
+      ).toBe(unknownAsset);
+      expect(
+        await voiceInvalid(
+          await send('POST', path, identity.demo.token, HOSTS.demo, {
+            toMembershipId: demoOther,
+            mediaId: labSpare,
+          }),
+          'demo session, lab recording',
+        ),
+      ).toBe(unknownAsset);
+
+      // Nothing crossed: each tenant holds exactly its own message and the spares were never stored.
+      const [held] = await adminSql<{ taken: number; spare: number }[]>`
+          select (select count(*)::int from public.chat_messages
+                   where media_asset_id in (${demoTake}::uuid, ${labTake}::uuid)) as taken,
+                 (select count(*)::int from public.chat_messages
+                   where media_asset_id in (${demoSpare}::uuid, ${labSpare}::uuid)) as spare`;
+      expect(held).toEqual({ taken: 2, spare: 0 });
+
+      // The wrong host: a session of one tenant on the other tenant's host is refused before any read.
+      await expectHostRefused(
+        await send('POST', path, tokens.demoMember, HOSTS.lab, {
+          toMembershipId: labOther,
+          mediaId: labSpare,
+        }),
+        'demo session on the lab host',
+      );
+      await expectHostRefused(
+        await send('POST', path, tokens.labMember, HOSTS.demo, {
+          toMembershipId: demoOther,
+          mediaId: demoSpare,
+        }),
+        'lab session on the demo host',
+      );
+    } finally {
+      await removeVoiceRows(identityId ? [identityId] : []);
       await removeDirectRows([prefix]);
       for (const restore of restores.reverse()) await restore();
       resetDirectLimiters();
