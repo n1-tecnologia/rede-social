@@ -21,7 +21,7 @@ begin;
 --    notifications worker (the zero system user).
 --
 -- Fixture ids use the `1e380000-…` prefix (`tests.d38('a1')` spells one). Like its siblings, this file ROLLS BACK.
-select plan(32);
+select plan(51);
 
 create function tests.d38(p text) returns uuid language sql immutable as
   $$ select ('1e380000-0000-4000-8000-0000000000' || p)::uuid $$;
@@ -297,6 +297,124 @@ select case when current_setting('tests.now_partition') <> '' then results_eq(
   ARRAY[0],
   'RESEARCH finding 5: a bare unpaired direct signals nothing to any user topic'
 ) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
+
+-- ── 5. the notice definer ──────────────────────────────────────────────────────────────────────
+-- The facts a direct push needs, readable by the notifications worker (the zero system user) and nobody else.
+create function tests.msg38(p_conv uuid, p_seq int) returns uuid language sql security definer as
+  $$ select id from public.chat_messages where conversation_id = p_conv and seq = p_seq $$;
+-- the membership trigger already created each profile row: name the two writers.
+update public.member_profiles
+   set display_name = case user_id when tests.d38('a1') then 'Ana Um' else 'Bia Dois' end
+ where tenant_id = tests.d38('01') and user_id in (tests.d38('a1'), tests.d38('a2'));
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds)
+values ('1e380000-0000-4000-8000-000000000f01', tests.d38('01'), tests.d38('a1'), 'audio', 'voice', 'ready', 'audio/mp4', 8000, 7);
+-- a voice message of a1 into the (open) pair, written as the table owner: it takes seq 3.
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body, media_asset_id, voice_seconds)
+values (tests.d38('01'), tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), tests.d38('a1'), 'member', null,
+        '1e380000-0000-4000-8000-000000000f01', 7);
+
+select tests.as_tenant(tests.d38('01'), '00000000-0000-0000-0000-000000000000'::uuid, 'support_tenant');
+select results_eq(
+  $$ select recipient_user_id::text, writer_user_id::text, writer_name, body, voice_seconds, voice_gone, deliverable
+       from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 1)) $$,
+  $$ values (tests.d38('a2')::text, tests.d38('a1')::text, 'Ana Um'::text, 'oi'::text, null::int, false, true) $$,
+  'D-728: the worker reads a text message: the recipient is the OTHER participant, the writer, its profile name, the body');
+select results_eq(
+  $$ select recipient_user_id::text, writer_user_id::text, writer_name
+       from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 2)) $$,
+  $$ values (tests.d38('a1')::text, tests.d38('a2')::text, 'Bia Dois'::text) $$,
+  'D-728: the reply flips recipient and writer');
+select results_eq(
+  $$ select body, voice_seconds, voice_gone, deliverable
+       from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 3)) $$,
+  $$ values (null::text, 7, false, true) $$,
+  'D-728: a voice message answers no body, the stored length and voice_gone false');
+reset role;
+update public.media_assets set deleted_at = now() where id = '1e380000-0000-4000-8000-000000000f01';
+select tests.as_tenant(tests.d38('01'), '00000000-0000-0000-0000-000000000000'::uuid, 'support_tenant');
+select is(
+  (select voice_gone from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 3))),
+  true, 'D-868: once the recording''s asset is soft-deleted, voice_gone is true');
+reset role;
+
+-- T-11-08: `deliverable` is recomputed from the live pair every time it is asked.
+insert into public.member_blocks (tenant_id, blocker_user_id, blocked_user_id) values (tests.d38('01'), tests.d38('a2'), tests.d38('a1'));
+select tests.as_tenant(tests.d38('01'), '00000000-0000-0000-0000-000000000000'::uuid, 'support_tenant');
+select is(
+  (select deliverable from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 1))),
+  false, 'T-11-08: a block either way makes the message undeliverable (the row is still answered)');
+reset role;
+delete from public.member_blocks where tenant_id = tests.d38('01');
+update public.memberships set blocked_at = now() where tenant_id = tests.d38('01') and user_id = tests.d38('a2');
+select tests.as_tenant(tests.d38('01'), '00000000-0000-0000-0000-000000000000'::uuid, 'support_tenant');
+select is(
+  (select deliverable from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 1))),
+  false, 'T-11-08: an administrator-blocked participant makes it undeliverable');
+reset role;
+update public.memberships set blocked_at = null where tenant_id = tests.d38('01') and user_id = tests.d38('a2');
+update public.tenant_modules set enabled = false where tenant_id = tests.d38('01') and module_key = 'social';
+select tests.as_tenant(tests.d38('01'), '00000000-0000-0000-0000-000000000000'::uuid, 'support_tenant');
+select is(
+  (select deliverable from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 1))),
+  false, 'T-11-08: social off makes it undeliverable');
+reset role;
+update public.tenant_modules set enabled = true where tenant_id = tests.d38('01') and module_key = 'social';
+select tests.as_tenant(tests.d38('01'), '00000000-0000-0000-0000-000000000000'::uuid, 'support_tenant');
+select is(
+  (select deliverable from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 1))),
+  true, 'positive control: with every cause lifted the same message is deliverable again');
+
+-- zero rows: not a paired direct, not this tenant, not a message, a deleted message.
+select is(
+  (select count(*)::int from app.direct_message_notice(tests.msg38(tests.d38('f1'), 1))), 0,
+  'D-728: a message of a support case answers zero rows');
+select is(
+  (select count(*)::int from app.direct_message_notice(tests.msg38(tests.d38('e3'), 1))), 0,
+  'T-11-01: another tenant''s message (a bare direct of tenant B) answers zero rows under a tenant A claim');
+select is(
+  (select count(*)::int from app.direct_message_notice('1e380000-0000-4000-8000-000000000999')), 0,
+  'D-728: an unknown id answers zero rows');
+reset role;
+select tests.as_tenant(tests.d38('02'), '00000000-0000-0000-0000-000000000000'::uuid, 'support_tenant');
+select is(
+  (select count(*)::int from app.direct_message_notice(tests.msg38(tests.d38('e3'), 1))), 0,
+  'D-728: a bare direct of the claim''s own tenant answers zero rows (only a PAIRED direct is answered)');
+reset role;
+update public.chat_messages set deleted_at = now() where id = tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 1);
+select tests.as_tenant(tests.d38('01'), '00000000-0000-0000-0000-000000000000'::uuid, 'support_tenant');
+select is(
+  (select count(*)::int from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 1))), 0,
+  'D-728: a deleted message answers zero rows');
+reset role;
+
+-- T-11-02: every caller that is not the zero system user is refused 42501, whatever its role.
+select tests.as_tenant(tests.d38('01'), tests.d38('a1'));
+select throws_ok(
+  $$ select * from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 2)) $$,
+  '42501', null, 'T-11-02: a member lane is refused 42501');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('a6'), 'admin_tenant');
+select throws_ok(
+  $$ select * from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 2)) $$,
+  '42501', null, 'T-11-02: an administrator is refused 42501');
+reset role;
+select tests.as_tenant(tests.d38('01'), tests.d38('a5'), 'support_tenant');
+select throws_ok(
+  $$ select * from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 2)) $$,
+  '42501', null, 'T-11-02: a support member is refused 42501');
+reset role;
+select tests.as_tenant_without_claims();
+select throws_ok(
+  $$ select * from app.direct_message_notice(tests.msg38(tests.pair38(tests.d38('01'), tests.d38('a1'), tests.d38('a2')), 2)) $$,
+  '42501', null, 'T-11-02: a lane with no claims is refused 42501');
+reset role;
+select ok(
+  not has_function_privilege('anon', 'app.direct_message_notice(uuid)', 'execute')
+  and has_function_privilege('authenticated', 'app.direct_message_notice(uuid)', 'execute'),
+  'T-11-02: anon cannot execute the notice; the worker''s authenticated lane can (the zero-user guard is the gate)');
+select ok(
+  (select prosecdef and proconfig @> array['search_path=""'] from pg_proc where oid = 'app.direct_message_notice(uuid)'::regprocedure),
+  'the notice is a security definer that pins search_path');
 
 select * from finish();
 rollback;
