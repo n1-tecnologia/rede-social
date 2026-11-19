@@ -5,6 +5,7 @@ import { notificationsFanoutJob } from './server/fanout-job';
 import { onMembershipAccessCut } from './server/membership-access-cut';
 import { onMembershipBlocked } from './server/membership-blocked';
 import { pushSendJob } from './server/push/send-job';
+import { reportNotificationSources } from './server/report-notice';
 import { countUnseen } from './server/service';
 
 /**
@@ -30,8 +31,11 @@ import { countUnseen } from './server/service';
  * and the open-app nudge, once for a block and once for a payment cut. Both are best-effort and neither
  * revokes a session (D-499: the identity is shared across communities).
  *
- * No producer is named here (MOD-02): producers declare `notificationSources` in THEIR manifests and
- * the app registry wires both halves through the kernel seam.
+ * `notificationSources` (Phase 11 plan 17, D-729): ONE, the kernel's `report.created` (a new report rings
+ * the moderators' bell and phone, "Nova denúncia"). A recorded exception to "producers declare their own
+ * sources": the event belongs to the kernel and the audience is the holders of `moderation.manage`, not the
+ * readers of a module's content, so no producer module owns the notice. Every other source is still declared
+ * in the PRODUCER's manifest (MOD-02) and the app registry wires both halves through the kernel seam.
  */
 export const notificationsModule = defineModule({
   key: 'notifications',
@@ -45,6 +49,7 @@ export const notificationsModule = defineModule({
   },
   routes: () => import('./server/routes').then((m) => m.notificationsRoutes),
   jobs: [notificationsFanoutJob, pushSendJob],
+  notificationSources: reportNotificationSources,
   counters: async (tx, ctx) => ({ unreadNotifications: await countUnseen(tx, ctx) }),
   // D-231 (07-04): rows older than 90 days are deleted by the kernel's EXISTING hourly sweeper, which
   // runs `app.notifications_prune(batch)` through the admin lane. The kernel never names this table.

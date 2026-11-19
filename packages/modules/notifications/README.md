@@ -48,9 +48,16 @@ topic so the open app refetches its counters.
   for a member whose subscription was cut (their push devices are forgotten, their open app is
   nudged and meets the 403 `SUBSCRIPTION_PENDING`); the session is not revoked, the identity is
   shared across communities.
+- Notification source of this manifest: `report.created` (kernel, Phase 11 plan 17, D-729): a new
+  report rings the bell and the phone of every live holder of the moderation-manage permission (the roles are
+  derived from `KERNEL_ROLE_PERMISSIONS`, never typed), one row and one push per report, titled
+  `Nova denúncia`. The reporter and the reported author are never told, the facts are empty and the
+  push names no subject, person or reason; a tap opens `/configuracoes/denuncias`. A recorded
+  exception to "producers declare their own sources": the event is the kernel's.
 - Through the sink: every event another enabled module declares as a notification source or
   retraction. The API registry calls `setNotificationSink(notificationsSink)` and subscribes one
-  handler per distinct event name; this manifest declares no sources of its own.
+  handler per distinct event name; apart from `report.created` above, this manifest declares no
+  sources of its own.
 
 ## Flag key
 
@@ -73,6 +80,7 @@ kernel's default no-op sink, so producers keep working and simply notify nobody 
 - `@rede-social/core/server/modules/require-module`
 - `@rede-social/core/server/notifications/source`
 - `@rede-social/core/server/paging`
+- `@rede-social/core/server/rbac/require-role`
 - `@rede-social/core/ui`
 
 ## Navigation

@@ -38,6 +38,15 @@ export {
   webPushTransport,
 } from './push/transport';
 export { deletePushSubscription, savePushDevice, savePushSubscription } from './push-subscriptions';
+export {
+  moderatorRoles,
+  REPORT_PUSH_BODY,
+  REPORT_PUSH_TITLE,
+  REPORT_PUSH_URL,
+  reportCreatedNotificationSource,
+  reportNotificationSources,
+  reportTag,
+} from './report-notice';
 export { notificationsRoutes } from './routes';
 export { countUnseen, listNotifications, markAllRead, markAllSeen, markRead } from './service';
 export { notificationsSink } from './sink';
