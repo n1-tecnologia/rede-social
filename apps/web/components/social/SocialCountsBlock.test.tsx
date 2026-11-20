@@ -113,3 +113,73 @@ describe('SocialCountsBlock', () => {
     ]);
   });
 });
+
+describe('SocialCountsBlock - the action zone of 11-23 (UI-D-867, D-720)', () => {
+  const FACTS = { canFollow: true, canMessage: true, blockedByViewer: false, canChat: true };
+
+  it('Z1 (the path): Seguir (brand) and Enviar mensagem (outline) side by side, the second a link to the conversation entry', () => {
+    const { container } = render(block(FACTS));
+    const follow = screen.getByRole('button', { name: 'Seguir Marcos' });
+    const message = screen.getByRole('link', { name: 'Enviar mensagem para Marcos' });
+    expect(message.getAttribute('href')).toBe(`/conversas/com/${ID}`);
+    expect(message.textContent).toBe('Enviar mensagem');
+    expect(message.className).toContain('border-border-secondary');
+    expect(message.className).not.toContain('bg-button');
+    expect(follow.className).toContain('bg-button');
+
+    // The pair sits in ONE container that stacks below 360px and sits in a row from there, Seguir first.
+    const zone = follow.parentElement as HTMLElement;
+    expect(message.parentElement).toBe(zone);
+    expect(zone.className).toContain('flex-col');
+    expect(zone.className).toContain('gap-2');
+    expect(zone.className).toContain('min-[360px]:flex-row');
+    expect(zone.className).toContain('md:max-w-[400px]');
+    expect(follow.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(follow.className).toContain('min-[360px]:flex-1');
+    expect(message.className).toContain('min-[360px]:flex-1');
+    // The counts precede the zone.
+    const counts = container.querySelector('.grid') as HTMLElement;
+    expect(counts.compareDocumentPosition(zone) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('Z2: following is not required to message, and the label never carries the name', () => {
+    render(
+      block({ ...FACTS, viewerFollows: true, name: 'Maximiliano Alexandrino de Oliveira Prado' }),
+    );
+    const message = screen.getByRole('link', { name: /Enviar mensagem para Maximiliano/ });
+    expect(message.textContent).toBe('Enviar mensagem');
+    expect(screen.getByRole('button', { name: /^Seguindo Maximiliano/ })).toBeTruthy();
+  });
+
+  it('Z3 (an old API): no facts reads as the shipped zone for a viewer without chat.direct', () => {
+    render(block({ canChat: false }));
+    expect(screen.queryByRole('link')).toBeNull();
+    const follow = screen.getByRole('button', { name: 'Seguir Marcos' });
+    expect(follow.className).toContain('w-full');
+    expect(follow.className).toContain('md:max-w-[400px]');
+  });
+
+  it('Z4 (an old API): no facts at all, with chat.direct, is the pair and never an error', () => {
+    render(block({ canChat: true }));
+    expect(screen.getByRole('button', { name: 'Seguir Marcos' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Enviar mensagem para Marcos' })).toBeTruthy();
+  });
+
+  it('Z5: a viewer without chat.direct keeps Seguir alone even when the facts say canMessage', () => {
+    render(block({ ...FACTS, canChat: false }));
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Seguir Marcos' })).toBeTruthy();
+  });
+
+  it('Z6: canMessage false hides the link and keeps Seguir', () => {
+    render(block({ ...FACTS, canMessage: false }));
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Seguir Marcos' })).toBeTruthy();
+  });
+
+  it('Z7: own mode never draws the zone, whatever the facts say', () => {
+    render(block({ ...FACTS, mode: 'own' }));
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('link', { name: /Enviar mensagem/ })).toBeNull();
+  });
+});

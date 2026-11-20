@@ -62,6 +62,9 @@ function profile(
     followingCount: number;
     viewerFollows: boolean;
     self: boolean;
+    canFollow: boolean;
+    canMessage: boolean;
+    blockedByViewer: boolean;
   }> = {},
 ) {
   return {
@@ -212,5 +215,71 @@ describe('SocialProfileData - the own profile (D-468)', () => {
     getSocialProfile.mockResolvedValue(profile({ self: false }));
     const { container } = await renderData({ mode: 'own', retryHref: '/perfil' });
     expect(container.textContent).toBe('');
+  });
+});
+
+describe('SocialProfileData - the entry point of 11-23 (UI-D-867)', () => {
+  it('P1: the facts and the chat.direct boolean reach the zone: Seguir and Enviar mensagem', async () => {
+    getSocialProfile.mockResolvedValue(
+      profile({ canFollow: true, canMessage: true, blockedByViewer: false }),
+    );
+    await renderData({ canChat: true });
+    expect(screen.getByRole('button', { name: 'Seguir Marcos' })).toBeTruthy();
+    expect(
+      screen.getByRole('link', { name: 'Enviar mensagem para Marcos' }).getAttribute('href'),
+    ).toBe(`/conversas/com/${ID}`);
+  });
+
+  it('P2: without canChat the shipped zone (Seguir only) renders even with canMessage true', async () => {
+    getSocialProfile.mockResolvedValue(profile({ canFollow: true, canMessage: true }));
+    await renderData();
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Seguir Marcos' })).toBeTruthy();
+  });
+
+  it('P3: the answer of an API older than the web (no facts) never fails the block', async () => {
+    getSocialProfile.mockResolvedValue(profile());
+    await renderData({ canChat: true });
+    expect(screen.getByRole('button', { name: 'Seguir Marcos' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Enviar mensagem para Marcos' })).toBeTruthy();
+  });
+
+  it('P4: the gate derives chat.direct from the composed permissions', () => {
+    const without = SocialProfileBlock({ ...BASE, permissions: ['social.participate'] });
+    const withChat = SocialProfileBlock({
+      ...BASE,
+      permissions: ['social.participate', 'chat.direct'],
+    });
+    const canChatOf = (node: unknown) => {
+      const suspense = node as { props: { children: { props: { canChat?: boolean } } } };
+      return suspense.props.children.props.canChat;
+    };
+    expect(canChatOf(without)).toBe(false);
+    expect(canChatOf(withChat)).toBe(true);
+  });
+
+  it('P5 (loading): the pending read draws two skeleton blocks under the counts, never a button', () => {
+    const { container } = render(<SocialCountsSkeleton canChat />);
+    const zone = container.querySelector('[data-testid="social-zone-skeleton"]') as HTMLElement;
+    expect(zone).toBeTruthy();
+    expect(zone.children).toHaveLength(2);
+    expect(container.querySelector('button, a')).toBeNull();
+    expect(container.textContent).toBe('');
+  });
+
+  it('P6 (error): a failed read keeps the inline line and draws no button at all', async () => {
+    getSocialProfile.mockResolvedValue({ status: 'error' });
+    await renderData({ canChat: true });
+    expect(screen.getByText('Não foi possível carregar os seguidores.')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('link', { name: /Enviar mensagem/ })).toBeNull();
+  });
+
+  it('P7 (unchanged): another member of a viewer without chat.direct and the own profile stay as shipped', async () => {
+    getSocialProfile.mockResolvedValue(profile({ self: true }));
+    const own = await renderData({ mode: 'own', canChat: true, retryHref: '/perfil' });
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('link', { name: /Enviar mensagem/ })).toBeNull();
+    own.unmount();
   });
 });
