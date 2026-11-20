@@ -1744,7 +1744,7 @@ Plans:
 **Research needed**: Light — reuses Phase 7's chat and notification infrastructure and Phase 8's moderation log; the new parts are one direct conversation per pair of members, member-block enforcement across messaging, follow and profile, and follower fan-out for member-post notifications.
 **Notes**: Split out on 2026-09-25 from Phase 7 (criteria 5-7: CHAT-06, CHAT-07, the follower-scoped notification rules) and Phase 8 (criteria 5-6: MODER-04, MODER-05) when the "Rede social" module moved after the MVP. Phase 7's chat schema keeps `kind`, so direct conversations need no migration. **Amended 2026-11-04 (Phase 13, D-616):** Phase 13 delivers, ahead of this phase and for the app-store review, the minimum slice of MODER-05 (reports of posts and comments, the admin list and its three actions) and of CHAT-07 (the member block and the blocker's content filter) as NATIVE-31 and NATIVE-33 on kernel tables (`content_reports`, `member_blocks`) that are not gated by `social`; when this phase is planned it appends `story_comment`, `community` and `direct_message` to the report subject list, adds the block's effects on messaging, follow and the profile button, and must not plan the slice again.
 
-**Plans:** 23/28 plans executed (planned 2026-11-19: 28 plans in 10 waves; the database, contract, API, worker, push, view-function and catalog plans run before the sketch gate and are not gated; plan 02 stops at the sketch 025 approval that only Igor writes; plans 19 to 26 are the web and e2e plans and carry the approval precondition; plan 09 opens with the D-730 one-way confirmation; plan 28 holds the release, the ledger and the exit gate; the report and block screens plan 13-20 never delivered are built here by plans 20, 24, 25 and 27 from sketch 025)
+**Plans:** 24/28 plans executed (planned 2026-11-19: 28 plans in 10 waves; the database, contract, API, worker, push, view-function and catalog plans run before the sketch gate and are not gated; plan 02 stops at the sketch 025 approval that only Igor writes; plans 19 to 26 are the web and e2e plans and carry the approval precondition; plan 09 opens with the D-730 one-way confirmation; plan 28 holds the release, the ledger and the exit gate; the report and block screens plan 13-20 never delivered are built here by plans 20, 24, 25 and 27 from sketch 025)
 
 Plans:
 
@@ -1794,7 +1794,7 @@ Plans:
 **Wave 8** *(blocked on Wave 7 completion)*
 
 - [x] 11-22-PLAN.md — The direct conversation screen: lazy start, the five composer states, the message menu and voice (gated)
-- [ ] 11-23-PLAN.md — "Enviar mensagem" on the profile and the `/membros` row, the blocker's "Desbloquear" (gated)
+- [x] 11-23-PLAN.md — "Enviar mensagem" on the profile and the `/membros` row, the blocker's "Desbloquear" (gated)
 - [ ] 11-24-PLAN.md — The report and block entries of the story viewer, the story comment and the community header (gated)
 - [ ] 11-25-PLAN.md — The administrator's queue and resolve sheet for six subjects (gated)
 
@@ -2397,7 +2397,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10. Rede Social - Member Stories and Communities | 15/15 | Complete    | 2026-11-12 |
 | 10.1. Rede Social - Ingresso pago do evento pela Kiwify (INSERTED) | 19/19 | Complete    | 2026-11-13 |
 | 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 16/16 | In Progress|  |
-| 11. Rede Social - Direct Messages, Member Blocking and Reports | 23/28 | In Progress|  |
+| 11. Rede Social - Direct Messages, Member Blocking and Reports | 24/28 | In Progress|  |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 12.4. Abertura de chamado no suporte (INSERTED) | 22/22 | In Progress|  |
 | 12.5. Mensagem de voz no chat (INSERTED) | 18/18 | Complete    | 2026-11-17 |
