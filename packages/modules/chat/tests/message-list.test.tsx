@@ -194,3 +194,59 @@ describe('MessageList with voice messages (12.5-14, UI-D-851)', () => {
     }
   });
 });
+
+describe('MessageList per-message menu slot (11-22, D-733, UI-D-870)', () => {
+  const withMenu: MessageListItem[] = [
+    { kind: 'day', key: 'day-1', label: 'day-sentinel' },
+    {
+      kind: 'message',
+      key: 'in1',
+      side: 'other',
+      body: 'incoming-sentinel',
+      time: '10:00',
+      menu: <button type="button">menu-in1-sentinel</button>,
+    },
+    {
+      kind: 'message',
+      key: 'out1',
+      side: 'own',
+      body: 'outgoing-sentinel',
+      time: '10:01',
+      menu: <button type="button">menu-out1-sentinel</button>,
+    },
+    { kind: 'message', key: 'in2', side: 'other', body: 'no-menu-sentinel', time: '10:02' },
+  ];
+
+  it("draws the node in the gutter beside an INCOMING bubble only, never beside the viewer's own", () => {
+    const { container } = render(<MessageList label="log" items={withMenu} />);
+    expect(screen.getByText('menu-in1-sentinel')).toBeTruthy();
+    expect(screen.queryByText('menu-out1-sentinel')).toBeNull();
+    expect(container.querySelectorAll('[data-chat-gutter]')).toHaveLength(1);
+  });
+
+  it('the row is flex items-center gap-1 with the bubble first, and the bubble keeps max-w-[85%]', () => {
+    const { container } = render(<MessageList label="log" items={withMenu} />);
+    const gutter = container.querySelector('[data-chat-gutter]') as HTMLElement;
+    expect(gutter.className).toContain('flex');
+    expect(gutter.className).toContain('items-center');
+    expect(gutter.className).toContain('gap-1');
+    expect(gutter.className).toContain('min-w-0');
+    expect(gutter.firstElementChild).toHaveAttribute('data-chat-bubble', 'other');
+    expect(gutter.firstElementChild?.className).toContain('max-w-[85%]');
+    expect(within(gutter).getByText('menu-in1-sentinel')).toBe(gutter.lastElementChild);
+  });
+
+  it('an item with no menu renders exactly as before: the bubble is the only child of its row', () => {
+    const { container } = render(<MessageList label="log" items={withMenu} />);
+    const plain = container.querySelector('[data-chat-message="in2"]') as HTMLElement;
+    expect(plain.children).toHaveLength(1);
+    expect(plain.firstElementChild).toHaveAttribute('data-chat-bubble', 'other');
+    expect(plain.querySelector('[data-chat-gutter]')).toBeNull();
+  });
+
+  it("keeps the host's node out of the bubble and keeps the shipped text bubble unchanged", () => {
+    const { container } = render(<MessageList label="log" items={withMenu} />);
+    const bubble = container.querySelector('[data-chat-message="in1"] [data-chat-bubble]');
+    expect(bubble?.textContent).toBe('incoming-sentinel10:00');
+  });
+});

@@ -1,11 +1,15 @@
 'use server';
 
-import { directSendInputSchema } from '@rede-social/module-chat/contracts';
+import {
+  directSendInputSchema,
+  directVoiceSendInputSchema,
+} from '@rede-social/module-chat/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
-import { postDirectMessage } from '@/lib/chat';
+import { postDirectMessage, postDirectVoice } from '@/lib/chat';
 import { type ChatMessageView, chatMessageView } from '@/lib/chat-view';
+import type { VoiceSendError } from '@/lib/voice-send';
 
 /**
  * The direct conversation's sends (11-22, CHAT-06, D-720, D-722, D-734), in the `suporte/actions.ts`
@@ -81,6 +85,79 @@ export async function sendDirectMessage(
         code: error instanceof ApiClientError ? error.code : 'TRANSPORT',
       });
       result = { ok: false, error: directErrorOf(error) };
+    }
+  }
+
+  if (path) redirect(path);
+  return result;
+}
+
+/* ── The recording (D-734) ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * What a direct voice send answers. A refusal is ONE closed word of the upload-and-send orchestration
+ * (`lib/voice-send.ts`), the SAME vocabulary the support recordings use, so the pane maps it with the shipped
+ * voice sentences: `not_ready` (409 `voice_not_ready`, retriable), `invalid` (a 400, or an input refused here,
+ * permanent), `closed` (409 `direct_closed`: the neutral refusal, no word that says why), `not_found` (404),
+ * or `retriable` (a 5xx, a 429, a bare 409, the transport). `member_blocked` and `member_removed` are staff
+ * words and are never produced here.
+ */
+export type SendDirectVoiceResult =
+  | { ok: true; view: ChatMessageView; conversationId: string; created: boolean }
+  | { ok: false; error: VoiceSendError };
+
+/** The closed word of an API refusal of a direct recording; the API re-enforces everything this only names. */
+function directVoiceErrorOf(error: unknown): VoiceSendError {
+  if (!(error instanceof ApiClientError)) return 'retriable';
+  const chat = error.details?.chat;
+  if (error.status === 409) {
+    if (chat === 'voice_not_ready') return 'not_ready';
+    if (chat === 'direct_closed') return 'closed';
+    return 'retriable';
+  }
+  if (error.status === 404) return 'not_found';
+  if (error.status === 429 || error.status >= 500) return 'retriable';
+  return 'invalid';
+}
+
+/**
+ * `POST /v1/chat/direct/voice-messages` (D-734): the member's recording to another member. The strict
+ * `directVoiceSendInputSchema` (a membership uuid and the id of the asset, no duration, no side, no conversation id)
+ * runs BEFORE the request, so a non-uuid or an extra key never leaves the server. The bootstrap and the translator
+ * are read BEFORE the write, so nothing can fail after the message is stored and report "not sent". Called once
+ * per attempt by `runVoiceSend`, which repeats it while the answer is `not_ready`; the API stores a take once, so a
+ * repeat answers the stored message.
+ */
+export async function sendDirectVoice(
+  toMembershipId: unknown,
+  mediaId: unknown,
+): Promise<SendDirectVoiceResult> {
+  const input = directVoiceSendInputSchema.safeParse({ toMembershipId, mediaId });
+  if (!input.success) return { ok: false, error: 'invalid' };
+
+  let path: string | null = null;
+  let result: SendDirectVoiceResult = { ok: false, error: 'retriable' };
+  try {
+    const [bootstrap, t] = await Promise.all([getBootstrap(), getTranslations('chat')]);
+    const sent = await postDirectVoice(input.data.toMembershipId, input.data.mediaId);
+    result = {
+      ok: true,
+      conversationId: sent.conversationId,
+      created: sent.created,
+      view: chatMessageView(sent.message, {
+        timeZone: bootstrap.tenant.timezone,
+        viewer: 'member',
+        t,
+      }),
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) path = bootstrapRedirectPath(error);
+    if (!path) {
+      console.error('chat.direct_voice_failed', {
+        status: error instanceof ApiClientError ? error.status : null,
+        code: error instanceof ApiClientError ? error.code : 'TRANSPORT',
+      });
+      result = { ok: false, error: directVoiceErrorOf(error) };
     }
   }
 

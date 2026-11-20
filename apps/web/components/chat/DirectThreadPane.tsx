@@ -3,14 +3,31 @@
 import { convTopic, REALTIME_EVENTS } from '@rede-social/contracts/realtime';
 import { useRealtimeTopic } from '@rede-social/core/ui';
 import { CHAT_PAGE_SIZE } from '@rede-social/module-chat/contracts';
-import { ChatComposer, MessageList } from '@rede-social/module-chat/ui';
+import {
+  ChatComposer,
+  type ChatComposerVoice,
+  type MessageBubbleVoice,
+  MessageList,
+  pauseAllVoice,
+  type VoiceTake as RecordedTake,
+} from '@rede-social/module-chat/ui';
 import { Avatar, Button, EmptyState, useToast } from '@rede-social/ui';
 import { ArrowDown, MessageCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { type SendDirectMessageResult, sendDirectMessage } from '@/app/(app)/conversas/actions';
-import { unblockMember } from '@/components/feed/safety-actions';
+import {
+  type SendDirectMessageResult,
+  type SendDirectVoiceResult,
+  sendDirectMessage,
+  sendDirectVoice,
+} from '@/app/(app)/conversas/actions';
+import {
+  type BlockTarget,
+  ReportAndBlock,
+  type ReportTarget,
+} from '@/components/feed/ReportAndBlock';
+import { blockMember, reportContent, unblockMember } from '@/components/feed/safety-actions';
 import { cursorAfterOwnSend, cursorAfterPage, isReplayedSignal } from '@/lib/chat-cursor';
 import {
   type ChatDayKeys,
@@ -20,8 +37,19 @@ import {
   chatRuns,
   composerStateView,
   type DirectOtherView,
+  formatVoiceDuration,
+  nextPlaybackRate,
+  playbackRateLabel,
+  spokenVoiceDuration,
 } from '@/lib/chat-view';
+import {
+  runVoiceSend,
+  type VoiceFailureKind,
+  type VoiceResume,
+  type VoiceSendError,
+} from '@/lib/voice-send';
 import { ComposerStateStrip } from './ComposerStateStrip';
+import { MessageMenuSheet, type MessageMenuTarget, MessageMenuTrigger } from './MessageMenuSheet';
 
 /**
  * The direct conversation's body (11-22, CHAT-06, D-720, UI-D-864) [designed]: the scroller and the composer
@@ -61,6 +89,17 @@ import { ComposerStateStrip } from './ComposerStateStrip';
  *   nothing on screen, in an accessible name or in a log names a block or the blocker. With the conversation gone
  *   (the administrator's block) the shipped mid-session handling runs: the generic toast and `router.refresh()`.
  *
+ * - **Voice (D-734, Phase 12.5).** The composer carries the SAME opt-in voice props the support thread passes, built
+ *   from the shipped `voice-deps` and `voice-send` helpers: up to 5 minutes, one take in flight at a time, the
+ *   bubble and the player the support chat draws, no new recorder and no new player. The send goes to
+ *   `POST /v1/chat/direct/voice-messages`; only the two participants can play the recording (the API's gate).
+ *   The first recording of a pair creates the conversation exactly as the first text does.
+ * - **The message menu (D-733, UI-D-870).** Each message of the OTHER member carries a gutter trigger (the viewer's
+ *   own carry none) that opens "Opções da mensagem": "Denunciar mensagem" and, only when the server's `canBlock`
+ *   allows it, "Bloquear {nome}". The report sheet and the block dialog are the report-and-block component's
+ *   (subject `direct_message`, the author's membership id). A block made here swaps the composer for the blocker's
+ *   strip by re-reading the state.
+ *
  * Every string comes from the `chat` catalog; every time and day label is server-formatted (`chat-view.ts`), and
  * this component never reads the clock (UI-D-14). Every member string is a React text node (T-11-16).
  */
@@ -80,6 +119,20 @@ export interface DirectThreadPaneProps {
   canBlock: boolean;
   /** The tenant's display name, for the report sheet's intro. */
   tenantName: string;
+}
+
+/**
+ * One recording the pane holds in memory only (UI-D-847, A-UI-10): the bytes, the asset a failed attempt left
+ * ready to send again, and where the take stands. Never stored, never named in a URL, a log or a toast.
+ */
+/** What a stored voice send answers. */
+type VoiceSentOk = Extract<SendDirectVoiceResult, { ok: true }>;
+
+interface VoiceRecord {
+  take: { blob: Blob; durationSeconds: number };
+  resume?: VoiceResume;
+  state: 'queued' | 'running' | 'failed';
+  failure?: 'retriable' | 'permanent';
 }
 
 /** The composer slot as the server last described it, with the server's own answer to "may the viewer block". */
@@ -225,6 +278,7 @@ export function DirectThreadPane({
   initialKeys,
   initialComposer,
   canBlock,
+  tenantName,
 }: DirectThreadPaneProps) {
   const t = useTranslations('chat');
   const tf = useTranslations('feed');
@@ -240,6 +294,12 @@ export function DirectThreadPane({
   const [detail, setDetail] = useState<DetailState>({ composer: initialComposer, canBlock });
   const [unblocking, setUnblocking] = useState(false);
   const { composer } = detail;
+  /** UI-D-870: the message whose menu is open, the report sheet's subject and the block dialog's person. */
+  const [menu, setMenu] = useState<MessageMenuTarget | null>(null);
+  const [report, setReport] = useState<ReportTarget | null>(null);
+  const [block, setBlock] = useState<BlockTarget | null>(null);
+  /** 12.5 (UI-D-850): what the polite region speaks after a speed change; re-keyed so a repeat is spoken. */
+  const [rateNote, setRateNote] = useState({ count: 0, text: '' });
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const intentRef = useRef<ScrollIntent | null>({ kind: 'bottom' });
@@ -262,8 +322,27 @@ export function DirectThreadPane({
     running: false,
     again: false,
   });
+  /** The takes of this pane, keyed by the optimistic id. In memory only; they die with the pane. */
+  const voiceTakesRef = useRef(new Map<string, VoiceRecord>());
+  /** The tap-order queue, ONE take in flight at a time (VOICE-23). */
+  const voiceChainRef = useRef<Promise<void>>(Promise.resolve());
+  /** Always the latest render's runner, so a queued take reads fresh props when its turn comes. */
+  const voiceRunRef = useRef<(tempId: string) => Promise<void>>(async () => {});
+  const aliveRef = useRef(true);
   /** Set by an unblock: the field takes the focus once the open composer is drawn (UI-D-865). */
   const focusFieldRef = useRef(false);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    const takes = voiceTakesRef.current;
+    return () => {
+      // Leaving the screen loses every take and starts no further send (UI-D-847, A-UI-10): `runVoiceSend` reads
+      // `alive()` as its `cancelled` hook. A request already on the wire is not aborted, and an asset a cancelled
+      // take already uploaded and completed stays unsent for the 24 hour orphan sweep (D-856).
+      aliveRef.current = false;
+      takes.clear();
+    };
+  }, []);
 
   const nearBottom = useCallback(() => {
     const el = scrollerRef.current;
@@ -456,7 +535,10 @@ export function DirectThreadPane({
    * the pane the conversation it created (D-720): the topic is joined, and the address becomes
    * `/conversas/{conversationId}` through a history `replace` (no navigation, no refetch, the field keeps focus).
    */
-  const adoptSent = (result: Extract<SendDirectMessageResult, { ok: true }>, tempId: string) => {
+  const adoptSent = (
+    result: Extract<SendDirectMessageResult | SendDirectVoiceResult, { ok: true }>,
+    tempId: string,
+  ) => {
     const { view, conversationId: created } = result;
     const first = !conversationRef.current;
     if (first) {
@@ -474,6 +556,25 @@ export function DirectThreadPane({
     if (next.catchUp) void catchUp();
     // The thread exists now: the server's own answer to "may I block" and the composer state come with it.
     if (first) void refreshDetail();
+  };
+
+  /**
+   * D-722: the state this member did not know about. The bubble is already gone, the shipped toast says the ONE
+   * neutral sentence and the strip appears; nothing says who or why. The server's own read follows.
+   */
+  const refusedAsClosed = () => {
+    show({ tone: 'error', message: t('direct.closed') });
+    setDetail((current) => ({
+      ...current,
+      composer: composerStateView('closed', { removed: false, displayName: other.name }, t),
+    }));
+    void refreshDetail();
+  };
+
+  /** The conversation or the person is gone: the shipped mid-session handling, which lands on the not-found screen. */
+  const refusedAsGone = () => {
+    show({ tone: 'error', message: tf('errors.generic') });
+    router.refresh();
   };
 
   const onSend = async (body: string): Promise<boolean> => {
@@ -506,21 +607,8 @@ export function DirectThreadPane({
       setViews((current) => current.filter((view) => view.id !== tempId));
       setSendError(null);
       const refusal = result && !result.ok ? result.error : 'failed';
-      if (refusal === 'closed') {
-        // D-722: the state this member did not know about. The bubble is gone, the shipped toast says the ONE
-        // neutral sentence and the strip appears; nothing says who or why. The server's own read follows.
-        show({ tone: 'error', message: t('direct.closed') });
-        setDetail((current) => ({
-          ...current,
-          composer: composerStateView('closed', { removed: false, displayName: other.name }, t),
-        }));
-        void refreshDetail();
-      } else if (refusal === 'not_found') {
-        // The conversation or the person is gone: the shipped mid-session handling, which lands on the
-        // not-found screen and never says why.
-        show({ tone: 'error', message: tf('errors.generic') });
-        router.refresh();
-      }
+      if (refusal === 'closed') refusedAsClosed();
+      else if (refusal === 'not_found') refusedAsGone();
       return false;
     }
     adoptSent(result, tempId);
@@ -566,21 +654,296 @@ export function DirectThreadPane({
     show({ tone: 'success', message: toast });
   };
 
+  /* ── Voice messages (D-734, UI-D-846, UI-D-847): the support thread's machinery over the direct send ──── */
+
+  /** Change one view in place (a progress step, a failure, a retry). A view that is gone is left alone. */
+  const patchView = useCallback((id: string, patch: Partial<ChatMessageView>) => {
+    setViews((current) => current.map((view) => (view.id === id ? { ...view, ...patch } : view)));
+  }, []);
+
+  const runVoice = async (tempId: string) => {
+    const record = voiceTakesRef.current.get(tempId);
+    // Unmounted, discarded or cleared by a refusal while it waited its turn: nothing more is started.
+    if (!aliveRef.current || !record) return;
+    record.state = 'running';
+    patchView(tempId, { voiceUpload: { percent: null }, voiceFailed: undefined });
+
+    const toId = other.membershipId;
+    const sendAction = (
+      mediaId: string,
+    ): Promise<VoiceSentOk | { ok: false; error: VoiceSendError }> =>
+      toId
+        ? sendDirectVoice(toId, mediaId)
+        : Promise.resolve({ ok: false, error: 'not_found' } as const);
+
+    const alive = () => aliveRef.current && voiceTakesRef.current.get(tempId) === record;
+    // Loaded at the first recording, not with the pane: the wiring pulls in the media server actions, which a
+    // thread that never records has no use for.
+    const { voiceSendDeps } = await import('@/app/(app)/suporte/voice-deps');
+    if (!alive()) return;
+    const outcome = await runVoiceSend(
+      // Leaving the screen starts no further stage or send: `alive()` is false after an unmount, a discard and a
+      // refusal that cleared the queue, and runVoiceSend reads it before every step.
+      { ...voiceSendDeps<VoiceSentOk>(sendAction), cancelled: () => !alive() },
+      record.take,
+      {
+        onProgress: (progress) => {
+          if (!alive()) return;
+          // The finishing step has no percent: the footer reads the plain pending label again.
+          patchView(tempId, {
+            voiceUpload: {
+              percent: progress.phase === 'uploading' ? Math.round(progress.percent) : null,
+            },
+          });
+        },
+      },
+      record.resume,
+    );
+    if (!alive()) return;
+
+    if (outcome.ok) {
+      voiceTakesRef.current.delete(tempId);
+      adoptSent(outcome.sent, tempId);
+      return;
+    }
+    failVoice(tempId, record, outcome.kind, outcome.resume);
+  };
+  voiceRunRef.current = runVoice;
+
+  /** What each way a take can end does to the list (UI-D-847, D-722, D-862). */
+  const failVoice = (
+    tempId: string,
+    record: VoiceRecord,
+    kind: VoiceFailureKind,
+    resume: VoiceResume | undefined,
+  ) => {
+    if (kind === 'retriable' || kind === 'permanent') {
+      // The bubble stays with the take in memory; a permanent refusal offers only "Descartar".
+      record.state = 'failed';
+      record.failure = kind;
+      record.resume = resume;
+      patchView(tempId, { voiceFailed: kind, voiceUpload: undefined });
+      return;
+    }
+    voiceTakesRef.current.delete(tempId);
+    if (kind === 'not_found') {
+      setViews((current) => current.filter((view) => view.id !== tempId));
+      refusedAsGone();
+      return;
+    }
+    // `closed` (and the staff words, which a direct send never produces): nothing to restore. This bubble and
+    // every take still waiting are discarded, the ONE neutral sentence is toasted and the strip appears.
+    voiceTakesRef.current.clear();
+    setViews((current) => current.filter((view) => !(view.pending && view.voice !== undefined)));
+    refusedAsClosed();
+  };
+
+  /** Queue a take behind the ones before it: ONE in flight at a time, in the order they were tapped. */
+  const enqueueVoice = useCallback((tempId: string) => {
+    voiceChainRef.current = voiceChainRef.current
+      .then(() => voiceRunRef.current(tempId))
+      .catch(() => {});
+  }, []);
+
+  /** The composer's hand-off (UI-D-846): the bubble appears at once and the composer is idle again. */
+  const onSendVoice = async (take: RecordedTake): Promise<boolean> => {
+    pendingIdRef.current += 1;
+    const tempId = `pending-${pendingIdRef.current}`;
+    const seconds = Math.round(take.seconds);
+    const optimistic: ChatMessageView = {
+      id: tempId,
+      seq: 0,
+      side: 'own',
+      authorKey: 'member',
+      body: '',
+      label: null,
+      time: '',
+      dayKey: keys.todayKey,
+      createdAtMs: 0,
+      pending: true,
+      voice: {
+        mediaId: '',
+        durationSeconds: seconds,
+        durationLabel: formatVoiceDuration(seconds),
+        spokenLabel: spokenVoiceDuration(seconds, t),
+      },
+      voiceUpload: { percent: null },
+    };
+    // The recorder hands a base type in `mime`; the blob keeps the recorder's own (with parameters).
+    const blob =
+      take.blob.type === take.mime ? take.blob : new Blob([take.blob], { type: take.mime });
+    voiceTakesRef.current.set(tempId, {
+      take: { blob, durationSeconds: seconds },
+      state: 'queued',
+    });
+    intentRef.current = { kind: 'bottom' };
+    setViews((current) => [...current, optimistic]);
+    enqueueVoice(tempId);
+    return true;
+  };
+
+  const retryVoice = useCallback(
+    (tempId: string) => {
+      const record = voiceTakesRef.current.get(tempId);
+      if (record?.state !== 'failed' || record.failure !== 'retriable') return;
+      record.state = 'queued';
+      patchView(tempId, { voiceFailed: undefined, voiceUpload: { percent: null } });
+      enqueueVoice(tempId);
+    },
+    [patchView, enqueueVoice],
+  );
+
+  const discardVoice = useCallback((tempId: string) => {
+    voiceTakesRef.current.delete(tempId);
+    setViews((current) => current.filter((view) => view.id !== tempId));
+  }, []);
+
+  const announceRate = useCallback(
+    (label: string) => {
+      setRateNote((before) => ({
+        count: before.count + 1,
+        text: t('voice.live.rate', { rate: label }),
+      }));
+    },
+    [t],
+  );
+
+  /** The finished bubble props of a view with a recording (UI-D-846..848, UI-D-858). */
+  const voiceFor = useCallback(
+    (view: ChatMessageView): MessageBubbleVoice | undefined => {
+      const recording = view.voice;
+      if (!recording) return undefined;
+      if (recording.deleted) return { status: 'deleted', text: t('voice.deleted') };
+      const shared = {
+        durationSeconds: recording.durationSeconds,
+        spokenLabel: t('voice.group', { spoken: recording.spokenLabel }),
+        player: {
+          labels: {
+            play: t('voice.player.play'),
+            pause: t('voice.player.pause'),
+            loading: t('voice.player.loading'),
+            retry: t('thread.retry'),
+            seek: t('voice.player.seek'),
+            error: t('voice.player.error'),
+            unsupported: t('voice.player.unsupported'),
+            speed: (rate: string) => t('voice.player.speed', { rate }),
+            seekValue: (current: string, total: string) =>
+              t('voice.player.seekValue', { current, total }),
+          },
+          formatClock: formatVoiceDuration,
+          nextRate: (rate: number) => nextPlaybackRate(rate),
+          rateLabel: (rate: number) => playbackRateLabel(rate, t),
+          onRateChange: announceRate,
+        },
+      };
+      if (view.voiceFailed) {
+        const retriable = view.voiceFailed === 'retriable';
+        return {
+          status: 'failed',
+          ...shared,
+          failure: {
+            text: retriable ? t('voice.failed.retriable') : t('voice.failed.permanent'),
+            retriable,
+            retryLabel: t('thread.retry'),
+            discardLabel: t('voice.failed.discard'),
+            onRetry: () => retryVoice(view.id),
+            onDiscard: () => discardVoice(view.id),
+          },
+        };
+      }
+      if (view.pending) {
+        return {
+          status: 'pending',
+          ...shared,
+          progress: { percent: view.voiceUpload?.percent ?? null, label: t('voice.upload.label') },
+        };
+      }
+      return { status: 'ready', ...shared, src: `/v1/media/${recording.mediaId}/original` };
+    },
+    [t, announceRate, retryVoice, discardVoice],
+  );
+
+  // The microphone only where the composer renders: a strip replaces the composer, so there is no bundle and no
+  // microphone there (UI-D-865 state 2).
+  const voiceBundle: ChatComposerVoice = {
+    micLabel: t('voice.mic.label'),
+    micRequestingLabel: t('voice.mic.requesting'),
+    recordingLabel: t('voice.recording.status'),
+    timerLabel: t('voice.recording.timer'),
+    discardLabel: t('voice.recording.discard'),
+    sendLabel: t('voice.recording.send'),
+    limitWord: t('voice.recording.limitWord'),
+    interruptedWord: t('voice.recording.interruptedWord'),
+    notices: {
+      warning: t('voice.notice.warning'),
+      limit: t('voice.notice.limit'),
+      interrupted: t('voice.notice.interrupted'),
+      tooShort: t('voice.notice.tooShort'),
+    },
+    problems: {
+      blocked: t('voice.problem.blocked'),
+      missing: t('voice.problem.missing'),
+      busy: t('voice.problem.busy'),
+      failed: t('voice.problem.failed'),
+    },
+    live: {
+      started: t('voice.live.started'),
+      minute: (count: number) => t('voice.live.minute', { count }),
+      discarded: t('voice.live.discarded'),
+    },
+    formatClock: formatVoiceDuration,
+    onSendVoice,
+    // A recording pauses every playing voice message, so the speaker never feeds the microphone (A-UI-9).
+    onRecordingStart: pauseAllVoice,
+  };
+
+  /* ── The message menu (D-733, UI-D-870) ─────────────────────────────────────────────────────────────── */
+
+  /** "Bloquear {nome}" is the server's call (`canBlock`), and never for a person who left (nobody to block). */
+  const blockPerson = detail.canBlock && !other.removed ? other.membershipId : null;
+
+  /** A block made from the menu: the strip must follow at once, so the composer state is re-read after it. */
+  const blockAndRefresh: typeof blockMember = async (membershipId) => {
+    const answer = await blockMember(membershipId);
+    if (answer.ok) void refreshDetail();
+    return answer;
+  };
+
   const toBottom = () => {
     const el = scrollerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
     setNewCount(0);
   };
 
-  const items = useMemo(
-    () =>
-      chatRuns(views, keys, {
+  const items = useMemo(() => {
+    const runs = chatRuns(
+      views,
+      keys,
+      {
         today: t('day.today'),
         yesterday: t('day.yesterday'),
         pending: t('composer.sending'),
-      }),
-    [views, keys, t],
-  );
+        voiceProgress: (percent) => t('voice.upload.progress', { percent }),
+      },
+      voiceFor,
+    );
+    // UI-D-870: each SETTLED message of the other member carries the gutter trigger; the viewer's own never do.
+    const byId = new Map(views.map((view) => [view.id, view]));
+    return runs.map((item) => {
+      if (item.kind !== 'message' || item.side !== 'other') return item;
+      const view = byId.get(item.key);
+      if (!view || view.pending) return item;
+      return {
+        ...item,
+        menu: (
+          <MessageMenuTrigger
+            label={t('direct.menu.trigger')}
+            onOpen={() => setMenu({ messageId: view.id, voice: view.voice !== undefined })}
+          />
+        ),
+      };
+    });
+  }, [views, keys, t, voiceFor]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -658,8 +1021,52 @@ export function DirectThreadPane({
             }
             errorText={sendError ?? t('composer.errors.failed')}
             onSend={onSend}
+            voice={voiceBundle}
           />
         )}
+      </div>
+      <MessageMenuSheet
+        open={menu !== null}
+        onClose={() => setMenu(null)}
+        title={t('direct.menu.title')}
+        report={{
+          label: t('direct.menu.report'),
+          onSelect: () => {
+            if (menu) {
+              setReport({
+                subjectType: 'direct_message',
+                subjectId: menu.messageId,
+                voice: menu.voice,
+              });
+            }
+            setMenu(null);
+          },
+        }}
+        block={
+          blockPerson
+            ? {
+                label: t('direct.menu.block', { nome: other.name }),
+                onSelect: () => {
+                  setBlock({ membershipId: blockPerson, name: other.name });
+                  setMenu(null);
+                },
+              }
+            : null
+        }
+      />
+      <ReportAndBlock
+        report={report}
+        onReportClose={() => setReport(null)}
+        tenantName={tenantName}
+        reportAction={reportContent}
+        block={block}
+        onBlockClose={() => setBlock(null)}
+        blockAction={blockAndRefresh}
+        socialOn
+      />
+      {/* UI-D-850: the polite region the speed pills speak through; the speed itself is never stored. */}
+      <div data-chat-rate-status role="status" aria-live="polite" className="sr-only">
+        <span key={rateNote.count}>{rateNote.text}</span>
       </div>
     </div>
   );

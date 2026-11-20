@@ -493,3 +493,25 @@ export async function postDirectMessage(
   if (!res.ok) throw await apiError(res);
   return directSendResultSchema.parse(await res.json());
 }
+
+/**
+ * `POST /v1/chat/direct/voice-messages { toMembershipId, mediaId }` (11-22, D-734, VOICE-18): ONE recording to
+ * another member, by the id of a `ready` voice asset the caller owns and completed. Same pair rules and the same
+ * `{ conversationId, created, message }` answer as {@link postDirectMessage} (the FIRST send, of text or voice,
+ * creates the conversation, D-720). The API answers a recording still being normalized with a 409
+ * `voice_not_ready` (retriable), an unusable one with ONE 400 `voice_invalid`, a pair the database closed with
+ * the 409 `direct_closed`, and a take that was already stored with the stored message and `created: false`.
+ * Throws `ApiClientError` on a non-2xx.
+ */
+export async function postDirectVoice(
+  toMembershipId: string,
+  mediaId: string,
+): Promise<DirectSendResult> {
+  const res = await apiFetch('/v1/chat/direct/voice-messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ toMembershipId, mediaId }),
+  });
+  if (!res.ok) throw await apiError(res);
+  return directSendResultSchema.parse(await res.json());
+}

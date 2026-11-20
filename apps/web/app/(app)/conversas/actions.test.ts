@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
-import { sendDirectMessage } from './actions';
+import { sendDirectMessage, sendDirectVoice } from './actions';
 
 /**
  * 11-22 (CHAT-06, D-720, D-722; T-11-03, T-11-06) — the direct conversation's server actions. A server action is a
@@ -157,6 +157,76 @@ describe('sendDirectMessage (D-720)', () => {
     const logged = JSON.stringify(vi.mocked(console.error).mock.calls);
     expect(logged).toContain('chat.direct_send_failed');
     expect(logged).not.toContain('segredo');
+    expect(logged).not.toContain(OTHER);
+  });
+});
+
+describe('sendDirectVoice (D-734, VOICE-18)', () => {
+  const MEDIA = '0f000000-0000-4000-8000-0000000000f1';
+  const recorded = () => stored({ body: '', voice: { mediaId: MEDIA, durationSeconds: 42 } });
+
+  it('sends exactly { toMembershipId, mediaId } and answers the finished voice view and the conversation', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(201, recorded()));
+    const result = await sendDirectVoice(OTHER, MEDIA);
+
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe('/v1/chat/direct/voice-messages');
+    expect(sentBody()).toEqual({ toMembershipId: OTHER, mediaId: MEDIA });
+    expect(result).toMatchObject({
+      ok: true,
+      conversationId: CONVERSATION,
+      created: true,
+      view: {
+        side: 'own',
+        body: '',
+        voice: { mediaId: MEDIA, durationSeconds: 42, durationLabel: '0:42' },
+      },
+    });
+  });
+
+  it('refuses at the server what the API would refuse: a non-uuid, a missing id, an extra field', async () => {
+    for (const [to, media] of [
+      ['not-a-uuid', MEDIA],
+      [OTHER, 'not-a-uuid'],
+      [OTHER, undefined],
+      [undefined, MEDIA],
+    ] as const) {
+      await expect(sendDirectVoice(to, media)).resolves.toEqual({ ok: false, error: 'invalid' });
+    }
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('maps every refusal to the closed voice vocabulary; a closed pair is the neutral `closed`', async () => {
+    const cases: [Response, string][] = [
+      [refusal(409, 'CONFLICT', 'voice_not_ready'), 'not_ready'],
+      [refusal(409, 'CONFLICT', 'direct_closed'), 'closed'],
+      [refusal(409, 'CONFLICT'), 'retriable'],
+      [refusal(404, 'NOT_FOUND'), 'not_found'],
+      [refusal(429, 'RATE_LIMITED'), 'retriable'],
+      [refusal(500, 'INTERNAL'), 'retriable'],
+      [refusal(400, 'VALIDATION_FAILED', 'voice_invalid'), 'invalid'],
+    ];
+    for (const [response, code] of cases) {
+      vi.mocked(apiFetch).mockResolvedValueOnce(response);
+      await expect(sendDirectVoice(OTHER, MEDIA)).resolves.toEqual({ ok: false, error: code });
+    }
+  });
+
+  it('a transport failure is retriable; a 401 or 403 the bootstrap knows is a navigation', async () => {
+    vi.mocked(apiFetch).mockRejectedValueOnce(new Error('offline'));
+    await expect(sendDirectVoice(OTHER, MEDIA)).resolves.toEqual({
+      ok: false,
+      error: 'retriable',
+    });
+    vi.mocked(apiFetch).mockResolvedValueOnce(refusal(401, 'UNAUTHENTICATED'));
+    await expect(sendDirectVoice(OTHER, MEDIA)).rejects.toThrow('redirect:/entrar');
+  });
+
+  it('logs the shape only: no media id, no membership id', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(refusal(409, 'CONFLICT', 'direct_closed'));
+    await sendDirectVoice(OTHER, MEDIA);
+    const logged = JSON.stringify(vi.mocked(console.error).mock.calls);
+    expect(logged).toContain('chat.direct_voice_failed');
+    expect(logged).not.toContain(MEDIA);
     expect(logged).not.toContain(OTHER);
   });
 });

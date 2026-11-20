@@ -32,6 +32,8 @@ const messages = loadMessages(join(process.cwd(), 'messages', 'pt-BR'));
 const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   unblock: vi.fn(),
+  report: vi.fn(),
+  block: vi.fn(),
   refresh: vi.fn(),
   realtime: vi.fn(),
 }));
@@ -41,6 +43,8 @@ vi.mock('@/app/(app)/conversas/actions', () => ({
 }));
 vi.mock('@/components/feed/safety-actions', () => ({
   unblockMember: (...args: unknown[]) => mocks.unblock(...args),
+  reportContent: (...args: unknown[]) => mocks.report(...args),
+  blockMember: (...args: unknown[]) => mocks.block(...args),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
@@ -106,6 +110,9 @@ function renderPane(over: Partial<DirectThreadPaneProps> = {}) {
   );
 }
 
+/** The shipped toast surface (`role="status"`, fixed): any toast on screen. */
+const toasts = () => [...document.querySelectorAll('[role="status"].fixed')];
+
 const field = () => screen.getByLabelText('Mensagem') as HTMLTextAreaElement;
 const write = (text: string) => fireEvent.change(field(), { target: { value: text } });
 const sendButton = () => screen.getByRole('button', { name: 'Enviar mensagem' });
@@ -113,6 +120,8 @@ const sendButton = () => screen.getByRole('button', { name: 'Enviar mensagem' })
 beforeEach(() => {
   mocks.send.mockReset();
   mocks.unblock.mockReset();
+  mocks.report.mockReset();
+  mocks.block.mockReset();
   mocks.refresh.mockReset();
   mocks.realtime.mockReset();
   window.history.replaceState(null, '', `/conversas/com/${OTHER_ID}`);
@@ -170,7 +179,7 @@ describe('the lazy start (D-720, UI-D-864) — tracer', () => {
     await waitFor(() => expect(window.location.pathname).toBe(`/conversas/${CONVERSATION}`));
     // Focus stays in the composer; NO toast and NO confirmation row (unlike the support case).
     expect(document.activeElement).toBe(field());
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(toasts()).toHaveLength(0);
     expect(container.querySelector('[data-case-opened]')).toBeNull();
     expect(mocks.refresh).not.toHaveBeenCalled();
     // The pane now listens on the conversation's topic.
@@ -562,7 +571,8 @@ describe('a live change (UI-D-865: no toast, no announcement, no scroll, no focu
     expect(screen.queryByLabelText('Mensagem')).toBeNull();
     // No toast of any kind, the scroll and the focus did not move.
     expect(screen.getAllByText(CLOSED_TEXT)).toHaveLength(1);
-    expect(container.ownerDocument.querySelectorAll('[role="status"]')).toHaveLength(1);
+    expect(toasts()).toHaveLength(0);
+    expect(container.querySelectorAll('[data-composer-strip]')).toHaveLength(1);
     expect(scroller.scrollTop).toBe(40);
     expect(document.activeElement).toBe(heading);
     expect(mocks.refresh).not.toHaveBeenCalled();
@@ -671,5 +681,105 @@ describe('a refused send (D-722: silent and neutral)', () => {
     await waitFor(() => expect(field().value).toBe('Oi de novo'));
     expect(screen.queryByText('Algo deu errado. Tente novamente.')).toBeNull();
     expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+});
+
+/* ── Task 3: the message menu (D-733, UI-D-870) ─────────────────────────────────────────────────────── */
+
+describe('the message menu', () => {
+  const triggers = (container: HTMLElement) =>
+    [...container.querySelectorAll('[data-chat-message] [data-message-menu]')] as HTMLElement[];
+
+  it('draws a trigger beside each message of the OTHER member only, named "Mais ações da mensagem"', () => {
+    const { container } = renderPane(paneProps('open'));
+    const found = triggers(container);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.getAttribute('aria-label')).toBe('Mais ações da mensagem');
+    // It sits in the gutter row of the incoming bubble, never beside the viewer's own.
+    expect(
+      found[0]?.closest('[data-chat-gutter]')?.querySelector('[data-chat-bubble="other"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-chat-bubble="own"]')?.closest('[data-chat-gutter]'),
+    ).toBeNull();
+  });
+
+  it('draws no trigger on an optimistic bubble or in the empty thread', () => {
+    const { container } = renderPane({ initialConversationId: null, initialViews: [] });
+    expect(triggers(container)).toHaveLength(0);
+  });
+
+  it('opens "Opções da mensagem" with Denunciar and "Bloquear Carla Nunes", and no other row', async () => {
+    const { container } = renderPane(paneProps('open'));
+    fireEvent.click(triggers(container)[0] as HTMLElement);
+    const dialog = await screen.findByRole('dialog', { name: 'Opções da mensagem' });
+    expect([...dialog.querySelectorAll('button')].map((b) => b.textContent)).toEqual([
+      'Denunciar mensagem',
+      'Bloquear Carla Nunes',
+    ]);
+  });
+
+  it('the blocked member (closed strip) and the blocker (blocker strip) can still report; the blocker is not offered Bloquear', async () => {
+    const closed = renderPane({ ...paneProps('closed'), canBlock: true });
+    fireEvent.click(triggers(closed.container)[0] as HTMLElement);
+    let dialog = await screen.findByRole('dialog', { name: 'Opções da mensagem' });
+    expect(screen.getByRole('button', { name: 'Denunciar mensagem' })).toBeTruthy();
+    expect(dialog).toBeTruthy();
+    cleanup();
+
+    const blocker = renderPane({ ...paneProps('blocker'), canBlock: false });
+    fireEvent.click(triggers(blocker.container)[0] as HTMLElement);
+    dialog = await screen.findByRole('dialog', { name: 'Opções da mensagem' });
+    expect([...dialog.querySelectorAll('button')].map((b) => b.textContent)).toEqual([
+      'Denunciar mensagem',
+    ]);
+  });
+
+  it('a removed account (or canBlock false from the server, as for staff) drops Bloquear and keeps Denunciar', async () => {
+    const gone: DirectOtherView = {
+      membershipId: null,
+      name: 'Membro removido',
+      avatar: null,
+      removed: true,
+      profileHref: null,
+    };
+    const { container } = renderPane({ ...paneProps('removed'), other: gone, canBlock: true });
+    fireEvent.click(triggers(container)[0] as HTMLElement);
+    const dialog = await screen.findByRole('dialog', { name: 'Opções da mensagem' });
+    expect([...dialog.querySelectorAll('button')].map((b) => b.textContent)).toEqual([
+      'Denunciar mensagem',
+    ]);
+  });
+
+  it('Denunciar opens the shared report sheet for a direct_message and sends the message id once', async () => {
+    mocks.report.mockResolvedValue({ ok: true, code: 'ok' });
+    const { container } = renderPane(paneProps('open'));
+    fireEvent.click(triggers(container)[0] as HTMLElement);
+    fireEvent.click(await screen.findByRole('button', { name: 'Denunciar mensagem' }));
+    await screen.findByRole('dialog', { name: 'Denunciar mensagem' });
+    // The privacy line of a message names who will NOT see it; the five reasons are the shared ones.
+    fireEvent.click(screen.getByRole('radio', { name: /spam/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar denúncia' }));
+    await waitFor(() => expect(mocks.report).toHaveBeenCalledTimes(1));
+    expect(mocks.report).toHaveBeenCalledWith({
+      subjectType: 'direct_message',
+      subjectId: '33333333-3333-4333-8333-333333333331',
+      reason: 'spam',
+    });
+  });
+
+  it("Bloquear opens the shared dialog with the other member's MEMBERSHIP id; a block swaps the composer for the strip", async () => {
+    mocks.block.mockResolvedValue({ ok: true, code: 'ok', changed: true });
+    stubDetail(() => Response.json(detailAnswer('blocker', false)));
+    const { container } = renderPane(paneProps('open'));
+    fireEvent.click(triggers(container)[0] as HTMLElement);
+    fireEvent.click(await screen.findByRole('button', { name: 'Bloquear Carla Nunes' }));
+    const confirm = await screen.findByRole('button', { name: 'Bloquear' });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(mocks.block).toHaveBeenCalledWith(OTHER_ID));
+    await waitFor(() =>
+      expect(container.querySelector('[data-composer-strip="blocker"]')).not.toBeNull(),
+    );
+    expect(screen.queryByLabelText('Mensagem')).toBeNull();
   });
 });

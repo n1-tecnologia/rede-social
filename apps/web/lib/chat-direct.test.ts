@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
-import { fetchDirectDetail, fetchDirectList, fetchDirectWith, postDirectMessage } from './chat';
+import {
+  fetchDirectDetail,
+  fetchDirectList,
+  fetchDirectWith,
+  postDirectMessage,
+  postDirectVoice,
+} from './chat';
 
 /**
  * 11-18 (CHAT-06, CHAT-07, D-719, D-720, D-722) — the three direct-chat loaders against a stubbed
@@ -161,5 +167,45 @@ describe('postDirectMessage (11-22, D-720)', () => {
     });
     vi.mocked(apiFetch).mockResolvedValueOnce(json(201, { ...stored, blockedMe: true }));
     await expect(postDirectMessage(MEMBER, 'Oi')).rejects.toThrow();
+  });
+});
+
+describe('postDirectVoice (11-22, D-734)', () => {
+  const MEDIA = '0f000000-0000-4000-8000-0000000000f1';
+
+  it('posts exactly { toMembershipId, mediaId } and parses the strict answer', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(201, {
+        conversationId: CONVERSATION,
+        created: false,
+        message: {
+          id: '0d000000-0000-4000-8000-0000000000d1',
+          seq: 2,
+          side: 'member',
+          body: '',
+          createdAt: '2026-11-19T17:12:00.000000Z',
+          author: null,
+          authorIsViewer: true,
+          voice: { mediaId: MEDIA, durationSeconds: 12 },
+        },
+      }),
+    );
+    await expect(postDirectVoice(MEMBER, MEDIA)).resolves.toMatchObject({ created: false });
+    const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? [];
+    expect(path).toBe('/v1/chat/direct/voice-messages');
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      toMembershipId: MEMBER,
+      mediaId: MEDIA,
+    });
+  });
+
+  it('throws the typed client error with the API word (409 voice_not_ready)', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      json(409, { error: { code: 'CONFLICT', details: { chat: 'voice_not_ready' } } }),
+    );
+    await expect(postDirectVoice(MEMBER, MEDIA)).rejects.toMatchObject({
+      status: 409,
+      details: { chat: 'voice_not_ready' },
+    });
   });
 });
