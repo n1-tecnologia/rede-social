@@ -211,6 +211,7 @@ const SAFETY: Record<string, Copy> = {
   'safety.queue.viewContent': copy('Ver conteúdo'),
   'safety.queue.meta': copy('Motivo: {motivo} · por {nome} · {data}', 'motivo', 'nome', 'data'),
   'safety.queue.removedMember': copy('Membro removido'),
+  'safety.queue.author': copy('Autor: {nome}', 'nome'),
   'safety.queue.state.open': copy('Aberta'),
   'safety.queue.state.dismissed': copy('Ignorada'),
   'safety.queue.state.contentRemoved': copy('Conteúdo removido'),

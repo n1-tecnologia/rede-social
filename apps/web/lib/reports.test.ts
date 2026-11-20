@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
-import { fetchReports } from './reports';
+import { fetchReports, postReportResolve } from './reports';
 
 /**
  * 11-18 (MODER-05, D-730, D-731) — the admin queue loader against a stubbed transport: the `estado`
@@ -69,5 +69,40 @@ describe('fetchReports', () => {
       json(200, { items: [{ ...item(), conversationId: ID }], nextCursor: null }),
     );
     await expect(fetchReports({})).rejects.toThrow();
+  });
+});
+
+describe('postReportResolve', () => {
+  it("posts the verb to the report's own resolve route as JSON and parses the strict answer", async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, { id: ID, status: 'dismissed' }));
+    const done = await postReportResolve(ID, { resolution: 'dismiss' });
+    expect(done).toEqual({ id: ID, status: 'dismissed' });
+    const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? [];
+    expect(path).toBe(`/v1/admin/reports/${ID}/resolve`);
+    expect(init).toMatchObject({ method: 'POST' });
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({ resolution: 'dismiss' });
+  });
+
+  it('carries the internal reason of a block', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, { id: ID, status: 'author_blocked' }));
+    await postReportResolve(ID, { resolution: 'block_author', reason: 'spam' });
+    const init = vi.mocked(apiFetch).mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({ resolution: 'block_author', reason: 'spam' });
+  });
+
+  it('a 409 keeps its code and details on the typed error', async () => {
+    vi.mocked(apiFetch).mockImplementation(async () =>
+      json(409, { error: { code: 'CONFLICT', details: { report: 'not_removable' } } }),
+    );
+    await expect(postReportResolve(ID, { resolution: 'remove_content' })).rejects.toMatchObject({
+      status: 409,
+      code: 'CONFLICT',
+      details: { report: 'not_removable' },
+    });
+  });
+
+  it('refuses an answer with an unknown key', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, { id: ID, status: 'dismissed', extra: 1 }));
+    await expect(postReportResolve(ID, { resolution: 'dismiss' })).rejects.toThrow();
   });
 });

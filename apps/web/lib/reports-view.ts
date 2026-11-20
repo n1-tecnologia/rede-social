@@ -227,8 +227,15 @@ function bodyOf(item: ReportItem, t: Translator): ReportBodyView {
   }
 }
 
-function statePillOf(item: ReportItem, t: Translator): ReportStatePill {
-  const status: ReportStatus = item.status;
+/**
+ * The state pill of a report in `status` (UI-D-873). Exported so the row a resolve just changed reads from the
+ * same table as a freshly listed one: a community's removal is an archive and reads "Comunidade arquivada".
+ */
+export function reportStatePill(
+  status: ReportStatus,
+  subjectType: ReportSubjectType,
+  t: Translator,
+): ReportStatePill {
   switch (status) {
     case 'open':
       return { label: t('queue.state.open'), tone: 'neutral' };
@@ -238,7 +245,7 @@ function statePillOf(item: ReportItem, t: Translator): ReportStatePill {
       // A community's removal is an archive, and the administrator reads it as one (D-732).
       return {
         label: t(
-          item.subjectType === 'community'
+          subjectType === 'community'
             ? 'queue.state.communityArchived'
             : 'queue.state.contentRemoved',
         ),
@@ -267,7 +274,7 @@ export function reportRowView(
     id: item.id,
     subjectType: item.subjectType,
     typePill: reportSubjectView(item.subjectType, t).typePill,
-    statePill: statePillOf(item, t),
+    statePill: reportStatePill(item.status, item.subjectType, t),
     body: bodyOf(item, t),
     meta: t('queue.meta', {
       motivo: t(REASON_KEY[item.reason]),

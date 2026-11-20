@@ -96,6 +96,7 @@
       "viewContent": "Ver conteúdo",
       "meta": "Motivo: {motivo} · por {nome} · {data}",
       "removedMember": "Membro removido",
+      "author": "Autor: {nome}",
       "state": {
         "open": "Aberta",
         "dismissed": "Ignorada",

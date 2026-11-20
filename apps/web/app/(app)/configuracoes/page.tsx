@@ -288,6 +288,17 @@ export default async function SettingsPage({
                 trailing={null}
               />
             ) : null}
+            {/* 11-25 (UI-D-637, MODER-05): the reports queue, right under the log it feeds. Same
+                `moderation.manage` gate as the screen's own `notFound()`; absent on the platform host
+                because this whole group is (the page answers notFound() there). */}
+            {canModerate ? (
+              <Row
+                icon="flag"
+                label={ts('settings.reportsRow')}
+                href="/configuracoes/denuncias"
+                trailing={null}
+              />
+            ) : null}
             {/* 08.2-07 (UI-D-382); 2026-10-24: the store's Gerenciar (the "· Loja" menu's last row), as
                 the Cursos row opens the courses' Gerenciar. */}
             {canManageStore ? (
