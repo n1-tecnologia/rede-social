@@ -50,6 +50,11 @@ export interface CommunityHeaderProps {
    * Optional 44x44 control at `top-3 right-3`, mirroring the back control on the other side of the
    * cover. The host decides whether there is one at all — on this surface that is the admin's
    * "Editar comunidade" entry, and a member simply gets nothing.
+   *
+   * 11-24 (UI-D-869): the slot is a props-only CLUSTER, a flex row with an 8px gap, so the host may
+   * pass several 44px controls (the edit pencil and the "Mais opções da comunidade" ellipsis) and they
+   * sit side by side in the order given, after the back control in the focus order. The module adds no
+   * word and draws none of them.
    */
   action?: ReactNode;
   /** Optional slot BESIDE the name (the neutral "Arquivada" pill, UI-D-37). */
@@ -105,7 +110,14 @@ export function CommunityHeader({
             <path d="m15 18-6-6 6-6" />
           </svg>
         </BackLink>
-        {action ? <div className="absolute top-3 right-3 z-10">{action}</div> : null}
+        {action ? (
+          <div
+            data-community-actions
+            className="absolute top-3 right-3 z-10 flex items-center gap-2"
+          >
+            {action}
+          </div>
+        ) : null}
       </CommunityCover>
 
       <div className="px-4 pb-4">

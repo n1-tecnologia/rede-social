@@ -44,6 +44,7 @@ import {
   storyViewerLabels,
 } from '@/lib/story-view';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
+import { CommunityMenu } from './CommunityMenu';
 import { CommunityPosts } from './CommunityPosts';
 import { DeleteCommunityControl } from './DeleteCommunityControl';
 import { LockedCommunity } from './LockedCommunity';
@@ -462,6 +463,29 @@ export default async function CommunityPage({
     </>
   ) : undefined;
 
+  /**
+   * 11-24 (D-733, AD-1, AD-8, UI-D-869): the header's "Mais opções da comunidade", from the viewer's `canReport`
+   * and `canBlock` riders and nothing else (never a role, never `social`). The creator's riders are false, so
+   * they get no control; staff get Denunciar and never Bloquear. It is drawn only on THIS page of an ACTIVE
+   * community: the locked page above, an archived community and the not-found screen show no content to
+   * report, so they get none (the locked branch builds its own header and never reaches this line).
+   */
+  const menuSafety = postMenuSafety(bootstrap);
+  const menuBlock =
+    viewer.canBlock === true && community.kind === 'member' && community.createdBy
+      ? { membershipId: community.createdBy.membershipId, name: community.createdBy.displayName }
+      : null;
+  const menuNode =
+    !archived && menuSafety !== undefined && (viewer.canReport === true || menuBlock !== null) ? (
+      <CommunityMenu
+        communityId={community.id}
+        canReport={viewer.canReport === true}
+        block={menuBlock}
+        tenantName={bootstrap.tenant.displayName}
+        safety={menuSafety}
+      />
+    ) : null;
+
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col">
       <CommunityHeader
@@ -476,16 +500,22 @@ export default async function CommunityPage({
         // not a button: the form is a full-screen route (the `ComposeFab` rule). Its reactivate
         // control stays as the SECOND route back from archive (D-90); the first is the Reativar
         // island in the archived note below.
+        // 11-24: the slot is a cluster, so the edit pencil and the menu sit side by side (pencil first).
         action={
-          canEdit ? (
-            <a
-              href={`/comunidades/${community.id}/editar`}
-              aria-label={tc('form.editTitle')}
-              data-community-edit
-              className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm transition-colors hover:bg-black/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black/40"
-            >
-              <Pencil aria-hidden size={20} />
-            </a>
+          canEdit || menuNode ? (
+            <>
+              {canEdit ? (
+                <a
+                  href={`/comunidades/${community.id}/editar`}
+                  aria-label={tc('form.editTitle')}
+                  data-community-edit
+                  className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm transition-colors hover:bg-black/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black/40"
+                >
+                  <Pencil aria-hidden size={20} />
+                </a>
+              ) : null}
+              {menuNode}
+            </>
           ) : undefined
         }
         statusPill={

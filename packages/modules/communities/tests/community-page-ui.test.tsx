@@ -203,6 +203,54 @@ describe('CommunityHeader — UI-D-43 without D-67’s owner block', () => {
     ).toBeTruthy();
   });
 
+  it('7c. 11-24 (UI-D-869): the action slot holds a CLUSTER: two 44px controls side by side, after the back control, and a single action is unchanged', () => {
+    header({
+      action: (
+        <>
+          <a href="/edit" aria-label="edit-label" className="min-h-[44px] min-w-[44px]">
+            pencil
+          </a>
+          <button type="button" aria-label="more-label" className="min-h-[44px] min-w-[44px]">
+            ellipsis
+          </button>
+        </>
+      ),
+    });
+    const edit = screen.getByRole('link', { name: 'edit-label' });
+    const more = screen.getByRole('button', { name: 'more-label' });
+    const cluster = edit.parentElement as HTMLElement;
+    expect(more.parentElement).toBe(cluster);
+    // Side by side with a gap: a flex row at the cover's right corner, on top of the cover.
+    expect(cluster.className).toContain('absolute');
+    expect(cluster.className).toContain('top-3');
+    expect(cluster.className).toContain('right-3');
+    expect(cluster.className).toContain('z-10');
+    expect(cluster.className).toContain('flex');
+    expect(cluster.className).toContain('items-center');
+    expect(cluster.className).toContain('gap-2');
+    // The back control stays at the opposite corner and comes first in the focus order.
+    const back = screen.getByRole('link', { name: 'back-label' });
+    expect(back.className).toContain('left-3');
+    const order = [back, edit, more];
+    for (let index = 1; index < order.length; index += 1) {
+      expect(
+        (order[index - 1] as HTMLElement).compareDocumentPosition(order[index] as HTMLElement) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it('7d. 11-24: with no action there is no cluster at all, and a single action sits in the same slot', () => {
+    const { unmount } = header();
+    expect(document.querySelector('[data-community-actions]')).toBeNull();
+    unmount();
+    header({ action: <a href="/edit">single-action</a> });
+    const slot = screen.getByText('single-action').parentElement as HTMLElement;
+    expect(slot.className).toContain('top-3');
+    expect(slot.className).toContain('right-3');
+    expect(slot.hasAttribute('data-community-actions')).toBe(true);
+  });
+
   it('8. an empty description closes the header up — no reserved height, no placeholder line', () => {
     header({ description: '' });
 
