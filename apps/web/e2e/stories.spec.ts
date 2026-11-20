@@ -5,6 +5,7 @@ import communityMessages from '../messages/pt-BR/communities.json' with { type: 
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import loginMessages from '../messages/pt-BR/login.json' with { type: 'json' };
 import moderationMessages from '../messages/pt-BR/moderation.json' with { type: 'json' };
+import safetyMessages from '../messages/pt-BR/safety.json' with { type: 'json' };
 import socialMessages from '../messages/pt-BR/social.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import {
@@ -2356,7 +2357,12 @@ test.describe('2026-10-20 — the client’s FRONT.pdf corrections to stories', 
     }
   });
 
-  test('a MEMBER’s viewer offers the share but no "Mais opções"', async ({ page, isMobile }) => {
+  // Phase 11 (11-24): "Mais opções" now shows for every viewer of someone else's story, because "Denunciar story" is
+  // theirs. The case keeps its point (a member has no CURATOR door): the sheet holds the report row and nothing else.
+  test('a MEMBER’s viewer offers the share and a "Mais opções" holding only "Denunciar story"', async ({
+    page,
+    isMobile,
+  }) => {
     test.skip(!isMobile, 'the overlay is the phone’s');
     await login(page, users.demoMember, SEED_PASSWORD);
     await tenantCircle(page).click();
@@ -2364,7 +2370,18 @@ test.describe('2026-10-20 — the client’s FRONT.pdf corrections to stories', 
     await expect(dialog).toBeVisible();
 
     await expect(dialog.getByRole('button', { name: V.share, exact: true })).toBeVisible();
-    await expect(dialog.getByRole('button', { name: V.more, exact: true })).toHaveCount(0);
+    await dialog.getByRole('button', { name: V.more, exact: true }).dispatchEvent('click');
+    const sheet = page.getByRole('dialog', { name: H.menu.title });
+    await expect(
+      sheet.getByRole('button', { name: safetyMessages.safety.menu.reportStory }),
+    ).toBeVisible();
+    await expect(sheet.getByRole('button', { name: H.menu.delete })).toHaveCount(0);
+    await expect(sheet.getByRole('button', { name: H.menu.highlight })).toHaveCount(0);
+    await expect(
+      sheet.getByRole('button', {
+        name: new RegExp(`^${safetyMessages.safety.menu.block.split('{nome}')[0]}`),
+      }),
+    ).toHaveCount(0);
   });
 
   test('an ADMIN deletes a story from its deep link: back on Início with the toast, then the link is the not-found screen', async ({

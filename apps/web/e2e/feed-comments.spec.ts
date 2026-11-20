@@ -105,6 +105,8 @@ async function submitComment(page: Page, body: string): Promise<void> {
 
 /** Deletes a row this spec created, so the shared seed is left exactly as it was found. */
 async function deleteOwnComment(page: Page, body: string): Promise<void> {
+  // Phase 11 (11-20): the row's trash became the "Mais ações do comentário" menu; the delete row is inside it.
+  await row(page, body).locator('[data-comment-more]').click();
   await row(page, body).locator('[data-comment-delete]').click();
   await page.getByRole('button', { name: C.delete.confirm, exact: true }).click();
   await expect(row(page, body)).toHaveCount(0);
@@ -291,6 +293,8 @@ test.describe('FEED-05/FEED-06 — writing, replying, liking and deleting', () =
     await replyHeart.click();
 
     // T-04-44: the reply belongs to a DIFFERENT seeded member, so no delete control is drawn on it.
+    // Phase 11 (11-20): the menu is opened first, so "no delete row" is read from the rows that exist there.
+    await row(page, seededComments.firstPostReplyBody).locator('[data-comment-more]').click();
     await expect(
       row(page, seededComments.firstPostReplyBody).locator('[data-comment-delete]'),
     ).toHaveCount(0);

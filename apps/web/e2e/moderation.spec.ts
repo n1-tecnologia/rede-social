@@ -74,6 +74,8 @@ test('moderation tracer', async ({ page }, testInfo) => {
   await expect(commentRow(page, replyTwo)).toBeVisible();
 
   // UI-D-276: the shipped control, named for a moderator's act on someone else's comment.
+  // Phase 11 (11-20): the trash became the row's "Mais ações do comentário" menu; the same delete row is in it.
+  await root.locator('[data-comment-more]').click();
   const control = root.locator('[data-comment-delete]');
   await expect(control).toHaveAttribute('data-comment-removal', 'moderation');
   await expect(control).toHaveAccessibleName(
@@ -137,6 +139,8 @@ test('story removal', async ({ page }, testInfo) => {
   const row = commentRow(page, commentId);
   await expect(row).toBeVisible();
 
+  // Phase 11 (11-20): the menu first (dispatched AT the element, the dev-overlay rule), then its delete row.
+  await row.locator('[data-comment-more]').dispatchEvent('click');
   const control = row.locator('[data-comment-delete]');
   await expect(control).toHaveAttribute('data-comment-removal', 'moderation');
   await expect(control).toHaveAccessibleName(
@@ -223,7 +227,9 @@ function sheet(page: Page): Locator {
 
 /** Taps the row's own trash control (never a reply's) and confirms the MODERATION dialog. */
 async function removeAsModerator(page: Page, commentId: string): Promise<void> {
-  const own = commentRow(page, commentId).locator(':scope > div > div [data-comment-delete]');
+  // Phase 11 (11-20): open the row's menu first; the delete row lives inside the row's own sheet.
+  await commentRow(page, commentId).locator('[data-comment-more]').click();
+  const own = commentRow(page, commentId).locator('[data-comment-delete]');
   await expect(own).toHaveAttribute('data-comment-removal', 'moderation');
   await own.click();
   await expect(page.getByText(M.comment.title, { exact: true })).toBeVisible();
@@ -384,6 +390,8 @@ test('no moderation control for support or a member; the own dialog keeps parity
     await login(page, email, SEED_PASSWORD);
     await page.goto(`/post/${postId}`);
     await expect(commentRow(page, theirs)).toBeVisible();
+    // Phase 11 (11-20): the row now has a menu (Denunciar); open it so "no delete row" is read from its rows.
+    await commentRow(page, theirs).locator('[data-comment-more]').click();
     await expect(commentRow(page, theirs).locator('[data-comment-delete]')).toHaveCount(0);
   }
 
@@ -393,7 +401,8 @@ test('no moderation control for support or a member; the own dialog keeps parity
   await page.context().clearCookies();
   await login(page, users.demoAdmin, SEED_PASSWORD);
   await page.goto(`/post/${postId}`);
-  const own = commentRow(page, mine).locator(':scope > div > div [data-comment-delete]');
+  await commentRow(page, mine).locator('[data-comment-more]').click();
+  const own = commentRow(page, mine).locator('[data-comment-delete]');
   await expect(own).toHaveAttribute('data-comment-removal', 'own');
   await expect(own).toHaveAccessibleName(F.comments.delete.label);
   await own.click();

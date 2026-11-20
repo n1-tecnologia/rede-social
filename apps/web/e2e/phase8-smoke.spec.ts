@@ -297,7 +297,9 @@ test.describe('Phase 8 smoke — moderation, the admin panel and the phone creat
     await row(rootId).locator('[data-replies-toggle]').click();
     for (const id of replyIds) await expect(row(id)).toBeVisible();
 
-    const control = row(rootId).locator(':scope > div > div [data-comment-delete]');
+    // Phase 11 (11-20): the row's menu first, then the delete row inside it.
+    await row(rootId).locator('[data-comment-more]').click();
+    const control = row(rootId).locator('[data-comment-delete]');
     await expect(control).toHaveAttribute('data-comment-removal', 'moderation');
     await expect(control).toHaveAccessibleName(
       M.comment.label.replace('{author}', author.displayName),
