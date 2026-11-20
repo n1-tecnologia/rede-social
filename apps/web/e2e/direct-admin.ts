@@ -412,3 +412,25 @@ export async function reportCountOf(tenant: DirectTenant, subjectType: string): 
      where t.slug = ${tenant.slug} and r.subject_type = ${subjectType}`;
   return row?.n ?? 0;
 }
+
+/** The ids of the tenant's reports of one subject type, oldest first. */
+export async function reportIdsOf(tenant: DirectTenant, subjectType: string): Promise<string[]> {
+  const rows = await sql()<{ id: string }[]>`
+    select r.id::text as id from public.content_reports r
+      join public.tenants t on t.id = r.tenant_id
+     where t.slug = ${tenant.slug} and r.subject_type = ${subjectType}
+     order by r.created_at`;
+  return rows.map((row) => row.id);
+}
+
+/**
+ * `resetDirectState` plus the tenant's reports: the clean slate between two cases of `safety.spec.ts`. The
+ * moderation log is append-only and is left alone (a spec reads only its newest rows); the content a case wrote is
+ * removed by prefix when the tenant is dropped.
+ */
+export async function resetSafetyState(tenant: DirectTenant): Promise<void> {
+  await resetDirectState(tenant);
+  await sql()`
+    delete from public.content_reports r using public.tenants t
+     where t.id = r.tenant_id and t.slug = ${tenant.slug}`;
+}
