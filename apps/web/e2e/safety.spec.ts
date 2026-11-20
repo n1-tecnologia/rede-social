@@ -3,10 +3,10 @@ import chatMessages from '../messages/pt-BR/chat.json' with { type: 'json' };
 import moderationMessages from '../messages/pt-BR/moderation.json' with { type: 'json' };
 import notificationsMessages from '../messages/pt-BR/notifications.json' with { type: 'json' };
 import safetyMessages from '../messages/pt-BR/safety.json' with { type: 'json' };
-import socialMessages from '../messages/pt-BR/social.json' with { type: 'json' };
 import storiesMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import { closeAdmin, createFeedCommentAs, createFeedPostAs, membershipForEmail } from './admin';
 import {
+  blockAs,
   closeDirectAdmin,
   commentIsRemoved,
   communityStatusOf,
@@ -14,6 +14,7 @@ import {
   type DirectTenant,
   directSlug,
   dropDirectTenant,
+  memberBlockExists,
   moderationActionsOf,
   type Person,
   provisionDirectTenant,
@@ -24,7 +25,7 @@ import {
   resetSafetyState,
   sendDirectAs,
 } from './direct-admin';
-import { login, SEED_PASSWORD } from './fixtures';
+import { hosts, isRemote, login, SEED_PASSWORD } from './fixtures';
 import { closeJourneyAdmin, createMemberCommunityAs, createMemberStoryAs } from './member-journey';
 import { closeSocialAdmin, followMember } from './social-admin';
 import { closeTenantFixtures } from './tenant-fixtures';
@@ -68,7 +69,6 @@ const N = notificationsMessages.notifications;
 const _N = notificationsMessages.notifications;
 const SA = safetyMessages.safety;
 const ST = storiesMessages.stories;
-const _S = socialMessages.social;
 const _ST = storiesMessages.stories;
 
 const run = Date.now().toString(36);
@@ -480,5 +480,148 @@ test.describe('denúncia e bloqueio no navegador', () => {
     await bell.click();
     await expect(page).toHaveURL(/\/configuracoes\/denuncias$/);
     await expect(page.locator('[data-reports-list]')).toBeVisible();
+  });
+
+  // ── 8. two administrators ──────────────────────────────────────────────────────────────────────
+
+  test('8. two administrators resolving one report leave one winner; the other reads that it was already resolved', async ({
+    page,
+    browser,
+    contextOptions,
+    viewport,
+    isMobile,
+    hasTouch,
+    userAgent,
+    deviceScaleFactor,
+  }) => {
+    const { bia } = tenant;
+    const postId = await createFeedPostAs(
+      tenant.admin.email,
+      tenant.slug,
+      `${DIRECT_PREFIX}duas ${run}`,
+    );
+    const reportId = await reportAs(tenant, bia, 'feed_post', postId);
+
+    // Both administrators have the same open row on screen.
+    await login(page, tenant.admin.email, tenant.password, tenant.origin);
+    await openQueue(page);
+    const second = await contextAs(
+      browser,
+      tenant.admin2,
+      deviceOf({ contextOptions, viewport, isMobile, hasTouch, userAgent, deviceScaleFactor }),
+    );
+    try {
+      const sp = second.page;
+      await openQueue(sp);
+      await expect(queueRow(page, reportId).locator('[data-report-resolve]')).toBeVisible();
+      await expect(queueRow(sp, reportId).locator('[data-report-resolve]')).toBeVisible();
+
+      // The first one ignores it.
+      const first = await openResolve(page, reportId);
+      await first.getByRole('button', { name: M.report.resolve.dismiss }).click();
+      await expect(toast(page)).toContainText(SA.queue.toasts.resolved);
+      await expect(queueRow(page, reportId)).toContainText(SA.queue.state.dismissed);
+
+      // The second, still holding the stale row, asks for the same thing and meets the 409 sentence.
+      const stale = await openResolve(sp, reportId);
+      await stale.getByRole('button', { name: M.report.resolve.dismiss }).click();
+      await expect(toast(sp)).toContainText(SA.queue.toasts.alreadyResolved);
+      await expect(queueRow(sp, reportId).locator('[data-report-resolve]')).toHaveCount(0);
+      expect(await reportStatusOf(reportId)).toBe('dismissed');
+    } finally {
+      await second.context.close();
+    }
+  });
+
+  // ── 9. already reported ────────────────────────────────────────────────────────────────────────
+
+  test('9. reporting the same thing twice reads the already-reported sentence and stores one report', async ({
+    page,
+  }) => {
+    const { bia } = tenant;
+    const { postId, commentId } = await postWithComment('repetida');
+    await reportAs(tenant, bia, 'post_comment', commentId);
+
+    await login(page, bia.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/post/${postId}`);
+    const row = await openCommentMenu(page, commentId);
+    await row.locator('[data-comment-report]').click();
+    await fileReport(page, SA.subject.postComment.title, SA.reasons.harassment);
+    await expect(toast(page)).toContainText(SA.sheet.already);
+    expect(await reportCountOf(tenant, 'post_comment')).toBe(1);
+  });
+
+  // ── 10. the staff viewer ───────────────────────────────────────────────────────────────────────
+
+  test('10. the support user is offered Denunciar on a member’s comment but never Bloquear', async ({
+    page,
+  }) => {
+    const { support } = tenant;
+    const { postId, commentId } = await postWithComment('equipe');
+
+    await login(page, support.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/post/${postId}`);
+    const row = await openCommentMenu(page, commentId);
+    await expect(row.locator('[data-comment-report]')).toBeVisible();
+    await expect(row.locator('[data-comment-block]')).toHaveCount(0);
+    await expect(row.locator('[data-comment-delete]')).toHaveCount(0);
+  });
+
+  // ── 11. Membros bloqueados ─────────────────────────────────────────────────────────────────────
+
+  test('11. Membros bloqueados lists the person with one-tap Desbloquear, then the empty state; only the administrator has the Denúncias row', async ({
+    page,
+  }) => {
+    const { ana, bia } = tenant;
+    await blockAs(tenant, bia, ana);
+
+    await login(page, bia.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/configuracoes`);
+    await expect(
+      page.locator('main').getByRole('link', { name: SA.settings.blockedRow }),
+    ).toBeVisible();
+    await expect(
+      page.locator('main').getByRole('link', { name: SA.settings.reportsRow }),
+    ).toHaveCount(0);
+
+    await page.goto(`${tenant.origin}/configuracoes/bloqueados`);
+    const list = page.locator('main');
+    await expect(list.getByText(ana.name)).toBeVisible();
+    await list.getByRole('button', { name: SA.blocked.unblock }).click();
+    await expect(toast(page)).toContainText(SA.block.unblocked.replace('{nome}', ana.name));
+    await expect(list.getByText(SA.blocked.emptyTitle)).toBeVisible();
+    expect(await memberBlockExists(tenant, bia, ana)).toBe(false);
+
+    // The administrator's own settings carry the Denúncias row and it opens the queue.
+    await page.context().clearCookies();
+    await login(page, tenant.admin.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/configuracoes`);
+    await page.locator('main').getByRole('link', { name: SA.settings.reportsRow }).click();
+    await expect(page).toHaveURL(/\/configuracoes\/denuncias$/);
+  });
+
+  // ── 12. not found ──────────────────────────────────────────────────────────────────────────────
+
+  test('12. a member who does not moderate meets the standard not-found screen on the queue', async ({
+    page,
+  }) => {
+    await login(page, tenant.bia.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/configuracoes/denuncias`);
+    await expect(page.getByRole('heading', { name: '404' })).toBeVisible();
+    await expect(page.locator('[data-reports-list]')).toHaveCount(0);
+  });
+
+  test('13. the platform host meets the not-found screen on the queue, Membros bloqueados and Conversas', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    const superEmail = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
+    const superPassword = process.env.SUPER_ADMIN_PASSWORD;
+    test.skip(!superPassword, 'SUPER_ADMIN_PASSWORD is required for the platform host');
+    await login(page, superEmail, superPassword ?? '', hosts.platform);
+    for (const path of ['/configuracoes/denuncias', '/configuracoes/bloqueados', '/conversas']) {
+      await page.goto(`${hosts.platform}${path}`);
+      await expect(page.getByRole('heading', { name: '404' })).toBeVisible();
+    }
   });
 });
