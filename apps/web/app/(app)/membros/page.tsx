@@ -1,11 +1,12 @@
 import { MEMBERS_MAX_QUERY_LENGTH } from '@rede-social/contracts/profiles';
+import { CHAT_PERMISSIONS } from '@rede-social/module-chat/contracts';
 import { PageHeader } from '@rede-social/ui';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { canBrowseMemberDirectory, canFollowMembers } from '@/lib/member-directory';
 import { loadMembers, loadOwnProfile } from '@/lib/profile';
-import { loadFollowState } from '@/lib/social';
+import { loadFollowStateWithFacts } from '@/lib/social';
 import { getHostTenant, tenantDisplayName } from '@/lib/tenant-host';
 import { MembersList } from './MembersList';
 
@@ -41,7 +42,9 @@ function parseQuery(sp: SearchParams): string {
  * **A member's rows are the split row** (UI-D-503): the person's link plus a sibling Seguir / Seguindo
  * button, "Você" on the caller's own row, a `w-24` slot while a state is unknown. The page reads the
  * follow state of the whole first page ONCE (`POST /v1/social/follows/state`, server side), so the
- * rows arrive with their buttons and are never N requests. The staff keep today's single-link row. The
+ * rows arrive with their buttons and are never N requests. The staff keep today's single-link row.
+ * **11-23 (UI-D-868):** that read also carries the pair facts, so a row gains a round message control left of
+ * Seguir for a viewer who holds `chat.direct`, and a pair with a block in either direction has no controls. The
  * member's back link is `/inicio?aba=explorar`, the staff's stays `/perfil`.
  *
  * Server-rendered from `GET /v1/members` for the URL's `?q=`, so the first paint already carries the
@@ -76,12 +79,17 @@ export default async function MembersPage({
   // The first page's follow states, in ONE call and without the caller's own id (their row shows
   // "Você"). A failed read is `null`: the rows hold their slot rather than guess a label (EP-43).
   const viewerMembershipId = own?.membershipId ?? null;
-  const initialFollowing =
+  const followRead =
     canFollow && page
-      ? await loadFollowState(
+      ? await loadFollowStateWithFacts(
           page.items.map((item) => item.membershipId).filter((id) => id !== viewerMembershipId),
         )
       : null;
+  const initialFollowing = followRead?.following ?? null;
+  // 11-23 (D-720, UI-D-868): the same read carries the pair facts, and the viewer's `chat.direct` (the
+  // composed permission, never a role) is the web's half of "may write to them".
+  const initialFacts = followRead?.facts ?? null;
+  const canChat = bootstrap.permissions.includes(CHAT_PERMISSIONS.direct);
 
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col">
@@ -101,7 +109,9 @@ export default async function MembersPage({
         initialCursor={page?.nextCursor ?? null}
         initialError={page === null}
         tenantName={tenantDisplayName(hostTenant)}
-        follow={canFollow ? { viewerMembershipId, initialFollowing } : undefined}
+        follow={
+          canFollow ? { viewerMembershipId, initialFollowing, initialFacts, canChat } : undefined
+        }
       />
     </div>
   );

@@ -262,3 +262,65 @@ describe('FollowControl follows the server value (WR-04, EP-43)', () => {
     expect(button().textContent).toBe('Seguir');
   });
 });
+
+describe('FollowControl - a refused follow (11-23, UI-D-868)', () => {
+  it('R1: a refused follow reverts, toasts the shipped sentence and reports the refusal once', async () => {
+    follow.mockResolvedValue({ ok: false, code: 'generic' });
+    const onFollowRefused = vi.fn();
+    render(
+      <FollowControl
+        membershipId={ID}
+        name="Marcos"
+        size="sm"
+        initialFollowing={false}
+        onFollowRefused={onFollowRefused}
+      />,
+    );
+    await act(async () => {
+      fireEvent.click(button());
+    });
+    expect(button().textContent).toBe('Seguir');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível seguir agora. Tente novamente.',
+    });
+    expect(onFollowRefused).toHaveBeenCalledTimes(1);
+  });
+
+  it('R2: an action that never reached the server is the same refusal, and an unfollow failure is not reported', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    follow.mockRejectedValue(new Error('network'));
+    unfollow.mockResolvedValue({ ok: false, code: 'generic' });
+    const onFollowRefused = vi.fn();
+    const view = render(
+      <FollowControl
+        membershipId={ID}
+        name="Marcos"
+        size="sm"
+        initialFollowing={false}
+        onFollowRefused={onFollowRefused}
+      />,
+    );
+    await act(async () => {
+      fireEvent.click(button());
+    });
+    expect(onFollowRefused).toHaveBeenCalledTimes(1);
+    view.unmount();
+
+    const again = vi.fn();
+    render(
+      <FollowControl
+        membershipId={ID}
+        name="Marcos"
+        size="sm"
+        initialFollowing
+        onFollowRefused={again}
+      />,
+    );
+    await act(async () => {
+      fireEvent.click(button());
+    });
+    expect(again).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+});

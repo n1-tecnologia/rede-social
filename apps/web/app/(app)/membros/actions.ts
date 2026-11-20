@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import { canBrowseMemberDirectory, canFollowMembers } from '@/lib/member-directory';
 import { getMembers } from '@/lib/profile';
-import { loadFollowState } from '@/lib/social';
+import { loadFollowStateWithFacts, type MemberFacts } from '@/lib/social';
 
 /**
  * The directory's pagination action (PROF-03, R-11), in the `plataforma/actions.ts` conventions:
@@ -44,6 +44,11 @@ export type LoadMoreMembersResult =
        * slot empty, EP-43). Absent for the staff.
        */
       following?: Record<string, boolean> | null;
+      /**
+       * 11-23 (D-720, D-722): the finished pair facts of the same ids from the same read, or `null` when it
+       * failed. Absent for the staff.
+       */
+      facts?: Record<string, MemberFacts> | null;
     }
   | { ok: false; code: 'generic' };
 
@@ -90,11 +95,13 @@ export async function loadMoreMembersAction(
   if (refusal) redirect(refusal);
 
   // A member's rows carry a Seguir button, so the page's states come with it, in ONE batch call. It
-  // runs OUTSIDE the try/catch above: `loadFollowState` never throws, but it may navigate on a session
-  // refusal, and a catch would swallow that. The caller's own id is read too (it is in the list); its
-  // row shows "Você" whatever the answer is.
+  // runs OUTSIDE the try/catch above: `loadFollowStateWithFacts` never throws, but it may navigate on a
+  // session refusal, and a catch would swallow that. The caller's own id is read too (it is in the list); its
+  // row shows "Você" whatever the answer is. The same read carries the pair facts of 11-23.
   if (result.ok && mayFollow) {
-    result.following = await loadFollowState(result.items.map((item) => item.membershipId));
+    const read = await loadFollowStateWithFacts(result.items.map((item) => item.membershipId));
+    result.following = read === null ? null : read.following;
+    result.facts = read === null ? null : read.facts;
   }
   return result;
 }

@@ -8,6 +8,8 @@ import {
   getFollowing,
   getFollowState,
   getSocialProfile,
+  loadFollowState,
+  loadFollowStateWithFacts,
   putFollow,
 } from './social';
 
@@ -147,5 +149,61 @@ describe('the batch state and the two private lists', () => {
       json({ items: [{ membershipId: ID }], nextCursor: null }),
     );
     await expect(getFollowers()).rejects.toThrow();
+  });
+});
+
+describe('the follow state with the pair facts (11-23, D-720, D-722)', () => {
+  it('S13: one read answers the follow map and the finished facts of each id', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      json({
+        items: [
+          {
+            membershipId: ID,
+            following: true,
+            canFollow: true,
+            canMessage: true,
+            blockedByViewer: false,
+          },
+          {
+            membershipId: OTHER,
+            following: false,
+            canFollow: false,
+            canMessage: false,
+            blockedByViewer: true,
+          },
+        ],
+      }),
+    );
+    await expect(loadFollowStateWithFacts([ID, OTHER])).resolves.toEqual({
+      following: { [ID]: true, [OTHER]: false },
+      facts: {
+        [ID]: { canFollow: true, canMessage: true, blockedByViewer: false },
+        [OTHER]: { canFollow: false, canMessage: false, blockedByViewer: true },
+      },
+    });
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it('S14: an API older than the web (no facts) still answers, with empty facts per id', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json({ items: [{ membershipId: ID, following: true }] }));
+    await expect(loadFollowStateWithFacts([ID])).resolves.toEqual({
+      following: { [ID]: true },
+      facts: { [ID]: {} },
+    });
+  });
+
+  it('S15: a failed read is null and an empty list reads nothing', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(envelope(500, 'INTERNAL'));
+    await expect(loadFollowStateWithFacts([ID])).resolves.toBeNull();
+    vi.mocked(apiFetch).mockClear();
+    await expect(loadFollowStateWithFacts([])).resolves.toEqual({ following: {}, facts: {} });
+    expect(vi.mocked(apiFetch)).not.toHaveBeenCalled();
+  });
+
+  it('S16: loadFollowState keeps answering the plain id -> boolean map', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      json({ items: [{ membershipId: ID, following: true, canFollow: true }] }),
+    );
+    await expect(loadFollowState([ID])).resolves.toEqual({ [ID]: true });
   });
 });

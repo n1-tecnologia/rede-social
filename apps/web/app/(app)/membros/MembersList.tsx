@@ -9,6 +9,7 @@ import { type ReactNode, useEffect, useState, useTransition } from 'react';
 import { MemberRow } from '@/components/profile/MemberRow';
 import { MembersSkeleton } from '@/components/profile/MembersSkeleton';
 import { MemberFollowRow } from '@/components/social/MemberFollowRow';
+import type { MemberFacts } from '@/lib/social';
 import { loadMoreMembersAction } from './actions';
 
 /**
@@ -20,6 +21,14 @@ export interface MembersFollowProps {
   viewerMembershipId: string | null;
   /** id -> the caller follows them; `null` when the batch read failed (rows hold their slot). */
   initialFollowing: Record<string, boolean> | null;
+  /**
+   * 11-23 (D-720, D-722, UI-D-868): the finished pair facts of the first page's ids from the same read, or
+   * `null` when it failed or an older API sent none (the rows are then the shipped ones). A row of a pair
+   * that cannot interact (`canFollow` false) has no controls at all; the message control follows `canMessage`.
+   */
+  initialFacts?: Record<string, MemberFacts> | null;
+  /** The viewer holds `chat.direct`: the web's half of "may write to them". Without it no message control. */
+  canChat?: boolean;
 }
 
 export interface MembersListProps {
@@ -89,6 +98,8 @@ export function MembersList({
   // id -> the caller follows them, seeded by the server for page 1 and merged with each load-more.
   // `null` is a failed batch read: every slot is held empty rather than guessed (EP-43).
   const [following, setFollowing] = useState(follow?.initialFollowing ?? null);
+  // id -> the finished pair facts (11-23), seeded and merged the same way; `null` holds the shipped rows.
+  const [facts, setFacts] = useState(follow?.initialFacts ?? null);
 
   // The server answered a NEW query: re-seed from its page rather than merging into the old one.
   // Adjusting state during render (React's documented alternative to an effect) keeps the list and
@@ -102,6 +113,7 @@ export function MembersList({
     setCursor(initialCursor);
     setFailed(Boolean(initialError));
     setFollowing(follow?.initialFollowing ?? null);
+    setFacts(follow?.initialFacts ?? null);
   }
 
   useEffect(() => {
@@ -130,6 +142,9 @@ export function MembersList({
         // those rows' slots empty and keeps the states already known.
         if (follow && page.following) {
           setFollowing((prev) => ({ ...prev, ...page.following }));
+        }
+        if (follow && page.facts) {
+          setFacts((prev) => ({ ...prev, ...page.facts }));
         }
       } catch (error) {
         console.error('members.load_more_failed', { error: String(error) });
@@ -205,30 +220,46 @@ export function MembersList({
       <>
         <Card className="rounded-none bg-transparent shadow-none md:rounded-xl md:bg-card md:shadow-[0_1px_3px_rgba(22,35,59,.06)]">
           <ul className="flex flex-col">
-            {items.map((member, index) => (
-              <li
-                key={member.membershipId}
-                className={index === items.length - 1 ? undefined : 'border-b border-divider'}
-              >
-                {follow ? (
-                  <MemberFollowRow
-                    membershipId={member.membershipId}
-                    displayName={member.displayName}
-                    avatarAssetId={member.avatarAssetId}
-                    bio={member.bio}
-                    own={member.membershipId === follow.viewerMembershipId}
-                    following={following?.[member.membershipId] ?? null}
-                  />
-                ) : (
-                  <MemberRow
-                    membershipId={member.membershipId}
-                    displayName={member.displayName}
-                    avatarAssetId={member.avatarAssetId}
-                    bio={member.bio}
-                  />
-                )}
-              </li>
-            ))}
+            {items.map((member, index) => {
+              const own = member.membershipId === follow?.viewerMembershipId;
+              const entry = facts?.[member.membershipId];
+              // A pair that cannot interact (a block either way) has no controls and keeps its link; the
+              // message control needs the viewer's chat.direct, a known entry and no refusal in it.
+              const closed = !own && entry?.canFollow === false;
+              const message =
+                !own &&
+                !closed &&
+                follow?.canChat === true &&
+                entry !== undefined &&
+                entry.canMessage !== false;
+              return (
+                <li
+                  key={member.membershipId}
+                  className={index === items.length - 1 ? undefined : 'border-b border-divider'}
+                >
+                  {follow ? (
+                    <MemberFollowRow
+                      membershipId={member.membershipId}
+                      displayName={member.displayName}
+                      avatarAssetId={member.avatarAssetId}
+                      bio={member.bio}
+                      own={own}
+                      message={message}
+                      hideControls={closed}
+                      onFollowRefused={refresh}
+                      following={following?.[member.membershipId] ?? null}
+                    />
+                  ) : (
+                    <MemberRow
+                      membershipId={member.membershipId}
+                      displayName={member.displayName}
+                      avatarAssetId={member.avatarAssetId}
+                      bio={member.bio}
+                    />
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </Card>
 

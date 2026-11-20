@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClientError, getBootstrap } from '@/lib/bootstrap';
 import { getMembers } from '@/lib/profile';
-import { loadFollowState } from '@/lib/social';
+import { loadFollowStateWithFacts } from '@/lib/social';
 import { loadMoreMembersAction } from './actions';
 
 /**
@@ -30,7 +30,7 @@ vi.mock('@/lib/bootstrap', async (importOriginal) => ({
 
 vi.mock('@/lib/profile', () => ({ getMembers: vi.fn() }));
 
-vi.mock('@/lib/social', () => ({ loadFollowState: vi.fn() }));
+vi.mock('@/lib/social', () => ({ loadFollowStateWithFacts: vi.fn() }));
 
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((path: string) => {
@@ -64,7 +64,7 @@ const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
 beforeEach(() => {
   vi.mocked(getBootstrap).mockReset();
   vi.mocked(getMembers).mockReset().mockResolvedValue(PAGE);
-  vi.mocked(loadFollowState).mockReset();
+  vi.mocked(loadFollowStateWithFacts).mockReset();
   vi.mocked(redirect).mockClear();
   logged.mockClear();
 });
@@ -129,27 +129,32 @@ describe('loadMoreMembersAction — the member with social.participate (09-10)',
 
   it('5. pages on and returns the batch follow state beside the items', async () => {
     viewer('member', ['social.participate']);
-    vi.mocked(loadFollowState).mockResolvedValue({ [ID]: true });
+    vi.mocked(loadFollowStateWithFacts).mockResolvedValue({
+      following: { [ID]: true },
+      facts: { [ID]: { canFollow: true, canMessage: true, blockedByViewer: false } },
+    });
 
     await expect(loadMoreMembersAction('opaque', 'ana')).resolves.toEqual({
       ok: true,
       items: PAGE.items,
       nextCursor: 'next-opaque',
       following: { [ID]: true },
+      facts: { [ID]: { canFollow: true, canMessage: true, blockedByViewer: false } },
     });
-    expect(loadFollowState).toHaveBeenCalledTimes(1);
-    expect(loadFollowState).toHaveBeenCalledWith([ID]);
+    expect(loadFollowStateWithFacts).toHaveBeenCalledTimes(1);
+    expect(loadFollowStateWithFacts).toHaveBeenCalledWith([ID]);
   });
 
   it('6. a failed state read keeps the page and says so with null (the rows hold their slot)', async () => {
     viewer('member', ['social.participate']);
-    vi.mocked(loadFollowState).mockResolvedValue(null);
+    vi.mocked(loadFollowStateWithFacts).mockResolvedValue(null);
 
     await expect(loadMoreMembersAction('opaque')).resolves.toEqual({
       ok: true,
       items: PAGE.items,
       nextCursor: 'next-opaque',
       following: null,
+      facts: null,
     });
   });
 
@@ -158,12 +163,12 @@ describe('loadMoreMembersAction — the member with social.participate (09-10)',
     const answer = await loadMoreMembersAction('opaque');
     expect(answer).toEqual({ ok: true, items: PAGE.items, nextCursor: 'next-opaque' });
     expect('following' in answer).toBe(false);
-    expect(loadFollowState).not.toHaveBeenCalled();
+    expect(loadFollowStateWithFacts).not.toHaveBeenCalled();
   });
 
   it('8. a member without the permission never reaches the state read either', async () => {
     viewer('member', ['feed.post.create']);
     await expect(loadMoreMembersAction('opaque')).resolves.toEqual({ ok: false, code: 'generic' });
-    expect(loadFollowState).not.toHaveBeenCalled();
+    expect(loadFollowStateWithFacts).not.toHaveBeenCalled();
   });
 });

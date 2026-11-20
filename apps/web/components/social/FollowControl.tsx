@@ -26,6 +26,12 @@ export interface FollowControlProps {
    * failure. The locked post screen (09-11) uses it to refresh the route into the real post.
    */
   onFollowed?: () => void;
+  /**
+   * Called once when a FOLLOW was refused or never reached the server (11-23, UI-D-868): the button has
+   * already reverted and the toast shown. The directory row refreshes its route so a pair that became
+   * blocked loses its controls; the toast never names a reason (D-724).
+   */
+  onFollowRefused?: () => void;
 }
 
 /**
@@ -63,6 +69,7 @@ export function FollowControl({
   className,
   onChange,
   onFollowed,
+  onFollowRefused,
 }: FollowControlProps) {
   const t = useTranslations('social');
   const toast = useToast();
@@ -97,12 +104,14 @@ export function FollowControl({
         } else {
           setFollowing(!next);
           toast.show({ tone: 'error', message: t(next ? 'errors.follow' : 'errors.unfollow') });
+          if (next) onFollowRefused?.();
         }
       } catch (error) {
         // An action that never reached the server is the same outcome as a refusal for the member.
         console.error('social.follow_toggle_failed', { error: String(error) });
         setFollowing(!next);
         toast.show({ tone: 'error', message: t(next ? 'errors.follow' : 'errors.unfollow') });
+        if (next) onFollowRefused?.();
       } finally {
         inFlight.current = false;
       }

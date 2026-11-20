@@ -163,28 +163,67 @@ export function loadFollowing(cursor?: string): Promise<SocialListPage | null> {
 }
 
 /**
- * The follow state of a page of members as an id -> boolean map, or `null` when the batch read
- * failed (the rows then keep an empty `w-24` slot rather than a label that could be wrong, EP-43).
- * One call per page, never one per row. Ids beyond the contract's cap are read in slices.
+ * The finished facts of one member for the viewer (11-23, D-720, D-722): what is OFFERED, never why. Every key is
+ * optional because an API older than the web does not send them (the screens then read the shipped row). There
+ * is deliberately no "blocked me" key (T-11-03): the blocked member's entry equals a pair that cannot interact.
  */
-export async function loadFollowState(
+export interface MemberFacts {
+  canFollow?: boolean;
+  canMessage?: boolean;
+  blockedByViewer?: boolean;
+}
+
+/** One page's follow state with the facts of each id, from ONE read. */
+export interface FollowStateRead {
+  /** id -> the caller follows them. */
+  following: Record<string, boolean>;
+  /** id -> the finished facts (an empty object for an id the API sent none for). */
+  facts: Record<string, MemberFacts>;
+}
+
+/**
+ * The follow state of a page of members and the pair facts of each id, or `null` when the batch read failed
+ * (the rows then keep an empty `w-24` slot rather than a label that could be wrong, EP-43). One call per page,
+ * never one per row. Ids beyond the contract's cap are read in slices. A refusal the bootstrap map knows becomes
+ * a navigation, performed OUTSIDE the try/catch.
+ */
+export async function loadFollowStateWithFacts(
   membershipIds: readonly string[],
-): Promise<Record<string, boolean> | null> {
-  if (membershipIds.length === 0) return {};
+): Promise<FollowStateRead | null> {
+  if (membershipIds.length === 0) return { following: {}, facts: {} };
   let path: string | null = null;
-  let map: Record<string, boolean> | null = null;
+  let read: FollowStateRead | null = null;
   try {
-    const found: Record<string, boolean> = {};
+    const following: Record<string, boolean> = {};
+    const facts: Record<string, MemberFacts> = {};
     for (let index = 0; index < membershipIds.length; index += 50) {
       const state = await getFollowState(membershipIds.slice(index, index + 50));
-      for (const item of state.items) found[item.membershipId] = item.following;
+      for (const item of state.items) {
+        following[item.membershipId] = item.following;
+        const entry: MemberFacts = {};
+        if (item.canFollow !== undefined) entry.canFollow = item.canFollow;
+        if (item.canMessage !== undefined) entry.canMessage = item.canMessage;
+        if (item.blockedByViewer !== undefined) entry.blockedByViewer = item.blockedByViewer;
+        facts[item.membershipId] = entry;
+      }
     }
-    map = found;
+    read = { following, facts };
   } catch (error) {
     if (error instanceof ApiClientError) path = bootstrapRedirectPath(error);
     if (!path) console.error('social.state_failed', { error: String(error) });
   }
 
   if (path) redirect(path);
-  return map;
+  return read;
+}
+
+/**
+ * The follow state of a page of members as an id -> boolean map, or `null` when the batch read failed. The
+ * facts-free view of `loadFollowStateWithFacts`, for the callers that only need the buttons' labels.
+ */
+export async function loadFollowState(
+  membershipIds: readonly string[],
+): Promise<Record<string, boolean> | null> {
+  const read = await loadFollowStateWithFacts(membershipIds);
+  return read === null ? null : read.following;
 }
