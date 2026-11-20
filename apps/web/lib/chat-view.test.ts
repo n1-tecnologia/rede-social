@@ -160,6 +160,24 @@ describe('chatMessageView — times in the tenant zone, labels per viewer', () =
     expect(member.label).toBeNull();
   });
 
+  it('7b. a direct conversation: the member-side row the viewer did not write is the OTHER bubble (11-22, D-720)', () => {
+    const theirs = chatMessageView(row({ authorIsViewer: false }), {
+      timeZone: SP,
+      viewer: 'member',
+      t,
+    });
+    expect(theirs.side).toBe('other');
+    expect(theirs.label).toBeNull();
+    expect(theirs.authorKey).toBe('member:other');
+    const mine = chatMessageView(row({ authorIsViewer: true }), {
+      timeZone: SP,
+      viewer: 'member',
+      t,
+    });
+    expect(mine.side).toBe('own');
+    expect(mine.authorKey).toBe('member');
+  });
+
   it('8. a view carries no identity field beyond the first name', () => {
     const view = chatMessageView(staffRow(), { timeZone: SP, viewer: 'member', t });
     expect(Object.keys(view).sort()).toEqual(

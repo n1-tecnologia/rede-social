@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
-import { fetchDirectDetail, fetchDirectList, fetchDirectWith } from './chat';
+import { fetchDirectDetail, fetchDirectList, fetchDirectWith, postDirectMessage } from './chat';
 
 /**
  * 11-18 (CHAT-06, CHAT-07, D-719, D-720, D-722) — the three direct-chat loaders against a stubbed
@@ -118,5 +118,48 @@ describe('fetchDirectWith', () => {
   it('a 404 throws the typed client error', async () => {
     vi.mocked(apiFetch).mockResolvedValue(json(404, { error: { code: 'NOT_FOUND' } }));
     await expect(fetchDirectWith(MEMBER)).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('postDirectMessage (11-22, D-720)', () => {
+  const stored = {
+    conversationId: CONVERSATION,
+    created: true,
+    message: {
+      id: '0d000000-0000-4000-8000-0000000000d1',
+      seq: 1,
+      side: 'member',
+      body: 'Oi',
+      createdAt: '2026-11-19T17:12:00.000000Z',
+      author: null,
+      authorIsViewer: true,
+    },
+  };
+
+  it('posts exactly { toMembershipId, body } and parses the strict answer', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(201, stored));
+    await expect(postDirectMessage(MEMBER, 'Oi')).resolves.toMatchObject({
+      conversationId: CONVERSATION,
+      created: true,
+    });
+    const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? [];
+    expect(path).toBe('/v1/chat/direct/messages');
+    expect((init as RequestInit).method).toBe('POST');
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      toMembershipId: MEMBER,
+      body: 'Oi',
+    });
+  });
+
+  it('throws the typed client error with the API word (409 direct_closed) and refuses an extra key', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      json(409, { error: { code: 'CONFLICT', details: { chat: 'direct_closed' } } }),
+    );
+    await expect(postDirectMessage(MEMBER, 'Oi')).rejects.toMatchObject({
+      status: 409,
+      details: { chat: 'direct_closed' },
+    });
+    vi.mocked(apiFetch).mockResolvedValueOnce(json(201, { ...stored, blockedMe: true }));
+    await expect(postDirectMessage(MEMBER, 'Oi')).rejects.toThrow();
   });
 });

@@ -15,9 +15,11 @@ import {
   conversationDetailSchema,
   type DirectDetail,
   type DirectListAnswer,
+  type DirectSendResult,
   type DirectWithAnswer,
   directDetailSchema,
   directListAnswerSchema,
+  directSendResultSchema,
   directWithAnswerSchema,
   type InboxPage,
   inboxPageSchema,
@@ -470,4 +472,24 @@ export async function fetchDirectWith(membershipId: string): Promise<DirectWithA
   const res = await apiFetch(`/v1/chat/direct/with/${encodeURIComponent(membershipId)}`);
   if (!res.ok) throw await apiError(res);
   return directWithAnswerSchema.parse(await res.json());
+}
+
+/**
+ * `POST /v1/chat/direct/messages { toMembershipId, body }` (11-22, CHAT-06, D-720): the member's message to
+ * another member, named by MEMBERSHIP id. The FIRST message of a pair creates the conversation in the same
+ * transaction (`created: true`); the answer is the strict `directSendResultSchema`. A refusal is the API's one
+ * word (409 `direct_closed`, never saying why), a 404 for a target or conversation that is gone, a 429 for the
+ * limiters. Throws `ApiClientError` on a non-2xx.
+ */
+export async function postDirectMessage(
+  toMembershipId: string,
+  body: string,
+): Promise<DirectSendResult> {
+  const res = await apiFetch('/v1/chat/direct/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ toMembershipId, body }),
+  });
+  if (!res.ok) throw await apiError(res);
+  return directSendResultSchema.parse(await res.json());
 }

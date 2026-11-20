@@ -242,7 +242,11 @@ export function chatMessageView(
   row: MessageRow,
   { timeZone, viewer, t }: { timeZone: string; viewer: ChatViewer; t: Translator },
 ): ChatMessageView {
-  const own = viewer === 'member' ? row.side === 'member' : row.side === 'staff';
+  // A member viewer owns the member-side rows THEY wrote. In a support thread that is every member-side row, so
+  // nothing changes there; in a direct conversation (11-22, D-720) both people write on the member side, and
+  // `authorIsViewer` (the API's own fact, never a client comparison of ids) is what tells the other's bubble.
+  const own =
+    viewer === 'member' ? row.side === 'member' && row.authorIsViewer : row.side === 'staff';
   const firstName = row.author?.firstName ?? '';
   let label: MessageBubbleLabel | null = null;
   if (row.side === 'staff') {
@@ -255,7 +259,12 @@ export function chatMessageView(
     id: row.id,
     seq: row.seq,
     side: own ? 'own' : 'other',
-    authorKey: row.side === 'member' ? 'member' : `staff:${firstName}`,
+    authorKey:
+      row.side === 'member'
+        ? viewer === 'member' && !own
+          ? 'member:other'
+          : 'member'
+        : `staff:${firstName}`,
     body: row.body,
     label,
     time: formatEventTime(row.createdAt, timeZone),
