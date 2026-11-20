@@ -19,7 +19,7 @@ const { messages } = await vi.hoisted(async () => {
 
 MotionGlobalConfig.skipAnimations = true;
 
-const actions = vi.hoisted(() => ({ reportContent: vi.fn() }));
+const actions = vi.hoisted(() => ({ reportContent: vi.fn(), blockMember: vi.fn() }));
 
 vi.mock('next-intl', async (importOriginal) => {
   const actual = await importOriginal<typeof import('next-intl')>();
@@ -43,6 +43,7 @@ const { CommentItem } = await import('@rede-social/module-feed/ui');
 afterEach(cleanup);
 beforeEach(() => {
   actions.reportContent.mockReset();
+  actions.blockMember.mockReset();
 });
 
 const SUBJECT = '0b9a3c2e-5d1f-4e7a-9c3b-2f6d8e1a4b70';
@@ -56,6 +57,10 @@ function mount(subject: Parameters<typeof ReportAndBlock>[0]['report']) {
         onReportClose={onReportClose}
         tenantName="Instituto Aurora"
         reportAction={actions.reportContent}
+        block={null}
+        onBlockClose={vi.fn()}
+        blockAction={actions.blockMember}
+        socialOn={false}
       />
     </ToastProvider>,
   );
@@ -220,7 +225,11 @@ describe('the path of 11-20 Task 1: report a comment from its menu', () => {
   function Host() {
     const safety = useReportAndBlock({
       tenantName: 'Instituto Aurora',
-      safety: { socialOn: false, reportAction: actions.reportContent },
+      safety: {
+        socialOn: false,
+        reportAction: actions.reportContent,
+        blockAction: actions.blockMember,
+      },
     });
     const labels = safety.commentLabels({
       item: {
@@ -284,5 +293,232 @@ describe('the path of 11-20 Task 1: report a comment from its menu', () => {
     });
     expect(await screen.findByText('Denúncia enviada. Obrigado por avisar.')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Denunciar comentário' })).toBeNull();
+  });
+});
+
+describe('the block dialog (UI-D-872, D-722, D-724)', () => {
+  const MEMBERSHIP = 'a1b2c3d4-0000-4000-8000-000000000001';
+
+  function mountBlock({ socialOn, name = 'Carla Nunes' }: { socialOn: boolean; name?: string }) {
+    const onBlockClose = vi.fn();
+    render(
+      <ToastProvider>
+        <ReportAndBlock
+          report={null}
+          onReportClose={vi.fn()}
+          tenantName="Instituto Aurora"
+          reportAction={actions.reportContent}
+          block={{ membershipId: MEMBERSHIP, name }}
+          onBlockClose={onBlockClose}
+          blockAction={actions.blockMember}
+          socialOn={socialOn}
+        />
+      </ToastProvider>,
+    );
+    return { onBlockClose };
+  }
+
+  it('the title names the person and the buttons are Bloquear and Cancelar', () => {
+    mountBlock({ socialOn: false });
+    expect(screen.getByRole('heading', { name: 'Bloquear Carla Nunes?' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Bloquear' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toBeTruthy();
+  });
+
+  it('with social OFF the body is the shipped one; it never says the follows go', () => {
+    mountBlock({ socialOn: false });
+    const body = screen.getByText(/Você deixa de ver as publicações/).textContent ?? '';
+    expect(body).toContain('Carla Nunes não é avisado. Você pode desbloquear em Configurações.');
+    expect(body).not.toMatch(/seguir|se seguir/);
+  });
+
+  it('with social ON the body adds that they cannot follow or write and that the follows do not come back', () => {
+    mountBlock({ socialOn: true });
+    const body = screen.getByText(/Você deixa de ver as publicações/).textContent ?? '';
+    expect(body).toContain('não pode mais seguir você nem escrever para você');
+    expect(body).toContain('vocês dois deixam de se seguir');
+    expect(body).toContain('não é avisado');
+  });
+
+  it('a 40-character name wraps: the title and the body carry break-words and the buttons stay', () => {
+    const long = 'Maria'.repeat(8);
+    mountBlock({ socialOn: true, name: long });
+    const title = screen.getByRole('heading', { name: `Bloquear ${long}?` });
+    expect(title.className).toContain('break-words');
+    expect(screen.getByRole('button', { name: 'Bloquear' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toBeTruthy();
+  });
+
+  it('confirming calls the action ONCE with the membership id, toasts, and closes', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    actions.blockMember.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const { onBlockClose } = mountBlock({ socialOn: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bloquear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Bloquear' }));
+    expect((screen.getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    await act(async () => finish({ ok: true, code: 'ok', changed: true }));
+
+    expect(actions.blockMember).toHaveBeenCalledTimes(1);
+    expect(actions.blockMember).toHaveBeenCalledWith(MEMBERSHIP);
+    expect(await screen.findByText('Carla Nunes foi bloqueado.')).toBeTruthy();
+    expect(onBlockClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('a repeat answered changed:false is the same plain success, one toast', async () => {
+    actions.blockMember.mockResolvedValueOnce({ ok: true, code: 'ok', changed: false });
+    mountBlock({ socialOn: false });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Bloquear' })));
+    expect(await screen.findAllByText('Carla Nunes foi bloqueado.')).toHaveLength(1);
+  });
+
+  it.each(['failed', 'rate_limited', 'unauthenticated'])(
+    'a %s answer is the shipped error toast and the dialog is released',
+    async (code) => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      actions.blockMember.mockResolvedValueOnce({ ok: false, code, changed: false });
+      const { onBlockClose } = mountBlock({ socialOn: false });
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Bloquear' })));
+      expect(await screen.findByText('Algo deu errado. Tente novamente.')).toBeTruthy();
+      expect(screen.queryByText('Carla Nunes foi bloqueado.')).toBeNull();
+      expect(onBlockClose).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('a thrown action is the same error toast, never an unhandled rejection', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    actions.blockMember.mockRejectedValueOnce(new Error('offline'));
+    mountBlock({ socialOn: false });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Bloquear' })));
+    expect(await screen.findByText('Algo deu errado. Tente novamente.')).toBeTruthy();
+  });
+
+  it('Cancelar closes without any request', () => {
+    const { onBlockClose } = mountBlock({ socialOn: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(onBlockClose).toHaveBeenCalledTimes(1);
+    expect(actions.blockMember).not.toHaveBeenCalled();
+  });
+});
+
+describe('Bloquear is offered by data, never by a role (D-733, A-11-ROLE)', () => {
+  const MEMBERSHIP = 'a1b2c3d4-0000-4000-8000-000000000001';
+  const author = { displayName: 'Carla Nunes', profileHref: '/membros/m1', avatarUrl: null };
+
+  function Host({
+    canBlock,
+    membershipId = MEMBERSHIP,
+    authorName = 'Carla Nunes',
+    socialOn = false,
+  }: {
+    canBlock: boolean;
+    membershipId?: string | null;
+    authorName?: string | null;
+    socialOn?: boolean;
+  }) {
+    const safety = useReportAndBlock({
+      tenantName: 'Instituto Aurora',
+      safety: {
+        socialOn,
+        reportAction: actions.reportContent,
+        blockAction: actions.blockMember,
+      },
+    });
+    const labels = safety.commentLabels({
+      item: {
+        removedAuthor: 'Membro removido',
+        like: 'Curtir',
+        unlike: 'Descurtir',
+        likes: { one: '{count}', other: '{count}' },
+        reply: 'Responder',
+        delete: 'Excluir comentário',
+      },
+    } as Parameters<typeof safety.commentLabels>[0]);
+    return (
+      <>
+        <CommentItem
+          comment={{
+            id: SUBJECT,
+            body: 'Um comentário.',
+            author: { ...author, displayName: authorName, membershipId },
+            authorRemoved: authorName === null,
+            createdAtIso: '2026-11-19T10:00:00.000Z',
+            createdAtRelative: 'há 1 h',
+            createdAtAbsolute: '19/11/2026 10:00',
+            likeCount: 0,
+            viewerLiked: false,
+            replyCount: 0,
+            isReply: false,
+            canDelete: false,
+            removal: null,
+            canReport: true,
+            canBlock,
+          }}
+          locale="pt-BR"
+          labels={labels.item}
+          onReport={safety.onReportComment}
+          onBlock={safety.onBlockComment}
+        />
+        {safety.element}
+      </>
+    );
+  }
+
+  it('a comment with canBlock opens the dialog from its menu and blocks by membership id', async () => {
+    actions.blockMember.mockResolvedValueOnce({ ok: true, code: 'ok', changed: true });
+    render(
+      <ToastProvider>
+        <Host canBlock />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Mais ações do comentário' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Bloquear Carla Nunes' }));
+    expect(screen.getByRole('heading', { name: 'Bloquear Carla Nunes?' })).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Bloquear' })));
+    expect(actions.blockMember).toHaveBeenCalledWith(MEMBERSHIP);
+  });
+
+  it('the dialog body follows the socialOn DATA, in both directions', () => {
+    for (const [socialOn, expected] of [
+      [true, 'vocês dois deixam de se seguir'],
+      [false, null],
+    ] as const) {
+      render(
+        <ToastProvider>
+          <Host canBlock socialOn={socialOn} />
+        </ToastProvider>,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Mais ações do comentário' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Bloquear Carla Nunes' }));
+      const body = screen.getByText(/Você deixa de ver as publicações/).textContent ?? '';
+      if (expected) expect(body).toContain(expected);
+      else expect(body).not.toContain('deixam de se seguir');
+      cleanup();
+    }
+  });
+
+  it('no rider, no Bloquear: staff viewer, own comment or a staff author', () => {
+    render(
+      <ToastProvider>
+        <Host canBlock={false} />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Mais ações do comentário' }));
+    expect(screen.queryByRole('button', { name: /^Bloquear/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Denunciar comentário' })).toBeTruthy();
+  });
+
+  it('an author without a membership id never opens the dialog', () => {
+    render(
+      <ToastProvider>
+        <Host canBlock membershipId={null} />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Mais ações do comentário' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Bloquear Carla Nunes' }));
+    expect(screen.queryByRole('heading', { name: 'Bloquear Carla Nunes?' })).toBeNull();
   });
 });

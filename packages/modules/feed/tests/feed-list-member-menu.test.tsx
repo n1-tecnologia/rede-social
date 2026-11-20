@@ -160,3 +160,66 @@ describe('FeedList - the delete wording follows the author kind (10-11)', () => 
     expect(screen.queryByText('delete-body-org')).toBeNull();
   });
 });
+
+describe('FeedList - the report and block rows follow the post riders (11-20, D-733)', () => {
+  const SAFETY_LABELS = { ...MENU_LABELS, report: 'report-post', block: 'block-{nome}' };
+
+  function openSafety(post: ReturnType<typeof item> & { canReport?: boolean; canBlock?: boolean }) {
+    const onReport = vi.fn();
+    const onBlock = vi.fn();
+    render(
+      <ToastProvider>
+        <FeedList
+          {...listProps({
+            initialItems: [post],
+            menu: {
+              labels: SAFETY_LABELS,
+              onDelete: vi.fn(async () => {}),
+              onReport,
+              onBlock,
+            },
+          })}
+        />
+      </ToastProvider>,
+    );
+    return { onReport, onBlock };
+  }
+
+  it("another member's post: the control opens Denunciar and Bloquear, handing the target to the host", () => {
+    const { onReport, onBlock } = openSafety({
+      ...item('followers'),
+      canManage: false,
+      editHref: null,
+      canReport: true,
+      canBlock: true,
+      author: {
+        displayName: 'Carla Nunes',
+        profileHref: '/membros/m1',
+        membershipId: 'm1',
+        avatarUrl: null,
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'more-options-label' }));
+    fireEvent.click(screen.getByRole('button', { name: 'report-post' }));
+    expect(onReport).toHaveBeenCalledWith(
+      expect.objectContaining({ postId: '00000000-0000-4000-8000-000000000001' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'more-options-label' }));
+    fireEvent.click(screen.getByRole('button', { name: 'block-Carla Nunes' }));
+    expect(onBlock).toHaveBeenCalledWith(
+      expect.objectContaining({ authorMembershipId: 'm1', authorName: 'Carla Nunes' }),
+    );
+  });
+
+  it('a post with no riders and nothing to copy draws no overflow control at all', () => {
+    openSafety({ ...item(), canManage: false, editHref: null });
+    expect(screen.queryByRole('button', { name: 'more-options-label' })).toBeNull();
+  });
+
+  it('a canReport-only post (staff viewer) holds Denunciar and no Bloquear', () => {
+    openSafety({ ...item('followers'), canManage: false, editHref: null, canReport: true });
+    fireEvent.click(screen.getByRole('button', { name: 'more-options-label' }));
+    expect(screen.getByRole('button', { name: 'report-post' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^block-/ })).toBeNull();
+  });
+});

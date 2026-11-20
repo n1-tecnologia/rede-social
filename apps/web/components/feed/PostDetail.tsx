@@ -236,6 +236,7 @@ export function PostDetail({
         onDelete={confirmDelete}
         labels={safety.menuLabels(menu.labels)}
         onReport={safety.onReportPost}
+        onBlock={safety.onBlockPost}
       />
       {/* No `onOpenComments` and no sheet: the comments ARE the screen below. Wiring the card's
           comment control to a second surface here would open a bottom sheet over a list the member
@@ -244,6 +245,7 @@ export function PostDetail({
         {...comments}
         labels={safety.commentLabels(comments.labels)}
         onReportComment={safety.onReportComment}
+        onBlockComment={safety.onBlockComment}
         targetId={post.id}
         variant="inline"
         onLocked={commentsLocked}

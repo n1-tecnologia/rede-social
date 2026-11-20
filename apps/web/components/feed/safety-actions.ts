@@ -1,6 +1,8 @@
 'use server';
 
-import { reportCreateBodySchema } from '@rede-social/contracts/moderation';
+import { blockChangeAnswerSchema, reportCreateBodySchema } from '@rede-social/contracts/moderation';
+import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
 
 /**
@@ -32,6 +34,10 @@ export type ReportCode =
   | 'failed';
 export type ReportActionResult = { ok: boolean; code: ReportCode };
 
+/** The closed answers of the block writes (the API statuses 200, 400, 429, no session and everything else). */
+export type BlockCode = 'ok' | 'rate_limited' | 'unauthenticated' | 'failed';
+export type BlockActionResult = { ok: boolean; code: BlockCode; changed: boolean };
+
 /**
  * `POST /v1/reports` (NATIVE-31). `input` is untrusted: it is parsed with the contract's own schema, whose
  * `.strict()` refuses any key the client has no business sending (a tenant, a reporter, an author). An empty or
@@ -60,4 +66,64 @@ export async function reportContent(input: unknown): Promise<ReportActionResult>
   if (status === 429) return { ok: false, code: 'rate_limited' };
   if (status === 401) return { ok: false, code: 'unauthenticated' };
   return { ok: false, code: 'failed' };
+}
+
+/** The membership id of the person, a uuid (T-11-34: never a user id). Refused here before any request. */
+const membershipIdSchema = z.uuid();
+
+/**
+ * One block or unblock write. `changed` is false for the idempotent repeat, which is the plain success: the
+ * screen toasts once either way. The lists the blocked member's items sit in are revalidated on a real change so
+ * they leave at once (D-725: the API's filter is what hides them; no other filter is added here).
+ */
+async function writeBlock(
+  method: 'POST' | 'DELETE',
+  path: string,
+  revalidate: boolean,
+): Promise<BlockActionResult> {
+  let res: Response;
+  try {
+    res = await apiFetch(path, { method });
+  } catch (error) {
+    console.error('safety.block.network_failed', { error: String(error) });
+    return { ok: false, code: 'failed', changed: false };
+  }
+  if (res.status === 429) return { ok: false, code: 'rate_limited', changed: false };
+  if (res.status === 401) return { ok: false, code: 'unauthenticated', changed: false };
+  // `CANNOT_BLOCK` (400) is the ONE refusal for every miss and is shown as the plain failure: it names no reason.
+  if (!res.ok) return { ok: false, code: 'failed', changed: false };
+
+  let changed = false;
+  try {
+    changed = blockChangeAnswerSchema.parse(await res.json()).changed;
+  } catch {
+    return { ok: false, code: 'failed', changed: false };
+  }
+  if (revalidate && changed) revalidatePath('/', 'layout');
+  return { ok: true, code: 'ok', changed };
+}
+
+/** `POST /v1/blocks/members/{membershipId}` (plan 27): the author's items leave the lists at once. */
+export async function blockMember(membershipId: unknown): Promise<BlockActionResult> {
+  const id = membershipIdSchema.safeParse(membershipId);
+  if (!id.success) return { ok: false, code: 'failed', changed: false };
+  return writeBlock('POST', `/v1/blocks/members/${id.data}`, true);
+}
+
+/** `DELETE /v1/blocks/members/{membershipId}` (plan 27): restores only the content filter (D-724). */
+export async function unblockMember(membershipId: unknown): Promise<BlockActionResult> {
+  const id = membershipIdSchema.safeParse(membershipId);
+  if (!id.success) return { ok: false, code: 'failed', changed: false };
+  return writeBlock('DELETE', `/v1/blocks/members/${id.data}`, true);
+}
+
+/**
+ * `DELETE /v1/blocks/{userId}` (Phase 13): the blocked list's own unblock. The id is the one the CALLER's own
+ * list returned (`GET /v1/blocks`, only the caller's blocks), so it never names anyone the caller did not block.
+ * Nothing restores a follow (D-724).
+ */
+export async function unblockBlocked(userId: unknown): Promise<BlockActionResult> {
+  const id = membershipIdSchema.safeParse(userId);
+  if (!id.success) return { ok: false, code: 'failed', changed: false };
+  return writeBlock('DELETE', `/v1/blocks/${id.data}`, false);
 }

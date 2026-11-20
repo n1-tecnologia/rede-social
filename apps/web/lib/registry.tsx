@@ -35,7 +35,7 @@ import {
 } from '@/app/(app)/stories/story-actions';
 import { FeedSurface } from '@/components/feed/FeedSurface';
 import type { PostMenuSafety } from '@/components/feed/ReportAndBlock';
-import { reportContent } from '@/components/feed/safety-actions';
+import { blockMember, reportContent } from '@/components/feed/safety-actions';
 import type { ReelsHostBinding } from '@/components/reels/ReelsHost';
 import type { ReelsOverlayBinding } from '@/components/reels/ReelsOverlay';
 import { StoriesBand } from '@/components/stories/StoriesBand';
@@ -149,6 +149,7 @@ export function postMenuSafety(bootstrap: Bootstrap): PostMenuSafety {
   return {
     socialOn: bootstrap.permissions.includes('social.participate'),
     reportAction: reportContent,
+    blockAction: blockMember,
   };
 }
 

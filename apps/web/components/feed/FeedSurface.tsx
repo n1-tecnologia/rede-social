@@ -189,6 +189,7 @@ export function FeedSurface({ share, menu, reels, communityId, ...list }: FeedSu
                 labels: safety.menuLabels(menu.labels),
                 onDelete,
                 onReport: safety.onReportPost,
+                onBlock: safety.onBlockPost,
               }
             : undefined
         }
@@ -198,6 +199,7 @@ export function FeedSurface({ share, menu, reels, communityId, ...list }: FeedSu
                 ...list.comments,
                 labels: safety.commentLabels(list.comments.labels),
                 onReportComment: safety.onReportComment,
+                onBlockComment: safety.onBlockComment,
               }
             : undefined
         }

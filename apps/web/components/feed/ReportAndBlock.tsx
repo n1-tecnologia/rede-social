@@ -12,12 +12,12 @@ import type {
   PostMenuLabels,
   PostMenuTarget,
 } from '@rede-social/module-feed/ui';
-import { BottomSheet, Button, Textarea, useToast } from '@rede-social/ui';
-import { CircleAlert } from 'lucide-react';
+import { BottomSheet, Button, ConfirmDialog, Textarea, useToast } from '@rede-social/ui';
+import { Ban, CircleAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { reportSubjectView } from '@/lib/reports-view';
-import type { ReportCode, reportContent } from './safety-actions';
+import type { blockMember, ReportCode, reportContent } from './safety-actions';
 
 /**
  * The member's report sheet (11-20, MODER-05, D-731, UI-D-871), ONE sheet for every subject: a post, a post
@@ -61,7 +61,12 @@ export type PostMenuSafety = {
    * imports a server-only module of its own, which keeps this file free of `apps/web/lib/api` and its env.
    */
   reportAction: typeof reportContent;
+  /** `blockMember` (`POST /v1/blocks/members/{membershipId}`), handed in the same way. */
+  blockAction: typeof blockMember;
 };
+
+/** Who the block dialog names, and the membership id the block call is keyed by (never a user id, T-11-34). */
+export type BlockTarget = { membershipId: string; name: string };
 
 /** The reason value the API takes, by its catalog key (`safety.reasons.<key>`). */
 const REASON_KEY: Record<ReportReason, string> = {
@@ -80,21 +85,98 @@ export type ReportAndBlockProps = {
   tenantName: string;
   /** `reportContent`, handed in by the host (see `PostMenuSafety`). */
   reportAction: typeof reportContent;
+  /** The member to block, or `null` while the dialog is closed. */
+  block: BlockTarget | null;
+  onBlockClose: () => void;
+  blockAction: typeof blockMember;
+  /** Whether `social` is effective for the viewer: picks the dialog's body (D-722, D-724). */
+  socialOn: boolean;
 };
 
-/** The shared report sheet. Controlled: the host owns `report` (see `useReportAndBlock`). */
+/** The shared report sheet and block dialog. Controlled: the host owns both targets (see `useReportAndBlock`). */
 export function ReportAndBlock({
   report,
   onReportClose,
   tenantName,
   reportAction,
+  block,
+  onBlockClose,
+  blockAction,
+  socialOn,
 }: ReportAndBlockProps) {
   return (
-    <ReportSheet
-      report={report}
-      onClose={onReportClose}
-      tenantName={tenantName}
-      reportAction={reportAction}
+    <>
+      <ReportSheet
+        report={report}
+        onClose={onReportClose}
+        tenantName={tenantName}
+        reportAction={reportAction}
+      />
+      <BlockDialog
+        block={block}
+        onClose={onBlockClose}
+        blockAction={blockAction}
+        socialOn={socialOn}
+      />
+    </>
+  );
+}
+
+/**
+ * The block dialog (11-20, CHAT-07, D-722, D-724, UI-D-872): the shipped `ConfirmDialog` in its danger tone with
+ * the `Ban` icon, titled by the person's name. The body has TWO variants chosen by whether `social` is effective
+ * for the viewer, from DATA (`socialOn`, the composed `social.participate`, never a role): with `social` off the
+ * block only hides their content; with it on the body also says the follows go and do not come back.
+ *
+ * - **One request.** The dialog locks both buttons while the call runs (the shipped pending state), so a double
+ *   tap blocks once; `{ changed: false }` is the plain success, with ONE toast either way.
+ * - **Failure.** `CANNOT_BLOCK`, the rate limit, a lost session and a lost network are the one shipped error toast
+ *   (the API's one refusal names no reason); the dialog is released and the member can try again from the menu.
+ * - **The name is React text** (T-11-16) and wraps with `break-words`; nothing here tells the blocked member
+ *   anything, and no sentence implies they are told (T-11-03).
+ */
+function BlockDialog({
+  block,
+  onClose,
+  blockAction,
+  socialOn,
+}: {
+  block: BlockTarget | null;
+  onClose: () => void;
+  blockAction: typeof blockMember;
+  socialOn: boolean;
+}) {
+  const t = useTranslations('safety');
+  const tf = useTranslations('feed');
+  const toast = useToast();
+
+  // The last person stays in hand while the dialog animates out, so its title does not flip to a blank.
+  const shown = useRef<BlockTarget | null>(block);
+  if (block) shown.current = block;
+  const target = block ?? shown.current;
+  if (target === null) return null;
+
+  const confirm = async () => {
+    const result = await blockAction(target.membershipId);
+    if (!result.ok) throw new Error(`block_${result.code}`);
+    toast.show({ tone: 'success', message: t('block.blocked', { nome: target.name }) });
+  };
+
+  return (
+    <ConfirmDialog
+      open={block !== null}
+      title={t('block.title', { nome: target.name })}
+      body={t(socialOn ? 'block.bodySocialOn' : 'block.bodySocialOff', { nome: target.name })}
+      icon={Ban}
+      tone="danger"
+      confirmLabel={t('block.confirm')}
+      cancelLabel={t('block.cancel')}
+      onConfirm={confirm}
+      onClose={onClose}
+      onError={(error) => {
+        console.error('safety.block.failed', { error: String(error) });
+        toast.show({ tone: 'error', message: tf('errors.generic') });
+      }}
     />
   );
 }
@@ -283,11 +365,25 @@ export function useReportAndBlock({
     (comment: CommentView) => setReport({ subjectType: 'post_comment', subjectId: comment.id }),
     [],
   );
+  const [block, setBlock] = useState<BlockTarget | null>(null);
+  // The riders already say who may be blocked; a target without a membership id or a name is simply not
+  // opened (the menus draw no row for it in the first place).
+  const blockPost = useCallback((target: PostMenuTarget) => {
+    if (target.authorMembershipId && target.authorName) {
+      setBlock({ membershipId: target.authorMembershipId, name: target.authorName });
+    }
+  }, []);
+  const blockComment = useCallback((comment: CommentView) => {
+    const { membershipId, displayName } = comment.author;
+    if (membershipId && displayName) setBlock({ membershipId, name: displayName });
+  }, []);
 
-  /** The post menu's labels with "Denunciar publicação" added (the "Bloquear {nome}" row is the block dialog's). */
+  /** The post menu's labels with the report and block rows' words added ("Bloquear {nome}" keeps its placeholder). */
   const menuLabels = useCallback(
     (labels: PostMenuLabels): PostMenuLabels =>
-      enabled ? { ...labels, report: t('menu.reportPost') } : labels,
+      enabled
+        ? { ...labels, report: t('menu.reportPost'), block: t.raw('menu.block') as string }
+        : labels,
     [enabled, t],
   );
   /** The comment list's labels with the menu's three words added to the row block. */
@@ -300,6 +396,7 @@ export function useReportAndBlock({
               ...labels.item,
               moreActions: t('menu.commentTrigger'),
               report: t('menu.reportComment'),
+              block: t.raw('menu.block') as string,
             },
           }
         : labels,
@@ -314,9 +411,13 @@ export function useReportAndBlock({
           onReportClose={() => setReport(null)}
           tenantName={tenantName}
           reportAction={safety.reportAction}
+          block={block}
+          onBlockClose={() => setBlock(null)}
+          blockAction={safety.blockAction}
+          socialOn={safety.socialOn}
         />
       ) : null,
-    [safety, report, tenantName],
+    [safety, report, block, tenantName],
   );
 
   return {
@@ -325,5 +426,7 @@ export function useReportAndBlock({
     commentLabels,
     onReportPost: enabled ? reportPost : undefined,
     onReportComment: enabled ? reportComment : undefined,
+    onBlockPost: enabled ? blockPost : undefined,
+    onBlockComment: enabled ? blockComment : undefined,
   };
 }
