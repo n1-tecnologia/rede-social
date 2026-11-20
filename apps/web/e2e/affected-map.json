@@ -70,7 +70,7 @@
   "groups": [
     {
       "id": "feed-web",
-      "why": "The feed surfaces: the home feed, the post detail and the composer routes, and the components and helpers that render posts; the feed, comment, composer, media and share specs drive them, comunidades and moderation render and act on the same posts, the CSP walk opens a post, reels.spec opens Reels over the home feed from a video (2026-10-09), and profile.spec reads the author's Instagram line on a card (2026-10-09), and social.spec drives Explorar, the chip row and the member feed on /inicio?aba=explorar (2026-10-19).",
+      "why": "The feed surfaces: the home feed, the post detail and the composer routes, and the components and helpers that render posts; the feed, comment, composer, media and share specs drive them, comunidades and moderation render and act on the same posts, the CSP walk opens a post, reels.spec opens Reels over the home feed from a video (2026-10-09), and profile.spec reads the author's Instagram line on a card (2026-10-09), and social.spec drives Explorar, the chip row and the member feed on /inicio?aba=explorar (2026-10-19). safety.spec.ts reports a comment from its menu on the post page (2026-11-20).",
       "globs": [
         "apps/web/components/feed/**",
         "apps/web/lib/feed*",
@@ -92,7 +92,8 @@
         "reels.spec.ts",
         "profile.spec.ts",
         "social.spec.ts",
-        "phase9-smoke.spec.ts"
+        "phase9-smoke.spec.ts",
+        "safety.spec.ts"
       ]
     },
     {
@@ -117,7 +118,8 @@
         "phase5-smoke.spec.ts",
         "phase7-smoke.spec.ts",
         "store.spec.ts",
-        "profile.spec.ts"
+        "profile.spec.ts",
+        "safety.spec.ts"
       ]
     },
     {
@@ -163,7 +165,8 @@
         "comunidades.spec.ts",
         "moderation.spec.ts",
         "phase8-smoke.spec.ts",
-        "csp.spec.ts"
+        "csp.spec.ts",
+        "safety.spec.ts"
       ]
     },
     {
@@ -201,7 +204,8 @@
         "feed.spec.ts",
         "feed-composer.spec.ts",
         "store.spec.ts",
-        "profile.spec.ts"
+        "profile.spec.ts",
+        "safety.spec.ts"
       ]
     },
     {
@@ -272,17 +276,23 @@
       "id": "catalog-social",
       "why": "social.spec is the only spec that imports messages/pt-BR/social.json (the Início and Explorar chips, Encontrar pessoas and the Explorar empty states).",
       "globs": ["apps/web/messages/pt-BR/social.json"],
-      "specs": ["social.spec.ts", "phase9-smoke.spec.ts"]
+      "specs": ["social.spec.ts", "phase9-smoke.spec.ts", "direct-chat.spec.ts"]
     },
     {
       "id": "social-web",
-      "why": "The follow control, the social profile block and the social module's props-only UI render on the member profile, the directory and the private lists; social.spec walks them, members.spec and profile.spec guard the directory and the profile they sit in.",
+      "why": "The follow control, the social profile block and the social module's props-only UI render on the member profile, the directory and the private lists; social.spec walks them, members.spec and profile.spec guard the directory and the profile they sit in. direct-chat.spec.ts walks the Enviar mensagem and Desbloquear controls on the profile (2026-11-20).",
       "globs": [
         "apps/web/components/social/**",
         "apps/web/lib/social.ts",
         "packages/modules/social/ui/**"
       ],
-      "specs": ["social.spec.ts", "members.spec.ts", "profile.spec.ts", "phase9-smoke.spec.ts"]
+      "specs": [
+        "social.spec.ts",
+        "members.spec.ts",
+        "profile.spec.ts",
+        "phase9-smoke.spec.ts",
+        "direct-chat.spec.ts"
+      ]
     },
     {
       "id": "catalog-reels",
@@ -298,7 +308,7 @@
     },
     {
       "id": "notifications-push",
-      "why": "The notification center, its BFF routes and the Web Push client controls; the notifications and push specs drive them, phase7 covers the whole path, the shell shows the bell, and courses-member-area.spec renders the six school notices in the bell (08.6-12, the courses renderers in lib/notification-renderers.tsx).",
+      "why": "The notification center, its BFF routes and the Web Push client controls; the notifications and push specs drive them, phase7 covers the whole path, the shell shows the bell, and courses-member-area.spec renders the six school notices in the bell (08.6-12, the courses renderers in lib/notification-renderers.tsx). safety.spec.ts reads the moderators' Nova denuncia bell row (2026-11-20).",
       "globs": [
         "packages/modules/notifications/**",
         "apps/web/app/(app)/notificacoes/**",
@@ -313,7 +323,8 @@
         "chat-cases.spec.ts",
         "shell.spec.ts",
         "csp.spec.ts",
-        "courses-member-area.spec.ts"
+        "courses-member-area.spec.ts",
+        "safety.spec.ts"
       ]
     },
     {
@@ -327,7 +338,8 @@
         "chat-cases.spec.ts",
         "shell.spec.ts",
         "csp.spec.ts",
-        "courses-member-area.spec.ts"
+        "courses-member-area.spec.ts",
+        "safety.spec.ts"
       ]
     },
     {
@@ -344,13 +356,15 @@
     },
     {
       "id": "chat",
-      "why": "Support chat (inbox, thread, BFF routes, cursors); the chat spec drives it, chat-cases walks a case from the opener to the next one, chat-voice records a voice message and plays it on the team's side (12.5-17), phase7 and notifications read its unread signals.",
+      "why": "Support chat (inbox, thread, BFF routes, cursors); the chat spec drives it, chat-cases walks a case from the opener to the next one, chat-voice records a voice message and plays it on the team's side (12.5-17), phase7 and notifications read its unread signals. Phase 11 (2026-11-20): the Conversas list, the direct thread, the message menu and the composer strips are driven by direct-chat.spec.ts, and safety.spec.ts reports a direct message from the thread menu.",
       "globs": [
         "packages/modules/chat/**",
         "apps/web/app/(app)/suporte/**",
         "apps/web/app/api/chat/**",
         "apps/web/lib/chat*",
-        "apps/web/lib/voice-send.ts"
+        "apps/web/lib/voice-send.ts",
+        "apps/web/app/(app)/conversas/**",
+        "apps/web/components/chat/**"
       ],
       "specs": [
         "chat.spec.ts",
@@ -358,12 +372,14 @@
         "chat-voice.spec.ts",
         "phase7-smoke.spec.ts",
         "notifications.spec.ts",
-        "csp.spec.ts"
+        "csp.spec.ts",
+        "direct-chat.spec.ts",
+        "safety.spec.ts"
       ]
     },
     {
       "id": "catalog-chat",
-      "why": "Every spec that imports messages/pt-BR/chat.json asserts on its strings, together with the chat specs.",
+      "why": "Every spec that imports messages/pt-BR/chat.json asserts on its strings, together with the chat specs. direct-chat.spec.ts and safety.spec.ts read the direct conversation copy from this catalog (2026-11-20).",
       "globs": ["apps/web/messages/pt-BR/chat.json"],
       "specs": [
         "chat.spec.ts",
@@ -371,7 +387,9 @@
         "chat-voice.spec.ts",
         "phase7-smoke.spec.ts",
         "notifications.spec.ts",
-        "csp.spec.ts"
+        "csp.spec.ts",
+        "direct-chat.spec.ts",
+        "safety.spec.ts"
       ]
     },
     {
@@ -405,7 +423,7 @@
     },
     {
       "id": "members-profile",
-      "why": "The member directory, member detail and profile pages (view and edit), the profile components and the helpers behind the profile's sections and the staff-only directory (2026-10-12); members, profile and phase3 drive them, login/signup land on the profile, and the platform wizard's phone preview renders the profile hero.",
+      "why": "The member directory, member detail and profile pages (view and edit), the profile components and the helpers behind the profile's sections and the staff-only directory (2026-10-12); members, profile and phase3 drive them, login/signup land on the profile, and the platform wizard's phone preview renders the profile hero. direct-chat.spec.ts opens a member's profile and the /membros row to start a conversation and to read the blocked member's empty zone (2026-11-20).",
       "globs": [
         "apps/web/app/(app)/{membros,perfil}/**",
         "apps/web/components/profile/**",
@@ -424,7 +442,8 @@
         "login.spec.ts",
         "signup.spec.ts",
         "admin-members.spec.ts",
-        "platform-wizard.spec.ts"
+        "platform-wizard.spec.ts",
+        "direct-chat.spec.ts"
       ]
     },
     {
@@ -458,7 +477,7 @@
     },
     {
       "id": "moderation-admin",
-      "why": "The moderation log screen, its API route and the moderation helpers; moderation.spec drives it, admin-members shares the log row and phase8 covers the screen.",
+      "why": "The moderation log screen, its API route and the moderation helpers; moderation.spec drives it, admin-members shares the log row and phase8 covers the screen. safety.spec.ts reads the moderation log for a removal made from the reports queue (2026-11-20).",
       "globs": [
         "apps/web/app/(app)/configuracoes/moderacao/**",
         "apps/web/lib/moderation*",
@@ -469,7 +488,8 @@
         "moderation.spec.ts",
         "admin-members.spec.ts",
         "phase8-smoke.spec.ts",
-        "csp.spec.ts"
+        "csp.spec.ts",
+        "safety.spec.ts"
       ]
     },
     {
@@ -867,6 +887,24 @@
         "events-tickets.spec.ts",
         "events.spec.ts",
         "payments-admin.spec.ts"
+      ]
+    },
+    {
+      "id": "safety-web",
+      "why": "Phase 11 (2026-11-20): the report sheet and block dialog hosts, the administrator's Denuncias queue, Membros bloqueados and their server reads and catalog; safety.spec.ts walks a report of each subject to its resolution, direct-chat.spec.ts blocks and unblocks through the same dialog, and the shipped comment and story specs open the menus these screens added.",
+      "globs": [
+        "apps/web/app/(app)/configuracoes/{denuncias,bloqueados}/**",
+        "apps/web/lib/{reports,reports-view,blocks}*",
+        "apps/web/messages/pt-BR/safety.json"
+      ],
+      "specs": [
+        "safety.spec.ts",
+        "direct-chat.spec.ts",
+        "moderation.spec.ts",
+        "feed-comments.spec.ts",
+        "stories.spec.ts",
+        "comunidades.spec.ts",
+        "phase8-smoke.spec.ts"
       ]
     }
   ]
