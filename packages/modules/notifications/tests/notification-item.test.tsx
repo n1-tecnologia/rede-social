@@ -126,6 +126,8 @@ describe('NotificationItem glyphs (08.6-12, UI-D-460)', () => {
     ['Ticket', 'lucide-ticket'],
     // Phase 12.4-13 (UI-D-822): the resolved-case notice, same rule.
     ['CircleCheck', 'lucide-circle-check'],
+    // Phase 11-21 (UI-D-875): the report notice on the actor-less disc, same rule.
+    ['Flag', 'lucide-flag'],
   ] as const)('draws the %s glyph on the actor-less disc', (glyph, iconClass) => {
     const { container } = item({ leading: { glyph: true }, glyph });
     const disc = container.querySelector('.h-10.w-10.rounded-full.bg-bg-tertiary');
@@ -135,6 +137,12 @@ describe('NotificationItem glyphs (08.6-12, UI-D-460)', () => {
   it('draws a school glyph as the kind disc beside an actor avatar', () => {
     const { container } = item({ glyph: 'GraduationCap' });
     expect(container.querySelector('svg.lucide-graduation-cap')).not.toBeNull();
+    expect(container.querySelector('.h-10.w-10.rounded-full.bg-bg-tertiary')).toBeNull();
+  });
+
+  it('draws the UserPlus glyph as the kind badge beside the follower avatar (Phase 11-21, UI-D-875)', () => {
+    const { container } = item({ glyph: 'UserPlus' });
+    expect(container.querySelector('span.rounded-full svg.lucide-user-plus')).not.toBeNull();
     expect(container.querySelector('.h-10.w-10.rounded-full.bg-bg-tertiary')).toBeNull();
   });
 });

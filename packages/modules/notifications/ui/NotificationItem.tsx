@@ -11,6 +11,7 @@ import {
   CircleCheck,
   CirclePlay,
   Film,
+  Flag,
   GraduationCap,
   Heart,
   type LucideIcon,
@@ -21,6 +22,7 @@ import {
   ShoppingBag,
   Sparkles,
   Ticket,
+  UserPlus,
 } from 'lucide-react';
 import type { MouseEventHandler, ReactNode } from 'react';
 
@@ -55,6 +57,10 @@ const GLYPHS = {
   // Phase 12.4-13 (UI-D-822): the resolved-case notice, by name only. The web registry picks it per
   // kind, so this module still names no producer module (MOD-02).
   CircleCheck,
+  // Phase 11-21 (UI-D-875): the follow notice (`UserPlus`) and the new-report notice (`Flag`), by name
+  // only. The web registry picks them per kind, so this module still names no producer module (MOD-02).
+  UserPlus,
+  Flag,
 } as const satisfies Record<string, LucideIcon>;
 
 export type NotificationGlyph = keyof typeof GLYPHS;

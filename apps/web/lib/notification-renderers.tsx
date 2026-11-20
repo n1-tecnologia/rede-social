@@ -1,8 +1,10 @@
+import { REPORT_NOTIFICATION_KIND } from '@rede-social/contracts/moderation';
 import { CHAT_NOTIFICATION_KINDS } from '@rede-social/module-chat/contracts';
 import { COURSES_NOTIFICATION_KINDS } from '@rede-social/module-courses/contracts';
 import { EVENTS_NOTIFICATION_KINDS } from '@rede-social/module-events/contracts';
 import { FEED_NOTIFICATION_KINDS } from '@rede-social/module-feed/contracts';
 import { PAYMENTS_NOTIFICATION_KINDS } from '@rede-social/module-payments/contracts';
+import { SOCIAL_NOTIFICATION_KINDS } from '@rede-social/module-social/contracts';
 import { STORIES_NOTIFICATION_KINDS } from '@rede-social/module-stories/contracts';
 import type { ReactNode } from 'react';
 import { formatEventDate, formatEventTime } from '@/lib/events-view';
@@ -303,6 +305,47 @@ const chatRenderers: Partial<Record<string, NotificationRenderer>> = {
   },
 };
 
+/**
+ * Phase 11-21 (D-727, UI-D-875, A-UI-16): "{actor} começou a te seguir." The follower's avatar with the
+ * `UserPlus` badge (the reply row's anatomy); the actor is React text inside the catalog sentence, never
+ * markup. A tap opens the follower's profile, built ONLY from a canonical (lowercase) uuid the source
+ * wrote and encoded; anything else degrades to the directory, never to a hand-built URL. The row is never
+ * retracted when the follow is undone and no push exists for it; with `social` off it stays readable.
+ */
+const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+const followerHref = (facts: Record<string, unknown>) =>
+  typeof facts.membershipId === 'string' && CANONICAL_UUID.test(facts.membershipId)
+    ? `/membros/${encodeURIComponent(facts.membershipId)}`
+    : '/membros';
+
+/**
+ * Phase 11-21 (D-729, UI-D-875, T-11-12): the moderator's "Nova denúncia para analisar." An actor-less
+ * system fact: the 40px `Flag` disc (`leading: 'glyph'` even if a row ever names an actor) and the lead in
+ * bold, all from the catalog. It reads NO fact, so it never says what was reported, by whom or of whom,
+ * and its target is the queue's open filter (the default), a constant. A viewer without `moderation.manage`
+ * who somehow holds the row lands on the queue's own `notFound()` (T-11-37).
+ */
+const REPORTS_QUEUE_HREF = '/configuracoes/denuncias';
+
+const socialRenderers: Partial<Record<string, NotificationRenderer>> = {
+  [SOCIAL_NOTIFICATION_KINDS.followed]: {
+    glyph: 'UserPlus',
+    sentence: (_facts, t, actorName) =>
+      t.rich('kinds.socialFollowed', { actor: actorName, b: actorBold }),
+    href: followerHref,
+  },
+};
+
+const moderationRenderers: Partial<Record<string, NotificationRenderer>> = {
+  [REPORT_NOTIFICATION_KIND]: {
+    glyph: 'Flag',
+    leading: 'glyph',
+    sentence: (_facts, t) => t.rich('kinds.moderationReport', { b: actorBold }),
+    href: () => REPORTS_QUEUE_HREF,
+  },
+};
+
 export const notificationRenderers: Partial<Record<string, NotificationRenderer>> = {
   [FEED_NOTIFICATION_KINDS.post]: {
     glyph: 'Newspaper',
@@ -377,4 +420,6 @@ export const notificationRenderers: Partial<Record<string, NotificationRenderer>
   ...coursesRenderers,
   ...paymentsRenderers,
   ...chatRenderers,
+  ...socialRenderers,
+  ...moderationRenderers,
 };
