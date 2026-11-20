@@ -1,6 +1,11 @@
-import type { NavItem, ShellNav } from '@rede-social/core/ui';
+import { join } from 'node:path';
+import { type NavItem, type ShellNav, slotAccessibleName } from '@rede-social/core/ui';
+import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
-import { CONVERSATIONS_HREF, withConversationsDestination } from './chat-nav';
+import { loadMessages } from '@/i18n/messages';
+import { CONVERSATIONS_HREF, chatSlotLabel, withConversationsDestination } from './chat-nav';
+
+const messages = loadMessages(join(process.cwd(), 'messages', 'pt-BR'));
 
 /**
  * 11-19 (D-719, UI-D-861): the host points the chat slot at Conversas from the viewer's PERMISSION
@@ -86,5 +91,41 @@ describe('withConversationsDestination (UI-D-861)', () => {
     );
     expect(chat?.href).toBe('/conversas');
     expect(chat?.label).toBe('Suporte');
+  });
+});
+
+/**
+ * 11-19 Task 3 (UI-D-861, D-220, D-237, D-238, D-803): the chat slot's accessible name with a number. A viewer who
+ * holds chat.direct reads the ICU sentence "Conversas, {count} conversa(s) com mensagem nova" (the count is the
+ * number of CONVERSATIONS with something unread); everyone else keeps the shipped sentences, the member's dot
+ * and the staff count of "Suporte". With nothing unread the name is the plain label.
+ */
+describe('chatSlotLabel (UI-D-861)', () => {
+  const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'chat' });
+  const label = (over: Partial<Parameters<typeof chatSlotLabel>[1]> = {}) =>
+    chatSlotLabel(t as never, { count: 1, style: 'count', conversations: true, ...over });
+
+  it('one conversation and many use the ICU plural of the catalog', () => {
+    expect(label({ count: 1 })).toBe('Conversas, 1 conversa com mensagem nova');
+    expect(label({ count: 3 })).toBe('Conversas, 3 conversas com mensagem nova');
+    expect(label({ count: 120 })).toBe('Conversas, 120 conversas com mensagem nova');
+  });
+
+  it('without conversations the shipped sentences stay: the member dot and the staff count', () => {
+    expect(label({ conversations: false, style: 'dot' })).toBe('Suporte, nova resposta da equipe');
+    expect(label({ conversations: false, style: 'count', count: 2 })).toBe(
+      'Suporte, 2 aguardando resposta',
+    );
+  });
+
+  it('through the shell helper, nothing unread is the plain slot label', () => {
+    const labelFor = (badge: string, count: number, style: 'dot' | 'count') =>
+      badge === 'unreadConversations' ? label({ count, style }) : undefined;
+    expect(slotAccessibleName('Conversas', 'unreadConversations', 0, labelFor, 'count')).toBe(
+      'Conversas',
+    );
+    expect(slotAccessibleName('Conversas', 'unreadConversations', 2, labelFor, 'count')).toBe(
+      'Conversas, 2 conversas com mensagem nova',
+    );
   });
 });

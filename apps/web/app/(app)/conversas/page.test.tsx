@@ -91,7 +91,11 @@ const answer = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-type ListProps = { initial: { support?: { name: string }; rows: Array<{ name: string }> } | null };
+type ListProps = {
+  initial: { support?: { name: string }; rows: Array<{ name: string }> } | null;
+  tenantId: string;
+  userId: string;
+};
 const listProps = (element: ReactElement): ListProps => {
   // The page returns <div><PageHeader/><ConversationsList .../></div>: find the list by its `initial` prop.
   const children = (element.props as { children?: unknown }).children;
@@ -120,6 +124,13 @@ describe('/conversas page (UI-D-862, T-11-35)', () => {
     const { initial } = listProps(element);
     expect(initial?.support?.name).toBe('Equipe Rede Lab');
     expect(initial?.rows.map((row) => row.name)).toEqual(['Carla Nunes']);
+  });
+
+  it('hands the list the tenant and the member of the bootstrap, the topic of the live signal (never the host)', async () => {
+    mocks.fetchDirectList.mockResolvedValue(answer());
+    const props = listProps((await ConversationsPage()) as ReactElement);
+    expect(props.tenantId).toBe('99999999-9999-4999-8999-999999999999');
+    expect(props.userId).toBe('88888888-8888-4888-8888-888888888888');
   });
 
   it.each([

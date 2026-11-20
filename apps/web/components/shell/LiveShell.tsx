@@ -16,6 +16,7 @@ import {
 } from '@rede-social/core/ui';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useEffect, useMemo } from 'react';
+import { chatSlotLabel } from '@/lib/chat-nav';
 import {
   disablePush,
   type PushWindowLike,
@@ -42,6 +43,12 @@ export interface LiveShellProps {
    * the shell also joins `tenant:<t>:support-inbox` to keep the staff's awaiting count live.
    */
   supportInbox?: boolean;
+  /**
+   * 11-19 (UI-D-861): the viewer holds `chat.direct` (from `bootstrap.permissions`, never a role comparison), so the
+   * chat slot is "Conversas" and its accessible name counts conversations ("Conversas, 3 conversas com mensagem
+   * nova"). Absent or false, the slot's names are the support ones, exactly as before.
+   */
+  conversations?: boolean;
   /** `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (07-07); null leaves push out entirely. */
   vapidPublicKey?: string | null;
   children: ReactNode;
@@ -185,6 +192,7 @@ export function LiveShell({
   initialCounters,
   notificationsEnabled,
   supportInbox = false,
+  conversations = false,
   vapidPublicKey = null,
   children,
 }: LiveShellProps) {
@@ -221,10 +229,10 @@ export function LiveShell({
     (badge, count, style) => {
       if (badge === 'unreadNotifications') return t('navBadge', { count });
       if (badge === 'unreadConversations')
-        return style === 'dot' ? tChat('navBadge.member') : tChat('navBadge.staff', { count });
+        return chatSlotLabel(tChat, { count, style, conversations });
       return undefined;
     },
-    [t, tChat],
+    [t, tChat, conversations],
   );
 
   return (

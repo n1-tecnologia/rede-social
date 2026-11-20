@@ -11,6 +11,7 @@ import {
   withRailMainSlots,
   withTabDots,
 } from '@rede-social/core/ui';
+import { CHAT_PERMISSIONS } from '@rede-social/module-chat/contracts';
 import type { Viewport } from 'next';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -208,6 +209,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       initialCounters={bootstrap.counters}
       notificationsEnabled={notificationsOn}
       supportInbox={bootstrap.permissions.includes('chat.support')}
+      conversations={bootstrap.permissions.includes(CHAT_PERMISSIONS.direct)}
       vapidPublicKey={vapidPublicKey}
     >
       <AppShell

@@ -35,3 +35,28 @@ export function withConversationsDestination(
     ),
   };
 }
+
+/** The slice of a translator scoped to the `chat` namespace that the slot's name needs. */
+type ChatTranslate = (key: string, values?: { count: number }) => string;
+
+/**
+ * 11-19 (UI-D-861, UI-D-253, D-237, D-238): the chat slot's accessible name while something is unread. A viewer
+ * who holds `chat.direct` hears "Conversas, {count, plural, one {# conversa com mensagem nova} other {#
+ * conversas com mensagem nova}}" (the number counts CONVERSATIONS with something unread, support included, and the
+ * visual badge is the shipped count `Badge` the API's `conversationsBadge: 'count'` asks for). Every other viewer
+ * keeps the shipped sentences: "Suporte, nova resposta da equipe" for the member's dot and "Suporte, {count}
+ * aguardando resposta" for the staff count. The shell calls this only with a count above zero (at zero the name is
+ * the plain slot label, `slotAccessibleName`), and the catalog words are the `chat.navConversationsBadge`,
+ * `chat.navBadge.member` and `chat.navBadge.staff` keys.
+ */
+export function chatSlotLabel(
+  t: ChatTranslate,
+  {
+    count,
+    style,
+    conversations,
+  }: { count: number; style: 'dot' | 'count'; conversations: boolean },
+): string {
+  if (conversations) return t('navConversationsBadge', { count });
+  return style === 'dot' ? t('navBadge.member') : t('navBadge.staff', { count });
+}
