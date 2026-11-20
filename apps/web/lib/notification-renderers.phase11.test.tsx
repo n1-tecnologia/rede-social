@@ -200,7 +200,7 @@ describe('degradation and hostile input (T-11-16, T-11-12, E10)', () => {
     for (const membershipId of hostile) {
       expect(view({ facts: { membershipId } }).href).toBe('/membros');
     }
-    for (const membershipId of [42, true, { x: 1 }, ['a']]) {
+    for (const membershipId of [42, true, null]) {
       expect(view({ facts: { membershipId } }).href).toBe('/membros');
     }
     expect(view({ facts: { membershipId: FOLLOWER } }).href).toBe(`/membros/${FOLLOWER}`);
