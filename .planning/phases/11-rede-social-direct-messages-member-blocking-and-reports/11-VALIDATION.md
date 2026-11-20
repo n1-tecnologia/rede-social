@@ -156,7 +156,7 @@ Each Wave 0 file is created by the first task that needs it (plans run in wave o
 - [x] `apps/api/tests/integration/{direct-fixtures,direct-chat,direct-chat-block,direct-chat-voice,direct-notifications,reports-new-subjects,reports-notice,social-block,block-by-membership,story-comment-block,report-removers,report-riders}` and the `phase 11 sweep` cases of `isolation.test.ts` with an entry in `apps/api/tests/isolation-inventory.ts` for every new route (plans 05, 08, 10, 11, 12, 13, 14, 15, 16, 17, 27)
 - [x] `packages/modules/chat/tests/{direct-contracts,direct-notification-copy}.test.ts`, the additions of `notification-sources.test.ts` and `inbox-row.test.tsx`, the social, stories, communities, feed and notifications module test additions, `apps/api/tests/unit/{report-removal,report-audience-drift}.test.ts`, `apps/web/lib/{chat-view,reports-view,chat-nav}.test.ts`, `apps/web/i18n/direct-messages.test.ts` and the web component tests of plans 19 to 25
 - [x] Fixture helper: `direct-fixtures.ts` with throwaway members that have a profile, an identity shared with the lab tenant, and `setup.ts` extended so `withModuleEnabled` can toggle `chat` and `notifications` (plan 08)
-- [ ] Existing suites that pin touched seams updated deliberately: `registry.test.ts` (plan 08), `isolation-inventory.test.ts` (plans 08, 10, 12, 27), `module-readmes.test.ts` (plans 04, 08, 11, 14, 17), `mounts.test.ts` (run in plans 11 and 17), the web notification renderers and moderation view tests (plans 18 and 21)
+- [x] Existing suites that pin touched seams updated deliberately: `registry.test.ts` (plan 08), `isolation-inventory.test.ts` (plans 08, 10, 12, 27), `module-readmes.test.ts` (plans 04, 08, 11, 14, 17), `mounts.test.ts` (run in plans 11 and 17), the web notification renderers and moderation view tests (plans 18 and 21)
 - [x] The two Playwright specs `apps/web/e2e/direct-chat.spec.ts` and `safety.spec.ts`, WRITTEN AND LISTED, never run by an agent (plan 26); their run is a ledger row
 
 No framework install is needed.
@@ -179,12 +179,27 @@ No framework install is needed.
 
 ---
 
+## Exit gate record (plan 11-28, 2026-11-20)
+
+Run once on the local stack, in the order of the plan. Flags stay `false`: `wave_0_complete` and `nyquist_compliant` flip
+only when every automated command of the gate exits 0, and two of them end non-zero for reasons that are not this
+phase's (a stale local seed and local residue, both listed in the owner's ledger row P40). Every Wave 0 file exists.
+
+| Step | Result |
+|------|--------|
+| `bash scripts/supabase.sh test db` (whole directory, first) | exit 1: 73 files, 6004 tests; the phase's own files 237, 238, 239 and 240 are `ok`; the only reds are `120 #37`, `141 #21`, `232 #56` (EXPLAIN by name) and `154 #65` (local residue), all known and not this phase's |
+| 22 integration files, one by one | 19 green first time or on a lone rerun; `isolation` stays red on 5 cases (stories b3 and b8, `events` shared identity, `inventory sweep: events`, `phase 10 sweep`), all the seeded story window or the seeded events, none of the Phase 11 sweep cases; `direct-chat-block`, `direct-chat`, `block-by-membership`, `story-comment-block`, `report-*`, `reports-*`, `chat*`, `feed-social`, `member-communities`, `moderation-member-content`, `notifications` green; `direct-chat-voice`, `direct-notifications`, `social-block`, `reports-notice`, `chat-voice` red once from the sleeping machine (a 900 s test, a 30 s timeout) and green alone; `member-stories` EP-60 red while the seeded lab story still had its window, green after it closed |
+| `pnpm boundaries`, `boundaries:negative`, `guard:lanes`, `check:static-routes`, the two shell guards | exit 0 each |
+| `pnpm db:generate`, `pnpm db:generate:central` | exit 0, `No schema changes` each |
+| expand-only grep over the 13 migrations | prints nothing (grep exit 1) |
+| `turbo typecheck test` over 10 packages and the one `next build` of the web | typecheck and build green; the first test run was red only from sleep artifacts (900 s tests, workers that never answered) and every red file passed on a lone rerun (core 1858 of 1858, module-chat 332, module-stories 224, 40 web files) |
+
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
 - [ ] Feedback latency < 120s
 - [ ] `nyquist_compliant: true` set in frontmatter
 
