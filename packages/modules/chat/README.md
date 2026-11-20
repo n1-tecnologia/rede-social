@@ -332,3 +332,24 @@ acceptance (the shell's WebView needs its capture permission too).
 - The six info items of the Phase 12.5 code review (ffmpeg stderr overflow reported as a timeout, the 301 s verdict
   against the 1 s recorder timeslice, voice metadata on `GET /v1/media/{id}` for an administrator, a leftover
   `starting` flag in the recorder, the repeated `300` constant, and the DEPLOY.md diff check ending at `$$;`) are open.
+
+## Phase 11 (direct messages, shipped)
+
+- **The direct kind now has a member lane, through definers only.** A member lane still cannot insert a direct row:
+  `chat_conversations_insert` accepts support rows only, and the one creator of a direct conversation is
+  `app.direct_conversation_open(uuid)` (one conversation per pair, enforced by `chat_conversations_direct_pair_uq`; a
+  refusal is SQLSTATE `DM001`). A paired direct is readable only while the pair is open (`app.direct_pair_readable`),
+  and a send to a closed pair is refused by `app.chat_messages_before_insert` under the conversation row lock.
+- **The support case triggers still skip direct rows.** The number, the state, the owner, the category, the priority
+  and both instants stay null for a direct conversation, and no case history row is written for it. Staff are not
+  participants of a direct: `chat_participants_select` narrows them to the participant rows of support conversations
+  (`app.chat_conversation_is_support`).
+- **Voice in direct chats reuses the 12.5 machinery.** `POST /v1/chat/direct/voice-messages` passes the `voice` bundle
+  to the shared composer and bubble, with the same message model, insert policy and read gate; a send is idempotent per
+  take and only the two participants play the recording (a reported recording opens for the administrator through its
+  report only).
+- **The notice is push-only.** A direct message produces one push to the other participant, titled with the writer's
+  name through the literal `titleText` of the push hint, one tag per conversation, and no bell row; a closed pair gets
+  nothing. The recipient's unread count rides a `chat.unread` signal on their own user topic.
+- **Release order:** migrations, then the web, then the API and the worker together (see `docs/DEPLOY.md`, "Phase 11
+  release").
