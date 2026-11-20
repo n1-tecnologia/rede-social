@@ -97,10 +97,11 @@ export default async function SettingsPage({
 }: {
   searchParams: Promise<{ erro?: string }>;
 }) {
-  const [hostTenant, t, ta, cookieStore, params] = await Promise.all([
+  const [hostTenant, t, ta, ts, cookieStore, params] = await Promise.all([
     getHostTenant(),
     getTranslations('app'),
     getTranslations('admin'),
+    getTranslations('safety'),
     cookies(),
     searchParams,
   ]);
@@ -187,6 +188,15 @@ export default async function SettingsPage({
               icon="user-circle"
               label={t('settings.rows.editProfile')}
               href="/perfil/editar"
+              trailing={null}
+            />
+            {/* 11-20 (CHAT-07, UI-D-635): the blocked list, right under "Editar perfil". It sits in the
+                tenant group, so it is absent on the platform host; it is not gated by `social`
+                (D-616: the report and block slice is in the browser on purpose). */}
+            <Row
+              icon="ban"
+              label={ts('settings.blockedRow')}
+              href="/configuracoes/bloqueados"
               trailing={null}
             />
           </Group>

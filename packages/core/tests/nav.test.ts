@@ -1,4 +1,5 @@
 import {
+  Ban,
   Bell,
   GraduationCap,
   LayoutGrid,
@@ -629,6 +630,8 @@ describe('iconFor (serialisable icon names → lucide components)', () => {
     expect(() => iconFor('')).not.toThrow();
     // 08.3-03 (UI-D-389): the Configurações "Cursos" row's glyph.
     expect(iconFor('graduation-cap')).toBe(GraduationCap);
+    // 11-20 (UI-D-635): the Configurações "Membros bloqueados" row's glyph.
+    expect(iconFor('ban')).toBe(Ban);
     for (const name of [
       'home',
       'user',

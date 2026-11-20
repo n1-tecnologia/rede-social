@@ -14,7 +14,7 @@ vi.mock('next/cache', () => ({
   revalidatePath: (...args: unknown[]) => cache.revalidatePath(...args),
 }));
 
-const { reportContent, blockMember, unblockMember, unblockBlocked } = await import(
+const { reportContent, blockMember, unblockMember, unblockBlocked, loadMoreBlocked } = await import(
   './safety-actions'
 );
 
@@ -147,5 +147,34 @@ describe('blockMember, unblockMember and unblockBlocked (CHAT-07, D-722, D-724)'
     answerJson(200, { changed: true });
     expect(await unblockBlocked(SUBJECT)).toEqual({ ok: true, code: 'ok', changed: true });
     expect(api.apiFetch).toHaveBeenLastCalledWith(`/v1/blocks/${SUBJECT}`, { method: 'DELETE' });
+  });
+});
+
+describe('loadMoreBlocked (UI-D-635)', () => {
+  it('returns the next finished page, with the cursor forwarded', async () => {
+    api.apiFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          items: [
+            { userId: SUBJECT, displayName: 'Carla Nunes', avatarAssetId: null, blockedAt: 'x' },
+          ],
+          nextCursor: 'c3',
+        }),
+      ),
+    );
+    expect(await loadMoreBlocked('c2')).toEqual({
+      ok: true,
+      items: [{ userId: SUBJECT, name: 'Carla Nunes', avatarUrl: null }],
+      nextCursor: 'c3',
+    });
+    expect(api.apiFetch).toHaveBeenCalledWith('/v1/blocks?cursor=c2');
+  });
+
+  it('refuses a missing or oversized cursor before any request, and a failed read is { ok: false }', async () => {
+    expect(await loadMoreBlocked(null)).toEqual({ ok: false });
+    expect(await loadMoreBlocked('x'.repeat(513))).toEqual({ ok: false });
+    expect(api.apiFetch).not.toHaveBeenCalled();
+    api.apiFetch.mockResolvedValueOnce(new Response('{}', { status: 500 }));
+    expect(await loadMoreBlocked('c2')).toEqual({ ok: false });
   });
 });

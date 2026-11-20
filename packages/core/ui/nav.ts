@@ -1,5 +1,6 @@
 import type { Bootstrap } from '@rede-social/contracts';
 import {
+  Ban,
   Bell,
   Building2,
   CalendarDays,
@@ -537,6 +538,8 @@ const ICONS: Record<string, LucideIcon> = {
   home: Home,
   user: User,
   'chevrons-up-down': ChevronsUpDown,
+  // 11-20 (UI-D-635): the Configurações "Membros bloqueados" row.
+  ban: Ban,
   // 2026-10-26: the desktop header's account button (its menu drops down).
   'chevron-down': ChevronDown,
   users: Users,

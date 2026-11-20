@@ -4,6 +4,7 @@ import { blockChangeAnswerSchema, reportCreateBodySchema } from '@rede-social/co
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
+import { type BlockedMemberView, blockedMemberView, fetchBlocks } from '@/lib/blocks';
 
 /**
  * The member's report and block actions (11-20, MODER-05, CHAT-07, D-616, D-722, D-724, D-733), SERVER ACTIONS:
@@ -126,4 +127,22 @@ export async function unblockBlocked(userId: unknown): Promise<BlockActionResult
   const id = membershipIdSchema.safeParse(userId);
   if (!id.success) return { ok: false, code: 'failed', changed: false };
   return writeBlock('DELETE', `/v1/blocks/${id.data}`, false);
+}
+
+/** One page of the blocked list, finished (UI-D-635); `ok: false` is the page's failure state, never a message. */
+export type BlockedPageResult =
+  | { ok: true; items: BlockedMemberView[]; nextCursor: string | null }
+  | { ok: false };
+
+/** `GET /v1/blocks?cursor=`: the next keyset page of the CALLER's own blocks, for `InfiniteScroll`. */
+export async function loadMoreBlocked(cursor: unknown): Promise<BlockedPageResult> {
+  const parsed = z.string().min(1).max(512).safeParse(cursor);
+  if (!parsed.success) return { ok: false };
+  try {
+    const page = await fetchBlocks({ cursor: parsed.data });
+    return { ok: true, items: page.items.map(blockedMemberView), nextCursor: page.nextCursor };
+  } catch (error) {
+    console.error('safety.blocked.page_failed', { error: String(error) });
+    return { ok: false };
+  }
 }

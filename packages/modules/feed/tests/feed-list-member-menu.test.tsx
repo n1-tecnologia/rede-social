@@ -4,6 +4,7 @@ import { ToastProvider } from '@rede-social/ui';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FeedList, type FeedListProps } from '../ui/FeedList';
+import type { PostCardView } from '../ui/PostCard';
 import type { PostMenuLabels } from '../ui/PostMenu';
 
 /**
@@ -164,7 +165,7 @@ describe('FeedList - the delete wording follows the author kind (10-11)', () => 
 describe('FeedList - the report and block rows follow the post riders (11-20, D-733)', () => {
   const SAFETY_LABELS = { ...MENU_LABELS, report: 'report-post', block: 'block-{nome}' };
 
-  function openSafety(post: ReturnType<typeof item> & { canReport?: boolean; canBlock?: boolean }) {
+  function openSafety(post: PostCardView) {
     const onReport = vi.fn();
     const onBlock = vi.fn();
     render(
