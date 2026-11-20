@@ -77,11 +77,9 @@ export function ReportsQueueSkeleton({ count, voice = true }: { count: number; v
             <Skeleton variant="rect" width={64} className="h-6 rounded-full" />
           </div>
           {voice && index === 1 ? (
-            <Skeleton
-              variant="rect"
-              data-reports-skeleton-voice
-              className="h-14 w-70 max-w-full rounded-2xl"
-            />
+            <div data-reports-skeleton-voice className="h-14 w-70 max-w-full">
+              <Skeleton variant="rect" className="h-full w-full rounded-2xl" />
+            </div>
           ) : (
             <>
               <Skeleton variant="text" width="92%" className="h-4" />
