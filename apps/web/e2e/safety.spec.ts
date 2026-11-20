@@ -5,10 +5,11 @@ import notificationsMessages from '../messages/pt-BR/notifications.json' with { 
 import safetyMessages from '../messages/pt-BR/safety.json' with { type: 'json' };
 import socialMessages from '../messages/pt-BR/social.json' with { type: 'json' };
 import storiesMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
-import { closeAdmin, createFeedCommentAs, createFeedPostAs } from './admin';
+import { closeAdmin, createFeedCommentAs, createFeedPostAs, membershipForEmail } from './admin';
 import {
   closeDirectAdmin,
   commentIsRemoved,
+  communityStatusOf,
   DIRECT_PREFIX,
   type DirectTenant,
   directSlug,
@@ -17,13 +18,15 @@ import {
   type Person,
   provisionDirectTenant,
   reportAs,
+  reportCountOf,
   reportIdsOf,
   reportStatusOf,
   resetSafetyState,
+  sendDirectAs,
 } from './direct-admin';
 import { login, SEED_PASSWORD } from './fixtures';
-import { closeJourneyAdmin } from './member-journey';
-import { closeSocialAdmin } from './social-admin';
+import { closeJourneyAdmin, createMemberCommunityAs, createMemberStoryAs } from './member-journey';
+import { closeSocialAdmin, followMember } from './social-admin';
 import { closeTenantFixtures } from './tenant-fixtures';
 import { ensureWorker } from './worker';
 
@@ -59,9 +62,12 @@ test.use({ serviceWorkers: 'block' });
 test.describe.configure({ timeout: 180_000 });
 
 const _C = chatMessages.chat;
+const C = chatMessages.chat;
 const M = moderationMessages.moderation;
+const N = notificationsMessages.notifications;
 const _N = notificationsMessages.notifications;
 const SA = safetyMessages.safety;
+const ST = storiesMessages.stories;
 const _S = socialMessages.social;
 const _ST = storiesMessages.stories;
 
@@ -122,6 +128,8 @@ async function contextAs(browser: Browser, person: Person, use: DeviceUse) {
   await login(page, person.email, tenant.password, tenant.origin);
   return { context, page };
 }
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** The one visible toast. */
 const toast = (page: Page) => page.locator('[role="status"][style*="safe-top"]');
@@ -256,5 +264,221 @@ test.describe('denúncia e bloqueio no navegador', () => {
     await expect(first).toContainText(
       M.log.rows.commentRemoved.replace('{actor}', M.log.you).replace('{target}', ana.name),
     );
+  });
+
+  // ── 3. a story ─────────────────────────────────────────────────────────────────────────────────
+
+  test('3. a member reports a story from the viewer’s menu, which also offers Bloquear for a member author', async ({
+    page,
+  }) => {
+    const { ana, bia } = tenant;
+    await followMember(bia.email, ana.email, tenant.slug);
+    const storyId = await createMemberStoryAs(
+      ana.email,
+      tenant.slug,
+      `${DIRECT_PREFIX}story ${run}`,
+    );
+
+    await login(page, bia.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/stories/${storyId}`);
+    const viewer = page.getByRole('dialog', { name: ST.viewer.dialog });
+    await expect(viewer).toBeVisible();
+    // Dispatched AT the element: the stories spec's dev-overlay rule.
+    await viewer.getByRole('button', { name: ST.viewer.more, exact: true }).dispatchEvent('click');
+    const menu = page.getByRole('dialog', { name: ST.history.menu.title });
+    await expect(
+      menu.getByRole('button', { name: SA.menu.block.replace('{nome}', ana.name) }),
+    ).toBeVisible();
+    await expect(menu.getByRole('button', { name: ST.history.menu.delete })).toHaveCount(0);
+    await menu.getByRole('button', { name: SA.menu.reportStory }).dispatchEvent('click');
+
+    await fileReport(page, SA.subject.story.title);
+    await expect(toast(page)).toContainText(SA.sheet.success);
+    await expect.poll(() => reportCountOf(tenant, 'story')).toBe(1);
+  });
+
+  // ── 4. a community, archived ───────────────────────────────────────────────────────────────────
+
+  test('4. a member reports a member community; the administrator archives it: Comunidade arquivada, and it leaves the list', async ({
+    page,
+    browser,
+    contextOptions,
+    viewport,
+    isMobile,
+    hasTouch,
+    userAgent,
+    deviceScaleFactor,
+  }) => {
+    const { ana, bia } = tenant;
+    const name = `${DIRECT_PREFIX}comunidade ${run}`;
+    const communityId = await createMemberCommunityAs(ana.email, tenant.slug, name);
+
+    await login(page, bia.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/comunidades/${communityId}`);
+    await page.getByRole('button', { name: SA.menu.communityTrigger }).click();
+    const menu = page.getByRole('dialog', { name: SA.menu.communityTitle });
+    await expect(
+      menu.getByRole('button', { name: SA.menu.block.replace('{nome}', ana.name) }),
+    ).toBeVisible();
+    await menu.getByRole('button', { name: SA.menu.reportCommunity }).click();
+    await fileReport(page, SA.subject.community.title);
+    await expect(toast(page)).toContainText(SA.sheet.success);
+    await expect.poll(() => reportIdsOf(tenant, 'community')).toHaveLength(1);
+    const [reportId] = await reportIdsOf(tenant, 'community');
+    if (!reportId) throw new Error('the report was not stored');
+
+    const admin = await contextAs(
+      browser,
+      tenant.admin,
+      deviceOf({ contextOptions, viewport, isMobile, hasTouch, userAgent, deviceScaleFactor }),
+    );
+    try {
+      const ap = admin.page;
+      await openQueue(ap);
+      await expect(queueRow(ap, reportId)).toContainText(name);
+      const sheet = await openResolve(ap, reportId);
+      // A community ARCHIVES: the row says so and nothing in the sheet is called "Remover".
+      await expect(sheet.getByRole('button', { name: M.report.resolve.remove })).toHaveCount(0);
+      await expect(sheet.getByRole('button', { name: M.report.resolve.dismiss })).toBeVisible();
+      await sheet.getByRole('button', { name: M.report.resolve.archive }).click();
+      const confirm = dialogTitled(ap, M.report.archiveDialog.title);
+      await expect(confirm.getByText(M.report.archiveDialog.body)).toBeVisible();
+      await confirm
+        .getByRole('button', { name: M.report.archiveDialog.confirm, exact: true })
+        .click();
+
+      await expect(toast(ap)).toContainText(SA.queue.toasts.resolved);
+      await expect(queueRow(ap, reportId)).toContainText(SA.queue.state.communityArchived);
+      expect(await communityStatusOf(communityId)).toBe('archived');
+      expect((await moderationActionsOf(tenant))[0]).toBe('community_archived');
+    } finally {
+      await admin.context.close();
+    }
+
+    // It left the list the members read.
+    await page.goto(`${tenant.origin}/comunidades`);
+    await expect(page.getByText(name)).toHaveCount(0);
+  });
+
+  // ── 5. a direct message ────────────────────────────────────────────────────────────────────────
+
+  test('5. a direct message is reported from its menu; the queue row shows only the copy with no link and the sheet offers only ignore and block', async ({
+    page,
+    browser,
+    contextOptions,
+    viewport,
+    isMobile,
+    hasTouch,
+    userAgent,
+    deviceScaleFactor,
+  }) => {
+    const { ana, bia } = tenant;
+    const text = `Mensagem denunciada ${run}`;
+    const conversationId = await sendDirectAs(tenant, ana, bia, text);
+
+    await login(page, bia.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/conversas/${conversationId}`);
+    await page.getByRole('button', { name: C.direct.menu.trigger }).click();
+    await page
+      .getByRole('dialog', { name: C.direct.menu.title })
+      .getByRole('button', { name: C.direct.menu.report })
+      .click();
+    const report = page.getByRole('dialog', {
+      name: SA.subject.directMessage.title,
+      exact: true,
+    });
+    await expect(report.locator('[data-report-privacy]')).toHaveText(
+      SA.subject.directMessage.privacy,
+    );
+    await fileReport(page, SA.subject.directMessage.title);
+    await expect(toast(page)).toContainText(SA.sheet.success);
+    await expect.poll(() => reportIdsOf(tenant, 'direct_message')).toHaveLength(1);
+    const [reportId] = await reportIdsOf(tenant, 'direct_message');
+    if (!reportId) throw new Error('the report was not stored');
+
+    const admin = await contextAs(
+      browser,
+      tenant.admin,
+      deviceOf({ contextOptions, viewport, isMobile, hasTouch, userAgent, deviceScaleFactor }),
+    );
+    try {
+      const ap = admin.page;
+      await openQueue(ap);
+      const queued = queueRow(ap, reportId);
+      await expect(queued).toContainText(SA.subject.directMessage.pill);
+      await expect(queued.locator('[data-report-message-text]')).toHaveText(text);
+      await expect(queued.locator('[data-report-message-note]')).toHaveText(
+        SA.queue.body.messageNote,
+      );
+      // No link to the conversation and no "Ver conteúdo": the rest of the thread is never reachable from here.
+      await expect(queued.getByRole('link')).toHaveCount(0);
+      await expect(queued.locator('[data-report-view]')).toHaveCount(0);
+
+      const sheet = await openResolve(ap, reportId);
+      await expect(sheet.getByRole('button', { name: M.report.resolve.dismiss })).toBeVisible();
+      await expect(sheet.getByRole('button', { name: M.report.resolve.block })).toBeVisible();
+      await expect(sheet.getByRole('button', { name: M.report.resolve.remove })).toHaveCount(0);
+      await expect(sheet.getByRole('button', { name: M.report.resolve.archive })).toHaveCount(0);
+      await expect(sheet.locator('[data-resolve-helper]')).toHaveText(
+        M.report.resolve.helperMessage,
+      );
+    } finally {
+      await admin.context.close();
+    }
+  });
+
+  // ── 6. block the author from the queue ─────────────────────────────────────────────────────────
+
+  test('6. the administrator blocks the author of a reported post: Autor bloqueado, and the author’s membership is blocked', async ({
+    page,
+  }) => {
+    const { ana, bia } = tenant;
+    const postId = await createFeedPostAs(ana.email, tenant.slug, `${DIRECT_PREFIX}autor ${run}`);
+    const reportId = await reportAs(tenant, bia, 'feed_post', postId, 'harassment');
+
+    await login(page, tenant.admin.email, tenant.password, tenant.origin);
+    await openQueue(page);
+    const sheet = await openResolve(page, reportId);
+    await sheet.getByRole('button', { name: M.report.resolve.block }).click();
+
+    // The Phase 8 block step, with its optional internal reason.
+    const step = page.getByRole('dialog', {
+      name: M.member.blockStep.title.replace('{name}', ana.name),
+    });
+    await expect(step).toBeVisible();
+    await step.getByLabel(M.member.reason.label).fill(`Denúncia ${run}`);
+    await step.locator('[data-resolve-block-confirm]').click();
+
+    await expect(toast(page)).toContainText(SA.queue.toasts.resolved);
+    await expect(queueRow(page, reportId)).toContainText(SA.queue.state.authorBlocked);
+    expect(await reportStatusOf(reportId)).toBe('author_blocked');
+    expect((await membershipForEmail(ana.email))?.status).toBe('blocked');
+    expect((await moderationActionsOf(tenant))[0]).toBe('member_blocked');
+  });
+
+  // ── 7. the moderators' bell row ────────────────────────────────────────────────────────────────
+
+  test('7. the administrator’s bell shows Nova denúncia and the row opens the queue', async ({
+    page,
+  }) => {
+    const { bia } = tenant;
+    const postId = await createFeedPostAs(
+      tenant.admin.email,
+      tenant.slug,
+      `${DIRECT_PREFIX}sino ${run}`,
+    );
+    await reportAs(tenant, bia, 'feed_post', postId);
+
+    await login(page, tenant.admin.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/notificacoes`);
+    const sentence = N.kinds.moderationReport.replace(/<\/?b>/g, '');
+    const bell = page.getByRole('link', { name: new RegExp(escapeRegExp(sentence)) }).first();
+    await expect(bell).toBeVisible({ timeout: 30_000 });
+    await expect(bell).toHaveAttribute('href', '/configuracoes/denuncias');
+    // The row names no reporter and no content: the fixed sentence only.
+    expect(await bell.innerText()).not.toContain(bia.name);
+    await bell.click();
+    await expect(page).toHaveURL(/\/configuracoes\/denuncias$/);
+    await expect(page.locator('[data-reports-list]')).toBeVisible();
   });
 });
