@@ -5426,6 +5426,237 @@ phone and on a desktop browser (the first real-device walks are ledger rows):
 
 See the ledger named at the top. A row becomes `passed` only with the evidence you paste and your own date.
 
+## Phase 11 release (direct messages, block effects and reports)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them: nothing of
+Phase 11 has been pushed, deployed or applied to a hosted project, and no agent touches homolog or production. No
+command here prints a secret. Phase 11 ships ON TOP of the Phase 13 report and block slice (the report queue, the
+member block and their three actions) and of every release above it, including 12.5 (voice messages): the direct
+voice route reuses the 12.5 recording machinery. The proofs only the owner can run (two real phones with a push on
+each, the banner per conversation and its suppression in the foreground, voice heard by the two participants only, the
+blocked member's strip on a device, the report of every subject and the `Nova denúncia` push, the screen-reader walks,
+the held-out visual rows, the two Playwright runs, the sketch 025 approval kind and the defaults, every hosted release
+step and the first-day checks, and the full `pnpm verify`) are in the ledger
+`.planning/phases/11-rede-social-direct-messages-member-blocking-and-reports/11-MANUAL-PROOFS.md`; it ships with every
+row `pending`, and a row becomes `passed` only with the evidence you paste and your own date.
+
+**A tenant without the `social` module sees no change in conversations or follows.** What every tenant does get, on
+the day of the release and gated by nothing (D-616, intentional), is the report and block slice's entries in the
+browser and the new `Membros bloqueados` and `Denúncias` rows. What changes with `social` and `chat` on is told in
+"Per-tenant effect" below.
+
+### What ships
+
+- **Thirteen migrations, applied in timestamp order** (the order `ls supabase/migrations` prints, all after
+  `20261117230638_chat_voice_account_deletion.sql`). All thirteen are expand-only: this phase has no allowed
+  destructive statement (see the grep below). Each applies on an EMPTY tenant project and on an existing one. The one
+  step that cannot be undone is item 9 (D-730).
+  1. `20261119155818_direct_pair_gates.sql` (hand-written): the helper definers `app.pair_open_in`,
+     `app.members_blocked_between`, `app.social_pair_open` (system user only) and `app.direct_pair_readable`.
+  2. `20261119155903_direct_pairs.sql` (generated): `chat_conversations.direct_low_user_id` and
+     `direct_high_user_id` (nullable), two CHECKs and the partial unique index `chat_conversations_direct_pair_uq`, so a
+     pair has one conversation.
+  3. `20261119155914_direct_open.sql` (hand-written): `app.direct_conversation_open(uuid)`, the only creator of a
+     direct conversation (SQLSTATE `DM001` on a refusal).
+  4. `20261119160110_direct_policies.sql` (generated): `chat_conversations_insert` narrowed to support rows (a member
+     lane can no longer create a direct) and `chat_conversations_select` gains the readable-pair term.
+  5. `20261119162341_direct_triggers.sql` (hand-written): `app.chat_messages_before_insert` and
+     `app.chat_messages_after_insert` REPLACED, so a send to a closed pair is refused under the conversation row lock
+     and the recipient gets the `chat.unread` signal. It is a security-relevant function: read the diff by hand (the
+     command is in "Read-only check" below) before you apply it to a hosted project.
+  6. `20261119162800_direct_notice.sql` (hand-written): `app.direct_message_notice(uuid)`, a definer that only the
+     system user (the worker) can run.
+  7. `20261119173204_block_effects.sql` (hand-written): `app.member_block_create` REPLACED: it takes the pair
+     conversation row lock, writes the block and deletes the follows between the pair in both directions, in one
+     transaction.
+  8. `20261119173313_follow_block_policy.sql` (generated): the follow insert policy refuses a follow across a block,
+     in both directions.
+  9. `20261119194425_report_subjects.sql` (generated, **the one-way step**, D-730): the report subject CHECK is
+     widened by four values appended after the two it held (`story`, `story_comment`, `community`, `direct_message`),
+     and `content_reports` gains the nullable `media_asset_id` and `voice_seconds`, two CHECKs and a partial index.
+     Once applied to a tenant database it stays.
+  10. `20261119194436_report_subjects_functions.sql` (hand-written): `app.content_report_create` REPLACED with the four
+      new branches, each snapshotting exactly one item.
+  11. `20261119194821_chat_support_conversation_gate.sql` (hand-written): `app.chat_conversation_is_support(uuid)`.
+  12. `20261119194838_direct_participants_policy.sql` (generated): `chat_participants_select` narrowed so the staff
+      read the participant rows of support conversations only. This is the staff-participants policy fix of plan 11-09
+      (who talks to whom in a direct is no longer readable by staff); the policy calls the definer of item 11 directly.
+  13. `20261119195211_report_voice_gate.sql` (hand-written): `app.chat_asset_hidden` REPLACED with the report clause,
+      so the administrator plays a reported recording only through its report.
+- **The API and the worker (one image, deployed together).** The direct routes (open, send, voice, list, detail),
+  the member block and unblock by membership id, the reported-subject routes and the resolve dispatcher, the follow
+  notice (`social.followed`), the `report.created` source, and the direct push branch with a literal title (`titleText`
+  on the push hint, a STRICT schema widened in the worker by plan 04). No new queue and no new job name.
+- **The web.** Conversas (the list, the thread with its five composer states, the entry points on the profile and on
+  the `/membros` row), the menus and sheets to report and block on every subject, `Membros bloqueados`, the
+  `Denúncias` queue with six subjects, and the two bell rows (`começou a te seguir` and `Nova denúncia`).
+- **Facts the notes below rely on.** The API emits no signal on a block or an unblock (a thread open on another device
+  learns on the next message signal, subscribe or refocus). The header of an open thread keeps the removed member's old
+  name until the next navigation. `unreadCount` is capped at 100 in the strict contract and the screen shows `99+`.
+  Staff never get `Bloquear {name}` (A-11-ROLE): the rider and the screen enforce it, the database function
+  `app.member_block_create` does not. The banner is not shown while the app is visible, by the global service-worker
+  rule (assumption A5, two phones needed).
+
+### Read-only check on EVERY hosted project (run before anything else)
+
+Run these on each hosted tenant project, **including the one that holds several tenants**, in the Supabase SQL editor
+or with `psql` and a read-only role. They only read. Paste the shapes and counts in the ledger; never a project
+reference, a tenant name or a member's e-mail.
+
+```sql
+-- A. Is any of this release already on the project? (expected before the release: no row)
+select column_name from information_schema.columns
+ where (table_schema = 'public' and table_name = 'chat_conversations'
+        and column_name in ('direct_low_user_id', 'direct_high_user_id'))
+    or (table_schema = 'public' and table_name = 'content_reports'
+        and column_name in ('media_asset_id', 'voice_seconds'));
+-- B. Which of this release's versions are already recorded? (expected before the release: no row)
+select version from supabase_migrations.schema_migrations
+ where version in ('20261119155818', '20261119155903', '20261119155914', '20261119160110', '20261119162341',
+                   '20261119162800', '20261119173204', '20261119173313', '20261119194425', '20261119194436',
+                   '20261119194821', '20261119194838', '20261119195211')
+ order by version;
+-- C. Is the wider subject CHECK still absent? (expected before the release: f, the list does not name 'story')
+select (select pg_get_constraintdef(oid) ilike '%direct_message%' from pg_constraint
+         where conname = 'content_reports_subject_type_chk') as wider_check_live;
+-- D. How big are the tables the release touches?
+select (select count(*) from public.chat_conversations) as conversations,
+       (select count(*) from public.chat_messages) as messages,
+       (select count(*) from public.content_reports) as reports;
+```
+
+Then, from the repository, the local checks that need no project:
+
+- `pnpm db:migrate-all -- --dry-run` lists the pending versions per project and writes nothing; on a project that has
+  the 12.5 release the thirteen files above are the pending ones.
+- The expand-only grep over the phase's files prints NOTHING (this phase has no allowed destructive statement):
+  `grep -inE 'drop (table|column)|rename|set not null|alter column .* type' supabase/migrations/*_direct_pair_gates.sql
+  supabase/migrations/*_direct_pairs.sql supabase/migrations/*_direct_open.sql supabase/migrations/*_direct_policies.sql
+  supabase/migrations/*_direct_triggers.sql supabase/migrations/*_direct_notice.sql supabase/migrations/*_block_effects.sql
+  supabase/migrations/*_follow_block_policy.sql supabase/migrations/*_report_subjects.sql
+  supabase/migrations/*_report_subjects_functions.sql supabase/migrations/*_chat_support_conversation_gate.sql
+  supabase/migrations/*_direct_participants_policy.sql supabase/migrations/*_report_voice_gate.sql`. The widening of the
+  subject CHECK drops and adds a constraint (not a column), which the pattern does not match.
+- The replaced `app.chat_messages_before_insert` and `app.chat_asset_hidden` bodies, and the replaced
+  `app.account_anonymise` of 12.5 (untouched here), differ from their previous newest version only by added lines; a `<`
+  line is a defect. For the before-insert trigger, diff the body of `20261119162341_direct_triggers.sql` against the
+  newest earlier file that defines it (`grep -l 'function app.chat_messages_before_insert' supabase/migrations/*.sql`).
+
+### Order
+
+1. **Migrations** on every tenant database first, through the ledgered fan-out (the Phase 09.2 Cloud Run Job `migrateAll`, databases before the services); the thirteen files apply in the order of their names, the runner is serialised per database and idempotent, so a re-run is safe and reports nothing pending. **The whole set runs in one sitting through `pnpm db:migrate-all`, one project at a time, and never two runs at once.**
+2. **Web** second, once every project is current.
+3. **API and worker** last and together, from the same image build, in the same sitting as step 2.
+
+**Why this order inverts the API-first rule (it is the Phase 8 and 12.4 rule).** The new web tolerates both APIs: it
+reads every new key as optional and composes nothing the old API lacks (the entries appear only when the API composes
+`chat.direct`). An OLD web refuses the NEW API's optional keys, because its strict parsers (the member social read,
+the story, comment and community riders, the report list) reject a key they do not know. So the web goes before the
+API. The API and the worker go together because the push hint schema is strict: an API that enqueues `titleText` for a
+worker that does not yet have the widening of plan 04 fails the job.
+
+### What each window does
+
+- **Window 1: the API before the migrations (held out, as for every phase).** The new code reads the pair columns and
+  calls the new functions; a project the migrations have not reached is held out `updating` by the schema gate instead
+  of letting a member meet the error. What keeps working: nothing of the new surface, and the previous behavior of every
+  other module. Do not release the API before the migrations reach every project.
+- **Window 2: the web ahead of the API, inside one sitting.** No screen reaches a missing route, because
+  `chat.direct` is composed by the API: until the new API answers, the new entries do not appear. What keeps working:
+  every screen the previous web had.
+- **Window 3: the API ahead of the worker (the strict push schema).** The API enqueues a push hint with `titleText`;
+  a worker without the widening rejects it and the job fails (retries, then ends failed). What keeps working: every
+  send and every read; only the push of a direct message is lost until the worker catches up. Deploy the two together.
+- **Window 4: an OLD web against the NEW API (never).** Its strict parsers refuse the optional keys of the member
+  social read, the story, comment and community riders and the report list. This is why the web goes first.
+- **Window 5: the report subject CHECK widening live before the API can write a new subject.** The migration order
+  guarantees it: item 9 is applied to every project before any API revision that can write `story`, `story_comment`,
+  `community` or `direct_message`. What keeps working: the two subjects that existed.
+- **Window 6: the follow-notice and report-notice kinds written before the web renders them.** The bell shows the
+  generic row until the web ships. What keeps working: the bell, its badge and the push.
+- **Window 7: a follow undone before the worker runs.** The follow bell row is still created once for the pair; it is
+  never retracted by design (A-UI-16).
+- **Two runs of `db:migrate-all` must never overlap.** The fan-out runs the projects one at a time, each file in its
+  own transaction.
+
+### Per-tenant effect
+
+- **With `social` off nothing changes for conversations or follows.** No Conversas, no `Enviar mensagem`, no block
+  clearing follows.
+- **The first-day effect for EVERY tenant (D-616, intentional, not gated by `social`).** The report and block slice's
+  entries appear in the browser (the menus and sheets to report content), and the settings show the new
+  `Membros bloqueados` and `Denúncias` rows. A tenant that did not use the Phase 13 slice sees them on the day of the
+  release.
+- **With `social` and `chat` on:** a member's bubble opens Conversas; the profile and the `/membros` row offer
+  `Enviar mensagem`; a block clears the two follows; a voice message works in a direct chat through the 12.5 machinery.
+  A push per conversation needs the `notifications` module.
+- **Staff never get `Bloquear {name}` (A-11-ROLE)**; they can report. A message report keeps only the message: the
+  administrator reads no chat row, and hears a reported recording only through its report.
+- **The `Nova denúncia` bell row and push** go to the live holders of `moderation.manage`, never naming the subject.
+
+### Rollback limit
+
+- **Migrations are never rolled back** (forward-only; there is no down migration, and D-730 is one-way once applied to
+  a tenant database). Roll forward with a fix.
+- **Rolling the WEB back to the previous revision after a report of a new subject or a direct conversation exists**
+  makes the screens that read them fail on that web's strict parsers (the report list refuses a subject it does not
+  know) until it is rolled forward. Roll the web forward, not back.
+- **Rolling the API back below this phase while the worker stays** is safe for sends; rolling the worker back below
+  plan 04 while the API stays makes every direct push fail (window 3). Move them together.
+- **The new API against an old schema is held out `updating`.** Do not release the API before the migrations reach
+  every project.
+
+### After the migration: read-only checks (every project)
+
+```sql
+-- E. The pair columns and the unique index exist. Expected: 2, 1.
+select (select count(*) from information_schema.columns
+         where table_schema = 'public' and table_name = 'chat_conversations'
+           and column_name in ('direct_low_user_id', 'direct_high_user_id')) as pair_columns,
+       (select count(*) from pg_indexes where indexname = 'chat_conversations_direct_pair_uq') as pair_index;
+-- F. The subject CHECK is wider and the voice CHECKs exist. Expected: t, 2.
+select (select pg_get_constraintdef(oid) ilike '%direct_message%' from pg_constraint
+         where conname = 'content_reports_subject_type_chk') as wider_check,
+       (select count(*) from pg_constraint
+         where conname in ('content_reports_voice_pair_chk', 'content_reports_voice_subject_chk')) as voice_checks;
+-- G. The functions exist with the right grants. Read the grants against the migration text; the notice definer is
+--    executable by the system user only and the open function by authenticated.
+select p.proname,
+       has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
+       has_function_privilege('anon', p.oid, 'execute') as anon,
+       has_function_privilege('service_role', p.oid, 'execute') as service_role
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app'
+   and p.proname in ('direct_conversation_open', 'direct_message_notice', 'members_blocked_between',
+                     'direct_pair_readable', 'social_pair_open', 'pair_open_in', 'chat_conversation_is_support')
+ order by p.proname;
+-- H. The follow policy and the participants policy were replaced. Expected: two rows.
+select policyname from pg_policies
+ where (tablename = 'social_follows' and policyname = 'social_follows_insert_member')
+    or (tablename = 'chat_participants' and policyname = 'chat_participants_select');
+-- I. No direct conversation breaks the pair rule (a validated CHECK, so 0 is the only answer). Expected: 0.
+select count(*) from public.chat_conversations
+ where kind = 'direct' and (direct_low_user_id is null or direct_high_user_id is null);
+```
+
+### Smoke checks (on the homolog host once it serves this release)
+
+In the app, on a homolog tenant with `social`, `chat` and `notifications` on, two member accounts, one administrator
+and one support account, on a phone and on a desktop browser (the first real-device walks are ledger rows):
+
+- As member A, open a member's profile and tap `Enviar mensagem`; send a text and then a voice message. Member B sees
+  the badge on the bubble (`99+` past a hundred), the row in Conversas, and gets one push titled with A's name.
+- As B, block A from a message menu: the block clears the two follows, A's composer closes with the neutral strip on
+  the next read, and unblocking reopens it.
+- Report a post, a comment, a story, a story comment, a community and a direct message as a member: the
+  administrator's `Denúncias` queue shows the six subjects, the reported voice message plays only through its report,
+  and the `Nova denúncia` bell row appears (and the push on a phone).
+- A staff account sees `Denunciar` but never `Bloquear {name}`.
+
+### Manual proofs (hosted)
+
+See the ledger named at the top. A row becomes `passed` only with the evidence you paste and your own date.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
