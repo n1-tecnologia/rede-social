@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { REPORT_NOTIFICATION_KIND } from '@rede-social/contracts/moderation';
 import type { NotificationRow } from '@rede-social/module-notifications/contracts';
+import { NotificationItem, NotificationList } from '@rede-social/module-notifications/ui';
 import { SOCIAL_NOTIFICATION_KINDS } from '@rede-social/module-social/contracts';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -28,6 +29,8 @@ const NOW = Date.parse('2026-11-19T12:05:00.000Z');
 const ROW = '22222222-2222-4222-8222-222222222222';
 const AVATAR = '33333333-3333-4333-8333-333333333333';
 const FOLLOWER = '44444444-4444-4444-8444-444444444444';
+/** A uuid with letters, so its upper-case form is genuinely different. */
+const LETTERED = 'abcdef01-2345-4678-89ab-cdef01234567';
 
 function row(overrides: Partial<NotificationRow> = {}): NotificationRow {
   return {
@@ -149,5 +152,118 @@ describe('every other kind is unchanged', () => {
     expect(v.glyph).toBe('Bell');
     expect(v.href).toBe('/inicio');
     expect(markup(v.sentence)).toBe('Você tem uma nova notificação.');
+  });
+});
+
+describe('degradation and hostile input (T-11-16, T-11-12, E10)', () => {
+  it('a follow row whose actor was removed keeps the shipped removed-actor handling', () => {
+    const removed = view({ actor: { removed: true, displayName: null, avatarAssetId: null } });
+    expect(markup(removed.sentence)).toBe(`${BOLD('Membro removido')} começou a te seguir.`);
+    expect(removed.href).toBe(`/membros/${FOLLOWER}`);
+    const missing = view({ actor: null });
+    expect(missing.leading).toEqual({ glyph: true });
+    expect(markup(missing.sentence)).toBe(`${BOLD('')} começou a te seguir.`);
+  });
+
+  it('a 60-grapheme name of combining marks and right-to-left text renders as text, sentence intact', () => {
+    const name = `${'e\u0301\u0323'.repeat(20)}${'\u0645\u0631\u062d\u0628\u0627'.repeat(8)}`;
+    const html = markup(
+      view({ actor: { removed: false, displayName: name, avatarAssetId: null } }).sentence,
+    );
+    expect(html).toBe(`${BOLD(name)} começou a te seguir.`);
+  });
+
+  it('an actor name that looks like markup is escaped, never rendered as markup', () => {
+    const hostile = '<img src=x onerror=alert(1)><b>x</b>';
+    const html = markup(
+      view({ actor: { removed: false, displayName: hostile, avatarAssetId: null } }).sentence,
+    );
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(html.endsWith(' começou a te seguir.')).toBe(true);
+  });
+
+  it('only the canonical lowercase uuid builds a URL; every other id degrades to /membros', () => {
+    const hostile = [
+      '../x',
+      '../../configuracoes/membros',
+      '/membros/evil',
+      'https://evil.example/x',
+      LETTERED.toUpperCase(),
+      `${FOLLOWER} `,
+      ` ${FOLLOWER}`,
+      `${FOLLOWER}/../x`,
+      `${FOLLOWER}?a=1`,
+      FOLLOWER.slice(0, -1),
+      FOLLOWER.replace(/-/g, ''),
+    ];
+    for (const membershipId of hostile) {
+      expect(view({ facts: { membershipId } }).href).toBe('/membros');
+    }
+    for (const membershipId of [42, true, { x: 1 }, ['a']]) {
+      expect(view({ facts: { membershipId } }).href).toBe('/membros');
+    }
+    expect(view({ facts: { membershipId: FOLLOWER } }).href).toBe(`/membros/${FOLLOWER}`);
+    expect(view({ facts: { membershipId: LETTERED } }).href).toBe(`/membros/${LETTERED}`);
+  });
+
+  it('the follow row reads no flag: with social off at read time the same row and the same link render', () => {
+    // The view is a pure function of the row (A-UI-16, UI-D-510): nothing here asks for the module switch.
+    const first = view();
+    const again = view();
+    expect(again.href).toBe(first.href);
+    expect(markup(again.sentence)).toBe(markup(first.sentence));
+    expect(again.removed).toBe(false);
+  });
+});
+
+describe('the bell list keeps its order and unread dot with the new rows (UI-D-875)', () => {
+  const NEXT = '55555555-5555-4555-8555-555555555555';
+  const asItem = (v: ReturnType<typeof view>) => (
+    <NotificationItem
+      key={v.id}
+      href={v.href}
+      unread={v.unread}
+      leading={v.leading}
+      glyph={v.glyph}
+      glyphTone={v.glyphTone}
+      sentence={v.sentence}
+      time={v.time}
+      unreadLabel="Não lida."
+    />
+  );
+
+  it('draws the Flag row between a shipped row and a follow row, each its own link and unread label', () => {
+    const post = view({
+      id: NEXT,
+      kind: 'feed.post',
+      facts: { postId: FOLLOWER, excerpt: 'Oi', communityId: null, communityName: null },
+    });
+    const flag = view({
+      id: '66666666-6666-4666-8666-666666666666',
+      kind: REPORT_NOTIFICATION_KIND,
+      actor: null,
+      facts: { reportId: 'HOSTILE' },
+    });
+    const follow = view();
+    const html = markup(
+      <NotificationList
+        unreadTitle="Novas"
+        unread={[asItem(post), asItem(flag), asItem(follow)]}
+        readTitle="Anteriores"
+        read={[]}
+        ariaLabel="Notificações"
+      />,
+    );
+    const hrefs = [...html.matchAll(/<a [^>]*href="([^"]+)"/g)].map((m) => m[1]);
+    expect(hrefs).toEqual([
+      `/post/${FOLLOWER}`,
+      '/configuracoes/denuncias',
+      `/membros/${FOLLOWER}`,
+    ]);
+    expect([...html.matchAll(/data-unread="true"/g)]).toHaveLength(3);
+    expect(html).toContain('lucide-flag');
+    expect(html).toContain('lucide-user-plus');
+    expect(html).not.toMatch(/HOSTILE/);
   });
 });
