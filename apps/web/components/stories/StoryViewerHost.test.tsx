@@ -123,17 +123,26 @@ vi.mock('motion/react', async () => {
     'layout',
     'layoutId',
   ]);
+  // ONE component per tag (11-24): a fresh `forwardRef` on every access made every render of a sheet remount
+  // its whole subtree, so a list inside a sheet re-read itself on any state change of its host. The real
+  // `motion.div` is a stable component; this stand-in now is too.
+  const components = new Map<string, unknown>();
   const proxy = new Proxy(
     {},
     {
-      get: (_target, tag: string) =>
-        forwardRef((props: Record<string, unknown>, ref: unknown) => {
+      get: (_target, tag: string) => {
+        const known = components.get(tag);
+        if (known) return known;
+        const made = forwardRef((props: Record<string, unknown>, ref: unknown) => {
           const plain: Record<string, unknown> = {};
           for (const [key, value] of Object.entries(props)) {
             if (!MOTION_ONLY.has(key)) plain[key] = value;
           }
           return createElement(tag, { ...plain, ref });
-        }),
+        });
+        components.set(tag, made);
+        return made;
+      },
     },
   );
   return {
@@ -2546,5 +2555,217 @@ describe('StoryViewerHost — the story menu for every viewer (11-24, UI-D-869)'
     const sheet = await openMenu();
     const row = within(sheet).getByRole('button', { name: `Bloquear ${longName}` });
     expect(row.querySelector('span.truncate')?.textContent).toBe(`Bloquear ${longName}`);
+  });
+});
+
+describe('StoryViewerHost — the story comment menu (11-24, CHAT-07, MODER-05, UI-D-869)', () => {
+  const BRUNO_ID = '0e000000-0000-4000-8000-0000000000b1';
+  const OTHER_COMMENT = {
+    ...SEEDED_COMMENT,
+    id: '0d000000-0000-4000-8000-0000000000e2',
+    body: 'Adorei.',
+    author: {
+      displayName: 'Bruno',
+      profileHref: `/membros/${BRUNO_ID}`,
+      avatarUrl: null,
+      membershipId: BRUNO_ID,
+    },
+    replyCount: 0,
+    canReport: true,
+    canBlock: true,
+  };
+  const OWN_COMMENT = {
+    ...SEEDED_COMMENT,
+    id: '0d000000-0000-4000-8000-0000000000e3',
+    body: 'Meu comentário.',
+    author: { displayName: 'Membro', profileHref: null, avatarUrl: null, membershipId: null },
+    replyCount: 0,
+    canDelete: true,
+    removal: 'own' as const,
+    canReport: false,
+    canBlock: false,
+  };
+  const report = vi.fn();
+  const block = vi.fn();
+  const safetyBinding = (overrides: Partial<StoryCommentsBinding> = {}) =>
+    commentsBinding({
+      safety: { socialOn: false, reportAction: report as never, blockAction: block as never },
+      tenantName: 'Rede Demo',
+      ...overrides,
+    });
+
+  async function openComments() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Comentar' }));
+    });
+    return screen.getByRole('dialog', { name: 'Comentários' });
+  }
+  const rowOf = (sheet: HTMLElement, body: string) =>
+    within(sheet).getByText(body).closest('article') as HTMLElement;
+  async function openRowMenu(sheet: HTMLElement, body: string) {
+    await act(async () => {
+      fireEvent.click(
+        within(rowOf(sheet, body)).getByRole('button', { name: 'Mais ações do comentário' }),
+      );
+    });
+    // The row's own menu sheet has no title: it is the newest dialog on the page.
+    const dialogs = screen.getAllByRole('dialog');
+    return dialogs[dialogs.length - 1] as HTMLElement;
+  }
+  const names = (menu: HTMLElement) =>
+    within(menu)
+      .getAllByRole('button')
+      .map((node) => node.textContent);
+
+  beforeEach(() => {
+    report.mockResolvedValue({ ok: true, code: 'ok' });
+    block.mockResolvedValue({ ok: true, code: 'ok', changed: true });
+    loadComments.mockResolvedValue({
+      ok: true,
+      items: [OTHER_COMMENT, OWN_COMMENT],
+      nextCursor: null,
+    });
+  });
+
+  it('C1. a foreign comment offers Denunciar and Bloquear; the viewer’s own comment offers only its delete row', async () => {
+    host({ comments: safetyBinding() });
+    const sheet = await openComments();
+    const foreign = await openRowMenu(sheet, 'Adorei.');
+    expect(names(foreign)).toEqual(['Denunciar comentário', 'Bloquear Bruno']);
+    cleanup();
+
+    host({ comments: safetyBinding() });
+    const again = await openComments();
+    const own = await openRowMenu(again, 'Meu comentário.');
+    expect(names(own)).toEqual(['Excluir comentário']);
+  });
+
+  it('C2. a moderator sees the delete row on a foreign comment beside the two new rows; staff never get Bloquear', async () => {
+    loadComments.mockResolvedValue({
+      ok: true,
+      items: [
+        { ...OTHER_COMMENT, canDelete: true, removal: 'moderation' as const, canBlock: false },
+        {
+          ...OTHER_COMMENT,
+          id: '0d000000-0000-4000-8000-0000000000e4',
+          body: 'Outro.',
+          canDelete: true,
+          removal: 'moderation' as const,
+        },
+      ],
+      nextCursor: null,
+    });
+    host({ comments: safetyBinding() });
+    const sheet = await openComments();
+    const staffMenu = await openRowMenu(sheet, 'Adorei.');
+    expect(names(staffMenu)).toEqual(['Denunciar comentário', 'Excluir comentário']);
+    expect(within(staffMenu).queryByRole('button', { name: /^Bloquear/ })).toBeNull();
+    cleanup();
+    host({ comments: safetyBinding() });
+    const second = await openComments();
+    const full = await openRowMenu(second, 'Outro.');
+    expect(names(full)).toEqual(['Denunciar comentário', 'Bloquear Bruno', 'Excluir comentário']);
+  });
+
+  it('C3. reporting passes the subject story_comment and the comment id, never post_comment', async () => {
+    host({ comments: safetyBinding() });
+    const sheet = await openComments();
+    const menu = await openRowMenu(sheet, 'Adorei.');
+    await act(async () => {
+      fireEvent.click(within(menu).getByRole('button', { name: 'Denunciar comentário' }));
+    });
+    const reportSheet = screen.getByRole('dialog', { name: 'Denunciar comentário' });
+    expect(
+      reportSheet.querySelector('[data-report-sheet]')?.getAttribute('data-report-sheet'),
+    ).toBe('story_comment');
+    // The clock stays paused under the comment sheet and the report sheet.
+    expect(screen.getByRole('dialog', { name: 'Story' }).getAttribute('data-paused')).toBe('true');
+    await act(async () => {
+      fireEvent.click(within(reportSheet).getByRole('radio', { name: 'Assédio ou bullying' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Enviar denúncia' }));
+    });
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith({
+      subjectType: 'story_comment',
+      subjectId: OTHER_COMMENT.id,
+      reason: 'harassment',
+    });
+    expect(report).not.toHaveBeenCalledWith(
+      expect.objectContaining({ subjectType: 'post_comment' }),
+    );
+  });
+
+  it('C4. blocking passes the author’s membership id and the comment list is read again without that member', async () => {
+    host({ comments: safetyBinding() });
+    const sheet = await openComments();
+    expect(loadComments).toHaveBeenCalledTimes(1);
+    loadComments.mockResolvedValue({ ok: true, items: [OWN_COMMENT], nextCursor: null });
+    const menu = await openRowMenu(sheet, 'Adorei.');
+    await act(async () => {
+      fireEvent.click(within(menu).getByRole('button', { name: 'Bloquear Bruno' }));
+    });
+    const dialog = screen.getByRole('dialog', { name: 'Bloquear Bruno?' });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Bloquear' }));
+    });
+    expect(block).toHaveBeenCalledTimes(1);
+    expect(block).toHaveBeenCalledWith(BRUNO_ID);
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Bruno foi bloqueado.' });
+    expect(loadComments).toHaveBeenCalledTimes(2);
+    const after = screen.getByRole('dialog', { name: 'Comentários' });
+    expect(within(after).queryByText('Adorei.')).toBeNull();
+    expect(within(after).getByText('Meu comentário.')).toBeTruthy();
+  });
+
+  it('C5. a failed block leaves the list as it was (no re-read) and raises the shipped error toast', async () => {
+    block.mockResolvedValue({ ok: false, code: 'failed', changed: false });
+    loadComments.mockImplementation(async () => {
+      return { ok: true, items: [OTHER_COMMENT, OWN_COMMENT], nextCursor: null };
+    });
+    host({ comments: safetyBinding() });
+    const sheet = await openComments();
+    const menu = await openRowMenu(sheet, 'Adorei.');
+
+    await act(async () => {
+      fireEvent.click(within(menu).getByRole('button', { name: 'Bloquear Bruno' }));
+    });
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Bloquear Bruno?' })).getByRole('button', {
+          name: 'Bloquear',
+        }),
+      );
+    });
+    expect(loadComments).toHaveBeenCalledTimes(1);
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: feed('errors.generic'),
+    });
+  });
+
+  it('C6. the dialog body follows the social.participate flag of the binding, never a role', async () => {
+    host({
+      comments: safetyBinding({
+        safety: { socialOn: true, reportAction: report as never, blockAction: block as never },
+      }),
+    });
+    const sheet = await openComments();
+    const menu = await openRowMenu(sheet, 'Adorei.');
+    await act(async () => {
+      fireEvent.click(within(menu).getByRole('button', { name: 'Bloquear Bruno' }));
+    });
+    expect(screen.getByRole('dialog', { name: 'Bloquear Bruno?' }).textContent).toContain(
+      'deixam de se seguir',
+    );
+  });
+
+  it('C7. without the safety opt-in the comment rows are the shipped ones (a delete control, no menu)', async () => {
+    loadComments.mockResolvedValue({ ok: true, items: [OWN_COMMENT], nextCursor: null });
+    host({ comments: commentsBinding() });
+    const sheet = await openComments();
+    expect(within(sheet).queryByRole('button', { name: 'Mais ações do comentário' })).toBeNull();
+    expect(within(sheet).getByRole('button', { name: 'Excluir comentário' })).toBeTruthy();
   });
 });
