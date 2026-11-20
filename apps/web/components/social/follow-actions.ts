@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
+import { type BlockActionResult, unblockMember } from '@/components/feed/safety-actions';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import { deleteFollow, loadFollowState, putFollow } from '@/lib/social';
 
@@ -65,4 +66,14 @@ export async function followStateAction(membershipIds: string[]): Promise<Follow
   if (!ids.success) return { ok: false, code: 'generic' };
   const state = await loadFollowState(ids.data);
   return state === null ? { ok: false, code: 'generic' } : { ok: true, following: state };
+}
+
+/**
+ * 11-23 (D-723, D-724): the profile's one-tap "Desbloquear" - the SAME `DELETE /v1/blocks/members/{membershipId}`
+ * the settings list reaches through `safety-actions` (plan 20, plan 27), reached from here so the profile's
+ * client component imports one action module. The id is validated there; the answer is a closed code, never a
+ * message; nothing restores a follow.
+ */
+export async function unblockMemberAction(membershipId: string): Promise<BlockActionResult> {
+  return unblockMember(membershipId);
 }

@@ -1,10 +1,12 @@
 'use client';
 
 import { FollowCounts } from '@rede-social/module-social/ui';
-import { buttonClasses } from '@rede-social/ui';
+import { Button, buttonClasses, useToast } from '@rede-social/ui';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { FollowControl } from './FollowControl';
+import { unblockMemberAction } from './follow-actions';
 
 /**
  * A count as the counts row prints it: the full number in pt-BR ("1.234"), and compact notation from
@@ -70,6 +72,7 @@ export function SocialCountsBlock({
   viewerFollows,
   canFollow,
   canMessage,
+  blockedByViewer,
   canChat = false,
 }: SocialCountsBlockProps) {
   const t = useTranslations('social');
@@ -79,9 +82,19 @@ export function SocialCountsBlock({
     setSeenFollowerCount(initialFollowerCount);
     setFollowerCount(initialFollowerCount);
   }
+  // The blocker lifted the block from this very screen: the pair is back until the refreshed facts arrive
+  // (and the follow rows were deleted at the block, so it reads "Seguir", D-724). A changed server value of
+  // `blockedByViewer` replaces the local guess during render, the same way the follower count does.
+  const [unblocked, setUnblocked] = useState(false);
+  const [seenBlocked, setSeenBlocked] = useState(blockedByViewer);
+  if (seenBlocked !== blockedByViewer) {
+    setSeenBlocked(blockedByViewer);
+    setUnblocked(false);
+  }
   const own = mode === 'own';
-  const showFollow = canFollow !== false;
-  const showMessage = canChat && canMessage !== false;
+  const blocker = !own && blockedByViewer === true && !unblocked;
+  const showFollow = unblocked || canFollow !== false;
+  const showMessage = canChat && (unblocked || canMessage !== false);
   const pair = showFollow && showMessage;
 
   return (
@@ -108,7 +121,16 @@ export function SocialCountsBlock({
             : {}),
         }}
       />
-      {own || (!showFollow && !showMessage) ? null : (
+      {blocker ? (
+        <div className="px-4 pt-4">
+          <UnblockButton
+            membershipId={membershipId}
+            name={name}
+            onUnblocked={() => setUnblocked(true)}
+          />
+        </div>
+      ) : null}
+      {own || blocker || (!showFollow && !showMessage) ? null : (
         <div className="px-4 pt-4">
           {pair ? (
             <div className="flex flex-col gap-2 min-[360px]:flex-row md:mx-auto md:max-w-[400px]">
@@ -164,5 +186,68 @@ function MessageLink({
     >
       {t('profile.message')}
     </a>
+  );
+}
+
+/**
+ * "Desbloquear" for the blocker (UI-D-867, A-UI-19): one tap, no confirmation, "Desbloqueando…" while the
+ * request is in flight, a success toast naming the person and the pair back in the zone. It takes the zone's
+ * whole width, like the pair, with the same desktop cap. A failure keeps the button and toasts the generic
+ * error; a second tap while pending is ignored (a ref as well as the disabled state, as `FollowControl` does).
+ * An answer `changed: false` (somebody lifted it already) re-renders the pair WITHOUT a second toast. The
+ * route is refreshed so the facts are read again.
+ */
+function UnblockButton({
+  membershipId,
+  name,
+  onUnblocked,
+}: {
+  membershipId: string;
+  name: string;
+  onUnblocked: () => void;
+}) {
+  const t = useTranslations('social');
+  const tf = useTranslations('feed');
+  const toast = useToast();
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const inFlight = useRef(false);
+
+  const unblock = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setPending(true);
+    let answer: { ok: boolean; changed: boolean } = { ok: false, changed: false };
+    try {
+      answer = await unblockMemberAction(membershipId);
+    } catch (error) {
+      console.error('social.unblock_failed', { error: String(error) });
+    } finally {
+      inFlight.current = false;
+      setPending(false);
+    }
+    if (!answer.ok) {
+      toast.show({ tone: 'error', message: tf('errors.generic') });
+      return;
+    }
+    if (answer.changed) {
+      toast.show({ tone: 'success', message: t('profile.unblocked', { nome: name }) });
+    }
+    onUnblocked();
+    router.refresh();
+  };
+
+  return (
+    <Button
+      variant="outline"
+      size="md"
+      fullWidth
+      loading={pending}
+      aria-label={t('profile.unblockAria', { nome: name })}
+      className="md:mx-auto md:max-w-[400px]"
+      onClick={() => void unblock()}
+    >
+      {pending ? t('profile.unblocking') : t('profile.unblock')}
+    </Button>
   );
 }

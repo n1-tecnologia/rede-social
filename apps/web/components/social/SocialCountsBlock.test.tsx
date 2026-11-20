@@ -11,10 +11,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * no control.
  */
 
-const { toast, follow, unfollow } = vi.hoisted(() => ({
+const { toast, follow, unfollow, unblock, refresh } = vi.hoisted(() => ({
   toast: { show: vi.fn(), dismiss: vi.fn() },
   follow: vi.fn(),
   unfollow: vi.fn(),
+  unblock: vi.fn(),
+  refresh: vi.fn(),
 }));
 
 vi.mock('next-intl', async (orig) => {
@@ -34,7 +36,13 @@ vi.mock('@rede-social/ui', async (orig) => ({
   useToast: () => toast,
 }));
 
-vi.mock('./follow-actions', () => ({ followAction: follow, unfollowAction: unfollow }));
+vi.mock('./follow-actions', () => ({
+  followAction: follow,
+  unfollowAction: unfollow,
+  unblockMemberAction: unblock,
+}));
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
 
 const { SocialCountsBlock } = await import('./SocialCountsBlock');
 
@@ -181,5 +189,115 @@ describe('SocialCountsBlock - the action zone of 11-23 (UI-D-867, D-720)', () =>
     render(block({ ...FACTS, mode: 'own' }));
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.queryByRole('link', { name: /Enviar mensagem/ })).toBeNull();
+  });
+});
+
+describe('SocialCountsBlock - the blocker and the blocked member (D-722, D-723, D-724, D-725)', () => {
+  const BLOCKER = { canFollow: false, canMessage: false, blockedByViewer: true, canChat: true };
+  const BLOCKED = { canFollow: false, canMessage: false, blockedByViewer: false, canChat: true };
+
+  it('U1: the blocker sees ONE full-width outline Desbloquear and neither Seguir nor Enviar mensagem', () => {
+    render(block(BLOCKER));
+    const button = screen.getByRole('button', { name: 'Desbloquear Marcos' });
+    expect(button.textContent).toBe('Desbloquear');
+    expect(button.className).toContain('w-full');
+    expect(button.className).toContain('border-border-secondary');
+    expect(button.className).toContain('md:max-w-[400px]');
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.queryByText('Seguir')).toBeNull();
+  });
+
+  it('U2: one tap sends one request, reads Desbloqueando…, toasts once and re-renders the pair as Seguir', async () => {
+    let settle: (value: unknown) => void = () => {};
+    unblock.mockReturnValue(new Promise((resolve) => (settle = resolve)));
+    render(block(BLOCKER));
+    const button = screen.getByRole('button', { name: 'Desbloquear Marcos' });
+    await act(async () => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+    expect(unblock).toHaveBeenCalledTimes(1);
+    expect(unblock).toHaveBeenCalledWith(ID);
+    expect(screen.getByRole('button', { name: 'Desbloquear Marcos' }).textContent).toBe(
+      'Desbloqueando…',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Desbloquear Marcos' }).getAttribute('aria-busy'),
+    ).toBe('true');
+
+    await act(async () => {
+      settle({ ok: true, code: 'ok', changed: true });
+    });
+    expect(toast.show).toHaveBeenCalledTimes(1);
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Marcos foi desbloqueado.',
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // The pair is back, and the follow did not come back (D-724).
+    expect(screen.getByRole('button', { name: 'Seguir Marcos' }).textContent).toBe('Seguir');
+    expect(screen.getByRole('link', { name: 'Enviar mensagem para Marcos' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Desbloquear/ })).toBeNull();
+  });
+
+  it('U3 (idempotency): an answer changed false re-renders the pair without a second toast', async () => {
+    unblock.mockResolvedValue({ ok: true, code: 'ok', changed: false });
+    render(block(BLOCKER));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Desbloquear Marcos' }));
+    });
+    expect(toast.show).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Seguir Marcos' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Enviar mensagem para Marcos' })).toBeTruthy();
+  });
+
+  it('U4: a failure keeps the button and fires the generic error toast', async () => {
+    unblock.mockResolvedValue({ ok: false, code: 'failed', changed: false });
+    render(block(BLOCKER));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Desbloquear Marcos' }));
+    });
+    expect(toast.show).toHaveBeenCalledTimes(1);
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Algo deu errado. Tente novamente.',
+    });
+    expect(screen.getByRole('button', { name: 'Desbloquear Marcos' }).textContent).toBe(
+      'Desbloquear',
+    );
+    expect(screen.queryByRole('button', { name: 'Seguir Marcos' })).toBeNull();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('U5: an action that never reached the server is the same failure', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    unblock.mockRejectedValue(new Error('network'));
+    render(block(BLOCKER));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Desbloquear Marcos' }));
+    });
+    expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
+    expect(screen.getByRole('button', { name: 'Desbloquear Marcos' })).toBeTruthy();
+    error.mockRestore();
+  });
+
+  it('U6 (T-11-03): the blocked member sees NOTHING in the zone while the counts render as usual', () => {
+    const { container } = render(block(BLOCKED));
+    expect(screen.getByText('Seguidores')).toBeTruthy();
+    // The block's container holds the counts and nothing else: no wrapper, no button, no link, no text.
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.children).toHaveLength(1);
+    expect(container.querySelector('button, a, [aria-label]')).toBeNull();
+    expect(container.querySelector('.pt-4')).toBeNull();
+    expect(container.textContent).not.toMatch(/bloque|indispon|mensagem|Seguir/i);
+  });
+
+  it('U7: the zone follows the facts: a refresh that says the pair is blocked removes the buttons', () => {
+    const view = render(block({ canFollow: true, canMessage: true, canChat: true }));
+    expect(screen.getByRole('button', { name: 'Seguir Marcos' })).toBeTruthy();
+    view.rerender(block(BLOCKED));
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
   });
 });

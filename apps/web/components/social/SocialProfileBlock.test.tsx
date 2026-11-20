@@ -19,7 +19,12 @@ const { getSocialProfile, toast } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/social', () => ({ getSocialProfile }));
-vi.mock('./follow-actions', () => ({ followAction: vi.fn(), unfollowAction: vi.fn() }));
+vi.mock('./follow-actions', () => ({
+  followAction: vi.fn(),
+  unfollowAction: vi.fn(),
+  unblockMemberAction: vi.fn(),
+}));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 
 vi.mock('next-intl', async (orig) => {
   const actual = await orig<typeof import('next-intl')>();
@@ -281,5 +286,24 @@ describe('SocialProfileData - the entry point of 11-23 (UI-D-867)', () => {
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.queryByRole('link', { name: /Enviar mensagem/ })).toBeNull();
     own.unmount();
+  });
+
+  it('P8: blockedByViewer reaches the zone as one Desbloquear; the blocked member gets an empty zone', async () => {
+    getSocialProfile.mockResolvedValue(
+      profile({ canFollow: false, canMessage: false, blockedByViewer: true }),
+    );
+    const first = await renderData({ canChat: true });
+    expect(screen.getByRole('button', { name: 'Desbloquear Marcos' })).toBeTruthy();
+    expect(screen.queryByRole('link')).toBeNull();
+    first.unmount();
+
+    getSocialProfile.mockResolvedValue(
+      profile({ canFollow: false, canMessage: false, blockedByViewer: false }),
+    );
+    const { container } = await renderData({ canChat: true });
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByText('Seguidores')).toBeTruthy();
+    expect(container.querySelector('.pt-4')).toBeNull();
   });
 });
