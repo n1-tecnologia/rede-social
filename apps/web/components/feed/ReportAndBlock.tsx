@@ -349,9 +349,15 @@ function ReportSheet({
 export function useReportAndBlock({
   tenantName,
   safety,
+  commentSubject = 'post_comment',
 }: {
   tenantName: string;
   safety: PostMenuSafety | undefined;
+  /**
+   * What a comment row's "Denunciar comentário" reports (11-24): `post_comment` for the feed's surfaces, and
+   * `story_comment` for the story viewer's comment sheet, which draws the very same `CommentItem`.
+   */
+  commentSubject?: Extract<ReportSubjectType, 'post_comment' | 'story_comment'>;
 }) {
   const enabled = safety !== undefined;
   const t = useTranslations('safety');
@@ -362,8 +368,8 @@ export function useReportAndBlock({
     [],
   );
   const reportComment = useCallback(
-    (comment: CommentView) => setReport({ subjectType: 'post_comment', subjectId: comment.id }),
-    [],
+    (comment: CommentView) => setReport({ subjectType: commentSubject, subjectId: comment.id }),
+    [commentSubject],
   );
   const [block, setBlock] = useState<BlockTarget | null>(null);
   // The riders already say who may be blocked; a target without a membership id or a name is simply not
@@ -428,5 +434,13 @@ export function useReportAndBlock({
     onReportComment: enabled ? reportComment : undefined,
     onBlockPost: enabled ? blockPost : undefined,
     onBlockComment: enabled ? blockComment : undefined,
+    /**
+     * 11-24: the generic doors, for a host whose subject is neither a post nor a comment (a story, a
+     * community): they open the same sheet and dialog with the host's own target.
+     */
+    openReport: setReport,
+    openBlock: setBlock,
+    /** True while the report sheet or the block dialog is open: a viewer that plays on a clock pauses it. */
+    open: report !== null || block !== null,
   };
 }

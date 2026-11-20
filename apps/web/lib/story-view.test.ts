@@ -799,6 +799,52 @@ describe('#2b — the tenant circle wears the face of the newest story’s autho
     expect(storyViewerItem(summary, now).authorAvatarUrl).toBe(FACE);
     expect(storyViewerItem({ ...summary, authorAvatarUrl: null }, now).authorAvatarUrl).toBeNull();
   });
+
+  it('37b. 11-24: storyViewerItem copies the report riders and the member author, and nothing else when they are absent', () => {
+    const summary: StorySummary = {
+      id: '0000000c-1111-4111-8111-111111111111',
+      authorUserId: null,
+      authorAvatarUrl: null,
+      author: {
+        membershipId: '0000000f-1111-4111-8111-111111111111',
+        displayName: 'Helena',
+        avatarUrl: null,
+      },
+      mediaAssetId: '0000000e-1111-4111-8111-111111111111',
+      mediaKind: 'image',
+      mediaVariantWidths: [640, 1080],
+      mediaStatus: 'ready',
+      mediaFailureReason: null,
+      caption: '',
+      publishedAt: '2026-09-20T12:00:00.000Z',
+      expiresAt: '2026-09-21T12:00:00.000Z',
+      isActive: true,
+      durationSeconds: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewerLiked: false,
+      highlightCount: 0,
+      viewerSeen: false,
+      canReport: true,
+      canBlock: true,
+    };
+    const now = Date.parse('2026-09-20T13:00:00.000Z');
+    const view = storyViewerItem(summary, now);
+    expect(view.canReport).toBe(true);
+    expect(view.canBlock).toBe(true);
+    // The author keeps only what the screens need: a membership id (never a user id) and a name.
+    expect(view.author).toEqual({
+      membershipId: '0000000f-1111-4111-8111-111111111111',
+      displayName: 'Helena',
+    });
+    const bare = storyViewerItem(
+      { ...summary, canReport: undefined, canBlock: undefined, author: null },
+      now,
+    );
+    expect('canReport' in bare).toBe(false);
+    expect('canBlock' in bare).toBe(false);
+    expect('author' in bare).toBe(false);
+  });
 });
 
 describe('2026-10-20 — storyShareUrl (the client’s FRONT.pdf: share a story like a post)', () => {

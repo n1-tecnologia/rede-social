@@ -59,6 +59,19 @@ export type StoryViewerItemView = {
    * the viewer header beside the tenant's name; a highlight keeps its cover (UI-D-65).
    */
   authorAvatarUrl: string | null;
+  /**
+   * 11-24 (D-733, MODER-05): the API's riders, copied through and never derived from a role. `canReport`: the
+   * viewer did not write the story. `canBlock`: not their own, the author is a live `member` and the viewer's own
+   * role of record is `member` (staff are offered Denunciar and never Bloquear). Both ABSENT read as false, so a
+   * story from an API that predates them draws no entry.
+   */
+  canReport?: boolean;
+  canBlock?: boolean;
+  /**
+   * 11-24: the member author of a MEMBER story, for the block call (a membership id, never a user id, T-11-34)
+   * and the name the `Bloquear {nome}` row wears. Null or absent for an organization story.
+   */
+  author?: { membershipId: string; displayName: string } | null;
 };
 
 /**
@@ -115,6 +128,18 @@ export function storyViewerItem(story: StorySummary, now: number): StoryViewerIt
     viewerLiked: story.viewerLiked,
     seen: story.viewerSeen,
     authorAvatarUrl: story.authorAvatarUrl,
+    // 11-24: the riders and the author ride along only when they say something, so a story that offers no
+    // entry is the same plain object it has always been.
+    ...(story.canReport === true ? { canReport: true } : {}),
+    ...(story.canBlock === true ? { canBlock: true } : {}),
+    ...(story.author
+      ? {
+          author: {
+            membershipId: story.author.membershipId,
+            displayName: story.author.displayName,
+          },
+        }
+      : {}),
   };
 }
 
@@ -188,6 +213,8 @@ export function storyCommentView(
           ? null
           : `/membros/${comment.author.membershipId}`,
       avatarUrl: avatarUrlFor(comment.author.avatarAssetId),
+      // 11-24: the membership id the block call is keyed by (null for a removed member, T-11-34).
+      membershipId: comment.author.membershipId,
     },
     authorRemoved: comment.authorRemoved,
     createdAtIso: comment.createdAt,
@@ -201,6 +228,9 @@ export function storyCommentView(
     // 08-03 (D-336, UI-D-276): server-derived; an API that predates it leaves the field absent,
     // which reads as the shipped rule (`canDelete ? 'own' : null`).
     removal: comment.removal ?? (comment.canDelete ? 'own' : null),
+    // 11-24 (D-733): the server's riders, copied through; absent reads as false.
+    ...(comment.canReport === true ? { canReport: true } : {}),
+    ...(comment.canBlock === true ? { canBlock: true } : {}),
   };
 }
 

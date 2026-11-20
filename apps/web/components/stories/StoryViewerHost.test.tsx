@@ -44,6 +44,7 @@ const {
   catalog,
   feedCatalog,
   modCatalog,
+  safetyCatalog,
   toast,
   like,
   unlike,
@@ -66,6 +67,7 @@ const {
     catalog: read('stories').stories as Record<string, unknown>,
     feedCatalog: read('feed').feed as Record<string, unknown>,
     modCatalog: read('moderation').moderation as Record<string, unknown>,
+    safetyCatalog: read('safety').safety as Record<string, unknown>,
     toast: { show: vi.fn(), dismiss: vi.fn() },
     like: vi.fn(),
     unlike: vi.fn(),
@@ -84,14 +86,15 @@ const {
   };
 });
 
-const lookup = (key: string, values?: Record<string, unknown>) => {
+const lookupIn = (tree: Record<string, unknown>, key: string, values?: Record<string, unknown>) => {
   const raw = key
     .split('.')
-    .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], catalog);
+    .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], tree);
   return String(raw ?? key).replace(/\{(\w+)\}/g, (_, name: string) =>
     String(values?.[name] ?? `{${name}}`),
   );
 };
+const lookup = (key: string, values?: Record<string, unknown>) => lookupIn(catalog, key, values);
 
 /**
  * `motion/react`, replaced by plain elements.
@@ -220,7 +223,21 @@ vi.mock('@/app/(app)/stories/story-actions', () => ({
  * and returns ONE stable reader, as next-intl's memoised hook does.
  */
 const translate = (key: string, values?: Record<string, unknown>) => lookup(key, values);
-vi.mock('next-intl', () => ({ useTranslations: () => translate }));
+/**
+ * 11-24: the report sheet and the block dialog read the `safety` and `feed` namespaces, so the stand-in answers
+ * each namespace from its own REAL catalog (one stable reader per namespace, `.raw` included); every other
+ * namespace is the stories catalog, exactly as before.
+ */
+const namespaced = (tree: Record<string, unknown>) =>
+  Object.assign((key: string, values?: Record<string, unknown>) => lookupIn(tree, key, values), {
+    raw: (key: string) => lookupIn(tree, key),
+  });
+const safetyTranslate = namespaced(safetyCatalog);
+const feedTranslate = namespaced(feedCatalog);
+vi.mock('next-intl', () => ({
+  useTranslations: (namespace?: string) =>
+    namespace === 'safety' ? safetyTranslate : namespace === 'feed' ? feedTranslate : translate,
+}));
 
 const { highlightGroupView, inicioGroups, inicioRow, storyViewerLabels } = await import(
   '@/lib/story-view'
@@ -2329,5 +2346,205 @@ describe('StoryViewerHost — member groups: the author’s and the moderator’
     });
     expect(loadSheet).toHaveBeenCalledWith(STORY_ID);
     expect(screen.getByRole('dialog', { name: 'Destacar story' })).toBeTruthy();
+  });
+});
+
+/* ── 11-24 (D-733, MODER-05, UI-D-869): Denunciar and Bloquear on a story ─────────────────────────── */
+
+describe('StoryViewerHost — the story menu for every viewer (11-24, UI-D-869)', () => {
+  const STORY_ID = '0d000000-0000-4000-8000-0000000000d1';
+  const AUTHOR_ID = '0e000000-0000-4000-8000-0000000000e1';
+  const report = vi.fn();
+  const block = vi.fn();
+
+  const safetyBinding = (socialOn = false) =>
+    commentsBinding({
+      safety: { socialOn, reportAction: report as never, blockAction: block as never },
+      tenantName: 'Rede Demo',
+    });
+
+  /** The riders, as `storyViewerItem` copies them from the API. */
+  const riders = (overrides: Record<string, unknown> = {}) =>
+    item({
+      canReport: true,
+      canBlock: true,
+      author: { membershipId: AUTHOR_ID, displayName: 'Helena' },
+      ...overrides,
+    });
+
+  function memberGroupHost(overrides: Record<string, unknown> = {}) {
+    const {
+      items = [riders()],
+      isSelf = false,
+      ...rest
+    } = overrides as { items?: ReturnType<typeof item>[]; isSelf?: boolean };
+    return render(
+      <StoryViewerHost
+        groups={[
+          {
+            key: `author:${AUTHOR_ID}`,
+            kind: 'member',
+            highlightId: null,
+            name: 'Helena',
+            avatar: { kind: 'avatar', src: null },
+            items,
+            member: { membershipId: AUTHOR_ID, isSelf },
+          },
+        ]}
+        labels={LABELS}
+        onLike={like as never}
+        onUnlike={unlike as never}
+        onClose={() => {}}
+        comments={safetyBinding()}
+        {...rest}
+      />,
+    );
+  }
+
+  async function openMenu() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mais opções' }));
+    });
+    return screen.getByRole('dialog', { name: 'Opções do story' });
+  }
+  const rows = (sheet: HTMLElement) =>
+    within(sheet)
+      .getAllByRole('button')
+      .map((node) => node.textContent);
+
+  beforeEach(() => {
+    report.mockResolvedValue({ ok: true, code: 'ok' });
+    block.mockResolvedValue({ ok: true, code: 'ok', changed: true });
+  });
+
+  it('S1. a plain member sees "Mais opções" on another member’s story, reports it once, and the clock stays paused', async () => {
+    memberGroupHost();
+    const sheet = await openMenu();
+    expect(rows(sheet)).toEqual(['Denunciar story', 'Bloquear Helena']);
+    const viewer = screen.getByRole('dialog', { name: 'Story' });
+    expect(viewer.getAttribute('data-paused')).toBe('true');
+
+    await act(async () => {
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Denunciar story' }));
+    });
+    // The menu closed and the report sheet took its place, with the clock paused the whole way.
+    expect(screen.queryByRole('dialog', { name: 'Opções do story' })).toBeNull();
+    const reportSheet = screen.getByRole('dialog', { name: 'Denunciar story' });
+    expect(screen.getByRole('dialog', { name: 'Story' }).getAttribute('data-paused')).toBe('true');
+
+    await act(async () => {
+      fireEvent.click(within(reportSheet).getByRole('radio', { name: 'Spam ou propaganda' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Enviar denúncia' }));
+    });
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith({
+      subjectType: 'story',
+      subjectId: STORY_ID,
+      reason: 'spam',
+    });
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Denúncia enviada. Obrigado por avisar.',
+    });
+    expect(screen.getByRole('dialog', { name: 'Story' }).getAttribute('data-paused')).toBe('false');
+  });
+
+  it('S2. "Bloquear {nome}" opens the block dialog for THAT member by membership id, with the social-off body', async () => {
+    memberGroupHost();
+    const sheet = await openMenu();
+    await act(async () => {
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Bloquear Helena' }));
+    });
+    const dialog = screen.getByRole('dialog', { name: 'Bloquear Helena?' });
+    expect(dialog.textContent).toContain(
+      'Você deixa de ver as publicações e os comentários de Helena.',
+    );
+    expect(dialog.textContent).not.toContain('deixam de se seguir');
+    expect(screen.getByRole('dialog', { name: 'Story' }).getAttribute('data-paused')).toBe('true');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Bloquear' }));
+    });
+    expect(block).toHaveBeenCalledTimes(1);
+    expect(block).toHaveBeenCalledWith(AUTHOR_ID);
+  });
+
+  it('S3. with social on the dialog carries the follows body (chosen from data, never a role)', async () => {
+    memberGroupHost({ comments: safetyBinding(true) });
+    const sheet = await openMenu();
+    await act(async () => {
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Bloquear Helena' }));
+    });
+    expect(screen.getByRole('dialog', { name: 'Bloquear Helena?' }).textContent).toContain(
+      'deixam de se seguir',
+    );
+  });
+
+  it('S4. who sees what: the author sees neither new row, an organization story only Denunciar, staff never Bloquear', async () => {
+    // The author's own story: the riders are false, so the shipped rows only.
+    memberGroupHost({
+      isSelf: true,
+      items: [riders({ canReport: false, canBlock: false })],
+      memberMenu: { canModerate: false, canHighlight: false },
+    });
+    let sheet = await openMenu();
+    expect(rows(sheet)).toEqual(['Excluir story']);
+    cleanup();
+
+    // An organization story: reportable by a plain member, never blockable (no member author).
+    host({
+      items: [item({ canReport: true, canBlock: false, author: null })],
+      comments: safetyBinding(),
+    });
+    sheet = await openMenu();
+    expect(rows(sheet)).toEqual(['Denunciar story']);
+    cleanup();
+
+    // A staff viewer: Denunciar, and the rider says no Bloquear (A-11-ROLE).
+    memberGroupHost({ items: [riders({ canBlock: false })] });
+    sheet = await openMenu();
+    expect(rows(sheet)).toEqual(['Denunciar story']);
+  });
+
+  it('S5. a holder of moderation.manage sees the two rows ABOVE "Excluir story"', async () => {
+    memberGroupHost({ memberMenu: { canModerate: true, canHighlight: false } });
+    const sheet = await openMenu();
+    expect(rows(sheet)).toEqual(['Denunciar story', 'Bloquear Helena', 'Excluir story']);
+    expect(within(sheet).getByRole('button', { name: 'Excluir story' }).className).toContain(
+      'text-danger',
+    );
+  });
+
+  it('S6. the rows follow the riders and the opt-in: no riders or no safety binding draws no control at all', () => {
+    // Riders absent (an API that predates them): the plain member has no menu, as shipped (M4).
+    memberGroupHost({
+      items: [item({ author: { membershipId: AUTHOR_ID, displayName: 'Helena' } })],
+    });
+    expect(screen.queryByRole('button', { name: 'Mais opções' })).toBeNull();
+    cleanup();
+    // Riders true but the host did not opt in: still no control.
+    memberGroupHost({ comments: commentsBinding() });
+    expect(screen.queryByRole('button', { name: 'Mais opções' })).toBeNull();
+    cleanup();
+    // A story without a caption still reports normally (MODER-05, edge `empty`).
+    memberGroupHost({ items: [riders({ caption: '' })] });
+    expect(screen.getByRole('button', { name: 'Mais opções' })).toBeTruthy();
+  });
+
+  it('S7. the shipped curator menu is unchanged: "Excluir story" only when the riders say nothing', async () => {
+    host({ canCurate: true });
+    const sheet = await openMenu();
+    expect(rows(sheet)).toEqual(['Excluir story']);
+  });
+
+  it('S8. a long name wraps in the dialog and keeps the row’s full accessible name', async () => {
+    const longName = 'Maria das Graças Albuquerque de Oliveira Santos Pereira';
+    memberGroupHost({
+      items: [riders({ author: { membershipId: AUTHOR_ID, displayName: longName } })],
+    });
+    const sheet = await openMenu();
+    const row = within(sheet).getByRole('button', { name: `Bloquear ${longName}` });
+    expect(row.querySelector('span.truncate')?.textContent).toBe(`Bloquear ${longName}`);
   });
 });

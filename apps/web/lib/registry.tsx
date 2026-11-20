@@ -616,6 +616,10 @@ export function storyCommentsProps(
     onLikeComment: refuseStoryCommentLikeAction,
     onUnlikeComment: refuseStoryCommentLikeAction,
     labels: { ...feed.labels, storyNoReplyErrorLabel: ts('viewer.comments.noReply') },
+    // 11-24 (D-733, UI-D-869): the story viewer's opt-in to Denunciar and Bloquear (the story's own menu and
+    // every comment's). Whether a row shows is the API's riders, never this object.
+    safety: postMenuSafety(bootstrap),
+    tenantName: bootstrap.tenant.displayName,
   };
 }
 

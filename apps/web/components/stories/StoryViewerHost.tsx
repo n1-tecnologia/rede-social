@@ -27,7 +27,16 @@ import {
   IconButton,
   useToast,
 } from '@rede-social/ui';
-import { BookmarkPlus, MessageCircle, MoreHorizontal, Plus, Send, Trash2 } from 'lucide-react';
+import {
+  Ban,
+  BookmarkPlus,
+  Flag,
+  MessageCircle,
+  MoreHorizontal,
+  Plus,
+  Send,
+  Trash2,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import {
@@ -53,6 +62,7 @@ import {
   type likeStoryAction,
   type unlikeStoryAction,
 } from '@/app/(app)/stories/story-actions';
+import { type PostMenuSafety, useReportAndBlock } from '@/components/feed/ReportAndBlock';
 import { useSharePost } from '@/components/feed/useSharePost';
 import { suspendFeedVideos } from '@/components/media/FeedVideo';
 import {
@@ -188,6 +198,13 @@ export type StoryCommentsBinding = Omit<
    * open, so the LIST still sees the `(commentId) => …` shape it expects and needs no branch.
    */
   onDeleteComment: (storyId: string, commentId: string) => Promise<CommentDeleteOutcome>;
+  /**
+   * 11-24 (D-733, UI-D-869): the opt-in to Denunciar and Bloquear, built by `postMenuSafety` (the server
+   * actions travel as props, so no client file imports `lib/api`). Absent draws no safety row anywhere in the
+   * viewer: not on the story's menu, not on a comment's. `tenantName` names who reviews, in the report sheet.
+   */
+  safety?: PostMenuSafety;
+  tenantName?: string;
 };
 
 /** A group as the host receives it: the server's view plus the client's own "the read failed". */
@@ -261,7 +278,15 @@ export type StoryViewerHostProps = {
 
 /** Whose menu "Mais opções" opens (10-12): the organization's curator, a member's own, or a moderator's. */
 type MenuRole = 'curator' | 'author' | 'moderator';
-type MenuTarget = { storyId: string; role: MenuRole };
+type MenuTarget = {
+  storyId: string;
+  /** Whose delete rows the sheet holds; null for a plain viewer whose sheet holds only the safety rows (11-24). */
+  role: MenuRole | null;
+  /** 11-24: the story's `canReport` rider, with the opt-in. */
+  report: boolean;
+  /** 11-24: the story's `canBlock` rider, with the opt-in; the member the dialog names and the call is keyed by. */
+  block: { membershipId: string; name: string } | null;
+};
 
 /** The row's controls, as their `data-story-action` names them (the focus handoff). */
 type StoryActionName = 'like' | 'comment' | 'share' | 'highlight';
@@ -318,7 +343,7 @@ type HighlightSheetState = {
  * the organization's curator, a member's two variants for the author and the moderator. Every value
  * is a fixed string with no `{name}`.
  */
-function deleteCopy(role: MenuRole | undefined): string {
+function deleteCopy(role: MenuRole | null | undefined): string {
   if (role === 'author') return 'memberStory.confirmOwn';
   if (role === 'moderator') return 'memberStory.confirmMod';
   return 'history.confirmDelete';
@@ -379,6 +404,42 @@ export function StoryViewerHost({
 }: StoryViewerHostProps) {
   const toast = useToast();
   const t = useTranslations('stories');
+  const ts = useTranslations('safety');
+
+  /**
+   * 11-24 (D-733, UI-D-869): the report sheet and the block dialog of plan 20, mounted ONCE for the whole viewer
+   * and shared by the story's own menu and by every comment's menu (subject `story_comment`). A successful block
+   * bumps `blockEpoch`, which remounts the comment sheet so its list is read again and the blocked member's
+   * comments leave it at once (the filter of plan 05 does the hiding).
+   */
+  const safety = comments?.safety;
+  const tenantName = comments?.tenantName ?? '';
+  const [blockEpoch, setBlockEpoch] = useState(0);
+  const guardedSafety = useMemo<PostMenuSafety | undefined>(
+    () =>
+      safety
+        ? {
+            ...safety,
+            blockAction: async (membershipId) => {
+              const result = await safety.blockAction(membershipId);
+              if (result.ok) setBlockEpoch((epoch) => epoch + 1);
+              return result;
+            },
+          }
+        : undefined,
+    [safety],
+  );
+  const safetyOn = guardedSafety !== undefined;
+  const reportAndBlock = useReportAndBlock({
+    tenantName,
+    safety: guardedSafety,
+    commentSubject: 'story_comment',
+  });
+  const commentSheet = useMemo(() => {
+    if (!comments) return null;
+    const { safety: _safety, tenantName: _tenantName, labels, ...rest } = comments;
+    return { ...rest, labels: reportAndBlock.commentLabels(labels) };
+  }, [comments, reportAndBlock.commentLabels]);
 
   /**
    * 2026-10-20: the visit's ONE sound choice (`video-sound.ts`), on from the start. The toggle asks
@@ -664,6 +725,13 @@ export function StoryViewerHost({
     (group: StoryGroupState, header: ReactNode, item: StoryViewerItemView): StoryViewerItem => {
       const segment = `${group.key}:${item.id}`;
       const role = roleFor(group);
+      // 11-24: the safety rows follow the API's riders and the host's opt-in, never a role (A-11-ROLE).
+      const report = safetyOn && item.canReport === true;
+      const block =
+        safetyOn && item.canBlock === true && item.author
+          ? { membershipId: item.author.membershipId, name: item.author.displayName }
+          : null;
+      const hasMenu = role !== null || report || block !== null;
       // UI-D-66: the labelled pill is the ORGANIZATION curator's door; it is never drawn on a member
       // group, where "Destacar" lives in the author's menu.
       const pill = group.kind === 'member' ? null : highlightLabel;
@@ -736,17 +804,16 @@ export function StoryViewerHost({
         // 2026-10-20: "Mais opções" (delete) under the same permission as "Destacar", in the
         // viewer's HEADER, where a post keeps its own "…": in the bottom row it would not fit a
         // 390px screen beside the share and "Destacar".
-        menu:
-          role === null ? undefined : (
-            <IconButton
-              icon={MoreHorizontal}
-              size={20}
-              label={moreLabel}
-              data-story-action="more"
-              className="text-white"
-              onClick={() => setMenuFor({ storyId: item.id, role })}
-            />
-          ),
+        menu: !hasMenu ? undefined : (
+          <IconButton
+            icon={MoreHorizontal}
+            size={20}
+            label={moreLabel}
+            data-story-action="more"
+            className="text-white"
+            onClick={() => setMenuFor({ storyId: item.id, role, report, block })}
+          />
+        ),
       };
     },
     [
@@ -762,6 +829,7 @@ export function StoryViewerHost({
       shareStory,
       moreLabel,
       roleFor,
+      safetyOn,
     ],
   );
 
@@ -809,7 +877,8 @@ export function StoryViewerHost({
           highlightFor !== null ||
           sharing ||
           menuFor !== null ||
-          confirmFor !== null
+          confirmFor !== null ||
+          reportAndBlock.open
         }
         // 2026-10-20: the visit's sound, on from the start (`video-sound.ts`).
         muted={!soundWanted}
@@ -817,9 +886,13 @@ export function StoryViewerHost({
         onToggleSound={toggleSound}
         overlay={
           <>
-            {comments ? (
+            {comments && commentSheet ? (
               <CommentSheet
-                {...comments}
+                // 11-24: a block remounts the sheet, so its list is read again without the blocked member.
+                key={blockEpoch}
+                {...commentSheet}
+                onReportComment={reportAndBlock.onReportComment}
+                onBlockComment={reportAndBlock.onBlockComment}
                 variant="flat"
                 open={commentsFor !== null}
                 onClose={() => setCommentsFor(null)}
@@ -916,17 +989,44 @@ export function StoryViewerHost({
                     }}
                   />
                 ) : null}
-                <StoryMenuRow
-                  icon={Trash2}
-                  label={t('history.menu.delete')}
-                  destructive
-                  onClick={() => {
-                    setConfirmFor(menuFor);
-                    setMenuFor(null);
-                  }}
-                />
+                {/* 11-24 (UI-D-869): Denunciar and Bloquear ABOVE the destructive row. Each closes this sheet and
+                    opens plan 20's sheet or dialog in the same batch, so the clock never restarts in between. */}
+                {menuView?.report ? (
+                  <StoryMenuRow
+                    icon={Flag}
+                    label={ts('menu.reportStory')}
+                    onClick={() => {
+                      const storyId = menuView.storyId;
+                      setMenuFor(null);
+                      reportAndBlock.openReport({ subjectType: 'story', subjectId: storyId });
+                    }}
+                  />
+                ) : null}
+                {menuView?.block ? (
+                  <StoryMenuRow
+                    icon={Ban}
+                    label={ts('menu.block', { nome: menuView.block.name })}
+                    onClick={() => {
+                      const target = menuView.block;
+                      setMenuFor(null);
+                      if (target) reportAndBlock.openBlock(target);
+                    }}
+                  />
+                ) : null}
+                {menuView?.role ? (
+                  <StoryMenuRow
+                    icon={Trash2}
+                    label={t('history.menu.delete')}
+                    destructive
+                    onClick={() => {
+                      setConfirmFor(menuFor);
+                      setMenuFor(null);
+                    }}
+                  />
+                ) : null}
               </div>
             </BottomSheet>
+            {reportAndBlock.element}
             <ConfirmDialog
               open={confirmFor !== null}
               title={t(`${deleteCopy(confirmView?.role)}.title`)}
