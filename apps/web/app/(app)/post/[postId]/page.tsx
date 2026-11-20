@@ -20,6 +20,7 @@ import {
   feedCommentsProps,
   postCardLabels,
   postMenuLabels,
+  postMenuSafety,
   reelsOverlayProps,
 } from '@/lib/registry';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
@@ -213,6 +214,7 @@ export default async function PostPage({
           deletedLabel: tf('toasts.deleted'),
           removedLabel: tf('toasts.removed'),
           onDelete: deletePostAction,
+          safety: postMenuSafety(bootstrap),
         }}
         reels={reels}
         comments={{

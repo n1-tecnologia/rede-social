@@ -234,6 +234,13 @@ export type CommentsListProps = {
   pinnedThread?: PinnedThread;
   /** The comment to scroll to and tint (UI-D-254); it lies inside `pinnedThread`. */
   highlightCommentId?: string;
+  /**
+   * 11-20 (D-733, UI-D-632): the host's reaction to the comment menu's "Denunciar" and "Bloquear {nome}" rows,
+   * handed to every row (replies included). The report sheet and the block dialog are the host's, so the list
+   * only forwards. Absent means the rows are not drawn (the flat variant of 05-07 keeps its host's choice).
+   */
+  onReportComment?: (comment: CommentView) => void;
+  onBlockComment?: (comment: CommentView) => void;
 };
 
 /** The pinned root thread, already mapped by the host. */
@@ -325,6 +332,8 @@ export function CommentsList({
   onLocked,
   pinnedThread,
   highlightCommentId,
+  onReportComment,
+  onBlockComment,
 }: CommentsListProps) {
   /** UI-D-376, UI-D-500: hand either closed refusal to the host with its code; all else is ignored. */
   const reportLocked = useCallback(
@@ -905,6 +914,8 @@ export function CommentsList({
             // NO `onReply` — a reply has no reply affordance and no toggle of its own (D-60). The
             // one-level cap is visible here, not merely refused by the database.
             onDelete={removalOf(reply) !== null ? setConfirming : undefined}
+            onReport={onReportComment}
+            onBlock={onBlockComment}
             onToggleLike={(row) => void toggleLike(row)}
             highlighted={reply.id === highlightCommentId}
           />
@@ -987,6 +998,8 @@ export function CommentsList({
               // given, so there is no second branch anywhere about what a comment looks like.
               onReply={flat ? undefined : startReply}
               onDelete={removalOf(comment) !== null ? setConfirming : undefined}
+              onReport={onReportComment}
+              onBlock={onBlockComment}
               onToggleLike={flat ? undefined : (row) => void toggleLike(row)}
               highlighted={!flat && comment.id === highlightCommentId}
             >

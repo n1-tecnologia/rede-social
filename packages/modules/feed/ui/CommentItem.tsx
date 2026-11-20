@@ -1,9 +1,10 @@
 'use client';
 
-import { Avatar, cn, IconButton } from '@rede-social/ui';
-import { Heart, Trash2 } from 'lucide-react';
+import { Avatar, BottomSheet, cn, IconButton } from '@rede-social/ui';
+import { Ban, Ellipsis, Flag, Heart, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { linkify } from './linkify';
+import { MenuRow } from './MenuRow';
 import type { CountTemplates } from './meta';
 import { formatCountLabel } from './meta';
 
@@ -39,6 +40,11 @@ export type CommentAuthorView = {
   /** `/membros/{membershipId}` (D-52) — null when the membership is gone (UI-D-24). */
   profileHref: string | null;
   avatarUrl: string | null;
+  /**
+   * 11-20 (D-733): the author's membership id, for the block call (a membership id, never a user id,
+   * T-11-34). Null for a removed member; absent from a host that predates it.
+   */
+  membershipId?: string | null;
 };
 
 export type CommentView = {
@@ -65,6 +71,13 @@ export type CommentView = {
    */
   removal?: 'own' | 'moderation' | null;
   /**
+   * 11-20 (D-733, UI-D-632): the API's riders, copied through and never derived from a role. `canReport`: the
+   * viewer did not write the comment. `canBlock`: not their own AND the author is a live member AND the viewer
+   * is a member. Absent reads as false.
+   */
+  canReport?: boolean;
+  canBlock?: boolean;
+  /**
    * An optimistic row the server has not confirmed yet. It renders identically except that its
    * controls are inert — a like or a delete addressed to an id the server has never seen would be
    * a guaranteed 404, and offering it would be a lie about what the row currently is.
@@ -89,6 +102,15 @@ export type CommentItemLabels = {
    * predates moderation, and the own label is used.
    */
   remove?: string;
+  /**
+   * 11-20 (UI-D-632): the menu control's accessible name, "Mais ações do comentário". ABSENT means the host
+   * predates the menu: the row keeps its single direct delete control, exactly as shipped.
+   */
+  moreActions?: string;
+  /** The report row's own label (the sheet's title is the host's). */
+  report?: string;
+  /** The block row's label with `{nome}` still in it; the row fills in the name it is showing. */
+  block?: string;
 };
 
 /** The row's removal meaning, with an absent server value read as the pre-08-01 `canDelete` rule. */
@@ -106,6 +128,14 @@ export type CommentItemProps = {
   onReply?: (comment: CommentView) => void;
   /** Raises the list's shared confirmation dialog; the row owns the control, not the dialog. */
   onDelete?: (comment: CommentView) => void;
+  /**
+   * 11-20 (D-733): raised by the menu's "Denunciar comentário" and "Bloquear {nome}" rows, AFTER the menu
+   * closes. The report sheet and the block dialog are the host's. A row is drawn only when its rider
+   * (`canReport`, `canBlock`), its label and its callback are all present; the same "the presence of a handler
+   * chooses the shell" rule as `onReply` and `onDelete`.
+   */
+  onReport?: (comment: CommentView) => void;
+  onBlock?: (comment: CommentView) => void;
   /**
    * ABSENT MEANS NO HEART AT ALL, not a disabled one (05-07). The flat variant a story's comments
    * render in has no per-comment like, because `feed_likes_comment_fk` makes the row
@@ -141,6 +171,8 @@ export function CommentItem({
   labels,
   onReply,
   onDelete,
+  onReport,
+  onBlock,
   onToggleLike,
   children,
   highlighted = false,
@@ -154,6 +186,32 @@ export function CommentItem({
     removal === 'moderation' && labels.remove
       ? labels.remove.replace('{author}', name)
       : labels.delete;
+
+  // 11-20 (D-733, UI-D-632): what the "Mais ações do comentário" menu holds, from DATA. Staff and the
+  // author's own row never get "Bloquear" (the rider says so); a removed author has no name to put in it.
+  const canRemove = removal !== null && onDelete !== undefined;
+  const reportLabel =
+    comment.canReport === true && onReport !== undefined ? (labels.report ?? null) : null;
+  const blockLabel =
+    comment.canBlock === true &&
+    onBlock !== undefined &&
+    !authorRemoved &&
+    author.displayName !== null &&
+    labels.block !== undefined
+      ? labels.block.replace('{nome}', author.displayName)
+      : null;
+  const hasMenu =
+    labels.moreActions !== undefined &&
+    !pending &&
+    (canRemove || reportLabel !== null || blockLabel !== null);
+  // The sheet mounts on its first open and stays mounted so its exit animation can play; a list of
+  // twenty rows therefore carries no overlay machinery until one is used.
+  const [menuUsed, setMenuUsed] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const closeThen = (run: () => void) => () => {
+    setMenuOpen(false);
+    run();
+  };
 
   const rowRef = useRef<HTMLElement>(null);
   const [tinted, setTinted] = useState(highlighted);
@@ -238,19 +296,32 @@ export function CommentItem({
               {labels.reply}
             </button>
           ) : null}
-          {removal !== null && onDelete && !pending ? (
-            // ONE control, one destination. D-61 is "the row's own overflow control, behind a
-            // confirmation dialog", and with exactly one action in V1 an intermediate menu would
-            // add a second layer over the comment sheet for nothing — and would leave the control
-            // named "Mais opções" when it does precisely one thing. 08-01 (UI-D-276) reuses this
-            // exact control for a moderator on everyone's rows, named for what it does; Phase 11's
-            // "Denunciar" is when it becomes a menu.
+          {hasMenu ? (
+            // 11-20 (D-733, UI-D-632): the row's ONE overflow control. It replaces the single trash
+            // button of 04-07/08-01 and opens the SAME `BottomSheet` geometry as the post menu, with the
+            // destructive row last. The author's own row holds the delete row alone; someone else's holds
+            // "Denunciar" and, for a member author, "Bloquear {nome}", plus the moderator's remove row.
+            <IconButton
+              icon={Ellipsis}
+              size={20}
+              label={labels.moreActions ?? ''}
+              data-comment-more
+              data-comment-removal={removal ?? undefined}
+              aria-haspopup="dialog"
+              onClick={() => {
+                setMenuUsed(true);
+                setMenuOpen(true);
+              }}
+              className="-my-3.5 text-text-tertiary"
+            />
+          ) : labels.moreActions === undefined && canRemove && !pending ? (
+            // A host that has not adopted the menu keeps the one direct control, as shipped.
             <button
               type="button"
               data-comment-delete
               data-comment-removal={removal}
               aria-label={removeLabel}
-              onClick={() => onDelete(comment)}
+              onClick={() => onDelete?.(comment)}
               className="inline-flex items-center gap-1 font-bold text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
               <Trash2 aria-hidden size={14} />
@@ -260,6 +331,41 @@ export function CommentItem({
 
         {children}
       </div>
+
+      {menuUsed ? (
+        <BottomSheet open={menuOpen} onClose={() => setMenuOpen(false)}>
+          <div className="flex flex-col gap-1">
+            {reportLabel !== null ? (
+              <MenuRow
+                icon={Flag}
+                label={reportLabel}
+                onClick={closeThen(() => onReport?.(comment))}
+                attrs={{ 'data-comment-report': '' }}
+              />
+            ) : null}
+            {blockLabel !== null ? (
+              <MenuRow
+                icon={Ban}
+                label={blockLabel}
+                onClick={closeThen(() => onBlock?.(comment))}
+                attrs={{ 'data-comment-block': '' }}
+              />
+            ) : null}
+            {canRemove ? (
+              <MenuRow
+                icon={Trash2}
+                label={removeLabel}
+                destructive
+                onClick={closeThen(() => onDelete?.(comment))}
+                attrs={{
+                  'data-comment-delete': '',
+                  'data-comment-removal': removal ?? undefined,
+                }}
+              />
+            ) : null}
+          </div>
+        </BottomSheet>
+      ) : null}
 
       {/* `self-start`: the heart stays on the row's first line however tall the body grows. */}
       {onToggleLike ? (

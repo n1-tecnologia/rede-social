@@ -335,6 +335,8 @@ export function postCardBase(
       displayName: post.author.displayName,
       // D-52: the post is attributed to the PERSON, and their profile opens by direct link (D-47).
       profileHref: `/membros/${post.author.membershipId}`,
+      // 11-20 (D-733): the membership id the block call is keyed by (never a user id, T-11-34).
+      membershipId: post.author.membershipId,
       avatarUrl: avatarUrlFor(post.author.avatarAssetId),
       ...(handle !== undefined && isInstagramHandle(handle)
         ? { handle: instagramLinkView(handle, tf) }
@@ -375,6 +377,10 @@ export function postCardBase(
     // menu decides its rows and wording from this data; no role is compared anywhere.
     ...(post.audience ? { audience: post.audience } : {}),
     ...(post.removal ? { removal: post.removal } : {}),
+    // 11-20 (D-616, D-733): the report and block riders ride the card as the API sent them (an absent
+    // one reads false), and ONLY when true, so a card of an API that predates them is unchanged.
+    ...(post.canReport === true ? { canReport: true } : {}),
+    ...(post.canBlock === true ? { canBlock: true } : {}),
     likeCount: post.likeCount,
     commentCount: post.commentCount,
     viewerLiked: post.viewerLiked,
@@ -478,6 +484,8 @@ export function commentView(
           ? null
           : `/membros/${comment.author.membershipId}`,
       avatarUrl: avatarUrlFor(comment.author.avatarAssetId),
+      // 11-20 (D-733): the membership id the block call is keyed by; null with a removed author.
+      membershipId: comment.author.membershipId,
     },
     authorRemoved: comment.authorRemoved,
     createdAtIso: comment.createdAt,
@@ -491,5 +499,9 @@ export function commentView(
     // 08-01 (UI-D-276): copied THROUGH, like `canDelete`. An API that predates it sends nothing, and
     // the row then reads `canDelete ? 'own' : null` — the shipped behaviour (release-order rule).
     removal: comment.removal ?? (comment.canDelete ? 'own' : null),
+    // 11-20 (D-616, D-733, UI-D-632): the report and block riders, copied through like `canDelete`
+    // and only when true; an API that predates them sends nothing and the menu draws neither row.
+    ...(comment.canReport === true ? { canReport: true } : {}),
+    ...(comment.canBlock === true ? { canBlock: true } : {}),
   };
 }

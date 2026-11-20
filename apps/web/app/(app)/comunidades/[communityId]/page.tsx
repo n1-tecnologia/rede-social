@@ -30,6 +30,7 @@ import {
   feedCommentsProps,
   postCardLabels,
   postMenuLabels,
+  postMenuSafety,
   reelsOverlayProps,
   storyCommentsProps,
 } from '@/lib/registry';
@@ -570,6 +571,7 @@ export default async function CommunityPage({
             deletedLabel: tf('toasts.deleted'),
             removedLabel: tf('toasts.removed'),
             onDelete: deletePostAction,
+            safety: postMenuSafety(bootstrap),
           }}
           reels={reels}
           communityId={community.id}

@@ -1,8 +1,9 @@
 'use client';
 
 import { BottomSheet, ConfirmDialog } from '@rede-social/ui';
-import { Link2, type LucideIcon, Pencil, Trash2 } from 'lucide-react';
-import { type ReactNode, useCallback, useState } from 'react';
+import { Ban, Flag, Link2, Pencil, Trash2 } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { MenuRow } from './MenuRow';
 import type { PostShareTarget } from './PostCard';
 
 /**
@@ -55,6 +56,12 @@ export type PostMenuLabels = {
   removeBody: string;
   removeConfirm: string;
   removeCancel: string;
+  /**
+   * 11-20 (D-733, UI-D-632): "Denunciar publicação" and "Bloquear {nome}" (the placeholder still in it; the
+   * menu fills in the author's name). OPTIONAL on purpose: a host that predates them draws neither row.
+   */
+  report?: string;
+  block?: string;
 };
 
 /** Which delete a confirmation is for: the author's own, or a moderator's removal of a member post. */
@@ -76,6 +83,16 @@ export type PostMenuTarget = {
    * author's delete uses the member body.
    */
   memberPost?: boolean;
+  /**
+   * 11-20 (D-733, UI-D-632): the API's riders, copied through and never derived from a role. `canReport`: the
+   * viewer did not write the post. `canBlock`: not their own AND the author is a member AND the viewer is a
+   * member (staff are offered Denunciar and never Bloquear, A-11-ROLE). Absent reads as false.
+   */
+  canReport?: boolean;
+  canBlock?: boolean;
+  /** The author's display name, for the block row, and their membership id for the block call. */
+  authorName?: string;
+  authorMembershipId?: string;
 };
 
 export type PostMenuProps = {
@@ -96,48 +113,25 @@ export type PostMenuProps = {
    */
   onDelete?: (postId: string, variant?: PostDeleteVariant) => Promise<void>;
   labels: PostMenuLabels;
+  /**
+   * 11-20: the host's reaction to the two new rows. The menu closes first and hands the TARGET over: the
+   * report sheet and the block dialog are the host's (one implementation for every subject), never the
+   * module's. A row is drawn only when its rider, its label and its callback are all present.
+   */
+  onReport?: (target: PostMenuTarget) => void;
+  onBlock?: (target: PostMenuTarget) => void;
 };
 
-/** One 44px-minimum sheet row. `destructive` tints the label with the danger token, never a hex. */
-function MenuRow({
-  icon: Icon,
-  label,
-  destructive,
-  onClick,
-  href,
-}: {
-  icon: LucideIcon;
-  label: string;
-  destructive?: boolean;
-  onClick?: () => void;
-  href?: string;
-}): ReactNode {
-  const shape = [
-    'flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-bold',
-    'transition-colors hover:bg-bg-hover active:bg-bg-tertiary',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset',
-    destructive ? 'text-danger' : 'text-text',
-  ].join(' ');
-
-  // A plain `<a>` rather than `next/link`: a module package must not depend on the web framework
-  // (MOD-02), and the host app is free to intercept the navigation.
-  if (href !== undefined) {
-    return (
-      <a href={href} className={shape}>
-        <Icon aria-hidden size={20} className="shrink-0" />
-        {label}
-      </a>
-    );
-  }
-  return (
-    <button type="button" onClick={onClick} className={shape}>
-      <Icon aria-hidden size={20} className="shrink-0" />
-      {label}
-    </button>
-  );
-}
-
-export function PostMenu({ open, target, onClose, onSharePost, onDelete, labels }: PostMenuProps) {
+export function PostMenu({
+  open,
+  target,
+  onClose,
+  onSharePost,
+  onDelete,
+  labels,
+  onReport,
+  onBlock,
+}: PostMenuProps) {
   /**
    * Which confirmation is up. `mode` is kept after the dialog closes on purpose: the dialog's exit
    * animation would otherwise flip to the other wording for a frame once the target is gone.
@@ -172,6 +166,26 @@ export function PostMenu({ open, target, onClose, onSharePost, onDelete, labels 
   }, [onDelete, postId, onClose, confirm.mode]);
 
   const canManage = target?.canManage === true;
+  // 11-20 (D-733): the two safety rows, from the API's riders as DATA. `Bloquear` also needs the author's
+  // name (the row names the person) and `Denunciar` the label; neither is ever drawn for a host without
+  // the callback, so a surface that has not wired the sheet shows no dead row.
+  const reportRow =
+    target?.canReport === true && onReport !== undefined && labels.report !== undefined
+      ? { label: labels.report, run: onReport }
+      : null;
+  const blockRow =
+    target?.canBlock === true &&
+    onBlock !== undefined &&
+    labels.block !== undefined &&
+    typeof target.authorName === 'string' &&
+    target.authorName !== ''
+      ? { label: labels.block.replace('{nome}', target.authorName), run: onBlock }
+      : null;
+  const safety = (run: (target: PostMenuTarget) => void) => () => {
+    if (!target) return;
+    onClose();
+    run(target);
+  };
   // D-475: a moderator's row, drawn from the API's `removal` and only where the author's own
   // controls are not (an author who also moderates keeps the author's set).
   const canRemove = !canManage && target?.removal === 'moderation';
@@ -186,6 +200,14 @@ export function PostMenu({ open, target, onClose, onSharePost, onDelete, labels 
 
           {shareUrl && onSharePost ? (
             <MenuRow icon={Link2} label={labels.copyLink} onClick={copyLink} />
+          ) : null}
+
+          {reportRow ? (
+            <MenuRow icon={Flag} label={reportRow.label} onClick={safety(reportRow.run)} />
+          ) : null}
+
+          {blockRow ? (
+            <MenuRow icon={Ban} label={blockRow.label} onClick={safety(blockRow.run)} />
           ) : null}
 
           {canManage && onDelete ? (

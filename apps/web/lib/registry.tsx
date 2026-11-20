@@ -34,6 +34,8 @@ import {
   unlikeStoryAction,
 } from '@/app/(app)/stories/story-actions';
 import { FeedSurface } from '@/components/feed/FeedSurface';
+import type { PostMenuSafety } from '@/components/feed/ReportAndBlock';
+import { reportContent } from '@/components/feed/safety-actions';
 import type { ReelsHostBinding } from '@/components/reels/ReelsHost';
 import type { ReelsOverlayBinding } from '@/components/reels/ReelsOverlay';
 import { StoriesBand } from '@/components/stories/StoriesBand';
@@ -134,6 +136,19 @@ export function postMenuLabels(tf: Translator): PostMenuLabels {
     removeBody: tf('remove.body'),
     removeConfirm: tf('remove.confirm'),
     removeCancel: tf('remove.cancel'),
+  };
+}
+
+/**
+ * 11-20 (D-616, D-722, D-733): the opt-in of a posts surface into Denunciar and Bloquear. The menus follow the API's
+ * riders on each item (`canReport`, `canBlock`); this only says WHICH block dialog body applies, from the composed
+ * `social.participate` permission (data, never a role): with `social` on the dialog also says the follows do not
+ * come back (D-724).
+ */
+export function postMenuSafety(bootstrap: Bootstrap): PostMenuSafety {
+  return {
+    socialOn: bootstrap.permissions.includes('social.participate'),
+    reportAction: reportContent,
   };
 }
 
@@ -338,6 +353,7 @@ export async function buildFeedSurface(
         deletedLabel: tf('toasts.deleted'),
         removedLabel: tf('toasts.removed'),
         onDelete: deletePostAction,
+        safety: postMenuSafety(bootstrap),
       }}
       reels={reels}
       empty={empty}

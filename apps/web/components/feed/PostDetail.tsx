@@ -27,6 +27,7 @@ import {
   useCommunityLockedRefusal,
   useFollowRequiredRefusal,
 } from './community-locked';
+import { type PostMenuSafety, useReportAndBlock } from './ReportAndBlock';
 import { useDeletePost } from './useDeletePost';
 import { useSharePost } from './useSharePost';
 
@@ -74,6 +75,8 @@ export type PostDetailProps = {
     /** 09-09 (D-475): the toast of a moderator's removal ("Publicação removida."). */
     removedLabel: string;
     onDelete: typeof deletePostAction;
+    /** 11-20 (D-616, D-733): present when the page offers Denunciar and Bloquear (see `FeedSurface`). */
+    safety?: PostMenuSafety;
   };
   comments: Omit<CommentsListProps, 'targetId' | 'variant'>;
   /** 2026-10-09: the Reels overlay (`reelsOverlayProps`); `null` or absent without Reels. */
@@ -96,6 +99,8 @@ export function PostDetail({
   const toast = useToast();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  // 11-20 (D-733): the post's menu and the comments below it share ONE report sheet.
+  const safety = useReportAndBlock({ tenantName: share.title, safety: menu.safety });
 
   /** What the member did to this post in Reels, with a revision per report (2026-10-09). */
   const [reported, setReported] = useState<(ReelInteractionReport & { revision: number }) | null>(
@@ -197,7 +202,11 @@ export function PostDetail({
         onShare={onShare}
         // The control renders only when the menu behind it would carry a row (04-06's rule): a
         // member on a shell with no share url has nothing to copy and nothing to manage.
-        onMore={post.canManage || post.shareUrl ? () => setMenuOpen(true) : undefined}
+        onMore={
+          post.canManage || post.shareUrl || post.canReport === true
+            ? () => setMenuOpen(true)
+            : undefined
+        }
         onOpenVideo={open}
       />
       <PostMenu
@@ -210,17 +219,37 @@ export function PostDetail({
           ...(post.removal ? { removal: post.removal } : {}),
           // 10-11 (Pitfall 11): `followers` and `community` are both a member's post.
           memberPost: post.audience === 'followers' || post.audience === 'community',
+          // 11-20 (D-733): the API's riders and the author, for the safety rows.
+          ...(post.canReport || post.canBlock
+            ? {
+                ...(post.canReport ? { canReport: true } : {}),
+                ...(post.canBlock ? { canBlock: true } : {}),
+                authorName: post.author.displayName,
+                ...(post.author.membershipId
+                  ? { authorMembershipId: post.author.membershipId }
+                  : {}),
+              }
+            : {}),
         }}
         onClose={() => setMenuOpen(false)}
         onSharePost={onShare}
         onDelete={confirmDelete}
-        labels={menu.labels}
+        labels={safety.menuLabels(menu.labels)}
+        onReport={safety.onReportPost}
       />
       {/* No `onOpenComments` and no sheet: the comments ARE the screen below. Wiring the card's
           comment control to a second surface here would open a bottom sheet over a list the member
           is already looking at — D-59's one-implementation rule read literally. */}
-      <CommentsList {...comments} targetId={post.id} variant="inline" onLocked={commentsLocked} />
+      <CommentsList
+        {...comments}
+        labels={safety.commentLabels(comments.labels)}
+        onReportComment={safety.onReportComment}
+        targetId={post.id}
+        variant="inline"
+        onLocked={commentsLocked}
+      />
       {overlay}
+      {safety.element}
     </>
   );
 }

@@ -42,6 +42,8 @@ export type PostCardView = {
     displayName: string;
     /** `/membros/{membershipId}` (D-52). */
     profileHref: string;
+    /** 11-20 (D-733): the author's membership id, for the block call; absent from a host that predates it. */
+    membershipId?: string;
     avatarUrl: string | null;
     /** 2026-10-06: the mark's accessible name when the author is an administrator; else absent. */
     adminLabel?: string | null;
@@ -91,6 +93,13 @@ export type PostCardView = {
    * statement re-decides the write.
    */
   removal?: 'moderation';
+  /**
+   * 11-20 (D-733, UI-D-632): the API's riders, copied through and never derived from a role. `canReport`: the
+   * viewer did not write the post. `canBlock`: not their own AND the author is a member AND the viewer is a
+   * member. They draw the post menu's "Denunciar publicação" and "Bloquear {nome}" rows.
+   */
+  canReport?: boolean;
+  canBlock?: boolean;
   /**
    * 09-09 (D-473): the stamped audience as the API sent it (`'followers'` for a member post; an organization
    * post carries no key on the wire). The menu reads it to word the author's delete for Explorar, and the host reads

@@ -94,6 +94,12 @@ export type FeedCommentsProps = Omit<
 export type FeedPostMenuProps = {
   labels: PostMenuLabels;
   onDelete: (postId: string, variant?: PostDeleteVariant) => Promise<void>;
+  /**
+   * 11-20 (D-733): the host's reaction to the menu's "Denunciar publicação" and "Bloquear {nome}" rows. The
+   * report sheet and the block dialog are the host's; the list only forwards the TARGET.
+   */
+  onReport?: (target: PostMenuTarget) => void;
+  onBlock?: (target: PostMenuTarget) => void;
 };
 
 export type FeedListLabels = {
@@ -498,6 +504,11 @@ export function FeedList({
             // 10-11 (Pitfall 11): a member's post is `followers` (Explorar) or `community` (a member
             // community); only an organization post (`tenant`, or no key on the wire) is not.
             memberPost: post.audience === 'followers' || post.audience === 'community',
+            // 11-20 (D-733): the API's riders and the author, copied through for the safety rows.
+            ...(post.canReport ? { canReport: true } : {}),
+            ...(post.canBlock ? { canBlock: true } : {}),
+            authorName: post.author.displayName,
+            ...(post.author.membershipId ? { authorMembershipId: post.author.membershipId } : {}),
           });
         }
       }
@@ -630,7 +641,11 @@ export function FeedList({
               // The control renders only when the menu it opens would actually carry a row: a member
               // on a shell with no share url has nothing to copy and nothing to manage, and a
               // control that opens an empty sheet is a promise the card cannot keep (04-06's rule).
-              onMore={(menu && (post.canManage || post.shareUrl)) || onMore ? openMenu : undefined}
+              onMore={
+                (menu && (post.canManage || post.shareUrl || post.canReport === true)) || onMore
+                  ? openMenu
+                  : undefined
+              }
               onOpenVideo={onOpenVideo}
             />
           ))}
@@ -691,6 +706,8 @@ export function FeedList({
           onSharePost={onShare}
           onDelete={deletePost}
           labels={menu.labels}
+          onReport={menu.onReport}
+          onBlock={menu.onBlock}
         />
       ) : null}
 

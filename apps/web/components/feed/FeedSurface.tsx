@@ -21,6 +21,7 @@ import {
   useCommunityLockedRefusal,
   useFollowRequiredRefusal,
 } from './community-locked';
+import { type PostMenuSafety, useReportAndBlock } from './ReportAndBlock';
 import { useDeletePost } from './useDeletePost';
 import { useSharePost } from './useSharePost';
 
@@ -79,6 +80,11 @@ export type FeedSurfaceProps = Omit<
     /** 09-09 (D-475): the toast of a moderator's removal ("Publicação removida."). */
     removedLabel: string;
     onDelete: typeof deletePostAction;
+    /**
+     * 11-20 (D-616, D-733): present when the host opts the surface into Denunciar and Bloquear. The menus then
+     * follow the API riders on each post and comment (`canReport`, `canBlock`); absent, no safety row exists.
+     */
+    safety?: PostMenuSafety;
   };
 };
 
@@ -90,6 +96,8 @@ export type FeedSurfaceProps = Omit<
 const noDelete = async () => ({ ok: false, code: 'generic' }) as const;
 
 export function FeedSurface({ share, menu, reels, communityId, ...list }: FeedSurfaceProps) {
+  // 11-20 (D-733): the report sheet is the surface's, one for every post and comment on it.
+  const safety = useReportAndBlock({ tenantName: share.title, safety: menu?.safety });
   const onShare = useSharePost(share.title, { copied: share.copied, error: share.error });
   const onDelete = useDeletePost(menu?.onDelete ?? noDelete, {
     deleted: menu?.deletedLabel ?? '',
@@ -175,13 +183,31 @@ export function FeedSurface({ share, menu, reels, communityId, ...list }: FeedSu
         onLoadMore={loadMore}
         onRefresh={refresh}
         onShare={onShare}
-        menu={menu ? { labels: menu.labels, onDelete } : undefined}
+        menu={
+          menu
+            ? {
+                labels: safety.menuLabels(menu.labels),
+                onDelete,
+                onReport: safety.onReportPost,
+              }
+            : undefined
+        }
+        comments={
+          list.comments
+            ? {
+                ...list.comments,
+                labels: safety.commentLabels(list.comments.labels),
+                onReportComment: safety.onReportComment,
+              }
+            : undefined
+        }
         onLikeError={onLikeError}
         onCommentsLocked={onCommentsLocked}
         onOpenVideo={open}
         itemOverrides={overrides}
       />
       {overlay}
+      {safety.element}
     </>
   );
 }

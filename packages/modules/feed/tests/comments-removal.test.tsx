@@ -431,3 +431,125 @@ describe('commentSchema — release-order compatibility (production is live)', (
     expect(commentSchema.safeParse({ ...wire, removal: 'admin' }).success).toBe(false);
   });
 });
+
+describe('CommentItem - the "Mais ações do comentário" menu (11-20, D-733, UI-D-632)', () => {
+  const MENU_LABELS: CommentItemLabels = {
+    ...ITEM_LABELS,
+    moreActions: 'more-actions-label',
+    report: 'report-comment-label',
+    block: 'block-{nome}-label',
+  };
+
+  function menuRow(
+    view: CommentView,
+    props: {
+      onReport?: (c: CommentView) => void;
+      onBlock?: (c: CommentView) => void;
+      onDelete?: (c: CommentView) => void;
+    } = {},
+  ) {
+    return render(<CommentItem comment={view} locale="pt-BR" labels={MENU_LABELS} {...props} />);
+  }
+
+  const other = (over: Partial<CommentView> = {}) =>
+    comment({
+      author: { displayName: 'Carla Nunes', profileHref: '/membros/m1', avatarUrl: null },
+      canDelete: false,
+      removal: null,
+      canReport: true,
+      canBlock: true,
+      ...over,
+    });
+
+  it('M1: another member comment: the control opens a sheet with Denunciar and "Bloquear {nome}"', () => {
+    const onReport = vi.fn();
+    const onBlock = vi.fn();
+    menuRow(other(), { onReport, onBlock });
+
+    expect(screen.queryByText('report-comment-label')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'more-actions-label' }));
+    expect(screen.getByText('report-comment-label')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'block-Carla Nunes-label' }));
+    expect(onBlock).toHaveBeenCalledTimes(1);
+    expect(onReport).not.toHaveBeenCalled();
+  });
+
+  it('M2: a tap on Denunciar closes the sheet and hands the comment to the host', () => {
+    const onReport = vi.fn();
+    menuRow(other(), { onReport, onBlock: vi.fn() });
+    fireEvent.click(screen.getByRole('button', { name: 'more-actions-label' }));
+    fireEvent.click(screen.getByRole('button', { name: 'report-comment-label' }));
+    expect(onReport).toHaveBeenCalledWith(expect.objectContaining({ id: 'c1' }));
+    expect(screen.queryByText('report-comment-label')).toBeNull();
+  });
+
+  it('M3: the viewer own comment holds the delete row alone, which keeps its data hooks and goes last', () => {
+    const onDelete = vi.fn();
+    const { container } = menuRow(comment({ removal: 'own' }), {
+      onReport: vi.fn(),
+      onBlock: vi.fn(),
+      onDelete,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'more-actions-label' }));
+    expect(screen.queryByText('report-comment-label')).toBeNull();
+    const row = container.querySelector('[data-comment-delete]') as HTMLElement;
+    expect(row).toHaveAttribute('data-comment-removal', 'own');
+    expect(row).toHaveClass('text-danger');
+    fireEvent.click(row);
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it('M4: staff never get Bloquear (the rider) but a moderator keeps Denunciar and the remove row', () => {
+    const { container } = menuRow(other({ canBlock: false, removal: 'moderation' }), {
+      onReport: vi.fn(),
+      onBlock: vi.fn(),
+      onDelete: vi.fn(),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'more-actions-label' }));
+    expect(screen.queryByText(/^block-/)).toBeNull();
+    expect(screen.getByText('report-comment-label')).toBeInTheDocument();
+    expect(container.querySelector('[data-comment-delete]')).toHaveAttribute(
+      'data-comment-removal',
+      'moderation',
+    );
+  });
+
+  it('M5: a removed author has no name to block: Denunciar only', () => {
+    menuRow(
+      other({
+        authorRemoved: true,
+        author: { displayName: null, profileHref: null, avatarUrl: null },
+      }),
+      { onReport: vi.fn(), onBlock: vi.fn() },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'more-actions-label' }));
+    expect(screen.getByText('report-comment-label')).toBeInTheDocument();
+    expect(screen.queryByText(/^block-/)).toBeNull();
+  });
+
+  it('M6: the control is drawn only when the menu would hold a row', () => {
+    menuRow(other({ canReport: false, canBlock: false }), {});
+    expect(screen.queryByRole('button', { name: 'more-actions-label' })).toBeNull();
+    cleanup();
+    // A pending (optimistic) row has an inert menu, like its heart.
+    menuRow(other({ pending: true }), { onReport: vi.fn(), onBlock: vi.fn() });
+    expect(screen.queryByRole('button', { name: 'more-actions-label' })).toBeNull();
+  });
+
+  it('M7: a host that predates the menu keeps the one direct delete control, as shipped', () => {
+    const onDelete = vi.fn();
+    render(
+      <CommentItem
+        comment={comment({ removal: 'own' })}
+        locale="pt-BR"
+        labels={ITEM_LABELS}
+        onDelete={onDelete}
+        onReport={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'more-actions-label' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'delete-label' }));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});

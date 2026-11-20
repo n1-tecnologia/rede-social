@@ -100,6 +100,7 @@ vi.mock('@/lib/admin-icon-cookie', () => ({ readAdminIconChoice: async () => nul
 vi.mock('@/lib/registry', () => ({
   postCardLabels: () => ({ media: { carousel: 'carrossel', attachmentError: 'erro' } }),
   postMenuLabels: () => ({ deleteBodyMember: 'base-member', removeBody: 'base-remove' }),
+  postMenuSafety: () => undefined,
   feedCommentsProps: () => ({}),
   storyCommentsProps: () => ({}),
   reelsOverlayProps: async () => null,

@@ -166,3 +166,93 @@ describe('PostMenu - the author delete wording (UI-D-495)', () => {
     expect(screen.getByText(LABELS.edit)).toBeInTheDocument();
   });
 });
+
+describe('PostMenu - the report and block rows (11-20, D-733, UI-D-632)', () => {
+  const safetyLabels: PostMenuLabels = {
+    ...LABELS,
+    report: 'report-post-label',
+    block: 'block-{nome}-label',
+  };
+  const member = {
+    canReport: true,
+    canBlock: true,
+    authorName: 'Carla Nunes',
+    authorMembershipId: 'a1b2c3d4-0000-4000-8000-000000000001',
+  };
+
+  function renderSafety(
+    menuTarget: PostMenuTarget,
+    { withBlock = true, labels = safetyLabels } = {},
+  ) {
+    const onClose = vi.fn();
+    const onReport = vi.fn();
+    const onBlock = vi.fn();
+    render(
+      <PostMenu
+        open
+        target={menuTarget}
+        onClose={onClose}
+        onSharePost={vi.fn()}
+        onDelete={vi.fn().mockResolvedValue(undefined)}
+        labels={labels}
+        onReport={onReport}
+        onBlock={withBlock ? onBlock : undefined}
+      />,
+    );
+    return { onClose, onReport, onBlock };
+  }
+
+  it('S1: another member post holds Denunciar and "Bloquear {nome}" with the name filled in', () => {
+    renderSafety(target(member));
+    expect(screen.getByRole('button', { name: 'report-post-label' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'block-Carla Nunes-label' })).toBeInTheDocument();
+  });
+
+  it('S2: the delete row stays last, under both safety rows', () => {
+    renderSafety(target({ ...member, canManage: true, editHref: '/post/x/editar' }));
+    const names = screen.getAllByRole('button').map((node) => node.textContent);
+    expect(names.indexOf('report-post-label')).toBeLessThan(names.indexOf(LABELS.delete));
+    expect(names.indexOf('block-Carla Nunes-label')).toBeLessThan(names.indexOf(LABELS.delete));
+  });
+
+  it('S3: a tap closes the menu FIRST and hands the target to the host', () => {
+    const { onClose, onReport, onBlock } = renderSafety(target(member));
+    fireEvent.click(screen.getByRole('button', { name: 'report-post-label' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onReport).toHaveBeenCalledWith(expect.objectContaining({ postId: POST }));
+    fireEvent.click(screen.getByRole('button', { name: 'block-Carla Nunes-label' }));
+    expect(onBlock).toHaveBeenCalledWith(
+      expect.objectContaining({ authorMembershipId: member.authorMembershipId }),
+    );
+  });
+
+  it('S4: the riders are data: no rider, no row (own post, staff viewer, staff author)', () => {
+    renderSafety(target({ canManage: true, editHref: '/post/x/editar' }));
+    expect(screen.queryByText('report-post-label')).toBeNull();
+    expect(screen.queryByText(/^block-/)).toBeNull();
+  });
+
+  it('S5: a staff viewer is offered Denunciar and never Bloquear (A-11-ROLE)', () => {
+    renderSafety(target({ ...member, canBlock: false }));
+    expect(screen.getByText('report-post-label')).toBeInTheDocument();
+    expect(screen.queryByText(/^block-/)).toBeNull();
+  });
+
+  it('S6: a host without the callback or the label draws no dead row, and a nameless author gets no Bloquear', () => {
+    renderSafety(target(member), { withBlock: false });
+    expect(screen.queryByText(/^block-/)).toBeNull();
+    cleanup();
+    renderSafety(target(member), { labels: LABELS });
+    expect(screen.queryByText('report-post-label')).toBeNull();
+    cleanup();
+    renderSafety(target({ ...member, authorName: '' }));
+    expect(screen.queryByText(/^block-/)).toBeNull();
+  });
+
+  it('S7: the full name stays complete as the accessible name, wrapped rather than clipped', () => {
+    const long = 'N'.repeat(80);
+    renderSafety(target({ ...member, authorName: long }));
+    const row = screen.getByRole('button', { name: `block-${long}-label` });
+    expect(row.querySelector('span')).toHaveClass('break-words');
+  });
+});
