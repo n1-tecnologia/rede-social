@@ -4,20 +4,24 @@ import { convTopic, REALTIME_EVENTS } from '@rede-social/contracts/realtime';
 import { useRealtimeTopic } from '@rede-social/core/ui';
 import { CHAT_PAGE_SIZE } from '@rede-social/module-chat/contracts';
 import { ChatComposer, MessageList } from '@rede-social/module-chat/ui';
-import { Avatar, Button, EmptyState } from '@rede-social/ui';
+import { Avatar, Button, EmptyState, useToast } from '@rede-social/ui';
 import { ArrowDown, MessageCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type SendDirectMessageResult, sendDirectMessage } from '@/app/(app)/conversas/actions';
+import { unblockMember } from '@/components/feed/safety-actions';
 import { cursorAfterOwnSend, cursorAfterPage, isReplayedSignal } from '@/lib/chat-cursor';
 import {
   type ChatDayKeys,
   type ChatMessageView,
   type ComposerStateView,
+  type ComposerStripView,
   chatRuns,
+  composerStateView,
   type DirectOtherView,
 } from '@/lib/chat-view';
+import { ComposerStateStrip } from './ComposerStateStrip';
 
 /**
  * The direct conversation's body (11-22, CHAT-06, D-720, UI-D-864) [designed]: the scroller and the composer
@@ -46,6 +50,17 @@ import {
  * - **Send:** an optimistic own bubble ("Enviando…") is appended, then the server action answers the FINISHED
  *   view (replacing the optimistic one, keyed by id) and, on the first message, the conversation id to join.
  *
+ * - **The composer slot (UI-D-865, D-722, D-723): exactly one of four states.** `open` is the shipped composer;
+ *   `closed` (the other side blocked this member) replaces the composer AND its microphone with the ONE sentence;
+ *   `blocker` (this member blocked) is the strip with a one-tap "Desbloquear"; `removed` is the read-only strip.
+ *   The state is read with the thread and RE-READ on every conversation signal, (re)subscribe and
+ *   `visibilitychange`, and a live change toasts nothing, announces only the strip's own `role="status"` and
+ *   moves neither the scroll nor the focus. The pane never computes a state: it draws the server's.
+ * - **A refused send is silent and neutral (D-722).** When the server refuses with `closed` (the state reached
+ *   mid-session) the optimistic bubble is REMOVED, the shipped toast says the one sentence and the strip appears;
+ *   nothing on screen, in an accessible name or in a log names a block or the blocker. With the conversation gone
+ *   (the administrator's block) the shipped mid-session handling runs: the generic toast and `router.refresh()`.
+ *
  * Every string comes from the `chat` catalog; every time and day label is server-formatted (`chat-view.ts`), and
  * this component never reads the clock (UI-D-14). Every member string is a React text node (T-11-16).
  */
@@ -66,6 +81,75 @@ export interface DirectThreadPaneProps {
   /** The tenant's display name, for the report sheet's intro. */
   tenantName: string;
 }
+
+/** The composer slot as the server last described it, with the server's own answer to "may the viewer block". */
+interface DetailState {
+  composer: ComposerStateView;
+  canBlock: boolean;
+}
+
+type DetailRead = { kind: 'ok'; detail: DetailState } | { kind: 'gone' } | { kind: 'failed' };
+
+const STRIP_STATES = ['closed', 'blocker', 'removed'] as const;
+const STRIP_GLYPHS = ['Lock', 'Ban'] as const;
+
+const isText = (value: unknown): value is string => typeof value === 'string';
+
+/**
+ * The finished composer facts of `GET /api/chat/direct/{id}`, rebuilt from NAMED fields (the support pane's rule):
+ * anything that is not exactly the finished shape (an unknown state, a strip that does not match its state, a
+ * blocker strip with no button) is `null`, so the screen keeps what it shows rather than drawing a guess.
+ */
+function parseDetail(body: unknown): DetailState | null {
+  if (!body || typeof body !== 'object') return null;
+  const { state, strip, canBlock } = body as Record<string, unknown>;
+  if (typeof canBlock !== 'boolean') return null;
+  if (state === 'open')
+    return strip === null ? { composer: { state, strip: null }, canBlock } : null;
+  if (!STRIP_STATES.some((known) => known === state) || !strip || typeof strip !== 'object') {
+    return null;
+  }
+  const raw = strip as Record<string, unknown>;
+  const glyph = STRIP_GLYPHS.find((known) => known === raw.glyph);
+  if (raw.kind !== state || !glyph || !isText(raw.text) || !isText(raw.label)) return null;
+  let unblock: ComposerStripView['unblock'] = null;
+  if (raw.unblock !== null) {
+    const u = raw.unblock as Record<string, unknown> | undefined;
+    if (!u || !isText(u.label) || !isText(u.pendingLabel) || !isText(u.toast)) return null;
+    unblock = { label: u.label, pendingLabel: u.pendingLabel, toast: u.toast };
+  }
+  if ((state === 'blocker') !== (unblock !== null)) return null;
+  const kind = state as 'closed' | 'blocker' | 'removed';
+  return {
+    composer: {
+      state: kind,
+      strip: { kind, glyph, role: 'status', text: raw.text, label: raw.label, unblock },
+    },
+    canBlock,
+  };
+}
+
+/** `GET /api/chat/direct/{id}`: 404 is the conversation being gone for this reader, never a reason. */
+async function fetchDetail(conversationId: string): Promise<DetailRead> {
+  try {
+    const res = await fetch(`/api/chat/direct/${encodeURIComponent(conversationId)}`, {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      redirect: 'manual',
+    });
+    if (res.status === 404) return { kind: 'gone' };
+    if (!res.ok) return { kind: 'failed' };
+    const detail = parseDetail(await res.json());
+    return detail ? { kind: 'ok', detail } : { kind: 'failed' };
+  } catch {
+    return { kind: 'failed' };
+  }
+}
+
+const sameDetail = (a: DetailState, b: DetailState) =>
+  a.canBlock === b.canBlock &&
+  a.composer.state === b.composer.state &&
+  a.composer.strip?.text === b.composer.strip?.text;
 
 interface MessagesAnswer {
   items: ChatMessageView[];
@@ -140,9 +224,12 @@ export function DirectThreadPane({
   initialHasOlder,
   initialKeys,
   initialComposer,
+  canBlock,
 }: DirectThreadPaneProps) {
   const t = useTranslations('chat');
+  const tf = useTranslations('feed');
   const router = useRouter();
+  const { show } = useToast();
   const [sendError, setSendError] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [views, setViews] = useState<ChatMessageView[]>(initialViews);
@@ -150,7 +237,9 @@ export function DirectThreadPane({
   const [hasOlder, setHasOlder] = useState(initialHasOlder);
   const [olderState, setOlderState] = useState<'idle' | 'loading' | 'error'>('idle');
   const [newCount, setNewCount] = useState(0);
-  const [composer] = useState<ComposerStateView>(initialComposer);
+  const [detail, setDetail] = useState<DetailState>({ composer: initialComposer, canBlock });
+  const [unblocking, setUnblocking] = useState(false);
+  const { composer } = detail;
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const intentRef = useRef<ScrollIntent | null>({ kind: 'bottom' });
@@ -168,6 +257,13 @@ export function DirectThreadPane({
   const readSeqRef = useRef(0);
   const pendingIdRef = useRef(0);
   const catchUpRef = useRef<{ running: boolean; again: boolean }>({ running: false, again: false });
+  /** The composer state re-read, coalesced the same way: one in flight, one queued. */
+  const detailReadRef = useRef<{ running: boolean; again: boolean }>({
+    running: false,
+    again: false,
+  });
+  /** Set by an unblock: the field takes the focus once the open composer is drawn (UI-D-865). */
+  const focusFieldRef = useRef(false);
 
   const nearBottom = useCallback(() => {
     const el = scrollerRef.current;
@@ -262,14 +358,49 @@ export function DirectThreadPane({
     }
   }, [nearBottom, markRead]);
 
+  /**
+   * UI-D-865: re-read the composer state, one at a time (a request during a run schedules exactly one more). A
+   * failed read keeps the screen as it is; a 404 means the conversation is gone for this reader (the
+   * administrator's block, a removal that hid it), so the page re-renders into the not-found screen. Nothing
+   * toasts and neither the scroll nor the focus moves for a live change.
+   */
+  const refreshDetail = useCallback(async () => {
+    const state = detailReadRef.current;
+    if (state.running) {
+      state.again = true;
+      return;
+    }
+    state.running = true;
+    try {
+      do {
+        state.again = false;
+        const id = conversationRef.current;
+        if (!id) break;
+        const read = await fetchDetail(id);
+        if (conversationRef.current !== id) {
+          state.again = true;
+          continue;
+        }
+        if (read.kind === 'gone') router.refresh();
+        else if (read.kind === 'ok') {
+          setDetail((current) => (sameDetail(current, read.detail) ? current : read.detail));
+        }
+      } while (state.again);
+    } finally {
+      state.running = false;
+    }
+  }, [router]);
+
   const onSignal = useCallback(
     (_event: string, payload: unknown) => {
+      // A signal says "something changed": the composer state is re-read for every one of them.
+      void refreshDetail();
       const seq = (payload as { seq?: unknown } | null)?.seq;
       // Ids-only signal: a seq at or below the cursor is a replay, nothing to fetch (T-07-64).
       if (isReplayedSignal(cursorRef.current, seq)) return;
       void catchUp();
     },
-    [catchUp],
+    [catchUp, refreshDetail],
   );
 
   useRealtimeTopic(
@@ -279,6 +410,7 @@ export function DirectThreadPane({
     {
       onSubscribed: () => {
         void catchUp();
+        void refreshDetail();
       },
     },
   );
@@ -287,11 +419,19 @@ export function DirectThreadPane({
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
       void catchUp();
+      void refreshDetail();
       markRead();
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [catchUp, markRead]);
+  }, [catchUp, refreshDetail, markRead]);
+
+  // After an unblock the open composer takes the focus (UI-D-865); nothing else ever moves it.
+  useEffect(() => {
+    if (!focusFieldRef.current || composer.state !== 'open') return;
+    focusFieldRef.current = false;
+    document.getElementById(DIRECT_COMPOSER_ID)?.focus();
+  }, [composer.state]);
 
   const loadOlder = async () => {
     const id = conversationRef.current;
@@ -318,7 +458,8 @@ export function DirectThreadPane({
    */
   const adoptSent = (result: Extract<SendDirectMessageResult, { ok: true }>, tempId: string) => {
     const { view, conversationId: created } = result;
-    if (!conversationRef.current) {
+    const first = !conversationRef.current;
+    if (first) {
       conversationRef.current = created;
       setConversationId(created);
       window.history.replaceState(null, '', `/conversas/${encodeURIComponent(created)}`);
@@ -331,6 +472,8 @@ export function DirectThreadPane({
     setViews((current) => mergeViews(current, [view], [tempId]));
     setNewCount(0);
     if (next.catchUp) void catchUp();
+    // The thread exists now: the server's own answer to "may I block" and the composer state come with it.
+    if (first) void refreshDetail();
   };
 
   const onSend = async (body: string): Promise<boolean> => {
@@ -362,13 +505,65 @@ export function DirectThreadPane({
     if (!result?.ok) {
       setViews((current) => current.filter((view) => view.id !== tempId));
       setSendError(null);
-      // The conversation or the person is gone: the page re-renders into the not-found screen, never a message
-      // that says why.
-      if (result?.error === 'not_found') router.refresh();
+      const refusal = result && !result.ok ? result.error : 'failed';
+      if (refusal === 'closed') {
+        // D-722: the state this member did not know about. The bubble is gone, the shipped toast says the ONE
+        // neutral sentence and the strip appears; nothing says who or why. The server's own read follows.
+        show({ tone: 'error', message: t('direct.closed') });
+        setDetail((current) => ({
+          ...current,
+          composer: composerStateView('closed', { removed: false, displayName: other.name }, t),
+        }));
+        void refreshDetail();
+      } else if (refusal === 'not_found') {
+        // The conversation or the person is gone: the shipped mid-session handling, which lands on the
+        // not-found screen and never says why.
+        show({ tone: 'error', message: tf('errors.generic') });
+        router.refresh();
+      }
       return false;
     }
     adoptSent(result, tempId);
     return true;
+  };
+
+  /** UI-D-865: one tap, no confirmation; the strip swaps for what the server now says, and the field takes focus. */
+  const onUnblock = async () => {
+    const membershipId = other.membershipId;
+    if (!membershipId || unblocking) return;
+    const toast = detail.composer.strip?.unblock?.toast ?? '';
+    setUnblocking(true);
+    let ok = false;
+    try {
+      ok = (await unblockMember(membershipId)).ok;
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      // A failure keeps the strip and fires the shipped generic error toast.
+      setUnblocking(false);
+      show({ tone: 'error', message: tf('errors.generic') });
+      return;
+    }
+    const id = conversationRef.current;
+    const read: DetailRead = id ? await fetchDetail(id) : { kind: 'failed' };
+    if (read.kind === 'gone') {
+      setUnblocking(false);
+      router.refresh();
+      return;
+    }
+    // The unblock stands even when the re-read fails: the field opens and the server decides the next send.
+    const next: DetailState =
+      read.kind === 'ok'
+        ? read.detail
+        : {
+            canBlock: true,
+            composer: composerStateView('open', { removed: false, displayName: other.name }, t),
+          };
+    focusFieldRef.current = next.composer.state === 'open';
+    setDetail(next);
+    setUnblocking(false);
+    show({ tone: 'success', message: toast });
   };
 
   const toBottom = () => {
@@ -443,7 +638,15 @@ export function DirectThreadPane({
             </Button>
           </div>
         ) : null}
-        {composer.state === 'open' ? (
+        {composer.state !== 'open' ? (
+          composer.strip ? (
+            <ComposerStateStrip
+              strip={composer.strip}
+              onUnblock={() => void onUnblock()}
+              pending={unblocking}
+            />
+          ) : null
+        ) : (
           <ChatComposer
             id={DIRECT_COMPOSER_ID}
             label={t('composer.label')}
@@ -456,7 +659,7 @@ export function DirectThreadPane({
             errorText={sendError ?? t('composer.errors.failed')}
             onSend={onSend}
           />
-        ) : null}
+        )}
       </div>
     </div>
   );

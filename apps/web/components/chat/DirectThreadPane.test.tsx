@@ -3,10 +3,16 @@
 import { join } from 'node:path';
 import { ToastProvider } from '@rede-social/ui';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MotionGlobalConfig } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import type { ChatMessageView, ComposerStateView, DirectOtherView } from '@/lib/chat-view';
+import type {
+  ChatMessageView,
+  ComposerStateView,
+  ComposerStripView,
+  DirectOtherView,
+} from '@/lib/chat-view';
 import type { DirectThreadPaneProps } from './DirectThreadPane';
 
 /**
@@ -18,12 +24,23 @@ import type { DirectThreadPaneProps } from './DirectThreadPane';
  * the edges (a departed account, text that is only text).
  */
 
+// The toast animates in happy-dom, which cancels it on cleanup: skip it, as the report sheet's tests do.
+MotionGlobalConfig.skipAnimations = true;
+
 const messages = loadMessages(join(process.cwd(), 'messages', 'pt-BR'));
 
-const mocks = vi.hoisted(() => ({ send: vi.fn(), refresh: vi.fn(), realtime: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  send: vi.fn(),
+  unblock: vi.fn(),
+  refresh: vi.fn(),
+  realtime: vi.fn(),
+}));
 
 vi.mock('@/app/(app)/conversas/actions', () => ({
   sendDirectMessage: (...args: unknown[]) => mocks.send(...args),
+}));
+vi.mock('@/components/feed/safety-actions', () => ({
+  unblockMember: (...args: unknown[]) => mocks.unblock(...args),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
@@ -95,6 +112,7 @@ const sendButton = () => screen.getByRole('button', { name: 'Enviar mensagem' })
 
 beforeEach(() => {
   mocks.send.mockReset();
+  mocks.unblock.mockReset();
   mocks.refresh.mockReset();
   mocks.realtime.mockReset();
   window.history.replaceState(null, '', `/conversas/com/${OTHER_ID}`);
@@ -340,5 +358,318 @@ describe('the error card (UI-D-878)', () => {
     expect(screen.getByText('Verifique sua conexão e tente de novo.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* ── Task 2: the composer slot's five states (UI-D-865, D-722, D-723) ───────────────────────────────── */
+
+const history = [
+  view({
+    id: '33333333-3333-4333-8333-333333333331',
+    seq: 1,
+    side: 'other',
+    authorKey: 'member:other',
+    body: 'Oi, tudo bem?',
+  }),
+  view({ id: '33333333-3333-4333-8333-333333333332', seq: 2, side: 'own', body: 'Tudo!' }),
+];
+
+const CLOSED_TEXT = 'Esta conversa não aceita novas mensagens.';
+const REMOVED_TEXT = 'Este membro não está mais na comunidade. A conversa fica só para leitura.';
+
+const strip = (kind: 'closed' | 'blocker' | 'removed'): ComposerStripView => ({
+  kind,
+  glyph: kind === 'blocker' ? 'Ban' : 'Lock',
+  role: 'status',
+  text:
+    kind === 'closed'
+      ? CLOSED_TEXT
+      : kind === 'removed'
+        ? REMOVED_TEXT
+        : 'Você bloqueou Carla Nunes',
+  label:
+    kind === 'closed'
+      ? CLOSED_TEXT
+      : kind === 'removed'
+        ? REMOVED_TEXT
+        : 'Você bloqueou Carla Nunes',
+  unblock:
+    kind === 'blocker'
+      ? {
+          label: 'Desbloquear',
+          pendingLabel: 'Desbloqueando…',
+          toast: 'Carla Nunes foi desbloqueada.',
+        }
+      : null,
+});
+
+const composerOf = (kind: 'open' | 'closed' | 'blocker' | 'removed'): ComposerStateView =>
+  kind === 'open' ? OPEN : { state: kind, strip: strip(kind) };
+
+/** What `GET /api/chat/direct/{id}` answers: the finished view the BFF returns. */
+const detailAnswer = (kind: 'open' | 'closed' | 'blocker' | 'removed', canBlock = true) => ({
+  conversationId: CONVERSATION,
+  other: carla,
+  state: kind,
+  strip: kind === 'open' ? null : strip(kind),
+  canBlock,
+  lastSeq: 2,
+  lastReadSeq: 2,
+});
+
+/** Stubs `fetch` so the detail read answers `answer` (a status or a body), the page reads as before. */
+function stubDetail(answer: () => Response) {
+  vi.mocked(fetch).mockImplementation(async (url) => {
+    const target = String(url);
+    if (target.includes('/api/chat/direct/')) return answer();
+    if (target.includes('/messages?')) {
+      return Response.json({
+        items: [],
+        hasMore: false,
+        todayKey: '2026-11-19',
+        yesterdayKey: '2026-11-18',
+      });
+    }
+    return new Response(null, { status: 204 });
+  });
+}
+
+const paneProps = (kind: 'open' | 'closed' | 'blocker' | 'removed') => ({
+  initialConversationId: CONVERSATION,
+  initialViews: history,
+  initialComposer: composerOf(kind),
+});
+
+const lastRealtime = () =>
+  mocks.realtime.mock.calls.at(-1) as [
+    string,
+    string[],
+    (event: string, payload: unknown) => void,
+    { onSubscribed: () => void },
+  ];
+
+describe('the composer slot (UI-D-865)', () => {
+  it('(1) open: the shipped composer with the placeholder, no strip', () => {
+    const { container } = renderPane(paneProps('open'));
+    expect(field().placeholder).toBe('Escreva uma mensagem');
+    expect(container.querySelector('[data-composer-strip]')).toBeNull();
+  });
+
+  it('(2) closed: the composer AND its field are gone, the strip is the one sentence, nothing else', () => {
+    const { container } = renderPane(paneProps('closed'));
+    expect(screen.queryByLabelText('Mensagem')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Enviar mensagem' })).toBeNull();
+    expect(container.querySelector('textarea')).toBeNull();
+    const strip = container.querySelector('[data-composer-strip="closed"]') as HTMLElement;
+    expect(strip.getAttribute('role')).toBe('status');
+    expect(strip.textContent).toBe(CLOSED_TEXT);
+    expect(strip.querySelector('button')).toBeNull();
+    // The history stays readable above it.
+    expect(screen.getByText('Oi, tudo bem?')).toBeTruthy();
+  });
+
+  it('(3) blocker: the strip names who, Desbloquear is one tap, and the history stays readable', () => {
+    renderPane(paneProps('blocker'));
+    expect(screen.getByText('Você bloqueou Carla Nunes')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Desbloquear' })).toBeTruthy();
+    expect(screen.queryByLabelText('Mensagem')).toBeNull();
+    expect(screen.getByText('Tudo!')).toBeTruthy();
+  });
+
+  it('(4) removed: the read-only sentence and no button', () => {
+    const { container } = renderPane({ ...paneProps('removed') });
+    expect(container.querySelector('[data-composer-strip="removed"]')?.textContent).toBe(
+      REMOVED_TEXT,
+    );
+    expect(screen.queryByRole('button', { name: 'Desbloquear' })).toBeNull();
+    expect(screen.queryByLabelText('Mensagem')).toBeNull();
+  });
+});
+
+describe('the unblock (UI-D-865 state 3)', () => {
+  it('one tap: Desbloqueando…, then the composer returns, the field has focus and the toast names the person', async () => {
+    let resolve: (value: unknown) => void = () => {};
+    mocks.unblock.mockReturnValue(new Promise((r) => (resolve = r)));
+    stubDetail(() => Response.json(detailAnswer('open')));
+    renderPane(paneProps('blocker'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Desbloquear' }));
+    expect(mocks.unblock).toHaveBeenCalledWith(OTHER_ID);
+    expect(screen.getByRole('button', { name: 'Desbloqueando…' }).hasAttribute('disabled')).toBe(
+      true,
+    );
+    // No confirmation step of any kind.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    await act(async () => {
+      resolve({ ok: true, code: 'ok', changed: true });
+    });
+    await waitFor(() => expect(field()).toBeTruthy());
+    expect(screen.queryByText('Você bloqueou Carla Nunes')).toBeNull();
+    expect(document.activeElement).toBe(field());
+    expect(screen.getByText('Carla Nunes foi desbloqueada.')).toBeTruthy();
+    // Exactly one unblock was sent, never a second.
+    expect(mocks.unblock).toHaveBeenCalledTimes(1);
+  });
+
+  it('when the other side also blocked, the strip swaps for the closed one and no field is focused', async () => {
+    mocks.unblock.mockResolvedValue({ ok: true, code: 'ok', changed: true });
+    stubDetail(() => Response.json(detailAnswer('closed', true)));
+    const { container } = renderPane(paneProps('blocker'));
+    fireEvent.click(screen.getByRole('button', { name: 'Desbloquear' }));
+    await waitFor(() =>
+      expect(container.querySelector('[data-composer-strip="closed"]')).not.toBeNull(),
+    );
+    expect(screen.queryByLabelText('Mensagem')).toBeNull();
+    expect(screen.getByText('Carla Nunes foi desbloqueada.')).toBeTruthy();
+  });
+
+  it('a failed unblock keeps the strip, offers the button again and fires the generic error toast', async () => {
+    mocks.unblock.mockResolvedValue({ ok: false, code: 'failed', changed: false });
+    renderPane(paneProps('blocker'));
+    fireEvent.click(screen.getByRole('button', { name: 'Desbloquear' }));
+    await waitFor(() => expect(screen.getByText('Algo deu errado. Tente novamente.')).toBeTruthy());
+    expect(screen.getByText('Você bloqueou Carla Nunes')).toBeTruthy();
+    expect(
+      (screen.getByRole('button', { name: 'Desbloquear' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(screen.queryByLabelText('Mensagem')).toBeNull();
+  });
+
+  it('a lost network on the unblock is the same toast, not an exception', async () => {
+    mocks.unblock.mockRejectedValue(new Error('offline'));
+    renderPane(paneProps('blocker'));
+    fireEvent.click(screen.getByRole('button', { name: 'Desbloquear' }));
+    await waitFor(() => expect(screen.getByText('Algo deu errado. Tente novamente.')).toBeTruthy());
+  });
+});
+
+describe('a live change (UI-D-865: no toast, no announcement, no scroll, no focus)', () => {
+  it('a conversation signal re-reads the state and swaps the strip silently', async () => {
+    stubDetail(() => Response.json(detailAnswer('closed')));
+    const { container } = renderPane(paneProps('open'));
+    const scroller = container.querySelector('[data-chat-scroller]') as HTMLElement;
+    scroller.scrollTop = 40;
+    const heading = screen.getByText('Oi, tudo bem?');
+    heading.setAttribute('tabindex', '-1');
+    heading.focus();
+
+    act(() => lastRealtime()[2]('chat.message', { seq: 2 }));
+    await waitFor(() =>
+      expect(container.querySelector('[data-composer-strip="closed"]')).not.toBeNull(),
+    );
+    expect(screen.queryByLabelText('Mensagem')).toBeNull();
+    // No toast of any kind, the scroll and the focus did not move.
+    expect(screen.getAllByText(CLOSED_TEXT)).toHaveLength(1);
+    expect(container.ownerDocument.querySelectorAll('[role="status"]')).toHaveLength(1);
+    expect(scroller.scrollTop).toBe(40);
+    expect(document.activeElement).toBe(heading);
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it('a (re)subscribe and a refocus re-read it too; a blocker strip back to open swaps without a toast', async () => {
+    stubDetail(() => Response.json(detailAnswer('open')));
+    const { container } = renderPane(paneProps('blocker'));
+    const reads = () =>
+      vi.mocked(fetch).mock.calls.filter((c) => String(c[0]).includes('/api/chat/direct/')).length;
+    expect(reads()).toBe(0);
+
+    act(() => lastRealtime()[3].onSubscribed());
+    await waitFor(() => expect(reads()).toBe(1));
+    await waitFor(() => expect(field()).toBeTruthy());
+    expect(container.querySelector('[data-composer-strip]')).toBeNull();
+    expect(screen.queryByText('Carla Nunes foi desbloqueada.')).toBeNull();
+
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await waitFor(() => expect(reads()).toBe(2));
+    // A live change never moves the focus into the field.
+    expect(document.activeElement).not.toBe(field());
+  });
+
+  it('a read that answers 404 (the conversation is gone for this reader) re-renders into the not-found screen', async () => {
+    stubDetail(() => new Response(null, { status: 404 }));
+    renderPane(paneProps('open'));
+    act(() => lastRealtime()[2]('chat.message', { seq: 9 }));
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it('a failed or malformed read keeps what is shown; a strip that does not match its state is refused', async () => {
+    renderPane(paneProps('open'));
+    for (const answer of [
+      () => new Response(null, { status: 500 }),
+      () => Response.json({ state: 'closed', strip: null, canBlock: true }),
+      () =>
+        Response.json({
+          ...detailAnswer('blocker'),
+          strip: { ...strip('blocker'), unblock: null },
+        }),
+      () => Response.json({ state: 'invented', strip: null, canBlock: true }),
+      () => Response.json({ ...detailAnswer('closed'), canBlock: 'yes' }),
+    ]) {
+      stubDetail(answer);
+      act(() => lastRealtime()[2]('chat.message', { seq: 2 }));
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
+    expect(field()).toBeTruthy();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe('a refused send (D-722: silent and neutral)', () => {
+  it('"closed" mid-session: the optimistic bubble is removed, the neutral toast shows and the strip appears', async () => {
+    stubDetail(() => Response.json(detailAnswer('closed')));
+    mocks.send.mockResolvedValue({ ok: false, error: 'closed' });
+    const { container } = renderPane(paneProps('open'));
+    write('Ainda aí?');
+    fireEvent.click(sendButton());
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-composer-strip="closed"]')).not.toBeNull(),
+    );
+    // The bubble is gone: only the two shipped bubbles of the history remain.
+    expect(container.querySelectorAll('[data-chat-bubble="own"]')).toHaveLength(1);
+    expect(container.querySelector('[data-pending]')).toBeNull();
+    expect(screen.getAllByText(CLOSED_TEXT).length).toBeGreaterThanOrEqual(2);
+    // Nothing on screen names a block or the person who could have blocked.
+    const everything = container.ownerDocument.body.innerHTML.toLowerCase();
+    expect(everything).not.toContain('bloqueou você');
+    expect(everything).not.toContain('foi bloqueado');
+  });
+
+  it('"closed" on the FIRST send (the person blocked the sender): the strip replaces the empty thread\'s composer', async () => {
+    mocks.send.mockResolvedValue({ ok: false, error: 'closed' });
+    const { container } = renderPane({ initialConversationId: null, initialViews: [] });
+    write('Oi');
+    fireEvent.click(sendButton());
+    await waitFor(() =>
+      expect(container.querySelector('[data-composer-strip="closed"]')).not.toBeNull(),
+    );
+    expect(window.location.pathname).toBe(`/conversas/com/${OTHER_ID}`);
+    expect(screen.getByRole('heading', { name: 'Escreva para Carla Nunes' })).toBeTruthy();
+  });
+
+  it('"not_found" mid-session: the generic toast and a page refresh, never a reason', async () => {
+    mocks.send.mockResolvedValue({ ok: false, error: 'not_found' });
+    renderPane(paneProps('open'));
+    write('Oi');
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('Algo deu errado. Tente novamente.')).toBeTruthy();
+  });
+
+  it('any other refusal keeps the draft with the shipped inline error and no toast', async () => {
+    mocks.send.mockResolvedValue({ ok: false, error: 'rate_limited' });
+    renderPane(paneProps('open'));
+    write('Oi de novo');
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(field().value).toBe('Oi de novo'));
+    expect(screen.queryByText('Algo deu errado. Tente novamente.')).toBeNull();
+    expect(mocks.refresh).not.toHaveBeenCalled();
   });
 });
