@@ -22,6 +22,7 @@ import { LiveShell } from '@/components/shell/LiveShell';
 import { TabDotRefresh } from '@/components/shell/TabDotRefresh';
 import { getBootstrap, requireBootstrap } from '@/lib/bootstrap';
 import { brandScope } from '@/lib/brand-scope';
+import { withConversationsDestination } from '@/lib/chat-nav';
 import { env } from '@/lib/env';
 import { iconsFor } from '@/lib/manifest';
 import { savedPhoneLayout } from '@/lib/phone-nav-layout';
@@ -145,26 +146,35 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // Configurações. 12.3-16 (D-695, D-697): it is kept by the API in the tenant's brand, so it comes
   // with the bootstrap and applies to EVERY member on the next load (`savedPhoneLayout`, none = the
   // shell's own menu); the desktop never reads it.
-  const nav = withPhoneLayout(
-    withPhoneTabSlots(
-      withRailMainSlots(
-        withAreas(
-          withCollapsingTabs(
-            withTabDots(tabs, Object.fromEntries(dots.map(([key, dot]) => [key, dot.description]))),
-            Object.fromEntries(
-              collapsingTabsFor(tabs.tabs).map((tab) => [
-                tab.key,
-                t('nav.backToTop', { tab: tab.label }),
-              ]),
+  // 11-19 (D-719, UI-D-861): the chat slot opens Conversas for a viewer who holds `chat.direct` (a member
+  // while `social` is on): decided from the permission DATA, never a role, and only its href and label change.
+  const nav = withConversationsDestination(
+    withPhoneLayout(
+      withPhoneTabSlots(
+        withRailMainSlots(
+          withAreas(
+            withCollapsingTabs(
+              withTabDots(
+                tabs,
+                Object.fromEntries(dots.map(([key, dot]) => [key, dot.description])),
+              ),
+              Object.fromEntries(
+                collapsingTabsFor(tabs.tabs).map((tab) => [
+                  tab.key,
+                  t('nav.backToTop', { tab: tab.label }),
+                ]),
+              ),
             ),
+            areasFor([...tabs.tabs, ...tabs.topbar], (key) => tRoot(key), bootstrap),
           ),
-          areasFor([...tabs.tabs, ...tabs.topbar], (key) => tRoot(key), bootstrap),
+          MAIN_SLOTS,
         ),
         MAIN_SLOTS,
       ),
-      MAIN_SLOTS,
+      savedPhoneLayout(branding),
     ),
-    savedPhoneLayout(branding),
+    bootstrap.permissions,
+    tRoot('chat.navConversations'),
   );
   const dotBoundaries = dots.flatMap(([, dot]) => (dot.until ? [dot.until] : []));
 

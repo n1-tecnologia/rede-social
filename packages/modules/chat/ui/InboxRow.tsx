@@ -45,11 +45,11 @@ export interface InboxRowProps {
   /** "HH:mm", "Ontem" or "dd/MM", formatted by the host in the tenant clock. */
   time: string;
   awaiting: boolean;
-  /** The screen-reader suffix appended to the name when awaiting. */
-  awaitingSr: string;
+  /** The screen-reader suffix appended to the name when awaiting; absent on a row whose `label` names it whole. */
+  awaitingSr?: string;
   state: InboxRowState;
-  /** The neutral pill text for a blocked member. */
-  blockedLabel: string;
+  /** The neutral pill text for a blocked member; absent on a list that has no blocked state. */
+  blockedLabel?: string;
   /** "#42 · subject", finished by the host: one truncated line under the name. */
   subjectLine?: string;
   /** The case state pill, built by the host. */
@@ -64,6 +64,24 @@ export interface InboxRowProps {
    * Absent, the preview line is exactly what it was.
    */
   previewLeading?: ReactNode;
+  /**
+   * 11-19 (UI-D-862, UI-D-866): the unread mark, built by the host (the count `Badge` of a direct conversation or
+   * the dot of the support row). It takes the 8px awaiting dot's place under the time, and the dot is not drawn
+   * beside it. A blocked member's pill still wins the slot. Absent, the row is exactly what it was.
+   */
+  unread?: ReactNode;
+  /**
+   * 11-19 (UI-D-862): a node drawn in place of the avatar, for the pinned support row (the tenant logo in a neutral
+   * disc). The host builds it (`aria-hidden`); absent, the avatar draws as before.
+   */
+  avatarSlot?: ReactNode;
+  /**
+   * 11-19 (UI-D-879): the accessible name of the whole link, finished by the host ("{name}, {count} mensagens
+   * novas. {preview}"). Absent, the link is named by its content, as before.
+   */
+  label?: string;
+  /** 11-19 (UI-D-862): the preview in the tertiary tone, for the support row's idle line. */
+  previewMuted?: boolean;
 }
 
 export function InboxRow({
@@ -82,22 +100,33 @@ export function InboxRow({
   priorityPill,
   metaText,
   previewLeading,
+  unread,
+  avatarSlot,
+  label,
+  previewMuted = false,
 }: InboxRowProps) {
   const removed = state === 'removed';
   const hasMeta = Boolean(statePill || priorityPill || metaText);
+  // Awaiting reads in full ink; the support row's idle line (`previewMuted`) reads tertiary, never both.
+  const previewTone = previewMuted
+    ? 'text-text-tertiary'
+    : awaiting
+      ? 'text-text'
+      : 'text-text-secondary';
   return (
     <a
       href={href}
       data-inbox-row
       data-awaiting={awaiting || undefined}
       aria-current={active ? 'page' : undefined}
+      aria-label={label}
       className={cn(
         'flex min-h-18 items-start gap-3 border-b border-divider px-4 py-3 transition-colors hover:bg-bg-hover active:bg-bg-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand',
         active && 'bg-bg-active',
       )}
     >
       <span aria-hidden className="inline-flex shrink-0 self-start">
-        <Avatar size="md" src={removed ? null : avatar} alt="" />
+        {avatarSlot ?? <Avatar size="md" src={removed ? null : avatar} alt="" />}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span
@@ -108,7 +137,7 @@ export function InboxRow({
           )}
         >
           {name}
-          {awaiting ? <span className="sr-only">{awaitingSr}</span> : null}
+          {awaiting && awaitingSr ? <span className="sr-only">{awaitingSr}</span> : null}
         </span>
         {subjectLine ? (
           <span data-inbox-subject className="truncate text-sm font-normal text-text">
@@ -118,10 +147,7 @@ export function InboxRow({
         {previewLeading ? (
           <span
             data-inbox-preview
-            className={cn(
-              'flex min-w-0 items-center gap-1 text-sm font-normal',
-              awaiting ? 'text-text' : 'text-text-secondary',
-            )}
+            className={cn('flex min-w-0 items-center gap-1 text-sm font-normal', previewTone)}
           >
             {previewLeading}
             <span data-inbox-preview-text className="min-w-0 truncate">
@@ -129,13 +155,7 @@ export function InboxRow({
             </span>
           </span>
         ) : (
-          <span
-            data-inbox-preview
-            className={cn(
-              'truncate text-sm font-normal',
-              awaiting ? 'text-text' : 'text-text-secondary',
-            )}
-          >
+          <span data-inbox-preview className={cn('truncate text-sm font-normal', previewTone)}>
             {preview}
           </span>
         )}
@@ -159,6 +179,8 @@ export function InboxRow({
           <StatusPill tone="neutral" data-inbox-blocked>
             {blockedLabel}
           </StatusPill>
+        ) : unread ? (
+          unread
         ) : awaiting ? (
           <span aria-hidden data-inbox-dot className="h-2 w-2 rounded-full bg-brand" />
         ) : null}

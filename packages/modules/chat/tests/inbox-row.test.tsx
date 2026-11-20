@@ -282,3 +282,71 @@ describe('InboxRow with the case facts (UI-D-824)', () => {
     expect(stripped).toBe('');
   });
 });
+
+/**
+ * 11-19 (UI-D-862, UI-D-866, UI-D-879): the Conversas row is the SAME component. It gains an optional `unread`
+ * node that takes the 8px dot's slot (the host builds the count badge or the dot, the module ships no word), an
+ * optional `avatarSlot` for the pinned support row, an optional `label` that names the whole link, and a
+ * `previewMuted` tone for the support row's idle line. `awaitingSr` and `blockedLabel` are optional now, because
+ * a Conversas row has neither a blocked state nor a screen-reader suffix. Every case above runs unchanged.
+ */
+describe('InboxRow in Conversas (UI-D-862)', () => {
+  const minimal: InboxRowProps = {
+    href: '/conversas/c1',
+    avatar: null,
+    name: 'name-sentinel',
+    preview: 'preview-sentinel',
+    time: '14:02',
+    awaiting: false,
+    state: 'active',
+  };
+
+  it('renders as a two-line row with no case props and no suffix or pill words', () => {
+    render(<InboxRow {...minimal} />);
+    expect(row().querySelector('[data-inbox-subject]')).toBeNull();
+    expect(row().querySelector('[data-inbox-meta]')).toBeNull();
+    expect(row().textContent).toBe('name-sentinelpreview-sentinel14:02');
+  });
+
+  it('the unread node takes the dot slot under the time and the dot is not drawn beside it', () => {
+    render(
+      <InboxRow {...minimal} awaiting unread={<span data-testid="count">count-sentinel</span>} />,
+    );
+    const trailing = row().querySelector('[data-inbox-time]')?.parentElement;
+    expect(trailing).toContainElement(screen.getByTestId('count'));
+    expect(row().querySelector('[data-inbox-dot]')).toBeNull();
+    expect(row().querySelector('[data-inbox-preview]')).toHaveClass('text-text');
+    expect(row()).toHaveAttribute('data-awaiting');
+  });
+
+  it('no unread node and awaiting keeps the shipped dot', () => {
+    render(<InboxRow {...minimal} awaiting />);
+    expect(row().querySelector('[data-inbox-dot]')).not.toBeNull();
+  });
+
+  it('label names the whole link (aria-label) and is absent otherwise', () => {
+    const { rerender } = render(<InboxRow {...minimal} label="label-sentinel" />);
+    expect(row()).toHaveAttribute('aria-label', 'label-sentinel');
+    rerender(<InboxRow {...minimal} />);
+    expect(row()).not.toHaveAttribute('aria-label');
+  });
+
+  it('avatarSlot replaces the avatar, and previewMuted draws the preview in the tertiary tone', () => {
+    const { container } = render(
+      <InboxRow
+        {...minimal}
+        avatarSlot={<span data-testid="slot">slot-sentinel</span>}
+        previewMuted
+      />,
+    );
+    expect(screen.getByTestId('slot')).toBeInTheDocument();
+    expect(container.querySelector('svg')).toBeNull();
+    expect(row().querySelector('[data-inbox-preview]')).toHaveClass('text-text-tertiary');
+    expect(row().querySelector('[data-inbox-preview]')).not.toHaveClass('text-text-secondary');
+  });
+
+  it('the unread node is React content: markup in a name or preview stays text', () => {
+    render(<InboxRow {...minimal} name="<b>x</b>" preview="<i>y</i>" />);
+    expect(row().querySelector('b, i')).toBeNull();
+  });
+});
