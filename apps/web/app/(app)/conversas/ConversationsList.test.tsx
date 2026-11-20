@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationRowView, ConversationsPageView, SupportRowView } from '@/lib/chat-view';
@@ -20,7 +20,7 @@ const { messages } = await vi.hoisted(async () => {
   return { messages: loadMessages(join(process.cwd(), 'messages', 'pt-BR')) };
 });
 
-const mocks = vi.hoisted(() => ({ push: vi.fn() }));
+const mocks = vi.hoisted(() => ({ push: vi.fn(), realtime: vi.fn() }));
 
 vi.mock('next-intl', async (importOriginal) => {
   const actual = await importOriginal<typeof import('next-intl')>();
@@ -40,14 +40,48 @@ vi.mock('next-intl', async (importOriginal) => {
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mocks.push, replace: vi.fn(), refresh: vi.fn() }),
 }));
+vi.mock('@rede-social/core/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@rede-social/core/ui')>()),
+  useRealtimeTopic: (...args: unknown[]) => mocks.realtime(...args),
+}));
 vi.mock('@rede-social/ui', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@rede-social/ui')>();
   const { createElement, Fragment } = await import('react');
   return {
     ...actual,
-    InfiniteScroll: () => null,
-    PullToRefresh: ({ children }: { children: ReactNode }) =>
-      createElement(Fragment, null, children),
+    InfiniteScroll: ({
+      hasMore,
+      enabled = true,
+      onLoadMore,
+    }: {
+      hasMore: boolean;
+      enabled?: boolean;
+      onLoadMore: () => void | Promise<void>;
+    }) =>
+      hasMore && enabled
+        ? createElement(
+            'button',
+            { type: 'button', 'data-testid': 'load-more', onClick: () => void onLoadMore() },
+            'load-more',
+          )
+        : null,
+    PullToRefresh: ({
+      children,
+      onRefresh,
+    }: {
+      children: ReactNode;
+      onRefresh: () => Promise<void> | void;
+    }) =>
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          'button',
+          { type: 'button', 'data-testid': 'pull', onClick: () => void onRefresh() },
+          'pull',
+        ),
+        children,
+      ),
   };
 });
 
@@ -89,8 +123,19 @@ const row = (over: Partial<ConversationRowView> = {}): ConversationRowView => {
 const page = (rows: ConversationRowView[], over: Partial<ConversationsPageView> = {}) =>
   ({ support: support(), rows, nextCursor: null, ...over }) satisfies ConversationsPageView;
 
-const renderList = (initial: ConversationsPageView | null) =>
-  render(<ConversationsList initial={initial} tenantName="Rede Lab" logoUrl={null} />);
+const TENANT_ID = '99999999-9999-4999-8999-999999999999';
+const USER_ID = '88888888-8888-4888-8888-888888888888';
+
+const ui = (initial: ConversationsPageView | null): ReactNode => (
+  <ConversationsList
+    initial={initial}
+    tenantId={TENANT_ID}
+    userId={USER_ID}
+    tenantName="Rede Lab"
+    logoUrl={null}
+  />
+);
+const renderList = (initial: ConversationsPageView | null) => render(ui(initial));
 
 const has = (element: Element | null | undefined, ...names: string[]) =>
   element !== null &&
@@ -99,11 +144,41 @@ const has = (element: Element | null | undefined, ...names: string[]) =>
 const links = () =>
   within(screen.getByRole('list', { name: 'Suas conversas' })).getAllByRole('link');
 
+const fetchMock = vi.fn();
+/** What the BFF `GET /api/chat/direct` answers next, by URL. */
+let directAnswer: (url: string) => Promise<Response> | Response = () =>
+  Response.json({ rows: [], nextCursor: null });
+
+const directUrls = () =>
+  fetchMock.mock.calls
+    .map(([url]) => String(url))
+    .filter((url) => url.startsWith('/api/chat/direct'));
+
+/** What the list last handed to `useRealtimeTopic`. */
+function realtime() {
+  const call = mocks.realtime.mock.calls.at(-1) as unknown[];
+  return {
+    topic: call[0] as string,
+    events: call[1] as string[],
+    onSignal: call[2] as (event: string, payload: unknown) => void,
+    options: call[3] as { onSubscribed?: () => void },
+  };
+}
+
 beforeEach(() => {
   seq = 0;
   mocks.push.mockReset();
+  mocks.realtime.mockReset();
+  fetchMock.mockReset();
+  directAnswer = () => Response.json({ rows: [], nextCursor: null });
+  fetchMock.mockImplementation(async (url: string) => directAnswer(String(url)));
+  vi.stubGlobal('fetch', fetchMock);
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('ConversationsList (UI-D-862, UI-D-879)', () => {
   it('is a list named "Suas conversas" with the support row first and the rows in the given order', () => {
@@ -248,5 +323,269 @@ describe('ConversationsList (UI-D-862, UI-D-879)', () => {
       .getByRole('list', { name: 'Suas conversas' })
       .closest('[data-conversations]');
     expect(has(column, 'mx-auto', 'w-full', 'max-w-[680px]')).toBe(true);
+  });
+});
+
+/**
+ * 11-19 Task 2 (CHAT-06, UI-D-863; UC E1 empty, loading, error, populated, overflow): the states and the live
+ * refresh. The blank state keeps the support row and draws the card under it; a failed first read draws the card
+ * and NO support row; a failed later page keeps the rows with the inline retry line; a fresh page 1 merges by
+ * conversation id at the top without moving the scroll or the focus.
+ */
+describe('ConversationsList states (UI-D-863)', () => {
+  it('blank: the support row stays and the card sits under it with Encontrar pessoas to /membros', () => {
+    renderList(
+      page([], {
+        support: support({
+          unread: false,
+          idle: true,
+          preview: 'Fale com a equipe de Rede Lab',
+          label: 'Equipe Rede Lab. Fale com a equipe de Rede Lab',
+        }),
+      }),
+    );
+    expect(links()).toHaveLength(1);
+    expect(links()[0]?.getAttribute('href')).toBe('/suporte');
+    expect(screen.getByText('Você ainda não conversou com outros membros')).toBeTruthy();
+    expect(screen.getByText('Abra o perfil de um membro e toque em Enviar mensagem.')).toBeTruthy();
+    const cta = screen.getByRole('link', { name: 'Encontrar pessoas' });
+    expect(cta.getAttribute('href')).toBe('/membros');
+    // No "Nova conversa" button and no member search exist (D-720, deferred).
+    expect(screen.queryByText(/nova conversa/i)).toBeNull();
+    expect(document.querySelector('input')).toBeNull();
+  });
+
+  it('a populated list draws no blank card', () => {
+    renderList(page([row()]));
+    expect(screen.queryByText('Você ainda não conversou com outros membros')).toBeNull();
+  });
+
+  it('first read failed: the error card with Tentar novamente and NO support row', () => {
+    renderList(null);
+    expect(screen.getByText('Não foi possível carregar suas conversas.')).toBeTruthy();
+    expect(screen.getByText('Verifique sua conexão e tente de novo.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeTruthy();
+    expect(screen.queryByRole('list', { name: 'Suas conversas' })).toBeNull();
+    expect(document.querySelector('[data-support-avatar]')).toBeNull();
+  });
+
+  it('Tentar novamente shows the skeleton (aria-busy), then draws the list when the read lands', async () => {
+    const target = row({ name: 'Carla' });
+    let release: (response: Response) => void = () => undefined;
+    directAnswer = () => new Promise<Response>((resolve) => (release = resolve));
+    renderList(null);
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+    await waitFor(() => expect(document.querySelector('[aria-busy]')).not.toBeNull());
+    expect(directUrls()).toEqual(['/api/chat/direct']);
+    await act(async () => {
+      release(Response.json(page([target])));
+    });
+    await waitFor(() => expect(links()).toHaveLength(2));
+    expect(document.querySelector('[aria-busy]')).toBeNull();
+  });
+
+  it('Tentar novamente that fails again goes back to the card', async () => {
+    directAnswer = () => new Response(null, { status: 502 });
+    renderList(null);
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+    await waitFor(() =>
+      expect(screen.getByText('Não foi possível carregar suas conversas.')).toBeTruthy(),
+    );
+    expect(document.querySelector('[aria-busy]')).toBeNull();
+  });
+
+  it('paging: the next page is APPENDED by cursor, a row already on screen is not repeated, the support row is not drawn twice', async () => {
+    const first = row({ name: 'Primeira' });
+    const second = row({ name: 'Segunda' });
+    directAnswer = () => Response.json({ rows: [first, second], nextCursor: null });
+    renderList(page([first], { nextCursor: 'cursor-1' }));
+    fireEvent.click(screen.getByTestId('load-more'));
+    await waitFor(() => expect(links()).toHaveLength(3));
+    expect(directUrls()).toEqual(['/api/chat/direct?cursor=cursor-1']);
+    expect(links().map((a) => a.getAttribute('href'))).toEqual([
+      '/suporte',
+      first.href,
+      second.href,
+    ]);
+    expect(screen.queryByTestId('load-more')).toBeNull();
+  });
+
+  it('a failed later page keeps the rows and shows the inline retry line; Tentar novamente re-arms the sentinel', async () => {
+    const first = row({ name: 'Primeira' });
+    directAnswer = () => new Response(null, { status: 502 });
+    renderList(page([first], { nextCursor: 'cursor-1' }));
+    fireEvent.click(screen.getByTestId('load-more'));
+    await waitFor(() =>
+      expect(screen.getByText('Não foi possível carregar mais conversas.')).toBeTruthy(),
+    );
+    expect(links()).toHaveLength(2);
+    expect(screen.queryByTestId('load-more')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+    expect(screen.queryByText('Não foi possível carregar mais conversas.')).toBeNull();
+    expect(screen.getByTestId('load-more')).toBeTruthy();
+  });
+
+  it('pull to refresh asks page 1 and replaces the window', async () => {
+    const old = row({ name: 'Antiga' });
+    const fresh = row({ name: 'Nova', unread: { count: 4, text: '4' } });
+    directAnswer = () => Response.json(page([fresh]));
+    renderList(page([old]));
+    fireEvent.click(screen.getByTestId('pull'));
+    await waitFor(() =>
+      expect(links().map((a) => a.querySelector('[data-inbox-name]')?.textContent)).toEqual([
+        'Equipe Rede Lab',
+        'Nova',
+      ]),
+    );
+  });
+});
+
+describe('ConversationsList live refresh (UI-D-863, D-240)', () => {
+  it('listens to chat.unread on the member own user topic and refetches page 1 on the signal and on (re)subscribe', async () => {
+    renderList(page([row()]));
+    const live = realtime();
+    expect(live.topic).toBe(`tenant:${TENANT_ID}:user:${USER_ID}`);
+    expect(live.events).toContain('chat.unread');
+    await act(async () => live.onSignal('chat.unread', { conversationId: 'x' }));
+    await waitFor(() => expect(directUrls()).toEqual(['/api/chat/direct']));
+    await act(async () => live.options.onSubscribed?.());
+    await waitFor(() => expect(directUrls()).toHaveLength(2));
+  });
+
+  it('refetches on refocus (visibilitychange to visible) and never while hidden', async () => {
+    renderList(page([row()]));
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(directUrls()).toHaveLength(1));
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    fireEvent(document, new Event('visibilitychange'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(directUrls()).toHaveLength(1);
+  });
+
+  it('refetches are coalesced: one in flight and at most one more queued', async () => {
+    let release: (response: Response) => void = () => undefined;
+    directAnswer = () => new Promise<Response>((resolve) => (release = resolve));
+    renderList(page([row()]));
+    const live = realtime();
+    await act(async () => {
+      live.onSignal('chat.unread', {});
+      live.onSignal('chat.unread', {});
+      live.onSignal('chat.unread', {});
+    });
+    expect(directUrls()).toHaveLength(1);
+    directAnswer = () => Response.json(page([row()]));
+    await act(async () => release(Response.json(page([row()]))));
+    await waitFor(() => expect(directUrls()).toHaveLength(2));
+  });
+
+  it('the merge puts a moved conversation at the top by id, instantly, and keeps the scroll offset and the focused row', async () => {
+    const a = row({ name: 'Ana' });
+    const b = row({ name: 'Beto' });
+    const c = row({ name: 'Caio' });
+    // Caio gets news: he moves to the top, with the count; the others keep their order.
+    const caioNow = {
+      ...c,
+      unread: { count: 3, text: '3' },
+      lastMessageAt: '2026-11-19T15:30:00.000000Z',
+      label: 'Caio, 3 mensagens novas. prévia',
+    };
+    directAnswer = () => Response.json(page([caioNow, a, b]));
+    renderList(page([a, b, c]));
+
+    document.documentElement.scrollTop = 120;
+    const anaLink = links().find((l) => l.getAttribute('href') === a.href) as HTMLElement;
+    anaLink.focus();
+    expect(document.activeElement).toBe(anaLink);
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+
+    await act(async () => realtime().onSignal('chat.unread', {}));
+    await waitFor(() =>
+      expect(links().map((l) => l.querySelector('[data-inbox-name]')?.textContent)).toEqual([
+        'Equipe Rede Lab',
+        'Caio',
+        'Ana',
+        'Beto',
+      ]),
+    );
+    // Nothing scrolled, and the focus is still on Ana's row (the same link, wherever it sits now).
+    expect(document.documentElement.scrollTop).toBe(120);
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect((document.activeElement as HTMLElement | null)?.getAttribute('href')).toBe(a.href);
+    // The moved row is a normal row: no animation class anywhere in the list.
+    expect(
+      document.querySelector(
+        '[data-conversations] [class*="animate-"], [data-conversations] [class*="transition-transform"]',
+      ),
+    ).toBeNull();
+  });
+
+  it('the focus stays on the focused row when a reorder moves it', async () => {
+    const a = row({ name: 'Ana' });
+    const b = row({ name: 'Beto' });
+    // Beto gets news and goes first; React keeps his row and MOVES Ana's below it, and Ana's link holds the focus.
+    directAnswer = () =>
+      Response.json(page([{ ...b, lastMessageAt: '2026-11-19T15:30:00.000000Z' }, a]));
+    renderList(page([a, b]));
+    const anaLink = links().find((l) => l.getAttribute('href') === a.href) as HTMLElement;
+    anaLink.focus();
+    expect(document.activeElement).toBe(anaLink);
+    await act(async () => realtime().onSignal('chat.unread', {}));
+    await waitFor(() => expect(links()[1]?.getAttribute('href')).toBe(b.href));
+    expect((document.activeElement as HTMLElement | null)?.getAttribute('href')).toBe(a.href);
+  });
+
+  it('a row the API no longer lists leaves on the refetch (the screen draws exactly the API answer)', async () => {
+    const a = row({ name: 'Ana' });
+    const b = row({ name: 'Beto' });
+    directAnswer = () => Response.json(page([a]));
+    renderList(page([a, b]));
+    await act(async () => realtime().onSignal('chat.unread', {}));
+    await waitFor(() => expect(links()).toHaveLength(2));
+    expect(links().map((l) => l.getAttribute('href'))).toEqual(['/suporte', a.href]);
+  });
+
+  it('a failed refetch keeps what is on screen', async () => {
+    directAnswer = () => new Response(null, { status: 502 });
+    renderList(page([row({ name: 'Ana' })]));
+    await act(async () => realtime().onSignal('chat.unread', {}));
+    await waitFor(() => expect(directUrls()).toHaveLength(1));
+    expect(links()).toHaveLength(2);
+    expect(screen.queryByText('Não foi possível carregar suas conversas.')).toBeNull();
+  });
+
+  it('the support row follows the fresh page too (its dot clears when the member read the reply)', async () => {
+    directAnswer = () =>
+      Response.json(
+        page([], {
+          support: support({
+            unread: false,
+            label: 'Equipe Rede Lab. Equipe: Seu ingresso já está liberado.',
+          }),
+        }),
+      );
+    renderList(page([row()]));
+    expect(links()[0]?.querySelector('[data-badge-dot]')).not.toBeNull();
+    await act(async () => realtime().onSignal('chat.unread', {}));
+    await waitFor(() => expect(links()[0]?.querySelector('[data-badge-dot]')).toBeNull());
+  });
+
+  it('an answer that is not an object (a malformed body) is a failed read, never a crash', async () => {
+    directAnswer = () => new Response('not json', { status: 200 });
+    renderList(page([row()]));
+    await act(async () => realtime().onSignal('chat.unread', {}));
+    await waitFor(() => expect(directUrls()).toHaveLength(1));
+    expect(links()).toHaveLength(2);
+  });
+});
+
+describe('ConversationsSkeleton (UI-D-863)', () => {
+  it('is three rows at the row geometry with aria-busy', async () => {
+    const { ConversationsSkeleton } = await import('./ConversationsList');
+    const { container } = render(<ConversationsSkeleton count={3} />);
+    const root = container.querySelector('[aria-busy]');
+    expect(root).not.toBeNull();
+    const rows = container.querySelectorAll('[data-conversations-skeleton-row]');
+    expect(rows).toHaveLength(3);
+    expect(has(rows[0], 'min-h-18', 'border-b', 'border-divider')).toBe(true);
   });
 });

@@ -69,6 +69,8 @@ export default async function ConversationsPage() {
       />
       <ConversationsList
         initial={initial}
+        tenantId={tenant.id}
+        userId={bootstrap.user.id}
         tenantName={tenant.displayName}
         logoUrl={resolveBranding(tenant.branding).logoUrl}
       />
