@@ -163,7 +163,7 @@ What I checked and found sound:
 
 The findings below are privacy and robustness gaps, not exploitable isolation failures.
 
-> Orchestrator note (not part of the reviewer's text): the scope the orchestrator passed was 125 non-test source files (the base was `adc12ee6`, the phase's plan commit, because the default phase-directory anchor would have swept in 3362 files from 2026-09-25). The reviewer reports 113 paths and says 34 of them were not opened beyond the diff stat or a key check, so treat the "nothing found" statements for the small UI files as low-confidence.
+> Orchestrator note (not part of the reviewer's text): the scope the orchestrator passed was 125 non-test source files (the base was `adc12ee6`, the phase's plan commit, because the default phase-directory anchor would have swept in 3362 files from 2026-09-25). The reviewer's own count says 113 files, but its list holds the 125 paths that were passed; it says 34 of them were not opened beyond the diff stat or a key check, so treat the "nothing found" statements for the small UI files as low-confidence.
 
 ## Warnings
 
