@@ -2,12 +2,12 @@
 gsd_state_version: "1.0"
 current_phase: 11
 current_phase_name: Rede Social - Direct Messages, Member Blocking and Reports
-current_plan: 1
-status: executing
-stopped_at: Phase 11 planned (28 plans, 10 waves; checker 0 blockers, 1 scope warning accepted)
-last_updated: "2026-11-19T15:39:00.175Z"
-last_activity: 2026-11-19
-last_activity_desc: Phase 11 execution started
+current_plan: 28
+status: verifying
+stopped_at: Phase 11 executed 28/28 (verification human_needed, security 40/41 closed with 0 blocking, review 0 critical); awaiting the owner's closure word
+last_updated: "2026-11-23T18:00:00.000Z"
+last_activity: 2026-11-23
+last_activity_desc: Phase 11 verified (human_needed), security audited, UAT file written
 state_head: adc12ee68452b93191d94db5921383544b26d8ed
 progress:
   total_phases: 35
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 11 (Rede Social - Direct Messages, Member Blocking and Reports) — EXECUTING
-Current Plan: 1
+Phase: 11 (Rede Social - Direct Messages, Member Blocking and Reports) — EXECUTED, VERIFICATION human_needed
+Current Plan: 28
 Total Plans in Phase: 28
-Plan: 1 of 28
-Status: Executing Phase 11
-Last activity: 2026-11-19 — Phase 11 execution started
+Plan: 28 of 28
+Status: Executed; 11-VERIFICATION.md human_needed, 11-SECURITY.md threats_open 0 (T-11-36 open below the threshold, AR-11-01..05 proposed), 11-UAT.md pending; ledger P1..P41 are the owner's
+Last activity: 2026-11-23 — verification, security and UAT written; nothing pushed
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
