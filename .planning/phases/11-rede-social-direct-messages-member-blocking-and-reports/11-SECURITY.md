@@ -105,8 +105,8 @@ Accepted by Igor on 2026-11-23 ("Aceitar os 5 riscos e corrigir os avisos de rev
 
 ### Other findings that reopen no threat
 
-- **WR-03** (`direct.ts:233-236`, `voice-sql.ts:71-85`): the idempotent voice short-circuit returns the caller's own prior message, possibly from another conversation. A real correctness defect, no disclosure about the named recipient. Owner asked for the fix on 2026-11-23: compare the stored conversation with the pair.
-- **WR-05** (`safety.ts:196-201`): unblock by membership shares the 60-per-hour limiter. Maps to no register threat. Owner asked for the fix on 2026-11-23.
+- **WR-03** (`direct.ts:233-236`, `voice-sql.ts:71-85`): the idempotent voice short-circuit returns the caller's own prior message, possibly from another conversation. A real correctness defect, no disclosure about the named recipient. Owner asked for the fix on 2026-11-23. Fixed by `5306e214`: a stored take is answered only for the pair's own conversation, anything else is the one `400 voice_invalid`.
+- **WR-05** (`safety.ts:196-201`): unblock by membership shares the 60-per-hour limiter. Maps to no register threat. Owner asked for the fix on 2026-11-23. Fixed by `1eeda641`: neither unblock route is throttled.
 - **IN-01** (`GET /v1/blocks`, `BlockedList.tsx` carry `userId`), **IN-02** (`direct_message_notice` not bound to the event's conversation id), **IN-03** (the send trigger does not check that the author is one of the pair; the `chat_messages_insert` participant check covers it today).
 - Auditor's own observation: `app.direct_pair_readable(uuid, uuid)` is executable by `authenticated` with arbitrary ids; it is tenant-pinned and needs a known user id, so it is a minor liveness probe.
 - Summary 11-09 flag `rls-narrowing` on `chat_participants_select` maps to T-11-09 and T-11-02 and was verified (`194838:1`, `194821:23-33`).
