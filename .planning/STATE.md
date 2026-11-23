@@ -4,16 +4,16 @@ current_phase: 11
 current_phase_name: Rede Social - Direct Messages, Member Blocking and Reports
 current_plan: 28
 status: verifying
-stopped_at: Phase 11 executed 28/28 (verification human_needed, security 40/41 closed with 0 blocking, review 0 critical); awaiting the owner's closure word
-last_updated: "2026-11-23T18:00:00.000Z"
+stopped_at: Phase 11 executed 28/28 and pushed to origin/master 2026-11-23 (verification human_needed, security 41/41 with AR-11-01..05 accepted by Igor, WR-03 and WR-05 fixed); awaiting the owner's closure word. Phase 11.1 inserted and being discussed (planning only, pointer stays on 11)
+last_updated: "2026-11-23T21:40:35.392Z"
 last_activity: 2026-11-23
 last_activity_desc: Phase 11 verified (human_needed), security audited, UAT file written
-state_head: adc12ee68452b93191d94db5921383544b26d8ed
+state_head: e708260d760c400011f1dcdfdce3d2605fcb700e
 progress:
-  total_phases: 35
+  total_phases: 36
   completed_phases: 0
   total_plans: 519
-  completed_plans: 463
+  completed_plans: 491
   percent: 0
 ---
 
@@ -1329,6 +1329,7 @@ None yet.
 - Phase 10.2 inserted after Phase 10.1: Abertura das inscrições do evento com contagem regressiva (pedida em 13/11, executa antes da Fase 11) (URGENT)
 - Phase 12.4 inserted after Phase 12: Abertura de chamado no suporte: next delivery of the Cronograma Social e App chosen by Igor on 2026-11-16, placed after 12.3 and before 13; reverses D-221/D-225 of Phase 7
 - Phase 12.5 inserted after Phase 12: Mensagem de voz no chat: gravar e enviar áudio (até 5 min) em todos os chats; pedido do Igor em 2026-11-17
+- Phase 11.1 inserted after Phase 11: Permissões do comprador por produto numa comunidade (the Escopo por produto delivery of the cronograma artifact; inserted 2026-11-23 on Igor's word, STATE pointer stays on Phase 11)
 
 ## Deferred Items
 

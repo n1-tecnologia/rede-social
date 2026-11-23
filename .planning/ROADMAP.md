@@ -52,6 +52,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 10.1: Rede Social - Ingresso pago do evento pela Kiwify (INSERTED)** - An event linked to a Kiwify product confirms a member's presence only after that product's purchase is approved (matched by gateway product id and e-mail); a refund or chargeback removes it and frees the seat; an event with no linked product keeps the automatic RSVP (completed 2026-11-13)
 - [ ] **Phase 10.2: Abertura das inscrições do evento com contagem regressiva (INSERTED)** - A paid event gets an optional registration-opening date: before it the member sees "Em breve" and a days/hours/minutes countdown and cannot buy, after it a presence holder sees the countdown to the event; free events do not change
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
+- [ ] **Phase 11.1: Permissões do comprador por produto numa comunidade (INSERTED)** - A store product also says what its buyer can do in each community it unlocks (like, comment, share, post in the community, post a story); two products on one community add their permissions; existing products keep today's behavior
 - [x] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it right after their first login, members without a completed profile and members who had completed it before the form existed answer it too
 - [ ] **Phase 12.4: Abertura de chamado no suporte (INSERTED)** - A member's message to support opens a case with a number and a status; the support team takes it, answers it, resolves it and closes it from an inbox with tabs by status; reverses D-221/D-225 of Phase 7 (the support chat had no status, owner or closing)
 - [x] **Phase 12.5: Mensagem de voz no chat (INSERTED)** - Anyone in a chat records a voice message on the spot (up to 5 minutes) and sends it; the other side plays it in the conversation; works in the support chat now and in the direct and group chats of Phase 11; previews read "Mensagem de voz" (completed 2026-11-17)
@@ -1806,6 +1807,18 @@ Plans:
 
 - [x] 11-28-PLAN.md — The release notes, the owner's ledger and the recorded exit gate
 
+### Phase 11.1: Permissões do comprador por produto numa comunidade (INSERTED)
+
+**Goal:** A store product says not only which communities its buyer sees but what the buyer can do in each: like, comment, share, post in the community and post a story. Two products that unlock the same community add their permissions; products that exist today keep their behavior (like, comment and share on; post and story off).
+**Requirements**: TBD
+**Depends on:** Phase 11 (the blocker/report surfaces and the member-publishing rule of Phase 10 are what the permissions sit on)
+**Notes**: Inserted 2026-11-23 by user decision ("pode começar") from the Cronograma Social e App artifact, where it was the "Escopo por produto" delivery asked on 2026-11-11. The server hooks were left in the Phase 10 plans on 2026-11-11 (a community-permission function that answers no today, a third path in the owner rule, the visitor permission set in the web plans). Open decisions are for discuss-phase: how it lives with "only the owner publishes" (Phase 10), whether "post" needs the social module, what "post a story" means in a community, the sum rule for two products, what happens to what the buyer published after a refund, and that "share" can only be hidden. Estimate from the 2026-11-11 code survey: about 12 plans (10 to 16), 22 to 31 hours; earlier estimates of new deliveries ran short.
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 11.1 to break down)
+
 ### Phase 12: Formulário de perfil do tenant
 
 **Goal**: The tenant admin builds the profile form of their own community (a list of questions of several types), and every member of that tenant answers it to complete their profile: new members right after their first login, existing members who never completed their profile, and members who had already completed it when the admin creates the form or later adds a question that needs an answer.
@@ -2398,6 +2411,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10.1. Rede Social - Ingresso pago do evento pela Kiwify (INSERTED) | 19/19 | Complete    | 2026-11-13 |
 | 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 16/16 | In Progress|  |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 28/28 | In Progress|  |
+| 11.1. Permissões do comprador por produto numa comunidade (INSERTED) | 0/0 | Not started |  |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 12.4. Abertura de chamado no suporte (INSERTED) | 22/22 | In Progress|  |
 | 12.5. Mensagem de voz no chat (INSERTED) | 18/18 | Complete    | 2026-11-17 |
