@@ -211,26 +211,42 @@ describe('block by membership tracer', () => {
     expect(await byUser.json()).toEqual({ changed: true });
   });
 
-  it('4. the shared 60 an hour limiter counts block and unblock attempts of the new routes and answers 429 RATE_LIMITED', async () => {
+  it('4. the 60 an hour limiter counts block attempts only: once it is spent, both unblock routes still lift a block and agree (WR-05)', async () => {
     const a = await directMember('bm4a');
     const b = await directMember('bm4b');
-    const statuses: number[] = [];
-    for (let i = 0; i < 60; i += 1) {
-      const res =
-        i % 2 === 0
-          ? await blockBy(a.token, b.membershipId)
-          : await unblockBy(a.token, b.membershipId);
-      statuses.push(res.status);
+    const c = await directMember('bm4d');
+    // 60 attempts spend the limiter: one real block of c, one real block of b, then 58 repeats of b.
+    expect((await blockBy(a.token, c.membershipId)).status).toBe(200);
+    for (let i = 1; i < 60; i += 1) {
+      expect((await blockBy(a.token, b.membershipId)).status).toBe(200);
     }
-    expect(statuses.every((status) => status === 200)).toBe(true);
     const blockedOut = await blockBy(a.token, b.membershipId);
     expect(blockedOut.status).toBe(429);
     expect(((await blockedOut.json()) as Envelope).error.code).toBe('RATE_LIMITED');
-    const liftedOut = await unblockBy(a.token, b.membershipId);
-    expect(liftedOut.status).toBe(429);
-    expect(((await liftedOut.json()) as Envelope).error.code).toBe('RATE_LIMITED');
+    expect(await blockRows(a.userId, b.userId)).toBe(1);
+    expect(await blockRows(a.userId, c.userId)).toBe(1);
+
+    // Spent: the unblock by membership id and the one by user id both still lift a block, with the same answer.
+    const byMembership = await unblockBy(a.token, b.membershipId);
+    expect(byMembership.status).toBe(200);
+    expect(await byMembership.json()).toEqual({ changed: true });
+    const byUser = await unblockUser(a.token, c.userId);
+    expect(byUser.status).toBe(200);
+    expect(await byUser.json()).toEqual({ changed: true });
+    expect(await blockRows(a.userId, b.userId)).toBe(0);
+    expect(await blockRows(a.userId, c.userId)).toBe(0);
+
+    // A repeat of either is still the plain 200 changed false, and blocking is still held back.
+    const again = await unblockBy(a.token, b.membershipId);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ changed: false });
+    const againByUser = await unblockUser(a.token, c.userId);
+    expect(againByUser.status).toBe(200);
+    expect(await againByUser.json()).toEqual({ changed: false });
+    expect((await blockBy(a.token, b.membershipId)).status).toBe(429);
+
     // The attempt counter is the member's; another member is unaffected and the reset (afterEach) clears it.
-    const other = await directMember('bm4c');
+    const other = await directMember('bm4e');
     expect((await blockBy(other.token, b.membershipId)).status).toBe(200);
   });
 });

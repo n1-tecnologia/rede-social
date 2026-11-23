@@ -146,7 +146,7 @@ const blockByMembershipRoute = createRoute({
     400: envelope(
       'CANNOT_BLOCK — the SAME body as `POST /v1/blocks` for every miss: a staff account, oneself, a person of another tenant, an unknown, blocked or removed member; VALIDATION_FAILED — a malformed id',
     ),
-    429: envelope('RATE_LIMITED — more than 60 block or unblock attempts in an hour'),
+    429: envelope('RATE_LIMITED — more than 60 blocks in an hour'),
   },
 });
 
@@ -161,7 +161,6 @@ const unblockByMembershipRoute = createRoute({
       content: { 'application/json': { schema: blockChangeAnswerSchema } },
     },
     400: envelope('VALIDATION_FAILED — a malformed membership id'),
-    429: envelope('RATE_LIMITED — more than 60 block or unblock attempts in an hour'),
   },
 });
 
@@ -196,7 +195,7 @@ export const blockRoutes = blocks
   .openapi(unblockByMembershipRoute, async (c) => {
     const ctx = c.get('ctx');
     const { membershipId } = c.req.valid('param');
-    if (!blockLimiter.consume(safetyLimiterKey(ctx))) throw new ApiError(429, 'RATE_LIMITED');
+    // No limiter, like `DELETE /v1/blocks/{userId}`: lifting a block must never wait behind the 60-an-hour block ceiling.
     const done = await unblockMemberByMembership(ctx, membershipId);
     c.header('Cache-Control', 'no-store');
     return c.json(done, 200);

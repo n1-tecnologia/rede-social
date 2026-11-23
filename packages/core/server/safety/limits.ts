@@ -5,7 +5,7 @@ import { type AttemptLimiter, createAttemptLimiter } from '../accounts/rate-limi
  * with the repository's in-process attempt limiter (13-13). Per process on purpose, like the deletion limiter: the
  * effective ceiling is the number here times the instance count, still a hard stop on a flood. Every ATTEMPT counts,
  * a refused one included, so guessing ids is not free. The key is the member inside the tenant of record, never
- * anything the client sends.
+ * anything the client sends. Unblocking is never counted (WR-05): lifting a block must not wait behind the block ceiling.
  */
 export const REPORTS_PER_HOUR = 20;
 export const BLOCKS_PER_HOUR = 60;
