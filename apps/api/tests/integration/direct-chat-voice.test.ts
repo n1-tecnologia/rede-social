@@ -226,6 +226,69 @@ suite('direct voice tracer', () => {
     }
   });
 
+  it('3b. WR-03: a take already stored in another conversation is refused for any other recipient (voice_invalid, nothing delivered, no event), and the retry to its own recipient stays idempotent', async () => {
+    const a = await voiceMember('vt3ba');
+    const b = await voiceMember('vt3bb');
+    const c = await voiceMember('vt3bc');
+    const take = await readyVoiceAsset(a.token, 'voice-2s.webm');
+    const unknownBody = await refusal(await sendDirectVoice(a, b.membershipId, randomUUID()));
+    expect(unknownBody).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      details: { chat: 'voice_invalid' },
+    });
+    const seen: string[] = [];
+    const unsubscribe = subscribe('chat.message_sent', async (payload) => {
+      seen.push(payload.messageId);
+    });
+    try {
+      // The take is stored in the direct conversation with B.
+      const first = await sendDirectVoice(a, b.membershipId, take);
+      expect(first.status).toBe(201);
+      const one = (await first.json()) as DirectSendResult;
+      expect(one.created).toBe(true);
+      expect(seen).toEqual([one.message.id]);
+
+      // The same take to C, to an unknown membership and to oneself is the ONE voice_invalid, never a 201.
+      for (const toMembershipId of [c.membershipId, randomUUID(), a.membershipId]) {
+        const res = await sendDirectVoice(a, toMembershipId, take);
+        expect(res.status).toBe(400);
+        expect(await refusal(res)).toEqual(unknownBody);
+      }
+      expect(await pairRows(a, c)).toEqual({ conversations: 0, messages: 0 });
+      expect(await pairRows(a, b)).toEqual({ conversations: 1, messages: 1 });
+      expect(await messageCountOf(take)).toBe(1);
+      expect(seen).toEqual([one.message.id]);
+
+      // The legitimate retry (same recipient, same take) is still the stored message of the right conversation.
+      const again = await sendDirectVoice(a, b.membershipId, take);
+      expect(again.status).toBe(201);
+      const two = (await again.json()) as DirectSendResult;
+      expect(two.created).toBe(false);
+      expect(two.message.id).toBe(one.message.id);
+      expect(two.conversationId).toBe(one.conversationId);
+      expect(seen).toEqual([one.message.id]);
+
+      // A take stored in the member's SUPPORT case is refused for a direct recipient too, and no direct row appears.
+      const supportTake = await readyVoiceAsset(a.token, 'voice-2s.webm');
+      const support = await post('/v1/chat/support/voice-messages', a.token, {
+        mediaId: supportTake,
+      });
+      expect(support.status).toBe(201);
+      seen.length = 0;
+      const crossed = await sendDirectVoice(a, b.membershipId, supportTake);
+      expect(crossed.status).toBe(400);
+      expect(await refusal(crossed)).toEqual(unknownBody);
+      const toC = await sendDirectVoice(a, c.membershipId, supportTake);
+      expect(toC.status).toBe(400);
+      expect(await pairRows(a, b)).toEqual({ conversations: 1, messages: 1 });
+      expect(await pairRows(a, c)).toEqual({ conversations: 0, messages: 0 });
+      expect(await messageCountOf(supportTake)).toBe(1);
+      expect(seen).toEqual([]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it('4. refusals: not ready, invalid, extra key, closed pair, staff, social off, an unknown target', async () => {
     const a = await voiceMember('vt4a');
     const b = await voiceMember('vt4b');

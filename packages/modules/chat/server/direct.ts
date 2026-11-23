@@ -219,10 +219,39 @@ async function storedDirectVoiceResult(
 }
 
 /**
+ * The stored message of a take, answered ONLY for the pair it was sent to (WR-03). `storedVoiceMessage` finds the caller's
+ * own message for the asset in ANY conversation (a support case, another member), so the idempotent answer is given only
+ * when the named recipient resolves and the pair's conversation IS the stored message's. A take stored anywhere else is the
+ * ONE `400 VALIDATION_FAILED { chat: 'voice_invalid' }` of an unusable asset, and so is a recipient that no longer resolves
+ * (staff, removed, administrator-blocked, the caller): the refusal is the same body for every cause, so it never reveals a
+ * block, a staff target or a removed member (T-11-27). A pair the database closed since reads as no conversation, so it is
+ * the same refusal too. Null when the take has no stored message yet.
+ */
+async function storedDirectVoiceFor(
+  tx: Tx,
+  ctx: RequestContext,
+  input: DirectVoiceSendInput,
+): Promise<DirectSendResult | null> {
+  const prior = await storedVoiceMessage(tx, ctx, input.mediaId);
+  if (!prior) return null;
+  const refused = () => new ApiError(400, 'VALIDATION_FAILED', { chat: 'voice_invalid' });
+  let conversationId: string | null;
+  try {
+    const target = await resolveDirectTarget(tx, ctx, input.toMembershipId);
+    conversationId = await directConversationOf(tx, ctx, target.userId);
+  } catch (error) {
+    throw error instanceof ApiError ? refused() : error;
+  }
+  if (conversationId !== prior.conversationId) throw refused();
+  return storedDirectVoiceResult(tx, ctx, prior);
+}
+
+/**
  * One attempt of the direct voice send, in ITS OWN transaction. The order is the support voice send's (D-862): the
- * idempotent read of the caller's own message for the asset, then the asset validation (every asset refusal BEFORE any
- * conversation write and BEFORE the pair is looked at, so a refusal for the asset never reveals a block, T-11-27), then the
- * target, the limiter for a new conversation, `app.direct_conversation_open` and the insert with the voice content.
+ * idempotent read of the caller's own message for the asset (answered only for THIS pair, `storedDirectVoiceFor`, WR-03),
+ * then the asset validation (every asset refusal BEFORE any conversation write and BEFORE the pair is looked at, so a
+ * refusal for the asset never reveals a block, T-11-27), then the target, the limiter for a new conversation,
+ * `app.direct_conversation_open` and the insert with the voice content.
  * `fresh` tells the caller whether THIS call stored the message, so only a stored one emits `chat.message_sent`.
  */
 async function sendDirectVoiceOnce(
@@ -231,8 +260,8 @@ async function sendDirectVoiceOnce(
   limiterKey: string[],
 ): Promise<{ result: DirectSendResult; fresh: boolean }> {
   return withTenantTx(ctx, async (tx) => {
-    const prior = await storedVoiceMessage(tx, ctx, input.mediaId);
-    if (prior) return { result: await storedDirectVoiceResult(tx, ctx, prior), fresh: false };
+    const stored = await storedDirectVoiceFor(tx, ctx, input);
+    if (stored) return { result: stored, fresh: false };
     await assertVoiceUsable(tx, ctx, input.mediaId);
     const target = await resolveDirectTarget(tx, ctx, input.toMembershipId);
     const existing = await directConversationOf(tx, ctx, target.userId);
@@ -280,10 +309,7 @@ export async function sendDirectVoiceMessage(
       outcome = await sendDirectVoiceOnce(ctx, input, limiterKey);
     } catch (error) {
       if (!assetIndexViolated(error)) throw error;
-      const stored = await withTenantTx(ctx, async (tx) => {
-        const prior = await storedVoiceMessage(tx, ctx, input.mediaId);
-        return prior ? storedDirectVoiceResult(tx, ctx, prior) : null;
-      });
+      const stored = await withTenantTx(ctx, (tx) => storedDirectVoiceFor(tx, ctx, input));
       if (!stored) throw error;
       outcome = { result: stored, fresh: false };
     }
