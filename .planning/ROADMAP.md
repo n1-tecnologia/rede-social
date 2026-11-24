@@ -1825,11 +1825,58 @@ Plans:
 
 **UI hint**: yes — the product form (five checkboxes per linked community), the highlight "Aberto a compradores" switch, controls that disappear on the member screens, the buyer's story and post flows.
 
-**Plans:** 0 plans
+**Plans:** 0/18 plans executed (planned 2026-11-24: 18 plans in 9 waves; the database, contract, service, pure-function and security plans do not wait for the sketch; plan 01 draws sketch 026 and stops at the approval that only Igor writes; web plans 12 to 17 carry the approval precondition; plan 18 holds the release, the ledger and the exit gate)
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 11.1 to break down)
+**Wave 1**
+
+- [ ] 11.1-01-PLAN.md — Sketch 026: the 47 designed frames (product form, highlight screens, member surfaces, buyer story and post flows), README with `approved: false`, MANIFEST row; stops at Igor's approval
+- [ ] 11.1-02-PLAN.md — Database tracer: the five flags on the product-to-community link, `open_to_buyers` on the highlight, the buyer scope function and its wrappers, the real `app.community_action_allowed`, the post insert gate, baseline of the known reds, pgTAP 241
+- [ ] 11.1-05-PLAN.md — Contracts: per-link flags in the product body and read, `community.actions` on a post, `openToBuyers` on the highlight, the new issue codes and the open-counts schemas
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 11.1-03-PLAN.md — Like gate (post and comment heart), the new comment insert gate and the sample of a locked community limited to tenant posts (D-893)
+- [ ] 11.1-06-PLAN.md — Store service: the five flags written with the links in the product transaction, idempotent upsert, manager read
+- [ ] 11.1-07-PLAN.md — Communities service: `viewer.actions` as the union of the buyer's flags, with `post` and `story` governed by `social` and by an open highlight (pgTAP 242)
+- [ ] 11.1-10-PLAN.md — Pure functions and catalog keys of the web half: the five-flag shape and the form-to-body mapping, post action facts, highlight switch facts, strings and their tests
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 11.1-04-PLAN.md — Highlight item insert and delete gates for a buyer (`ITEM_BUYER_OPEN`) and the lock term in `stories_audience_gate` (D-894, D-895)
+- [ ] 11.1-08-PLAN.md — Feed services: the bare 403 guard for like, unlike, comment heart and comment, the 42501 maps, the buyer post limiter (D-896) and `community.actions`
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 11.1-09-PLAN.md — Stories services: the `contribute` intent, saving and removing one's own story in an open highlight, the open switch, the buyer catalogue and the open-counts route
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 11.1-11-PLAN.md — Security sweep: the refund path end to end, the two-connection revoke race, the notification negative, the cross-tenant matrix and the no-leak sweep
+
+**Wave 6** *(blocked on Wave 5 completion and on the sketch 026 approval)*
+
+- [ ] 11.1-12-PLAN.md — Web: the product form's five checkboxes under each linked community
+- [ ] 11.1-14-PLAN.md — Web: the post card row and the post detail, a control not allowed is not rendered
+- [ ] 11.1-16-PLAN.md — Web: the buyer's story flow (the three doors, the open-highlight checklist, the entry gating)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 11.1-13-PLAN.md — Web: the "Aberto a compradores" switch, the manage-list mark and the administrator's Playwright spec (listed only)
+- [ ] 11.1-15-PLAN.md — Web: the comment surfaces, the Reels rail and the neutral refusal handling
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 11.1-17-PLAN.md — Web: the pinned composer and its refusal, the compose entries and the member Playwright spec (listed only)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 11.1-18-PLAN.md — Release: the "Phase 11.1 release" section of `docs/DEPLOY.md`, the owner's ledger (all rows pending) and the exit gate
+
+**Cross-cutting constraints:**
+
+- D-33 / D-365 / D-417 / UI-04 (the sketch gate applies) [informational]: EVERY task of this plan carries the precondition and the first verify clause `grep -q '^approved: true' .planning/sketches/026-phase-11.1-designed-screens/README.md`; when it fails the executor stops at Task 1 and reports; the executor never writes the approval keys
 
 ### Phase 12: Formulário de perfil do tenant
 
@@ -2423,7 +2470,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10.1. Rede Social - Ingresso pago do evento pela Kiwify (INSERTED) | 19/19 | Complete    | 2026-11-13 |
 | 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 16/16 | In Progress|  |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 28/28 | In Progress|  |
-| 11.1. Permissões do comprador por produto numa comunidade (INSERTED) | 0/0 | Not started |  |
+| 11.1. Permissões do comprador por produto numa comunidade (INSERTED) | 0/18 | Planned |  |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 12.4. Abertura de chamado no suporte (INSERTED) | 22/22 | In Progress|  |
 | 12.5. Mensagem de voz no chat (INSERTED) | 18/18 | Complete    | 2026-11-17 |
