@@ -1810,9 +1810,21 @@ Plans:
 ### Phase 11.1: Permissões do comprador por produto numa comunidade (INSERTED)
 
 **Goal:** A store product says not only which communities its buyer sees but what the buyer can do in each: like, comment, share, post in the community and post a story. Two products that unlock the same community add their permissions; products that exist today keep their behavior (like, comment and share on; post and story off).
-**Requirements**: TBD
+**Requirements**: BPERM-01..BPERM-30
 **Depends on:** Phase 11 (the blocker/report surfaces and the member-publishing rule of Phase 10 are what the permissions sit on)
 **Notes**: Inserted 2026-11-23 by user decision ("pode começar") from the Cronograma Social e App artifact, where it was the "Escopo por produto" delivery asked on 2026-11-11. The server hooks were left in the Phase 10 plans on 2026-11-11 (a community-permission function that answers no today, a third path in the owner rule, the visitor permission set in the web plans). Open decisions are for discuss-phase: how it lives with "only the owner publishes" (Phase 10), whether "post" needs the social module, what "post a story" means in a community, the sum rule for two products, what happens to what the buyer published after a refund, and that "share" can only be hidden. Estimate from the 2026-11-11 code survey: about 12 plans (10 to 16), 22 to 31 hours; earlier estimates of new deliveries ran short.
+**Success Criteria** (settled in `/gsd-discuss-phase 11.1` on 2026-11-24 and `11.1-RESEARCH.md`; decisions D-880..D-896 in `11.1-CONTEXT.md`):
+
+  1. An administrator ticks, per linked community, which of Curtir, Comentar, Compartilhar, Postar na comunidade and Postar story a product's buyer holds; every product that exists today keeps like, comment and share on and post and story off, and nothing changes for any member until a product is edited.
+  2. A member holding two products on one community gets the union of their flags; when a refund, chargeback, revoke or cancel ends the entitlement the permission ends at once, while the posts and saved stories already written stay for the administrator to moderate.
+  3. A control the product does not allow is absent from the post card, the comment sheet, the post detail, the Reels rail and the compose and story entries (no gray state, no notice), and the server answers 403 to the same action sent by hand, with no hint of which product or flag.
+  4. A buyer with "Postar na comunidade" publishes from the community page into an organization community (only with the `social` module on); the post is visible only on that community page, notifies nobody, and never reaches Início, Explorar or Reels.
+  5. A buyer with "Postar story" saves one of their own stories only into a highlight the administrator opened to buyers ("Aberto a compradores"); the buyer cannot create, rename, reorder or delete highlights or touch another member's story, and the administrator can remove any item.
+  6. Tenant isolation holds: a buyer, a product, a community or a highlight of one tenant never grants, reads or writes anything in another tenant (pgTAP and API cross-tenant negatives), and a locked member never reads a buyer's post or story.
+  7. The release is expand-only and ordered (migrations, API and worker, then web) with the previous API and web working in each window; the owner proves the screens on a real phone and a gateway refund on a real tenant.
+
+**UI hint**: yes — the product form (five checkboxes per linked community), the highlight "Aberto a compradores" switch, controls that disappear on the member screens, the buyer's story and post flows.
+
 **Plans:** 0 plans
 
 Plans:
