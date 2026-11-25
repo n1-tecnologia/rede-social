@@ -52,7 +52,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 10.1: Rede Social - Ingresso pago do evento pela Kiwify (INSERTED)** - An event linked to a Kiwify product confirms a member's presence only after that product's purchase is approved (matched by gateway product id and e-mail); a refund or chargeback removes it and frees the seat; an event with no linked product keeps the automatic RSVP (completed 2026-11-13)
 - [ ] **Phase 10.2: Abertura das inscrições do evento com contagem regressiva (INSERTED)** - A paid event gets an optional registration-opening date: before it the member sees "Em breve" and a days/hours/minutes countdown and cannot buy, after it a presence holder sees the countdown to the event; free events do not change
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
-- [ ] **Phase 11.1: Permissões do comprador por produto numa comunidade (INSERTED)** - A store product also says what its buyer can do in each community it unlocks (like, comment, share, post in the community, post a story); two products on one community add their permissions; existing products keep today's behavior
+- [x] **Phase 11.1: Permissões do comprador por produto numa comunidade (INSERTED)** - A store product also says what its buyer can do in each community it unlocks (like, comment, share, post in the community, post a story); two products on one community add their permissions; existing products keep today's behavior (completed 2026-11-25)
 - [x] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it right after their first login, members without a completed profile and members who had completed it before the form existed answer it too
 - [ ] **Phase 12.4: Abertura de chamado no suporte (INSERTED)** - A member's message to support opens a case with a number and a status; the support team takes it, answers it, resolves it and closes it from an inbox with tabs by status; reverses D-221/D-225 of Phase 7 (the support chat had no status, owner or closing)
 - [x] **Phase 12.5: Mensagem de voz no chat (INSERTED)** - Anyone in a chat records a voice message on the spot (up to 5 minutes) and sends it; the other side plays it in the conversation; works in the support chat now and in the direct and group chats of Phase 11; previews read "Mensagem de voz" (completed 2026-11-17)
@@ -1825,7 +1825,7 @@ Plans:
 
 **UI hint**: yes — the product form (five checkboxes per linked community), the highlight "Aberto a compradores" switch, controls that disappear on the member screens, the buyer's story and post flows.
 
-**Plans:** 20/20 plans executed (gap closure 11.1-19 and 11.1-20 planned 2026-11-25 from the verification's gaps_found; planned 2026-11-24: 18 plans in 9 waves; the database, contract, service, pure-function and security plans do not wait for the sketch; plan 01 draws sketch 026 and stops at the approval that only Igor writes; web plans 12 to 17 carry the approval precondition; plan 18 holds the release, the ledger and the exit gate)
+**Plans:** 20/20 plans complete
 
 Plans:
 
@@ -2475,7 +2475,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10.1. Rede Social - Ingresso pago do evento pela Kiwify (INSERTED) | 19/19 | Complete    | 2026-11-13 |
 | 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 16/16 | In Progress|  |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 28/28 | In Progress|  |
-| 11.1. Permissões do comprador por produto numa comunidade (INSERTED) | 20/20 | In Progress|  |
+| 11.1. Permissões do comprador por produto numa comunidade (INSERTED) | 20/20 | Complete    | 2026-11-25 |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 12.4. Abertura de chamado no suporte (INSERTED) | 22/22 | In Progress|  |
 | 12.5. Mensagem de voz no chat (INSERTED) | 18/18 | Complete    | 2026-11-17 |
