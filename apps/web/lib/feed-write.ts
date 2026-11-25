@@ -46,6 +46,7 @@ export type PostWriteResult =
         | FeedMemberIssue
         | 'empty_post'
         | 'not_found'
+        | 'refused'
         | 'generic';
     };
 
@@ -134,6 +135,7 @@ export function isRefusedWrite(error: unknown): boolean {
  */
 export async function attemptPostWrite(
   run: () => Promise<FeedPost>,
+  options: { mapRefused?: boolean } = {},
 ): Promise<{ result: PostWriteResult; refusal: string | null }> {
   try {
     const post = await run();
@@ -143,6 +145,13 @@ export async function attemptPostWrite(
     if (issue) return { result: { ok: false, code: issue }, refusal: null };
 
     const refusal = error instanceof ApiClientError ? bootstrapRedirectPath(error) : null;
+    // 11.1-17 (UI-D-893, D-888): a bare 403 on a CREATE (the buyer's pinned composer) is the one word
+    // 'refused', read from the status alone and tried AFTER the bootstrap redirects, so a 403 that carries
+    // one of those still redirects. No log line: nothing about the refusal is worth recording, and the
+    // reason (a missing flag, a revoked purchase, a switched-off module) must never reach a screen.
+    if (!refusal && options.mapRefused && isRefusedWrite(error)) {
+      return { result: { ok: false, code: 'refused' }, refusal: null };
+    }
     // Shape only: a caption is member content and never reaches a log line (T-04-05/T-04-40).
     if (!refusal) console.error('feed.post.write_failed', { error: String(error) });
     return { result: { ok: false, code: 'generic' }, refusal };

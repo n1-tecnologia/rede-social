@@ -762,3 +762,142 @@ describe('ComposerForm - the buyer pinned to the organization community (11.1-17
     expect(screen.queryByText(BUYER_LINE)).toBeNull();
   });
 });
+
+/**
+ * 11.1-17 Task 2 (UI-D-893, D-888, A-UI-14, A-UI-15, T-11.1-62, T-11.1-63): a publish the API refuses
+ * AFTER the fact (a refund, `social` turned off, the community archived while the form was open) from
+ * the buyer's pinned composer. The action answers the one word 'refused'; the composer keeps the caption
+ * and the media, disables "Publicar", says one neutral sentence in the form-error slot and never sends
+ * again, and above all NEVER turns into the Explorar composer (that would change where the words go).
+ */
+const REFUSAL = 'Você não pode publicar nesta comunidade.';
+const IMAGE_ID = '1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
+const FORBIDDEN_WORDS = /reembols|compra|produto|permiss|entitlement|acesso|cobran|assinatura/i;
+const removePhotoLabel = composer.removePhoto as string;
+
+async function addPhoto() {
+  const handler = upload.handlers.image?.onCompleted as
+    | ((asset: { id: string; variants: { width: number }[] }) => void)
+    | undefined;
+  if (!handler) throw new Error('the composer registered no image completion');
+  await act(async () => {
+    handler({ id: IMAGE_ID, variants: [{ width: 320 }] });
+  });
+}
+
+async function publishRefused() {
+  createPost.mockResolvedValue({ ok: false, code: 'refused' });
+  fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+  await waitFor(() => expect(document.querySelector('[data-composer-error]')).not.toBeNull());
+}
+
+describe('ComposerForm - a refused publish from the pinned composer (11.1-17 Task 2)', () => {
+  it('V1. the caption and the media stay, Publicar is disabled and the one sentence shows in the error slot', async () => {
+    buyerComposer();
+    typeCaption('Preparei um resumo da aula de hoje.');
+    await addPhoto();
+    expect(screen.getByRole('button', { name: removePhotoLabel })).toBeTruthy();
+
+    await publishRefused();
+
+    expect(document.querySelector('[data-composer-error]')?.textContent).toBe(REFUSAL);
+    expect((screen.getByLabelText(CAPTION_LABEL) as HTMLTextAreaElement).value).toBe(
+      'Preparei um resumo da aula de hoje.',
+    );
+    expect(screen.getByRole('button', { name: removePhotoLabel })).toBeTruthy();
+    expect((screen.getByRole('button', { name: PUBLISH }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(replace).not.toHaveBeenCalled();
+    expect(toast.show).not.toHaveBeenCalled();
+  });
+
+  it('V2. the composer is STILL pinned: the audience line is unchanged and the words are never re-sent', async () => {
+    buyerComposer();
+    typeCaption('Preparei um resumo da aula de hoje.');
+    await publishRefused();
+
+    expect(document.querySelector('[data-composer-audience]')?.textContent).toBe(BUYER_LINE);
+    expect(screen.queryByText(AUDIENCE)).toBeNull();
+
+    // A retry by the Enter key of the form (the disabled button cannot be clicked) sends nothing.
+    fireEvent.submit(form());
+    fireEvent.submit(form());
+    expect(createPost).toHaveBeenCalledTimes(1);
+    const first = (createPost.mock.calls[0]?.[0] ?? {}) as Record<string, unknown>;
+    expect(first.communityId).toBe(BUYER_COMMUNITY.id);
+  });
+
+  it('V3. editing the caption or picking more media does not lift the refusal', async () => {
+    buyerComposer();
+    typeCaption('Primeira versão');
+    await publishRefused();
+
+    typeCaption('Segunda versão do texto');
+    await addPhoto();
+
+    expect(document.querySelector('[data-composer-error]')?.textContent).toBe(REFUSAL);
+    expect((screen.getByRole('button', { name: PUBLISH }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it('V4. a re-render that hands the composer NO community (the facts changed) keeps it pinned', async () => {
+    const { rerender } = buyerComposer();
+    typeCaption('Preparei um resumo da aula de hoje.');
+    await publishRefused();
+
+    rerender(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={MEMBER_LIMITS} />);
+
+    expect(document.querySelector('[data-composer-audience]')?.textContent).toBe(BUYER_LINE);
+    expect(screen.queryByText(AUDIENCE)).toBeNull();
+    expect(document.querySelector('[data-composer-error]')?.textContent).toBe(REFUSAL);
+    expect((screen.getByLabelText(CAPTION_LABEL) as HTMLTextAreaElement).value).toBe(
+      'Preparei um resumo da aula de hoje.',
+    );
+    fireEvent.submit(form());
+    expect(createPost).toHaveBeenCalledTimes(1);
+  });
+
+  it('V5. the screen branches on the word only and names nothing: no product, purchase, permission or refund', async () => {
+    buyerComposer();
+    typeCaption('Preparei um resumo da aula de hoje.');
+    await publishRefused();
+
+    expect(document.body.textContent ?? '').not.toMatch(FORBIDDEN_WORDS);
+    expect(REFUSAL).not.toMatch(FORBIDDEN_WORDS);
+    // A refusal never reads a reason from the result: extra fields change nothing on screen.
+    cleanup();
+    buyerComposer();
+    typeCaption('Preparei um resumo da aula de hoje.');
+    createPost.mockResolvedValue({ ok: false, code: 'refused', reason: 'refund', product: 'X' });
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+    await waitFor(() => expect(document.querySelector('[data-composer-error]')).not.toBeNull());
+    expect(document.querySelector('[data-composer-error]')?.textContent).toBe(REFUSAL);
+  });
+
+  it('V6. without a pinned community a refused answer is the shipped generic publish error, never the locked state', async () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={MEMBER_LIMITS} />);
+    typeCaption('Olá, quem me segue');
+
+    createPost.mockResolvedValue({ ok: false, code: 'refused' });
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+    await waitFor(() =>
+      expect(document.querySelector('[data-composer-error]')?.textContent).toBe(
+        composerErrors.publish,
+      ),
+    );
+    expect((screen.getByRole('button', { name: PUBLISH }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it('V7. positive control: a pinned composer that is NOT refused stays enabled and lands on the community page', async () => {
+    buyerComposer();
+    typeCaption('Preparei um resumo da aula de hoje.');
+
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(`/comunidades/${BUYER_COMMUNITY.id}`));
+    expect(document.querySelector('[data-composer-error]')).toBeNull();
+  });
+});

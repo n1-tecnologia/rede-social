@@ -5,7 +5,9 @@ vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
 vi.mock('next/navigation', () => ({ redirect: vi.fn() }));
 
 const { ApiClientError } = await import('@/lib/bootstrap');
-const { asMemberIssue, isRefusedWrite, postWriteIssue } = await import('@/lib/feed-write');
+const { asMemberIssue, attemptPostWrite, isRefusedWrite, postWriteIssue } = await import(
+  '@/lib/feed-write'
+);
 
 /**
  * 09-09 (UI-D-504 h, T-04-42, T-09-35): the composer's refusal vocabulary gains the CLOSED member
@@ -71,5 +73,50 @@ describe('isRefusedWrite (11.1-15)', () => {
     expect(isRefusedWrite(new ApiClientError(401, 'UNAUTHENTICATED'))).toBe(false);
     expect(isRefusedWrite(new Error('403'))).toBe(false);
     expect(isRefusedWrite(null)).toBe(false);
+  });
+});
+
+/**
+ * 11.1-17 (UI-D-893, D-888): `attemptPostWrite` maps a bare 403 to the word 'refused' ONLY when the caller
+ * asks for it (the create action of the pinned composer); the edit path and every other caller keep
+ * today's generic answer and its log line.
+ */
+describe('attemptPostWrite - the refused word (11.1-17)', () => {
+  const failing = (error: unknown) => () => Promise.reject(error);
+
+  it('is refused for a bare 403 when asked, from the status alone', async () => {
+    for (const error of [
+      new ApiClientError(403, 'FORBIDDEN'),
+      new ApiClientError(403, 'OTHER', { reason: 'refund' }),
+    ]) {
+      const out = await attemptPostWrite(failing(error), { mapRefused: true });
+      expect(out).toEqual({ result: { ok: false, code: 'refused' }, refusal: null });
+    }
+  });
+
+  it('keeps the generic answer for the same 403 when not asked (the edit path is unchanged)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const out = await attemptPostWrite(failing(new ApiClientError(403, 'FORBIDDEN')));
+    expect(out).toEqual({ result: { ok: false, code: 'generic' }, refusal: null });
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it('a 403 with a bootstrap redirect is the redirect, never refused', async () => {
+    const out = await attemptPostWrite(failing(new ApiClientError(403, 'NO_MEMBERSHIP')), {
+      mapRefused: true,
+    });
+    expect(out).toEqual({ result: { ok: false, code: 'generic' }, refusal: '/sem-comunidade' });
+  });
+
+  it('any other status is not refused', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    for (const status of [400, 404, 429, 500]) {
+      const out = await attemptPostWrite(failing(new ApiClientError(status, 'X')), {
+        mapRefused: true,
+      });
+      expect(out.result).not.toEqual({ ok: false, code: 'refused' });
+    }
+    spy.mockRestore();
   });
 });

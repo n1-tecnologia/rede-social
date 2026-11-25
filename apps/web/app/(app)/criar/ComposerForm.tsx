@@ -201,8 +201,17 @@ export function ComposerForm({
   destinations = [],
   initialCommunityId = null,
   memberLimits,
-  memberCommunity,
+  memberCommunity: memberCommunityProp,
 }: ComposerFormProps) {
+  /**
+   * 11.1-17 (UI-D-893, A-UI-15): the community a pinned composer posts into is fixed at the FIRST paint.
+   * A later render of this route can hand the prop back as `undefined` (the server re-read the facts and
+   * the viewer may no longer post there), and a composer that followed it would turn into the Explorar
+   * composer with the member's words still in it, which changes where they go. Pinned in state, the
+   * destination, the audience line, the landing and the body all keep reading the community the member
+   * chose.
+   */
+  const [memberCommunity] = useState(memberCommunityProp);
   /** The member variant (UI-D-504). Absent `memberLimits` is the administrator's composer, unchanged. */
   const member = memberLimits !== undefined;
   /**
@@ -246,6 +255,14 @@ export function ComposerForm({
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const [formError, setFormError] = useState<string | null>(null);
+  /**
+   * 11.1-17 (UI-D-893, D-888, A-UI-15): the API refused this pinned composer's publish (a bare 403: a
+   * refund, `social` turned off, the community archived while the form was open). It is one fact with no
+   * reason: the caption and media stay as they are, "Publicar" is disabled for good and the neutral
+   * sentence shows in the form-error slot. It is NOT cleared by editing or picking media (nothing the
+   * member types can restore a permission), and the composer never falls back to Explorar.
+   */
+  const [refused, setRefused] = useState(false);
   const [captionError, setCaptionError] = useState<string | undefined>(undefined);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
@@ -517,8 +534,9 @@ export function ComposerForm({
   };
 
   const submit = () => {
-    // The disabled button already says so; this guards an Enter-key submit of the form itself.
-    if (videoBlocksSubmit) return;
+    // The disabled button already says so; this guards an Enter-key submit of the form itself. A refused
+    // pinned composer never sends again: a retry would only be refused the same way.
+    if (videoBlocksSubmit || refused) return;
     clearErrors();
     startTransition(async () => {
       const imageAssetIds = images.map((image) => image.assetId);
@@ -577,6 +595,13 @@ export function ComposerForm({
         // their own community (UI-D-711) it sends them back to that community's page.
         if (mode !== 'edit') replaceFormWith(router, member ? memberLanding : landing);
         else if (!returnAfterSave(router, landing, done)) router.push(landing);
+        return;
+      }
+
+      // 11.1-17 (UI-D-893): the one word 'refused' from a PINNED composer. Nothing is cleared, the words
+      // are not re-sent anywhere else, and the screen branches only on the word, never on a reason.
+      if (result.code === 'refused' && memberCommunity) {
+        setRefused(true);
         return;
       }
 
@@ -649,7 +674,7 @@ export function ComposerForm({
             type="submit"
             variant="brand"
             size="sm"
-            disabled={!publishable || busy || videoBlocksSubmit}
+            disabled={!publishable || busy || videoBlocksSubmit || refused}
             loading={busy}
             aria-busy={busy || undefined}
           >
@@ -661,13 +686,13 @@ export function ComposerForm({
       <div className="flex flex-col gap-6 px-4 py-4 md:px-6">
         {/* E14/error: a server refusal is an alert-role card at the TOP of the form, never a toast —
             the admin has to be able to see which field it is about without the message vanishing. */}
-        {formError ? (
+        {refused || formError ? (
           <p
             role="alert"
             data-composer-error
             className="rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm font-normal text-danger"
           >
-            {formError}
+            {refused ? t('composer.member.errors.communityForbidden') : formError}
           </p>
         ) : null}
 

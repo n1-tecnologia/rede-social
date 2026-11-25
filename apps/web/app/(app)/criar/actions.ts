@@ -53,7 +53,9 @@ export async function createPostAction(input: unknown): Promise<PostWriteResult>
     return { ok: false, code: empty ? 'empty_post' : 'generic' };
   }
 
-  const { result, refusal } = await attemptPostWrite(() => createPost(body.data));
+  const { result, refusal } = await attemptPostWrite(() => createPost(body.data), {
+    mapRefused: true,
+  });
   // The new card has to appear on the server-rendered home slot the admin lands back on; without
   // this they would read a cached page 1 that does not carry what they just published.
   if (result.ok) {
@@ -62,6 +64,15 @@ export async function createPostAction(input: unknown): Promise<PostWriteResult>
     // 10-14 (UI-D-711): a post born inside a community lands back on that community's page, which has
     // to carry it; the router cache would otherwise serve the page as it stood before the publish.
     if (body.data.communityId) revalidatePath(`/comunidades/${body.data.communityId}`);
+  }
+
+  // 11.1-17 (UI-D-893, D-888): a refused post into a community means the viewer's facts changed (a refund,
+  // `social` turned off, the community archived while the composer was open). The composer stays put and
+  // says one neutral sentence; what has to be re-read is the PAGE THE COMPOSE ENTRIES LIVE ON, so the
+  // community page is revalidated and the router cache drops its stale copy. `/criar` itself is never
+  // re-rendered here: the composer is pinned to the community it opened with.
+  if (!result.ok && result.code === 'refused' && body.data.communityId) {
+    revalidatePath(`/comunidades/${body.data.communityId}`);
   }
 
   if (refusal) redirect(refusal);

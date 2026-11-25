@@ -279,3 +279,77 @@ describe('/criar?comunidade= - a buyer in the ORGANIZATION community (11.1-17, U
     expect((await props({ comunidade: ID })).memberCommunity).toBeUndefined();
   });
 });
+
+/**
+ * 11.1-17 Task 2 (UI-D-892, D-888, A-UI-14, T-11.1-61): an id the viewer may not use never reaches the
+ * composer as a destination. Every case below is the SAME quiet answer: the Explorar composer, no
+ * redirect, no error, and no sentence naming a reason. The API's refusal is the real control; this page
+ * only decides what to paint.
+ */
+describe('/criar?comunidade= - the silent fallbacks (11.1-17, UI-D-892)', () => {
+  const FOREIGN = '7f2e3e4a-9c63-4e74-9f5c-2a8b3d4e5f62';
+
+  const cases: [string, () => unknown][] = [
+    ['an unknown id (the API answers not found)', () => ({ status: 'not-found' })],
+    ['a failed read', () => ({ status: 'error' })],
+    [
+      'an ARCHIVED organization community',
+      () => ({
+        status: 'ok',
+        community: community({ kind: 'organization', status: 'archived', post: true }),
+      }),
+    ],
+    [
+      'an organization community the viewer may not post in',
+      () => ({
+        status: 'ok',
+        community: community({ kind: 'organization', isOwner: false, post: false }),
+      }),
+    ],
+    [
+      'a member-created community that is not theirs',
+      () => ({
+        status: 'ok',
+        community: community({ kind: 'member', id: FOREIGN, isOwner: false, post: false }),
+      }),
+    ],
+  ];
+
+  it.each(cases)('F1. %s is the plain Explorar composer, silently', async (_name, result) => {
+    mocks.loadCommunity.mockResolvedValue(result());
+
+    const p = await props({ comunidade: FOREIGN });
+
+    expect(p.memberCommunity).toBeUndefined();
+    expect(p.memberLimits).toBeDefined();
+    expect(p.destinations).toEqual([]);
+    expect(p.initialCommunityId).toBeNull();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    // Nothing on the element names a reason: the only props are the composer's own.
+    expect(JSON.stringify(Object.keys(p).sort())).not.toMatch(/error|refus|reason/i);
+  });
+
+  it('F2. `social` off: the shipped rule of /criar for a member applies unchanged (the permission is gone, back to Início, no community read)', async () => {
+    mocks.permissions = ['social.participate'];
+    mocks.loadCommunity.mockResolvedValue({
+      status: 'ok',
+      community: community({ kind: 'organization', post: true }),
+    });
+
+    await expect(props({ comunidade: ID })).rejects.toThrow('REDIRECT:/inicio');
+    expect(mocks.loadCommunity).not.toHaveBeenCalled();
+  });
+
+  it('F3. a buyer composer has no destination picker whatever the list says: the list is never read', async () => {
+    mocks.loadCommunity.mockResolvedValue({
+      status: 'ok',
+      community: community({ kind: 'organization', isOwner: false, post: true }),
+    });
+    mocks.listAllCommunities.mockResolvedValue([community({ kind: 'organization', post: true })]);
+
+    const p = await props({ comunidade: ID });
+
+    expect(p.destinations).toEqual([]);
+    expect(mocks.listAllCommunities).not.toHaveBeenCalled();
+  });
+});
