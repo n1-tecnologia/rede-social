@@ -1865,7 +1865,9 @@ describe('ReelsHost — the rail draws only what the facts of the viewer allow (
   const has = (name: string, k = 0) => within(rail(k)).queryByRole('button', { name }) !== null;
 
   it('like false: comment and send remain, no heart, no like slot, and they close up', async () => {
-    renderHost({ initial: { items: [view(1, FACTS(false, true, true)), view(2)], nextCursor: null } });
+    renderHost({
+      initial: { items: [view(1, FACTS(false, true, true)), view(2)], nextCursor: null },
+    });
     await flush();
     expect(has(f('actions.like'))).toBe(false);
     expect(has(f('actions.unlike'))).toBe(false);
@@ -1877,7 +1879,9 @@ describe('ReelsHost — the rail draws only what the facts of the viewer allow (
   });
 
   it('comment false: heart and send remain, no comment control and no comment slot', async () => {
-    renderHost({ initial: { items: [view(1, FACTS(true, false, true)), view(2)], nextCursor: null } });
+    renderHost({
+      initial: { items: [view(1, FACTS(true, false, true)), view(2)], nextCursor: null },
+    });
     await flush();
     expect(has(f('actions.like'))).toBe(true);
     expect(has(f('actions.comment'))).toBe(false);
@@ -1886,7 +1890,9 @@ describe('ReelsHost — the rail draws only what the facts of the viewer allow (
   });
 
   it('share false: heart and comment remain even with a share link, and no send control', async () => {
-    renderHost({ initial: { items: [view(1, FACTS(true, true, false)), view(2)], nextCursor: null } });
+    renderHost({
+      initial: { items: [view(1, FACTS(true, true, false)), view(2)], nextCursor: null },
+    });
     await flush();
     expect(has(f('actions.like'))).toBe(true);
     expect(has(f('actions.comment'))).toBe(true);
@@ -1894,7 +1900,9 @@ describe('ReelsHost — the rail draws only what the facts of the viewer allow (
   });
 
   it('all three false: no rail at all (no control, no slot, no avatar wrapper), the caption stays', async () => {
-    renderHost({ initial: { items: [view(1, FACTS(false, false, false)), view(2)], nextCursor: null } });
+    renderHost({
+      initial: { items: [view(1, FACTS(false, false, false)), view(2)], nextCursor: null },
+    });
     await flush();
     // The pager's own pause control is not the rail: the three rail controls and their slots are gone.
     for (const name of [f('actions.like'), f('actions.comment'), f('actions.share')]) {
@@ -1935,7 +1943,10 @@ describe('ReelsHost — the rail draws only what the facts of the viewer allow (
     cleanup();
     controllers.clear();
     const likeOk = vi.fn(async () => ({ ok: true, liked: true, likeCount: 1 }) as const);
-    renderHost({ onLike: likeOk, initial: { items: [view(1, FACTS(true, true, true))], nextCursor: null } });
+    renderHost({
+      onLike: likeOk,
+      initial: { items: [view(1, FACTS(true, true, true))], nextCursor: null },
+    });
     await flush();
     await act(async () => {
       pagerProps.at(-1)?.onDoubleTap();
@@ -1946,12 +1957,20 @@ describe('ReelsHost — the rail draws only what the facts of the viewer allow (
 
   it('beside the desktop player the same rail closes up, and with all three false the slot is empty', async () => {
     viewportWidth = 1024;
-    renderHost({ initial: { items: [view(1, FACTS(false, true, true)), view(2)], nextCursor: null } });
+    renderHost({
+      initial: { items: [view(1, FACTS(false, true, true)), view(2)], nextCursor: null },
+    });
     await flush();
-    const side = document.querySelector<HTMLElement>('[data-reels-rail-slot] [data-reel-rail="side"]');
+    const side = document.querySelector<HTMLElement>(
+      '[data-reels-rail-slot] [data-reel-rail="side"]',
+    );
     expect(side).not.toBeNull();
-    expect(within(side as HTMLElement).queryByRole('button', { name: f('actions.like') })).toBeNull();
-    expect(within(side as HTMLElement).getByRole('button', { name: f('actions.comment') })).toBeTruthy();
+    expect(
+      within(side as HTMLElement).queryByRole('button', { name: f('actions.like') }),
+    ).toBeNull();
+    expect(
+      within(side as HTMLElement).getByRole('button', { name: f('actions.comment') }),
+    ).toBeTruthy();
     cleanup();
     controllers.clear();
     renderHost({
@@ -1970,7 +1989,9 @@ describe('ReelsHost — the rail draws only what the facts of the viewer allow (
       ],
       nextCursor: null,
     });
-    renderHost({ initial: { items: [view(1, FACTS(false, true, true)), view(2)], nextCursor: null } });
+    renderHost({
+      initial: { items: [view(1, FACTS(false, true, true)), view(2)], nextCursor: null },
+    });
     await flush();
     const dialog = await openSheet();
     expect(within(dialog).getByText('primeiro')).toBeTruthy();
@@ -2037,7 +2058,9 @@ describe('ReelsHost — a refused write is neutral and re-reads the facts (11.1-
     renderHost();
     await flush();
     const dialog = await openSheet();
-    const input = within(dialog).getByPlaceholderText(f('comments.placeholder')) as HTMLTextAreaElement;
+    const input = within(dialog).getByPlaceholderText(
+      f('comments.placeholder'),
+    ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: 'Meu rascunho' } });
     const form = input.closest('form');
     if (!form) throw new Error('the comment field has no form');
