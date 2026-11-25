@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "11.1"
 current_phase_name: Permissões do comprador por produto numa comunidade
-current_plan: 5
+current_plan: 6
 status: executing
-stopped_at: Completed 11.1-06-PLAN.md
-last_updated: "2026-11-25T12:05:06.080Z"
+stopped_at: Completed 11.1-07-PLAN.md
+last_updated: "2026-11-25T12:14:46.538Z"
 last_activity: 2026-11-24
 last_activity_desc: Phase 11.1 execution started
-state_head: f89831fcaf71ab007458f58d24268c111a065e79
+state_head: 69288c26dff693da58541eec6220d1f4b2b50418
 progress:
   total_phases: 36
   completed_phases: 0
   total_plans: 537
-  completed_plans: 495
+  completed_plans: 496
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 11.1 (Permissões do comprador por produto numa comunidade) — EXECUTING
-Current Plan: 5
+Current Plan: 6
 Total Plans in Phase: 18
-Plan: 5 of 18
+Plan: 6 of 18
 Status: Ready to execute
 Last activity: 2026-11-24 — Phase 11.1 execution started
 
@@ -398,6 +398,7 @@ Progress: [███████████████████░] 160/162
 | Phase 11.1 P05 | 8 min | 3 tasks | 11 files |
 | Phase 11.1 P03 | 8 min | 3 tasks | 11 files |
 | Phase 11.1 P06 | 10 min | 3 tasks | 3 files |
+| Phase 11.1 P07 | 9 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -1202,6 +1203,7 @@ Recent decisions affecting current work:
 - [Phase 12.4]: 12.4-18: release notes follow the migrations (the pre-activation window is benign, the 42P10 window is the failing one); CASE-28 and CASE-29 stay open as owner proofs; Nyquist flags left false because guard:lanes is red on four 07/08 test statements
 - [Phase 11.1]: 11.1-02: an archived organization community stays in the buyer scope map (post refused by the gate and the service); allowed() coalesces to false, never null — D-890 keeps today's like, comment and share behaviour until the administrator edits the product
 - [Phase 11.1]: 11.1-03: deniedCommunityIds inlines the action literal (sql.raw over a closed union) because a policy is DDL and cannot carry a bind parameter — drizzle-kit rendered the interpolated action as $1 in ALTER POLICY, which does not apply
+- [Phase 11.1]: 11.1-07: a buyer is offered post and story only while the community is active (the scope map keeps archived communities, the server refuses both into them)
 
 ### Pending Todos
 
@@ -1347,6 +1349,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-25T12:05:05.700Z
-Stopped at: Completed 11.1-06-PLAN.md
+Last session: 2026-11-25T12:14:46.126Z
+Stopped at: Completed 11.1-07-PLAN.md
 Resume file: None

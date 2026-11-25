@@ -519,11 +519,11 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [ ] **BPERM-08**: Every refusal of this phase is `403 FORBIDDEN` with no `details`, identical for a missing flag, a missing product and a closed highlight; no product id or flag name appears in any member-readable payload or log line *(D-888)*
 - [ ] **BPERM-09**: A buyer holding `post` publishes through `POST /v1/feed/posts` only into an active, live organization community; the post is stamped `visibility = 'community'` and the database insert gate carries its own `social_enabled()`, active, not-deleted, organization-kind and tenant terms *(D-880, D-881, D-882)*
 - [ ] **BPERM-10**: A buyer's post appears only on the community page, never in Início, Explorar or Reels, and raises no bell row, push or fan-out job *(D-881)*
-- [ ] **BPERM-11**: With `social` off a buyer keeps reading and keeps like/comment where the product allows, and `post` and `story` answer false and are refused *(D-882)*
+- [x] **BPERM-11**: With `social` off a buyer keeps reading and keeps like/comment where the product allows, and `post` and `story` answer false and are refused *(D-882)*
 - [ ] **BPERM-12**: A buyer holding `story` saves one of their own stories only into a highlight that is open to buyers, in an active organization community, through publish-with-highlight or add; they cannot create, rename, re-cover, reorder or delete a highlight; item insert and delete gates carry the open, organization, active and own-story terms *(D-883, D-884, D-885)*
 - [ ] **BPERM-13**: A buyer removes only their own story from an open highlight; the administrator removes any item from any highlight as today; a highlight closed afterwards keeps its items *(D-885, D-887)*
 - [ ] **BPERM-14**: The highlight catalogue for a buyer lists only open highlights of communities where `story` is granted, without any open flag on the payload *(UI-D-887, UI-D-891)*
-- [ ] **BPERM-15**: `viewer.actions` on the community list and detail is the union for a buyer, `story` true only while an open highlight exists, `post`/`story` false with `social` off, staff all true, and no linked product as today; the list stays one statement *(D-886, D-892, UI-D-888)*
+- [x] **BPERM-15**: `viewer.actions` on the community list and detail is the union for a buyer, `story` true only while an open highlight exists, `post`/`story` false with `social` off, staff all true, and no linked product as today; the list stays one statement *(D-886, D-892, UI-D-888)*
 - [ ] **BPERM-16**: A post of an organization community carries an optional `community.actions {like, comment, share}` only when at least one is false for the viewer, computed in the same statement; absent means all true *(UI-D-889)*
 - [x] **BPERM-17**: The product body accepts per-link flags (`communityLinks`) beside `communityIds`, both together is a 400, a changed flag on an existing link is persisted by an idempotent upsert in the product transaction, and the manager read returns flags only for non-default links *(D-890, D-363)*
 - [ ] **BPERM-18**: A locked community keeps its read-only sample (organization posts only) and the locked-member read of a buyer's story is closed *(D-892, D-356; confirm Open Questions 1 and 2)*
@@ -1274,11 +1274,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BPERM-08 | Phase 11.1 | Pending |
 | BPERM-09 | Phase 11.1 | Pending |
 | BPERM-10 | Phase 11.1 | Pending |
-| BPERM-11 | Phase 11.1 | Pending |
+| BPERM-11 | Phase 11.1 | Complete |
 | BPERM-12 | Phase 11.1 | Pending |
 | BPERM-13 | Phase 11.1 | Pending |
 | BPERM-14 | Phase 11.1 | Pending |
-| BPERM-15 | Phase 11.1 | Pending |
+| BPERM-15 | Phase 11.1 | Complete |
 | BPERM-16 | Phase 11.1 | Pending |
 | BPERM-17 | Phase 11.1 | Complete |
 | BPERM-18 | Phase 11.1 | Pending |
