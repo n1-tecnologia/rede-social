@@ -7,6 +7,7 @@ import {
 } from '@rede-social/core/db/social-gate';
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   index,
   integer,
@@ -304,6 +305,13 @@ export const storyHighlights = pgTable(
     createdByUserId: uuid('created_by_user_id')
       .notNull()
       .references(() => users.id),
+    /**
+     * 11.1-02 (D-884): the administrator's switch that opens THIS highlight of an organization community to buyers
+     * who hold the `story` permission. Off by default, so every existing highlight stays administrator-only. Plan 02
+     * adds the column; only `app.community_buyer_scope()` reads it (`openHighlight`); the item gates are plan 04 and
+     * the write path plan 09.
+     */
+    openToBuyers: boolean('open_to_buyers').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

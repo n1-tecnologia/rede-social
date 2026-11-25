@@ -337,14 +337,13 @@ export const feedPosts = pgTable(
     //
     // 10-03 (D-702, MPUB-04) added TWO member branches for the third audience. (a) The OWNER branch: a
     // `'community'` post with a community id, while `social` is on, in an ACTIVE, live MEMBER community the
-    // caller created. (b) The ESCOPO SEAM branch, false today: it carries only the role, the stamped
-    // `'community'` audience (never `'tenant'`, so no buyer's post can ever be an organization post) and a
-    // call to the kernel stub `app.community_action_allowed(community_id, 'post')`
-    // (`*_member_communities_functions.sql`), which answers `false` for every input until the per-product
-    // action scope is built after Phase 11. Every other condition (the community's kind, the module state,
-    // the product grant) belongs to the function body, so replacing the body with `create or replace`
-    // (same signature, same OID) is the ONLY change that phase needs. A member still cannot insert
-    // `'followers'` with a community, and the staff branch stays `visibility = 'tenant'`.
+    // caller created. (b) The BUYER branch (the ESCOPO seam of Phase 10, live since 11.1-02: D-880, D-881, D-882).
+    // It carries its OWN terms and relies on nothing the service checked: the stamped `'community'` audience
+    // (never `'tenant'`, so no buyer's post can ever be an organization post), `social` on, an ORGANIZATION
+    // community of the caller's tenant that is `'active'` and not soft-deleted, and the product grant
+    // `app.community_action_allowed(community_id, 'post')` (`*_buyer_permissions_functions.sql`, the union over the
+    // caller's ACTIVE entitlements; it replaced the constant-false stub with `create or replace`, same OID). A
+    // member still cannot insert `'followers'` with a community, and the staff branch stays `visibility = 'tenant'`.
     //
     // quick 261112-kuk (WR-04, MPUB-04, D-706; T-kuk-04) gave the STAFF branch a community-kind term: it admits
     // a `'tenant'` post only with no community or in an ORGANIZATION community of the caller's tenant, so an
@@ -354,7 +353,7 @@ export const feedPosts = pgTable(
       as: 'restrictive',
       for: 'insert',
       to: authenticatedRole,
-      withCheck: sql`(app.tenant_role() = 'member' and visibility = 'followers' and community_id is null and ${SOCIAL_ENABLED}) or (app.tenant_role() <> 'member' and visibility = 'tenant' and (community_id is null or exists (select 1 from public.communities c where c.id = community_id and c.tenant_id = app.tenant_id() and c.kind = 'organization'))) or (app.tenant_role() = 'member' and visibility = 'community' and community_id is not null and ${SOCIAL_ENABLED} and exists (select 1 from public.communities c where c.id = community_id and c.tenant_id = app.tenant_id() and c.kind = 'member' and c.created_by_user_id = app.user_id() and c.status = 'active' and c.deleted_at is null)) or (app.tenant_role() = 'member' and visibility = 'community' and community_id is not null and app.community_action_allowed(community_id, 'post'))`,
+      withCheck: sql`(app.tenant_role() = 'member' and visibility = 'followers' and community_id is null and ${SOCIAL_ENABLED}) or (app.tenant_role() <> 'member' and visibility = 'tenant' and (community_id is null or exists (select 1 from public.communities c where c.id = community_id and c.tenant_id = app.tenant_id() and c.kind = 'organization'))) or (app.tenant_role() = 'member' and visibility = 'community' and community_id is not null and ${SOCIAL_ENABLED} and exists (select 1 from public.communities c where c.id = community_id and c.tenant_id = app.tenant_id() and c.kind = 'member' and c.created_by_user_id = app.user_id() and c.status = 'active' and c.deleted_at is null)) or (app.tenant_role() = 'member' and visibility = 'community' and community_id is not null and ${SOCIAL_ENABLED} and exists (select 1 from public.communities c where c.id = community_id and c.tenant_id = app.tenant_id() and c.kind = 'organization' and c.status = 'active' and c.deleted_at is null) and app.community_action_allowed(community_id, 'post'))`,
     }),
     // 09-14 (WR-07, SOCIAL-03, T-04-54 [informational]; T-09-49): the DELETE backstop. The service never
     // hard-deletes a post (it soft-deletes), so a member lane that issued `delete from feed_posts` would

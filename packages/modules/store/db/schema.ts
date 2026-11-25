@@ -1,6 +1,7 @@
 import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   index,
   integer,
@@ -213,6 +214,18 @@ export const storeProductCommunities = pgTable(
       .references(() => storeProducts.id, { onDelete: 'cascade' }),
     /** FK to `communities(id) on delete cascade` is hand SQL (fact 4 above). */
     communityId: uuid('community_id').notNull(),
+    /**
+     * 11.1-02 (D-890, D-891): what the BUYER of this product may do in this community, per link (product x community),
+     * never per product. The defaults reproduce today's behaviour (like, comment and share on; post and story off), so
+     * the constant-default `ADD COLUMN` fills every existing row with no UPDATE and a link written by the previous API
+     * (naming no flag) takes the same values. Read by `app.community_buyer_scope()`: the union over a member's ACTIVE
+     * entitlements (`bool_or`), so the flags end with the entitlement.
+     */
+    canLike: boolean('can_like').notNull().default(true),
+    canComment: boolean('can_comment').notNull().default(true),
+    canShare: boolean('can_share').notNull().default(true),
+    canPost: boolean('can_post').notNull().default(false),
+    canStory: boolean('can_story').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

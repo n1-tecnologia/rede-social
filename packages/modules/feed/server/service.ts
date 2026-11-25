@@ -1274,7 +1274,8 @@ async function resolveCommunityTarget(
     // Branch 2: the organization's voice, in an organization community.
     audience = 'tenant';
   } else if (await communityActionAllowed(tx, community.id, 'post')) {
-    // Branch 3, RESERVED (Escopo): never taken while the SQL stub answers false.
+    // Branch 3 (11.1-02, D-880, D-881): a member whose ACTIVE product entitlements grant `post` in this organization
+    // community. The SQL function is the union over those entitlements; the insert gate repeats it with its own terms.
     audience = 'community';
   }
   if (audience === null) throw new ApiError(403, 'FORBIDDEN');
