@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   permissions: [] as string[],
+  modules: [] as { key: string }[],
   result: null as unknown,
   managerProps: null as Record<string, unknown> | null,
 }));
@@ -28,6 +29,7 @@ vi.mock('next-intl/server', async () => {
 vi.mock('@/lib/bootstrap', () => ({
   requireBootstrap: async () => ({
     permissions: mocks.permissions,
+    modules: mocks.modules,
     tenant: { displayName: 'Rede Lab' },
   }),
 }));
@@ -95,6 +97,7 @@ async function render() {
 
 beforeEach(() => {
   mocks.permissions = [];
+  mocks.modules = [];
 });
 
 describe('/comunidades/[communityId]/destaques — the guard is viewer.canCurate (UI-D-713)', () => {
@@ -138,5 +141,16 @@ describe('/comunidades/[communityId]/destaques — the guard is viewer.canCurate
 
     expect(mocks.managerProps?.archived).toBe(true);
     expect(html).toContain('arquivada');
+  });
+
+  it('D6. 11.1-13: `socialOn` is the bootstrap module list, never a role', async () => {
+    mocks.result = { status: 'ok', community: community('organization', true) };
+
+    await render();
+    expect(mocks.managerProps?.socialOn).toBe(false);
+
+    mocks.modules = [{ key: 'communities' }, { key: 'social' }];
+    await render();
+    expect(mocks.managerProps?.socialOn).toBe(true);
   });
 });

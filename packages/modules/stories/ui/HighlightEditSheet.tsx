@@ -10,6 +10,7 @@ import {
   Input,
   Skeleton,
   StatusPill,
+  Switch,
 } from '@rede-social/ui';
 import {
   Bookmark,
@@ -88,6 +89,26 @@ export interface HighlightEditItem {
 
 export type HighlightEditStep = 'main' | 'cover' | 'picker';
 
+/**
+ * 11.1-13 (UI-D-886, D-884) — the "open to buyers" switch, as the HOST finished it. Present only for a
+ * highlight of an active ORGANIZATION community: absent draws no section at all (a member-created
+ * community, Início and an archived community never see it, and it is never drawn disabled). Every
+ * word is a prop (PWA-03, UI-D-897); the write is the host's, so `onChange` receives the next value
+ * and the host answers by changing `checked` (and `busy` while it persists).
+ */
+export interface HighlightEditOpenToBuyers {
+  checked: boolean;
+  /** While the change persists: `aria-busy`, and further clicks are ignored. */
+  busy: boolean;
+  onChange: (next: boolean) => void;
+  /** The switch's name and the section's visible label. */
+  label: string;
+  /** The helper — also the switch's `aria-describedby`. */
+  helper: string;
+  /** An extra line under the helper (the `social`-off note), when the host has one. */
+  extra?: string;
+}
+
 export interface HighlightEditSheetLabels {
   title: string;
   cover: string;
@@ -159,6 +180,8 @@ export interface HighlightEditSheetProps {
   pickerEmpty?: ReactNode;
   /** Tells the host which body is showing (it loads the picker on entry and refreshes on return). */
   onStepChange?: (step: HighlightEditStep) => void;
+  /** 11.1-13: the open-to-buyers section. Absent means no section (see `HighlightEditOpenToBuyers`). */
+  openToBuyers?: HighlightEditOpenToBuyers;
   labels: HighlightEditSheetLabels;
 }
 
@@ -264,9 +287,12 @@ export function HighlightEditSheet({
   pickerFooter,
   pickerEmpty,
   onStepChange,
+  openToBuyers,
   labels,
 }: HighlightEditSheetProps) {
   const nameId = useId();
+  const openHelperId = useId();
+  const openExtraId = useId();
   const [step, setStepState] = useState<HighlightEditStep>('main');
   const [confirming, setConfirming] = useState(false);
   /** The main-step control focus returns to after "Voltar". */
@@ -476,6 +502,32 @@ export function HighlightEditSheet({
               className="shrink-0"
             />
           </section>
+
+          {/* (3b) Open to buyers (UI-D-886) — its own section, absent when the host passes none. */}
+          {openToBuyers ? (
+            <section className="flex min-h-11 items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-text">{openToBuyers.label}</p>
+                <p id={openHelperId} className="mt-1 text-xs font-normal text-text-secondary">
+                  {openToBuyers.helper}
+                </p>
+                {openToBuyers.extra ? (
+                  <p id={openExtraId} className="mt-1 text-xs font-normal text-text-tertiary">
+                    {openToBuyers.extra}
+                  </p>
+                ) : null}
+              </div>
+              <Switch
+                checked={openToBuyers.checked}
+                label={openToBuyers.label}
+                busy={openToBuyers.busy}
+                aria-describedby={
+                  openToBuyers.extra ? `${openHelperId} ${openExtraId}` : openHelperId
+                }
+                onChange={openToBuyers.onChange}
+              />
+            </section>
+          ) : null}
         </>
       )}
 

@@ -873,6 +873,12 @@ export type HighlightManageRowView = {
   cover: { assetId: string; variantWidths: number[] } | null;
   coverChosen: boolean;
   itemCount: number;
+  /**
+   * 11.1-13 (UI-D-886, UI-D-887): the curator's switch. This view is built ONLY for the manage screen
+   * and its edit read, the two reads the API answers to a curator with the flag; an API that predates
+   * the field omits it, which reads as closed. The member-facing builders above never copy it.
+   */
+  openToBuyers: boolean;
   editLabel: string;
 };
 
@@ -895,6 +901,7 @@ export function highlightManageRowView(
         : null,
     coverChosen: summary.coverChosen,
     itemCount: summary.itemCount,
+    openToBuyers: summary.openToBuyers === true,
     editLabel: t('highlights.manage.edit', { title: summary.title }),
   };
 }

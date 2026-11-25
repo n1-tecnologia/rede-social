@@ -12,6 +12,7 @@ import {
   renameHighlightAction,
   reorderHighlightsAction,
   setHighlightCoverAction,
+  setHighlightOpenToBuyersAction,
 } from './highlight-actions';
 
 /**
@@ -449,6 +450,7 @@ describe('createHighlightAction — a new highlight at the END of its place (UI-
         cover: null,
         coverChosen: false,
         itemCount: 0,
+        openToBuyers: false,
         editLabel: 'Editar destaque Teste',
       },
     });
@@ -680,5 +682,81 @@ describe('loadHighlightEditAction — the edit sheet’s ONE read (UI-D-74)', ()
 
     vi.mocked(apiFetch).mockResolvedValue(json(401, { error: { code: 'UNAUTHENTICATED' } }));
     await expect(loadHighlightEditAction(HIGHLIGHT)).rejects.toThrow('redirect:/entrar');
+  });
+});
+
+/**
+ * 11.1-13 (UI-D-886, D-884): the open-to-buyers switch is ONE `PATCH { openToBuyers }` through the
+ * shipped highlight route, answered with the curator's row view. A refusal never reaches the screen
+ * with a reason: the API's `open_unavailable`, a 403 and a transport failure all revert the switch.
+ */
+describe('setHighlightOpenToBuyersAction — one validated PATCH (UI-D-886, D-884)', () => {
+  it('28. PATCHes the single field, answers the row view with the flag and revalidates the community page', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(200, { ...summary(H_A, COMMUNITY_A, 'Atas', 0), openToBuyers: true }),
+    );
+
+    const result = await setHighlightOpenToBuyersAction(H_A, true, { communityId: COMMUNITY_A });
+
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(apiFetch).toHaveBeenCalledWith(`/v1/stories/highlights/${H_A}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ openToBuyers: true }),
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      highlight: { id: H_A, openToBuyers: true },
+    });
+    expect(revalidatePath).toHaveBeenCalledWith(`/comunidades/${COMMUNITY_A}`);
+
+    vi.mocked(apiFetch).mockResolvedValue(json(200, summary(H_A, COMMUNITY_A, 'Atas', 0)));
+    await expect(
+      setHighlightOpenToBuyersAction(H_A, false, { communityId: COMMUNITY_A }),
+    ).resolves.toMatchObject({ ok: true, highlight: { openToBuyers: false } });
+    expect(vi.mocked(apiFetch).mock.calls[1]?.[1]?.body).toBe(
+      JSON.stringify({ openToBuyers: false }),
+    );
+  });
+
+  it('29. open_unavailable, a 403 and a transport failure are closed answers, never a navigation', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(400, {
+        error: { code: 'VALIDATION_FAILED', details: { highlight: 'open_unavailable' } },
+      }),
+    );
+    await expect(
+      setHighlightOpenToBuyersAction(H_A, true, { communityId: COMMUNITY_A }),
+    ).resolves.toEqual({ ok: false, code: 'open_unavailable' });
+
+    vi.mocked(apiFetch).mockResolvedValue(json(403, { error: { code: 'FORBIDDEN' } }));
+    await expect(
+      setHighlightOpenToBuyersAction(H_A, true, { communityId: COMMUNITY_A }),
+    ).resolves.toEqual({ ok: false, code: 'generic' });
+
+    vi.mocked(apiFetch).mockRejectedValue(new Error('network'));
+    await expect(
+      setHighlightOpenToBuyersAction(H_A, true, { communityId: COMMUNITY_A }),
+    ).resolves.toEqual({ ok: false, code: 'generic' });
+
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('30. a forged id, place or value is generic WITHOUT a request; a 401 navigates', async () => {
+    await expect(
+      setHighlightOpenToBuyersAction('x', true, { communityId: COMMUNITY_A }),
+    ).resolves.toEqual({ ok: false, code: 'generic' });
+    await expect(
+      setHighlightOpenToBuyersAction(H_A, true, { communityId: 'x' } as never),
+    ).resolves.toEqual({ ok: false, code: 'generic' });
+    await expect(
+      setHighlightOpenToBuyersAction(H_A, 'yes' as never, { communityId: COMMUNITY_A }),
+    ).resolves.toEqual({ ok: false, code: 'generic' });
+    expect(apiFetch).not.toHaveBeenCalled();
+
+    vi.mocked(apiFetch).mockResolvedValue(json(401, { error: { code: 'UNAUTHENTICATED' } }));
+    await expect(
+      setHighlightOpenToBuyersAction(H_A, true, { communityId: COMMUNITY_A }),
+    ).rejects.toThrow('redirect:/entrar');
   });
 });

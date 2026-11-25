@@ -39,11 +39,17 @@ import {
   renameHighlightAction,
   reorderHighlightsAction,
   setHighlightCoverAction,
+  setHighlightOpenToBuyersAction,
 } from '@/app/(app)/stories/highlight-actions';
 import { loadMoreOwnStoriesAction } from '@/app/(app)/stories/story-actions';
 import { CoverSizeHint } from '@/components/media/CoverSizeHint';
 import { useAssetReadiness } from '@/components/media/useAssetReadiness';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
+import {
+  highlightOpenSectionVisible,
+  highlightOpenState,
+  openToBuyersToastKey,
+} from '@/lib/highlight-open';
 import type {
   HighlightEditStoryView,
   HighlightManageRowView,
@@ -98,6 +104,12 @@ export interface HighlightManagerProps {
    * organization's manager, exactly as shipped.
    */
   member?: boolean;
+  /**
+   * 11.1-13 (UI-D-886): whether the `social` module is effective for this tenant, a fact of the
+   * bootstrap's module list, never a role. Off adds one line under the "Aberto a compradores" helper;
+   * the switch itself is edited whatever `social` is. Absent reads as on.
+   */
+  socialOn?: boolean;
 }
 
 type EditState = {
@@ -155,6 +167,7 @@ export function HighlightManager({
   editTarget,
   publishHref,
   member = false,
+  socialOn = true,
 }: HighlightManagerProps) {
   const t = useTranslations('stories');
   const tm = useTranslations('media');
@@ -353,6 +366,43 @@ export function HighlightManager({
     toast.show({ tone: 'success', message: t('highlights.toasts.coverChanged') });
     void readEdit(current.id, { closeOnFailure: false });
     return true;
+  };
+
+  /**
+   * 11.1-13 (UI-D-886, D-884): "Aberto a compradores" persists AT ONCE, like the move controls — no Save
+   * button. `openWrite` is the value in flight: the switch shows it with `busy` (further taps are
+   * ignored) and falls back to the stored row when the write is refused, so a failure reverts by
+   * construction. Turning it off asks nothing (nothing already saved is lost). The web never reads a
+   * role here: whether the section exists is `highlightOpenSectionVisible`, a fact of the place.
+   */
+  const [openWrite, setOpenWrite] = useState<{ id: string; next: boolean } | null>(null);
+  const openWriting = useRef(false);
+  const openSectionVisible = highlightOpenSectionVisible({ place, archived, member });
+
+  const setOpenToBuyers = async (next: boolean): Promise<void> => {
+    if (!current || openWriting.current) return;
+    const id = current.id;
+    openWriting.current = true;
+    setOpenWrite({ id, next });
+    let result: Awaited<ReturnType<typeof setHighlightOpenToBuyersAction>> = {
+      ok: false,
+      code: 'generic',
+    };
+    try {
+      result = await setHighlightOpenToBuyersAction(id, next, place);
+    } catch (error) {
+      // A transport failure is the same closed answer as a refusal: the switch reverts, one toast.
+      console.error('stories.highlight_open_write_failed', { error: String(error) });
+    }
+    openWriting.current = false;
+    if (result.ok) {
+      replaceRow(result.highlight);
+      setOpenWrite(null);
+      toast.show({ tone: 'success', message: t(openToBuyersToastKey(next)) });
+      return;
+    }
+    setOpenWrite(null);
+    toast.show({ tone: 'error', message: t('highlights.errors.generic') });
   };
 
   const removeHighlight = async (): Promise<boolean> => {
@@ -732,6 +782,21 @@ export function HighlightManager({
           pickerFooter={pickerFooter}
           pickerEmpty={pickerEmpty}
           onStepChange={onStepChange}
+          {...(openSectionVisible
+            ? {
+                openToBuyers: {
+                  checked:
+                    openWrite !== null && openWrite.id === current.id
+                      ? openWrite.next
+                      : highlightOpenState(current),
+                  busy: openWrite !== null,
+                  onChange: (next: boolean) => void setOpenToBuyers(next),
+                  label: t('highlights.edit.openToBuyers.label'),
+                  helper: t('highlights.edit.openToBuyers.helper'),
+                  ...(socialOn ? {} : { extra: t('highlights.edit.openToBuyers.socialOff') }),
+                },
+              }
+            : {})}
           labels={{
             title: t('highlights.edit.title'),
             cover: t('highlights.edit.cover'),

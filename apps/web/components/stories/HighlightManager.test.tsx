@@ -18,8 +18,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * the server actions, the toast, the router, the signed-upload hook and `motion/react`.
  */
 
-const { catalog, toast, createHighlight, setCover, loadEdit, upload, readiness } = await vi.hoisted(
-  async () => {
+const { catalog, toast, createHighlight, setCover, setOpen, loadEdit, upload, readiness } =
+  await vi.hoisted(async () => {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const read = (name: string) =>
@@ -29,13 +29,13 @@ const { catalog, toast, createHighlight, setCover, loadEdit, upload, readiness }
       toast: { show: vi.fn(), dismiss: vi.fn() },
       createHighlight: vi.fn(),
       setCover: vi.fn(),
+      setOpen: vi.fn(),
       loadEdit: vi.fn(),
       /** The options the manager handed `useSignedUpload` — the test drives `onCompleted`. */
       upload: { options: null as null | { onCompleted: (asset: unknown) => Promise<void> } },
       readiness: { value: { phase: 'idle' } as { phase: string; issue?: null } },
     };
-  },
-);
+  });
 
 const lookup = (key: string, values?: Record<string, unknown>) => {
   const raw = key
@@ -122,6 +122,7 @@ vi.mock('@/app/(app)/stories/highlight-actions', () => ({
   renameHighlightAction: vi.fn(),
   reorderHighlightsAction: vi.fn(),
   setHighlightCoverAction: setCover,
+  setHighlightOpenToBuyersAction: setOpen,
 }));
 
 vi.mock('@/app/(app)/stories/story-actions', () => ({
@@ -244,6 +245,7 @@ const HIGHLIGHT = {
   cover: null,
   coverChosen: false,
   itemCount: 2,
+  openToBuyers: false,
   editLabel: 'Editar Bastidores',
 };
 const ASSET_ID = '22222222-2222-4222-8222-222222222222';
@@ -439,5 +441,181 @@ describe('HighlightManager — the member creator’s "Adicionar stories" (10-14
     });
     expect(screen.queryByRole('dialog', { name: CONFIRM_TITLE })).toBeNull();
     expect(actions.addStoryToHighlightAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * 11.1-13 (UI-D-886, UI-D-887, D-884): the "Aberto a compradores" switch in the edit sheet and the
+ * neutral "Compradores" mark on the manage list. The catalog is the REAL `stories.json`; the action is
+ * stubbed. The switch persists at once (no Save button), `busy` while the write is in flight, a toast
+ * on success and a revert plus the shipped generic toast on a refusal; it is ABSENT (not disabled)
+ * for a member community, Início and an archived community.
+ */
+describe('HighlightManager — the open-to-buyers switch (UI-D-886) and its mark (UI-D-887)', () => {
+  const COMMUNITY = '44444444-4444-4444-8444-444444444444';
+  const OPEN = { ...HIGHLIGHT, communityId: COMMUNITY, openToBuyers: true };
+  const CLOSED = { ...HIGHLIGHT, communityId: COMMUNITY, openToBuyers: false };
+  const SWITCH_NAME = lookup('highlights.edit.openToBuyers.label');
+
+  type Opts = {
+    communityId?: string | null;
+    archived?: boolean;
+    member?: boolean;
+    socialOn?: boolean;
+    row?: typeof CLOSED;
+    items?: (typeof CLOSED)[];
+    editTarget?: string | null;
+  };
+
+  async function sheet({
+    communityId = COMMUNITY,
+    archived = false,
+    member = false,
+    socialOn,
+    row = CLOSED,
+    items,
+    editTarget,
+  }: Opts = {}) {
+    loadEdit.mockResolvedValue({ ok: true, highlight: row, items: [] });
+    const view = render(
+      <HighlightManager
+        place={{ communityId }}
+        placeLabel="Clube"
+        initialItems={items ?? [row]}
+        archived={archived}
+        editTarget={editTarget === undefined ? row.id : editTarget}
+        publishHref="/stories/publicar"
+        member={member}
+        {...(socialOn === undefined ? {} : { socialOn })}
+      />,
+    );
+    await act(async () => {});
+    return view;
+  }
+
+  const theSwitch = () => screen.getByRole('switch', { name: SWITCH_NAME });
+
+  it('P1. TRACER: the section sits between "Posição" and the stories, off, and turning it on writes once with busy, then stays on with the success toast', async () => {
+    let finish: (value: unknown) => void = () => {};
+    setOpen.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    await sheet();
+
+    const position = screen.getByText(
+      lookup('highlights.edit.position', { position: 1, total: 1 }),
+    );
+    const label = screen.getByText(SWITCH_NAME);
+    const stories = screen.getByText(lookup('highlights.edit.stories'));
+    expect(position.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(label.compareDocumentPosition(stories) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(theSwitch().getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText(lookup('highlights.edit.openToBuyers.helper'))).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(theSwitch());
+    });
+    expect(setOpen).toHaveBeenCalledTimes(1);
+    expect(setOpen).toHaveBeenCalledWith(OPEN.id, true, { communityId: COMMUNITY });
+    expect(theSwitch().getAttribute('aria-busy')).toBe('true');
+
+    // A second tap while the write is in flight is ignored.
+    await act(async () => {
+      fireEvent.click(theSwitch());
+    });
+    expect(setOpen).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finish({ ok: true, highlight: OPEN });
+    });
+    expect(theSwitch().getAttribute('aria-checked')).toBe('true');
+    expect(theSwitch().getAttribute('aria-busy')).toBeNull();
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: lookup('highlights.edit.openToBuyers.toastOn'),
+    });
+  });
+
+  it('P2. turning it off asks nothing, writes false and toasts the closing line', async () => {
+    setOpen.mockResolvedValue({ ok: true, highlight: CLOSED });
+    await sheet({ row: OPEN });
+    expect(theSwitch().getAttribute('aria-checked')).toBe('true');
+
+    await act(async () => {
+      fireEvent.click(theSwitch());
+    });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(setOpen).toHaveBeenCalledWith(OPEN.id, false, { communityId: COMMUNITY });
+    expect(theSwitch().getAttribute('aria-checked')).toBe('false');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: lookup('highlights.edit.openToBuyers.toastOff'),
+    });
+  });
+
+  it.each([
+    ['a refusal', { ok: false, code: 'open_unavailable' }],
+    ['a generic failure', { ok: false, code: 'generic' }],
+  ])('P3. %s reverts the switch and fires the shipped generic toast', async (_name, answer) => {
+    setOpen.mockResolvedValue(answer);
+    await sheet();
+
+    await act(async () => {
+      fireEvent.click(theSwitch());
+    });
+    expect(theSwitch().getAttribute('aria-checked')).toBe('false');
+    expect(theSwitch().getAttribute('aria-busy')).toBeNull();
+    expect(toast.show).toHaveBeenCalledTimes(1);
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: lookup('highlights.errors.generic'),
+    });
+  });
+
+  it('P3b. a write that throws reverts the switch and fires the generic toast', async () => {
+    setOpen.mockRejectedValue(new Error('network'));
+    await sheet();
+    await act(async () => {
+      fireEvent.click(theSwitch());
+    });
+    expect(theSwitch().getAttribute('aria-checked')).toBe('false');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: lookup('highlights.errors.generic'),
+    });
+  });
+
+  it('P4. the section is ABSENT for a member community, Início and an archived community', async () => {
+    const places: Opts[] = [
+      { member: true },
+      { communityId: null, row: { ...CLOSED, communityId: null as never } },
+      { archived: true },
+    ];
+    for (const place of places) {
+      await sheet(place);
+      expect(screen.queryByRole('switch', { name: SWITCH_NAME })).toBeNull();
+      expect(screen.queryByText(SWITCH_NAME)).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('P5. with `social` off one more line shows under the helper; with it on, none', async () => {
+    const off = lookup('highlights.edit.openToBuyers.socialOff');
+    await sheet({ socialOn: false });
+    expect(screen.getByText(off)).toBeTruthy();
+    expect(theSwitch().getAttribute('aria-describedby')?.split(' ')).toContain(
+      screen.getByText(off).id,
+    );
+    cleanup();
+
+    await sheet({ socialOn: true });
+    expect(screen.queryByText(off)).toBeNull();
+    cleanup();
+
+    await sheet();
+    expect(screen.queryByText(off)).toBeNull();
+  });
+
+  it('P6. a highlight with zero stories still shows the switch', async () => {
+    await sheet({ row: { ...CLOSED, itemCount: 0, meta: 'Vazio · só você vê' } });
+    expect(theSwitch()).toBeTruthy();
   });
 });

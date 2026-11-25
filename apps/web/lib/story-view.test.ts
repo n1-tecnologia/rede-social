@@ -530,8 +530,13 @@ describe('05.2-09 — highlightManageRowView and highlightEditStoryView', () => 
       cover: { assetId: '0000000b-1111-4111-8111-111111111111', variantWidths: [640, 1080] },
       coverChosen: false,
       itemCount: 3,
+      openToBuyers: false,
       editLabel: 'Editar destaque Bastidores',
     });
+    // 11.1-13: only the curator read carries the flag; an API that omits it reads as closed.
+    expect(
+      highlightManageRowView(highlight({ itemCount: 3, openToBuyers: true }), t).openToBuyers,
+    ).toBe(true);
     expect(highlightManageRowView(highlight({ itemCount: 1 }), t).meta).toBe('1 story');
     const empty = highlightManageRowView(highlight({ itemCount: 0, coverAssetId: null }), t);
     expect(empty.meta).toBe('Vazio · só você vê');

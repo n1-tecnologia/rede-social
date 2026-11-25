@@ -369,3 +369,89 @@ describe('HighlightEditSheet — the edit sheet (UI-D-74)', () => {
     }
   });
 });
+
+/**
+ * 11.1-13 (UI-D-886, D-884) — the optional "open to buyers" slot: its own section between "Posição" and
+ * "Stories neste destaque", ABSENT (not disabled) when the host passes none, never on the reduced
+ * sheet of an archived place. The package ships no words: label, helper and the extra line are props.
+ */
+describe('HighlightEditSheet — the open-to-buyers slot (UI-D-886)', () => {
+  const slot = (overrides: Partial<NonNullable<HighlightEditSheetProps['openToBuyers']>> = {}) => ({
+    checked: false,
+    busy: false,
+    onChange: () => {},
+    label: 'open-label',
+    helper: 'open-helper',
+    ...overrides,
+  });
+  const theSwitch = () => screen.getByRole('switch', { name: 'open-label' });
+  const follows = (a: HTMLElement, b: HTMLElement) =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it('O1. without the slot no section and no switch are drawn', () => {
+    render(<HighlightEditSheet {...props()} />);
+    expect(screen.queryByText('open-label')).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'open-label' })).toBeNull();
+  });
+
+  it('O2. with the slot the section sits between the position row and the stories list', () => {
+    render(<HighlightEditSheet {...props({ openToBuyers: slot() })} />);
+    const position = screen.getByText('position:2:3');
+    const label = screen.getByText('open-label');
+    const stories = screen.getByText('edit-stories');
+    expect(follows(position, label)).toBe(true);
+    expect(follows(label, stories)).toBe(true);
+    expect(theSwitch()).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('O3. the helper is the switch description; the toggle reports the next value', () => {
+    const onChange = vi.fn();
+    render(<HighlightEditSheet {...props({ openToBuyers: slot({ onChange }) })} />);
+    const helper = screen.getByText('open-helper');
+    expect(theSwitch().getAttribute('aria-describedby')?.split(' ')).toContain(helper.id);
+    fireEvent.click(theSwitch());
+    expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it('O4. busy announces aria-busy and ignores clicks; checked is the on state', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <HighlightEditSheet {...props({ openToBuyers: slot({ onChange, busy: true }) })} />,
+    );
+    expect(theSwitch()).toHaveAttribute('aria-busy', 'true');
+    fireEvent.click(theSwitch());
+    expect(onChange).not.toHaveBeenCalled();
+
+    rerender(
+      <HighlightEditSheet {...props({ openToBuyers: slot({ onChange, checked: true }) })} />,
+    );
+    expect(theSwitch()).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(theSwitch());
+    expect(onChange).toHaveBeenCalledWith(false);
+  });
+
+  it('O5. the extra line shows only when given, and also describes the switch', () => {
+    const { rerender } = render(<HighlightEditSheet {...props({ openToBuyers: slot() })} />);
+    expect(screen.queryByText('open-extra')).toBeNull();
+
+    rerender(<HighlightEditSheet {...props({ openToBuyers: slot({ extra: 'open-extra' }) })} />);
+    const extra = screen.getByText('open-extra');
+    expect(theSwitch().getAttribute('aria-describedby')?.split(' ')).toContain(extra.id);
+  });
+
+  it('O6. an empty highlight still shows the switch; an archived place never does', () => {
+    const { rerender } = render(
+      <HighlightEditSheet {...props({ items: [], openToBuyers: slot() })} />,
+    );
+    expect(theSwitch()).toBeInTheDocument();
+
+    const base = props().highlight;
+    rerender(
+      <HighlightEditSheet
+        {...props({ openToBuyers: slot(), highlight: { ...base, archived: true } })}
+      />,
+    );
+    expect(screen.queryByRole('switch', { name: 'open-label' })).toBeNull();
+    expect(screen.queryByText('open-label')).toBeNull();
+  });
+});

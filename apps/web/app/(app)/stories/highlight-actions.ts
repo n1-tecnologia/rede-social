@@ -390,6 +390,32 @@ export async function setHighlightCoverAction(
 }
 
 /**
+ * "Aberto a compradores" (11.1-13, UI-D-886, D-884): `PATCH { openToBuyers }` — the one field, so the
+ * answer is the curator's row view with the stored flag. The refusal vocabulary is the closed one:
+ * `open_unavailable` (an Início, member-community or archived highlight), a 403 and a transport
+ * failure all land as a closed code the screen turns into the shipped generic toast; nothing here
+ * reads a role, a product or an entitlement.
+ */
+export async function setHighlightOpenToBuyersAction(
+  highlightId: string,
+  openToBuyers: boolean,
+  place: HighlightPlace,
+): Promise<HighlightCurationResult<{ highlight: HighlightManageRowView }>> {
+  const id = z.uuid().safeParse(highlightId);
+  const where = placeSchema.safeParse(place);
+  const patch = updateHighlightSchema.safeParse({ openToBuyers });
+  if (!id.success || !where.success || !patch.success) return { ok: false, code: 'generic' };
+
+  return curate('open_to_buyers', { highlightId: id.data }, where.data, async () => {
+    const [summary, t] = await Promise.all([
+      updateHighlight(id.data, patch.data),
+      getTranslations('stories'),
+    ]);
+    return { highlight: highlightManageRowView(summary, t) };
+  });
+}
+
+/**
  * "Excluir destaque" (UI-D-74, behind its confirm): `DELETE` → 204. A take-down, so an archived
  * community allows it (R-D-F); the stories stay in "Seus stories".
  */

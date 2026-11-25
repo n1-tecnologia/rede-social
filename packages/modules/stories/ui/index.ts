@@ -4,6 +4,7 @@ export {
   type HighlightEditCover,
   type HighlightEditHighlight,
   type HighlightEditItem,
+  type HighlightEditOpenToBuyers,
   HighlightEditSheet,
   type HighlightEditSheetLabels,
   type HighlightEditSheetProps,

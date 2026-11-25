@@ -39,7 +39,7 @@ export default async function CommunityHighlightsPage({
 
   const { communityId } = await params;
   // `requireBootstrap` runs for its session and host guards; the decision is the community's own flags.
-  const [, result] = await Promise.all([requireBootstrap(), loadCommunity(communityId)]);
+  const [bootstrap, result] = await Promise.all([requireBootstrap(), loadCommunity(communityId)]);
   // Not ok covers unknown, foreign, removed, the communities module off, a blocked or departed creator
   // (the API's bare 404, UI-D-717) — and a read failure, which must not render a manage screen for a
   // community nobody could verify.
@@ -60,6 +60,9 @@ export default async function CommunityHighlightsPage({
   if (row.status === 'error') throw new Error('stories.curator_highlights_unavailable');
 
   const archived = community.status !== 'active';
+  // 11.1-13 (UI-D-886): a fact of the bootstrap's module list, never a role. Off adds one line under the
+  // "Aberto a compradores" helper of the edit sheet; the switch itself is edited whatever it is.
+  const socialOn = bootstrap.modules.some((module) => module.key === 'social');
   const items = row.list.items.map((summary) => highlightManageRowView(summary, ts));
   const wanted = z.uuid().safeParse(query.editar);
   const editTarget =
@@ -86,6 +89,7 @@ export default async function CommunityHighlightsPage({
         editTarget={editTarget}
         publishHref={`/stories/publicar?comunidade=${community.id}`}
         member={community.kind === 'member'}
+        socialOn={socialOn}
       />
     </div>
   );
