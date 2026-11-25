@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "11.1"
 current_phase_name: Permissões do comprador por produto numa comunidade
-current_plan: 14
+current_plan: 16
 status: executing
-stopped_at: Completed 11.1-12-PLAN.md (product form permissions; plans 01-12 done, next 14 then 16)
-last_updated: "2026-11-25T14:56:52.275Z"
+stopped_at: Completed 11.1-14-PLAN.md (post card actions; plans 01-12 and 14 done, next 16 then wave 7 plans 13 and 15)
+last_updated: "2026-11-25T15:05:38.195Z"
 last_activity: 2026-11-25
-last_activity_desc: Completed 11.1-12 (product form permissions); next 11.1-14 then 11.1-16
-state_head: 716390ff1ce819eab64ef5773b4dfc55cc4f0e02
+last_activity_desc: Completed 11.1-14 (post card actions); next 11.1-16 then wave 7 plans 13 and 15
+state_head: d5e559b5f0fec85cce7cf5d6ba3a4f1c1de8f133
 progress:
   total_phases: 36
   completed_phases: 0
   total_plans: 537
-  completed_plans: 503
+  completed_plans: 504
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 11.1 (Permissões do comprador por produto numa comunidade) — EXECUTING
-Current Plan: 14
+Current Plan: 16
 Total Plans in Phase: 18
-Plan: 14 of 18
+Plan: 16 of 18
 Status: Ready to execute
-Last activity: 2026-11-25 — Completed 11.1-12 (product form permissions); plans 01-12 done, next 14 then 16
+Last activity: 2026-11-25 — Completed 11.1-14 (post card actions); plans 01-12 and 14 done, next 16 then wave 7 plans 13 and 15
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -406,6 +406,7 @@ Progress: [███████████████████░] 160/162
 | Phase 11.1 P11 | 19 min | 3 tasks | 3 files |
 | Phase 11.1 P01 | wall 16h45m (review wait) | 3 tasks | 3 files |
 | Phase 11.1 P12 | 25 min | 3 tasks | 10 files |
+| Phase 11.1 P14 | 50min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -1215,6 +1216,7 @@ Recent decisions affecting current work:
 - [Phase 11.1]: 11.1-01: sketch 026 (47 frames) approved provisionally by Igor 2026-11-25, every A-UI-1..A-UI-16 default kept; approval keys recorded by the orchestrator on his instruction 'altere voce e continue'; MANIFEST row 026 still pending — D-33/D-417 gate opened for web plans 12-17 (grep ^approved: true passes)
 - [Phase 11.1]: 11.1-12: the permission group holds no state; the form keeps a map of community id to the five flags (existing links from communityPermissions, added links from the defaults, entry dropped on removal) — A re-chosen community restarts from the defaults (A-UI-6) and toProductLinksBody compares against the stored original
 - [Phase 11.1]: 11.1-12: open counts are read on the server pages for every listed community, in chunks of 50, only with stories on and stories.story.manage held; one failed chunk makes the whole answer null — A community chosen later in the picker already has its count; a partial map would draw a helper for some communities for no visible reason (A-UI-5)
+- [Phase 11.1]: 11.1-14: the per-post fact for the post card rides on PostCardView.actions set by postCardBase (not a FeedList function: list pages cross the server boundary as data); all-false card reuses the row-less meta and keeps the comment count a button; focus on a vanished control goes to the next remaining control, else previous, else the card
 
 ### Pending Todos
 
@@ -1360,6 +1362,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-25T14:56:51.901Z
-Stopped at: Completed 11.1-12-PLAN.md (plans 01-12 done, next 14 then 16)
+Last session: 2026-11-25T15:05:37.836Z
+Stopped at: Completed 11.1-14-PLAN.md (post card actions; plans 01-12 and 14 done, next 16 then wave 7 plans 13 and 15)
 Resume file: None
