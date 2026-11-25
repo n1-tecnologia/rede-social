@@ -32,7 +32,7 @@ begin;
 --
 -- Fixture ids use the `24100000-…` prefix and the tenants `pgtap-bperm-a` / `pgtap-bperm-b`. Like its siblings, this
 -- file ROLLS BACK.
-select plan(156);
+select plan(207);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-bperm-a', 'Permissoes A', '24100000-0000-4000-8000-000000000001');
@@ -1029,6 +1029,224 @@ select lives_ok(
      values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f2', '24100000-0000-4000-8000-000000001462', '24100000-0000-4000-8000-000000000002') $$,
   '14: staff still insert an item into a closed highlight');
 reset role;
+
+-- ── 15. the item delete gate (11.1-04, D-884, D-885, D-887, D-895; BPERM-02, BPERM-12) ─────────────
+-- State left by section 14: hOpen holds 1451 (BS1), 1452 (BS1), 1453 (BS1), 1455 (BS1) and 1461 (BS2); hOpen2 holds 1451;
+-- hMem holds 1454; hClosed holds 1462 (saved by staff). A refused delete is a USING filter: it raises nothing and matches
+-- zero rows, so each refusal is asserted by the row staying (read back as the migration role).
+-- another buyer's item stays
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001402');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001451' $$,
+  '15: D-885: a buyer deleting ANOTHER buyer''s item raises nothing…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001451'), 1,
+  '15: …and the item stays');
+-- the highlight closed after the save: the item stays, and a staff delete removes it
+update public.story_highlights set open_to_buyers = false where id = '24100000-0000-4000-8000-0000000014f1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001453' $$,
+  '15: D-887: a highlight closed after the save: the buyer''s delete raises nothing…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001453'), 1,
+  '15: …and the item stays in the closed highlight');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001453' $$,
+  '15: …and a staff delete removes it');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001453'), 0,
+  '15: …(the row is gone)');
+update public.story_highlights set open_to_buyers = true where id = '24100000-0000-4000-8000-0000000014f1';
+-- the link flag turned off
+update public.store_product_communities set can_story = false where product_id = '24100000-0000-4000-8000-0000000014a1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001455' $$,
+  '15: D-895: the link flipped to can_story = false: the buyer''s delete raises nothing…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001455'), 1,
+  '15: …and the item stays (only an administrator removes it)');
+update public.store_product_communities set can_story = true where product_id = '24100000-0000-4000-8000-0000000014a1';
+-- the entitlement revoked (a refund): the item stays, the story is still the author's to soft-delete (D-887)
+update public.store_entitlements set status = 'revoked', revoked_at = now() where id = '24100000-0000-4000-8000-0000000014e1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001452' $$,
+  '15: D-895: the entitlement revoked: the buyer''s delete raises nothing…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001452'), 1,
+  '15: …and the item stays');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ update public.stories set deleted_at = now() where id = '24100000-0000-4000-8000-000000001452' $$,
+  '15: D-887: …yet the author can still soft-delete the story itself');
+reset role;
+select ok((select deleted_at is not null from public.stories where id = '24100000-0000-4000-8000-000000001452'),
+  '15: …and the story reads deleted');
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001452'), 1,
+  '15: …while its item is untouched (nothing is hidden automatically)');
+update public.store_entitlements set status = 'active', revoked_at = null where id = '24100000-0000-4000-8000-0000000014e1';
+-- the community archived
+update public.communities set status = 'archived' where id = '24100000-0000-4000-8000-0000000014c1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001455' $$,
+  '15: an archived community: the buyer''s delete raises nothing…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001455'), 1,
+  '15: …and the item stays');
+update public.communities set status = 'active' where id = '24100000-0000-4000-8000-0000000014c1';
+-- the buyer's own item goes, another buyer's does not (the positive controls)
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001461' $$,
+  '15: a buyer deleting the item of BS2''s story from an open highlight raises nothing…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001461'), 1,
+  '15: …and it stays (D-885: only the author''s own item)');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001455' $$,
+  '15: with the grant, an open highlight and an active community the buyer deletes their own item…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001455'), 0,
+  '15: …and it is gone (the control)');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001402');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001461' $$,
+  '15: …and its author, also a buyer, deletes theirs');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001461'), 0,
+  '15: …(gone)');
+-- the creator's own path (a member community) is unchanged
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f3' and story_id = '24100000-0000-4000-8000-000000001454' $$,
+  '15: the creator of a member community still removes their own item as before');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f3' and story_id = '24100000-0000-4000-8000-000000001454'), 0,
+  '15: …(gone)');
+-- staff delete any item, in an open and in a closed highlight
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select lives_ok(
+  $$ delete from public.story_highlight_items where story_id in ('24100000-0000-4000-8000-000000001451', '24100000-0000-4000-8000-000000001462') $$,
+  '15: staff delete any item (a buyer''s in two highlights, and one in a closed highlight)');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where story_id in ('24100000-0000-4000-8000-000000001451', '24100000-0000-4000-8000-000000001462')), 0,
+  '15: …(gone)');
+
+-- ── 16. the highlight level stays creator-only (11.1-04, D-884; T-11.1-14) ───────────────────────
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select throws_ok(
+  $$ insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014c1', 'do comprador', 9, '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '16: a buyer cannot create a highlight in an organization community (42501)');
+select throws_ok(
+  $$ insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id, open_to_buyers)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014c1', 'aberto pelo comprador', 9, '24100000-0000-4000-8000-000000001401', true) $$,
+  '42501', null, '16: …nor one that is already open (42501)');
+select lives_ok(
+  $$ update public.story_highlights set title = 'renomeado', position = 9, open_to_buyers = false, cover_story_id = '24100000-0000-4000-8000-000000001457'
+      where id = '24100000-0000-4000-8000-0000000014f1' $$,
+  '16: a buyer renaming, reordering, re-covering and closing an open highlight raises nothing…');
+select lives_ok(
+  $$ delete from public.story_highlights where id = '24100000-0000-4000-8000-0000000014f1' $$,
+  '16: …nor does deleting it…');
+reset role;
+select results_eq(
+  $$ select title, position, open_to_buyers, cover_story_id from public.story_highlights where id = '24100000-0000-4000-8000-0000000014f1' $$,
+  $$ values ('H aberto'::text, 1, true, null::uuid) $$,
+  '16: …and the highlight is untouched: same title, position, open flag and no cover, still there');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ update public.story_highlight_items set added_at = '2000-01-01' where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001452' $$,
+  '16: a member updating an item raises nothing…');
+reset role;
+select ok((select added_at > now() - interval '1 day' from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001452'),
+  '16: …and the item is untouched (a member never updates an item)');
+-- the positive controls: staff create, update and delete a highlight and update an item
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select lives_ok(
+  $$ insert into public.story_highlights (id, tenant_id, community_id, title, position, created_by_user_id)
+     values ('24100000-0000-4000-8000-0000000014fa', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014c1', 'da equipe', 9, '24100000-0000-4000-8000-000000000002') $$,
+  '16: staff create a highlight in the same community (the control)');
+select lives_ok(
+  $$ update public.story_highlights set title = 'renomeado pela equipe', open_to_buyers = false where id = '24100000-0000-4000-8000-0000000014f1' $$,
+  '16: …rename and close an open one…');
+select lives_ok(
+  $$ delete from public.story_highlights where id = '24100000-0000-4000-8000-0000000014fa' $$,
+  '16: …and delete one');
+select lives_ok(
+  $$ update public.story_highlight_items set added_at = '2000-01-01' where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001452' $$,
+  '16: …and update an item');
+reset role;
+select results_eq(
+  $$ select title, open_to_buyers from public.story_highlights where id = '24100000-0000-4000-8000-0000000014f1' $$,
+  $$ values ('renomeado pela equipe'::text, false) $$,
+  '16: …and the staff update took effect');
+select is((select count(*)::int from public.story_highlights where id = '24100000-0000-4000-8000-0000000014fa'), 0,
+  '16: …and the staff delete too');
+update public.story_highlights set title = 'H aberto', open_to_buyers = true where id = '24100000-0000-4000-8000-0000000014f1';
+
+-- ── 17. cross-tenant (11.1-04, BPERM-25; T-11.1-16) ──────────────────────────────────────────────
+-- BS1 is a member of A and of B. In B the link of PBS carries story = false; the A link grants nothing there.
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000014f8', '24100000-0000-4000-8000-000000001481', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '17: BPERM-25: the same user holds no story grant in B through tenant A''s link (42501)');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001481', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '17: …tenant B''s lane cannot save into tenant A''s open highlight (42501)');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001451', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '17: …nor forge tenant A''s id on the row (42501)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f8', '24100000-0000-4000-8000-000000001451', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '17: tenant B''s open highlight grants nothing to tenant A''s buyer (42501)');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000014f8', '24100000-0000-4000-8000-000000001481', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '17: …and a row stamped with tenant B''s id from tenant A''s lane is refused (42501)');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001457', '24100000-0000-4000-8000-000000001401') $$,
+  '17: the same buyer in tenant A, with the grant, saves into tenant A''s open highlight (the control)');
+reset role;
+-- B's link turned on: B's own buyer path works, and tenant A's lane cannot remove it; tenant B's lane cannot remove A's item
+update public.store_product_communities set can_story = true where product_id = '24100000-0000-4000-8000-0000000014a3';
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000014f8', '24100000-0000-4000-8000-000000001481', '24100000-0000-4000-8000-000000001401') $$,
+  '17: with B''s own link on, the buyer saves into B''s open highlight (the control)');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001457' $$,
+  '17: tenant B''s lane deleting tenant A''s item raises nothing…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f1' and story_id = '24100000-0000-4000-8000-000000001457'), 1,
+  '17: …and A''s item stays');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f8' and story_id = '24100000-0000-4000-8000-000000001481' $$,
+  '17: tenant A''s lane deleting tenant B''s item raises nothing…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f8' and story_id = '24100000-0000-4000-8000-000000001481'), 1,
+  '17: …and B''s item stays');
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ delete from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f8' and story_id = '24100000-0000-4000-8000-000000001481' $$,
+  '17: …while B''s own buyer removes it (the control)');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f8' and story_id = '24100000-0000-4000-8000-000000001481'), 0,
+  '17: …(gone)');
 
 select * from finish();
 rollback;

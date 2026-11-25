@@ -446,7 +446,7 @@ export const storyHighlightItems = pgTable(
       as: 'restrictive',
       for: 'delete',
       to: authenticatedRole,
-      using: sql`app.tenant_role() <> 'member' or (app.tenant_role() = 'member' and ${ITEM_OWNER})`,
+      using: sql`app.tenant_role() <> 'member' or (app.tenant_role() = 'member' and (${ITEM_OWNER} or (${ITEM_BUYER_OPEN} and ${ITEM_STORY_AUTHOR})))`,
     }),
   ],
 ).enableRLS();
