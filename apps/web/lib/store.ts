@@ -513,7 +513,9 @@ export async function createProduct(input: ProductInput): Promise<ProductWriteOu
  * `PATCH /v1/store/products/{productId}` (08.2-05, D-363): ONLY the keys the admin changed. The
  * patch contract has no defaults, so an omitted key leaves its column alone (a price-only patch
  * never wipes the description, the image or the links). `communityIds`, when present, REPLACES the
- * product's whole link set: the product form is the only link writer.
+ * product's whole link set: the product form is the only link writer. 11.1-12 (D-891): `communityLinks`
+ * (one entry per community with its five buyer flags) is the same replace carrying the flags; the
+ * contract accepts one of the two keys, and both travel as the body is parsed, never rebuilt here.
  */
 export async function updateProduct(
   productId: string,

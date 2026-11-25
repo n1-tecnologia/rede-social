@@ -1628,3 +1628,130 @@ describe('ProductForm — the category field (12.3-14, D-694, UI-D-689)', () => 
     expect(document.querySelector('[data-product-category="longa"]')?.textContent).toContain(long);
   });
 });
+
+/**
+ * 11.1-12 (UI-D-883, UI-D-884, UI-D-885, D-363, D-890, D-891): the buyer-permission group under each
+ * chosen community, saved in the same request as the links.
+ */
+describe('ProductForm — the permission group (11.1-12, UI-D-883, D-890, D-891)', () => {
+  /** Opens the picker, includes the community and closes it with Concluir. */
+  function choose(name: string) {
+    fireEvent.click(screen.getByRole('button', { name: /^(Escolher|Alterar) comunidades$/ }));
+    fireEvent.click(screen.getByRole('button', { name: `${name}, não incluída` }));
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+  }
+
+  const group = (id: string) =>
+    document.querySelector(`[data-product-community="${id}"] fieldset`) as HTMLFieldSetElement;
+  const box = (id: string, label: string) =>
+    Array.from(group(id).querySelectorAll<HTMLInputElement>('label'))
+      .find((row) => row.textContent === label)
+      ?.querySelector('input') as HTMLInputElement;
+
+  async function saveForm() {
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+  }
+
+  it('T1. one chosen community shows the legend and the five boxes, the first three ticked; ticking Postar na comunidade saves communityLinks the real contract accepts', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate();
+    fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
+    typePrice('19,90');
+    choose('Mentoria ao vivo');
+
+    expect(group(C1).querySelector('legend')?.textContent).toBe(
+      'Quem comprar pode: em Mentoria ao vivo',
+    );
+    expect(Array.from(group(C1).querySelectorAll('label')).map((row) => row.textContent)).toEqual([
+      'Curtir',
+      'Comentar',
+      'Compartilhar',
+      'Postar na comunidade',
+      'Postar story',
+    ]);
+    expect(
+      Array.from(group(C1).querySelectorAll<HTMLInputElement>('input')).map((i) => i.checked),
+    ).toEqual([true, true, true, false, false]);
+
+    fireEvent.click(box(C1, 'Postar na comunidade'));
+    await saveForm();
+
+    const sent = create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(sent).not.toHaveProperty('communityIds');
+    expect(sent.communityLinks).toEqual([
+      { communityId: C1, like: true, comment: true, share: true, post: true, story: false },
+    ]);
+    const { productInputSchema } = await import('@rede-social/module-store/contracts');
+    expect(productInputSchema.safeParse(sent).success).toBe(true);
+  });
+
+  it('T2. compat: no tick changed sends communityIds as the shipped form did, and a price-only edit sends neither field', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    update.mockResolvedValue({ ok: true, productId: P });
+
+    const first = renderCreate();
+    fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
+    typePrice('19,90');
+    choose('Bastidores da mentoria');
+    await saveForm();
+    const sent = create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(sent.communityIds).toEqual([C2]);
+    expect(sent).not.toHaveProperty('communityLinks');
+    first.unmount();
+
+    renderEdit();
+    typePrice('29,90');
+    await saveForm();
+    expect(update).toHaveBeenCalledWith(P, { priceCents: 2990 });
+  });
+
+  it('T3. a stored non-default link opens with its stored values, and a flags-only edit sends communityLinks with all five booleans', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({
+      communityPermissions: [
+        { communityId: C1, like: false, comment: true, share: true, post: true, story: false },
+      ],
+    });
+
+    expect(
+      Array.from(group(C1).querySelectorAll<HTMLInputElement>('input')).map((i) => i.checked),
+    ).toEqual([false, true, true, true, false]);
+    // Untouched: a clean form is not submittable.
+    expect(submitButton().disabled).toBe(true);
+
+    fireEvent.click(box(C1, 'Postar story'));
+    expect(submitButton().disabled).toBe(false);
+    await saveForm();
+
+    expect(update).toHaveBeenCalledWith(P, {
+      communityLinks: [
+        { communityId: C1, like: false, comment: true, share: true, post: true, story: true },
+      ],
+    });
+  });
+
+  it('T4. ticking a stored non-default link back to the defaults is sent, never lost (T-11.1-48)', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({
+      communityPermissions: [
+        { communityId: C1, like: true, comment: true, share: true, post: true, story: false },
+      ],
+    });
+
+    fireEvent.click(box(C1, 'Postar na comunidade'));
+    await saveForm();
+    expect(update).toHaveBeenCalledWith(P, {
+      communityLinks: [
+        { communityId: C1, like: true, comment: true, share: true, post: false, story: false },
+      ],
+    });
+  });
+
+  it('T5. no community chosen draws no group and keeps the shipped none line', () => {
+    renderCreate();
+    expect(document.querySelector('fieldset')).toBeNull();
+    expect(screen.getByText(/^Nenhuma comunidade\./)).toBeTruthy();
+  });
+});

@@ -11,6 +11,7 @@ import {
   PAYMENTS_MAX_PRODUCT_ID,
 } from '@rede-social/module-payments/contracts';
 import {
+  type ProductCommunityPermission,
   type ProductInput,
   type ProductPatch,
   STORE_MAX_DESCRIPTION,
@@ -50,6 +51,15 @@ import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
 import { STORE_MANAGE_PATH } from '@/lib/store-area';
 import { guessStoreCategory } from '@/lib/store-categories';
 import {
+  type BuyerPermissions,
+  defaultPermissions,
+  originalLinks,
+  type PermissionLink,
+  linksChanged as permissionLinksChanged,
+  permissionsForLink,
+  toProductLinksBody,
+} from '@/lib/store-permissions';
+import {
   type LockWarningView,
   lockWarningView,
   type ProductFormCommunity,
@@ -61,6 +71,7 @@ import {
   priceInputText,
   type StoreTranslator,
 } from '@/lib/store-view';
+import { ProductCommunityPermissions } from './ProductCommunityPermissions';
 import { savePaymentMappingAction } from './payment-actions';
 import {
   createProductAction,
@@ -161,6 +172,12 @@ export interface ProductFormProps {
   categories?: readonly { id: string; name: string }[];
   /** Edit mode: the product's category slug now (`null` = none). A create starts from its name's guess. */
   initialCategory?: string | null;
+  /**
+   * 11.1-12 (D-891): the buyer flags the product STORES, from the manager read's `communityPermissions`
+   * (only the links that differ from the defaults are listed; absent means every link has the defaults).
+   * A create has none.
+   */
+  communityPermissions?: readonly ProductCommunityPermission[];
 }
 
 /**
@@ -244,6 +261,7 @@ export function ProductForm({
   payment = null,
   categories = [],
   initialCategory = null,
+  communityPermissions,
 }: ProductFormProps) {
   const t = useTranslations('store');
   /** Full-key translator for the shared `lib/store-view` builders (`store.lockWarning.…`). */
@@ -261,6 +279,17 @@ export function ProductForm({
   const [imageAssetId, setImageAssetId] = useState<string | null>(start.imageAssetId);
   const [imageWidths, setImageWidths] = useState<readonly number[]>(PURPOSE_WIDTHS.cover);
   const [selected, setSelected] = useState<string[]>(() => start.communities.map((c) => c.id));
+  /**
+   * 11.1-12 (D-890, A-UI-6): the five flags of every chosen community, keyed by community id. A link
+   * that exists starts from its stored values (absent means the defaults); a community added here
+   * starts from the defaults; removing one drops its entry, so choosing it again restarts from the
+   * defaults.
+   */
+  const [permissions, setPermissions] = useState<Record<string, BuyerPermissions>>(() =>
+    Object.fromEntries(
+      start.communities.map((c) => [c.id, permissionsForLink(communityPermissions, c.id)]),
+    ),
+  );
   const [selectedCourses, setSelectedCourses] = useState<string[]>(() =>
     start.courses.map((course) => course.id),
   );
@@ -387,7 +416,13 @@ export function ProductForm({
         : undefined);
 
   const startIds = start.communities.map((community) => community.id);
-  const linksChanged = communities !== null && !sameSet(selected, startIds);
+  /** What the product stores per link (11.1-12): the base the body mapping and the dirty check compare with. */
+  const original = originalLinks(startIds, communityPermissions);
+  const selectedLinks: PermissionLink[] = selected.map((id) => ({
+    communityId: id,
+    ...(permissions[id] ?? defaultPermissions()),
+  }));
+  const linksChanged = communities !== null && permissionLinksChanged(selectedLinks, original);
   const coursesChanged = courses !== null && !sameSet(selectedCourses, startCourseIds);
   const livesChanged = lives !== null && !sameSet(selectedLives, startLiveIds);
   const priceChanged = price.kind !== 'ok' || price.cents !== start.priceCents;
@@ -430,7 +465,7 @@ export function ProductForm({
         description,
         priceCents: cents,
         imageAssetId,
-        ...(communities !== null ? { communityIds: selected } : {}),
+        ...(communities !== null ? toProductLinksBody(selectedLinks, original) : {}),
         ...(courses !== null ? { courseIds: selectedCourses } : {}),
         ...(lives !== null ? { liveIds: selectedLives } : {}),
         // A store with no category hides the field: nothing is sent and the server guesses (D-694).
@@ -442,7 +477,7 @@ export function ProductForm({
     if (description !== start.description) patch.description = description;
     if (cents !== start.priceCents) patch.priceCents = cents;
     if (imageAssetId !== start.imageAssetId) patch.imageAssetId = imageAssetId;
-    if (linksChanged) patch.communityIds = selected;
+    if (linksChanged) Object.assign(patch, toProductLinksBody(selectedLinks, original));
     if (coursesChanged) patch.courseIds = selectedCourses;
     if (livesChanged) patch.liveIds = selectedLives;
     if (categoryChanged) patch.category = categoryWire;
@@ -667,6 +702,13 @@ export function ProductForm({
 
   const toggle = (id: string) => {
     setSelected((current) => toggled(current, id));
+    setPermissions((current) => {
+      if (id in current) {
+        const { [id]: _dropped, ...rest } = current;
+        return rest;
+      }
+      return { ...current, [id]: defaultPermissions() };
+    });
   };
 
   const toggleCourse = (id: string) => {
@@ -1037,24 +1079,34 @@ export function ProductForm({
               {t('form.communities.label')}
             </span>
             {selectedRows.length > 0 ? (
-              <ul className="flex flex-col">
+              <ul className="flex flex-col gap-4">
                 {selectedRows.map((row) => (
                   <li
                     key={row.id}
                     data-product-community={row.id}
-                    className="flex min-h-11 items-center gap-3"
+                    className="flex flex-col gap-2 border-b border-divider pb-4 last:border-b-0 last:pb-0"
                   >
-                    <CommunityThumb community={row} />
-                    <span className="min-w-0 flex-1 truncate text-sm font-bold text-text">
-                      {row.name}
-                    </span>
-                    <IconButton
-                      icon={X}
-                      size={18}
-                      className="shrink-0 text-text-tertiary"
-                      label={t('form.communities.remove', { community: row.name })}
+                    <div className="flex min-h-11 items-center gap-3">
+                      <CommunityThumb community={row} />
+                      <span className="min-w-0 flex-1 truncate text-sm font-bold text-text">
+                        {row.name}
+                      </span>
+                      <IconButton
+                        icon={X}
+                        size={18}
+                        className="shrink-0 text-text-tertiary"
+                        label={t('form.communities.remove', { community: row.name })}
+                        disabled={pending}
+                        onClick={() => toggle(row.id)}
+                      />
+                    </div>
+                    <ProductCommunityPermissions
+                      community={row}
+                      value={permissions[row.id] ?? defaultPermissions()}
                       disabled={pending}
-                      onClick={() => toggle(row.id)}
+                      onChange={(next) =>
+                        setPermissions((current) => ({ ...current, [row.id]: next }))
+                      }
                     />
                   </li>
                 ))}
