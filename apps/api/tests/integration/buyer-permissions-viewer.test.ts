@@ -529,3 +529,54 @@ describe('11.1-07 matrix: two products, social off, the open highlight, revoke, 
     await clearHighlights();
   });
 });
+
+/** The community module's own tables, the pattern `feed-query-budget.test.ts` counts the community list with. */
+const COMMUNITY_TABLES_PATTERN = 'communit(ies|y_members)';
+
+describe('11.1-07 budget: the buyer column adds no statement to the community list or detail', () => {
+  /** Statements that touch the community tables while ONE request is served, counted by `pg_stat_statements`. */
+  async function statementsOf(path: string, token: string): Promise<number> {
+    await adminSql`select pg_stat_statements_reset()`;
+    const res = await request(path, token);
+    expect(res.status, await res.clone().text()).toBe(200);
+    const [measured] = await adminSql<{ calls: number }[]>`
+      select coalesce(sum(calls), 0)::int as calls
+        from pg_stat_statements
+       where query ~ ${COMMUNITY_TABLES_PATTERN}`;
+    return measured?.calls ?? 0;
+  }
+
+  it('i. T-11.1-26: a buyer, a staff viewer and a member with no entitlement cost the same number of community statements, on the list and on the detail', async () => {
+    await setFlags(fx.productA, fx.main, {
+      like: true,
+      comment: true,
+      share: true,
+      post: true,
+      story: true,
+    });
+    await setFlags(fx.productB, fx.main, { like: true, comment: true, share: true });
+    // positive control: the buyer really reads a buyer entry in this request (the column is evaluated, not skipped)
+    expect((await detailActions(tokens.buyer, fx.main)).post).toBe(true);
+    const list = '/v1/communities?limit=25';
+    const detail = `/v1/communities/${fx.main}`;
+    const listCalls = {
+      buyer: await statementsOf(list, tokens.buyer),
+      staff: await statementsOf(list, tokens.admin),
+      plain: await statementsOf(list, tokens.reader),
+    };
+    const detailCalls = {
+      buyer: await statementsOf(detail, tokens.buyer),
+      staff: await statementsOf(detail, tokens.admin),
+      plain: await statementsOf(detail, tokens.reader),
+    };
+    // bidirectional: a zero would mean the pattern matched nothing, not that the page got cheaper
+    expect(listCalls.buyer).toBeGreaterThan(0);
+    expect(detailCalls.buyer).toBeGreaterThan(0);
+    expect(listCalls.buyer).toBe(listCalls.staff);
+    expect(listCalls.buyer).toBe(listCalls.plain);
+    expect(detailCalls.buyer).toBe(detailCalls.staff);
+    expect(detailCalls.buyer).toBe(detailCalls.plain);
+    // and the list is the one statement the 05-01 budget holds it to
+    expect(listCalls.buyer).toBeLessThanOrEqual(1);
+  });
+});
