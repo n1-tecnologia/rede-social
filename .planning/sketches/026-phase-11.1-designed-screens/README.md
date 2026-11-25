@@ -51,11 +51,11 @@ screens:
   - matriz-estados-comprador
   - leitor-de-tela-fase-11-1
   - defaults-a-confirmar-fase-11-1
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: Igor (recorded by Claude on Igor's instruction)
+approved_at: 2026-11-25
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-11.1, design-review, D-417, UI-04, buyer-permissions, store, highlights]
