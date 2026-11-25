@@ -9,6 +9,7 @@ import {
   removeIdentitiesByPrefix,
   SEED_PASSWORD,
   signInAs,
+  withModuleEnabled,
   withStoreEnabled,
 } from './setup';
 
@@ -345,5 +346,206 @@ describe('11.1-06 update path: a changed flag, communityIds alone, archived link
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { items: unknown[] }).items).toEqual([]);
+  });
+});
+
+describe('11.1-06 authorization, isolation and member payloads (BPERM-25, D-888, D-363)', () => {
+  const fx = {
+    own: '',
+    other: '',
+    archived: '',
+    removed: '',
+    labCommunity: '',
+    product: '',
+    nonDefault: '',
+  };
+  let restoreLab: () => Promise<void> = async () => {};
+  let restoreLabCommunities: () => Promise<void> = async () => {};
+
+  beforeAll(async () => {
+    restoreLab = await withStoreEnabled('lab');
+    restoreLabCommunities = await withModuleEnabled('lab', 'communities');
+    fx.own = await createCommunity('aut-a');
+    fx.other = await createCommunity('aut-b');
+    fx.archived = await createCommunity('aut-arq');
+    fx.removed = await createCommunity('aut-rem');
+    await adminSql`update public.communities set status = 'archived' where id = ${fx.archived}::uuid`;
+    await adminSql`update public.communities set deleted_at = now() where id = ${fx.removed}::uuid`;
+    fx.labCommunity = await createCommunity('aut-lab', HOSTS.lab, tokens.labAdmin);
+    const product = await createProduct('autoriza', {
+      communityLinks: [link(fx.own, { post: true, story: true, share: false })],
+    });
+    fx.product = product.id;
+  });
+
+  afterAll(async () => {
+    await restoreLabCommunities();
+    await restoreLab();
+  });
+
+  it('T-11.1-20: a member and a support user are refused 403 on create and patch with communityLinks, beside a manager that succeeds', async () => {
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      const created = await post('/v1/store/products', token, {
+        name: `${PREFIX} recusado`,
+        priceCents: 100,
+        communityLinks: [link(fx.own, { post: true })],
+      });
+      expect(created.status).toBe(403);
+      const patched = await patch(fx.product, { communityLinks: [link(fx.own)] }, token);
+      expect(patched.status).toBe(403);
+    }
+    // nothing was written by the refusals
+    expect(
+      await adminSql`select 1 from public.store_products where name = ${`${PREFIX} recusado`}`,
+    ).toHaveLength(0);
+    expect((await linkRows(fx.product))[0]).toMatchObject({ can_post: true, can_story: true });
+    // positive control: the manager succeeds with the very same body
+    const ok = await patch(fx.product, {
+      communityLinks: [link(fx.own, { post: true, story: true, share: false })],
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it('T-11.1-20: neither a member nor a support user receives communityPermissions from the product read', async () => {
+    for (const token of [tokens.demoMember, tokens.demoSupport, tokens.buyer]) {
+      const res = await request(`/v1/store/products/${fx.product}`, token);
+      expect(res.status).toBe(200);
+      expect(await res.json()).not.toHaveProperty('communityPermissions');
+    }
+    // control: the manager does receive it for the same product
+    expect((await managerRead(fx.product)).communityPermissions).toEqual([
+      { communityId: fx.own, ...DEFAULTS, post: true, story: true, share: false },
+    ]);
+  });
+
+  it('T-11.1-21: an archived and a soft-deleted community in communityLinks are refused like in communityIds; an active one is accepted', async () => {
+    for (const community of [fx.archived, fx.removed]) {
+      const links = await patch(fx.product, { communityLinks: [link(community)] });
+      expect(links.status).toBe(400);
+      expect(((await links.json()) as Envelope).error.details).toEqual({
+        store: 'community_invalid',
+      });
+      const ids = await patch(fx.product, { communityIds: [community] });
+      expect(ids.status).toBe(400);
+      expect(((await ids.json()) as Envelope).error.details).toEqual({
+        store: 'community_invalid',
+      });
+      const created = await post('/v1/store/products', tokens.demoAdmin, {
+        name: `${PREFIX} invalida`,
+        priceCents: 100,
+        communityLinks: [link(community)],
+      });
+      expect(created.status).toBe(400);
+    }
+    expect(
+      await adminSql`select 1 from public.store_products where name = ${`${PREFIX} invalida`}`,
+    ).toHaveLength(0);
+    // nothing changed on the product
+    expect((await linkRows(fx.product)).map((row) => row.community_id)).toEqual([fx.own]);
+    const ok = await patch(fx.product, {
+      communityLinks: [link(fx.own, { post: true, story: true, share: false })],
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it('T-11.1-21 / BPERM-25: the other tenant never reaches this one: a lab manager cannot patch the demo product, and a demo community id inside lab communityLinks is community_invalid', async () => {
+    const before = await linkRows(fx.product);
+    const foreign = await patch(
+      fx.product,
+      { communityLinks: [link(fx.labCommunity, { post: true })] },
+      tokens.labAdmin,
+      HOSTS.lab,
+    );
+    expect(foreign.status).toBe(404);
+    const foreignBody = (await foreign.json()) as Envelope;
+    expect(foreignBody.error.code).toBe('NOT_FOUND');
+    expect(foreignBody.error).not.toHaveProperty('details');
+    expect(await linkRows(fx.product)).toEqual(before);
+
+    // a lab product whose links name a DEMO community: the same bare refusal as an unknown id
+    const labProduct = await post(
+      '/v1/store/products',
+      tokens.labAdmin,
+      {
+        name: `${PREFIX} lab-produto`,
+        priceCents: 100,
+        communityLinks: [link(fx.own, { post: true })],
+      },
+      HOSTS.lab,
+    );
+    expect(labProduct.status).toBe(400);
+    expect(((await labProduct.json()) as Envelope).error.details).toEqual({
+      store: 'community_invalid',
+    });
+    // positive control: the same lab manager links the lab's own community with a flag
+    const labOk = await post(
+      '/v1/store/products',
+      tokens.labAdmin,
+      {
+        name: `${PREFIX} lab-produto`,
+        priceCents: 100,
+        communityLinks: [link(fx.labCommunity, { post: true })],
+      },
+      HOSTS.lab,
+    );
+    expect(labOk.status, await labOk.clone().text()).toBe(201);
+    const labDetail = (await labOk.json()) as ProductDetail;
+    expect(labDetail.communityPermissions).toEqual([
+      { communityId: fx.labCommunity, ...DEFAULTS, post: true },
+    ]);
+    // and the demo product's links were never involved
+    expect(await linkRows(fx.product)).toEqual(before);
+  });
+
+  it('T-11.1-22 / D-888: the purchase answer, the member list and the member detail carry no communityPermissions, no can_* key and no flag key', async () => {
+    const forbidden = new RegExp(
+      `"(communityPermissions|${FLAG_KEYS.join('|')}|like|comment|share|post|story)"\\s*:`,
+    );
+    const bought = await post(`/v1/store/products/${fx.product}/purchase`, tokens.buyer, {
+      expectedAmountCents: 1990,
+    });
+    expect(bought.status, await bought.clone().text()).toBe(200);
+    const purchaseBody = await bought.text();
+    expect(purchaseBody).not.toMatch(forbidden);
+
+    const bodies: string[] = [purchaseBody];
+    for (const token of [tokens.buyer, tokens.demoMember]) {
+      for (const path of [`/v1/store/products/${fx.product}`, '/v1/store/products?limit=50']) {
+        const res = await request(path, token);
+        expect(res.status).toBe(200);
+        bodies.push(await res.text());
+      }
+    }
+    // the list really carries the product (so the absence above is not an empty-list artefact)
+    expect(bodies.some((body) => body.includes(fx.product))).toBe(true);
+    for (const body of bodies) expect(body).not.toMatch(forbidden);
+    // control: the manager's body for the same product does name the flags
+    const managerBody = await (
+      await request(`/v1/store/products/${fx.product}`, tokens.demoAdmin)
+    ).text();
+    expect(managerBody).toMatch(forbidden);
+  });
+
+  it('D-363: two sequential saves with different sets leave the last set (last writer wins), flags included', async () => {
+    const first = await patch(fx.product, {
+      communityLinks: [link(fx.own), link(fx.other, { post: true })],
+    });
+    expect(first.status).toBe(200);
+    expect((await linkRows(fx.product)).map((row) => row.community_id).sort()).toEqual(
+      [fx.own, fx.other].sort(),
+    );
+    const second = await patch(fx.product, { communityLinks: [link(fx.other, { story: true })] });
+    expect(second.status).toBe(200);
+    const rows = await linkRows(fx.product);
+    expect(rows).toEqual([
+      {
+        community_id: fx.other,
+        can_like: true,
+        can_comment: true,
+        can_share: true,
+        can_post: false,
+        can_story: true,
+      },
+    ]);
   });
 });
