@@ -464,9 +464,9 @@ describe('postCardView carries the per-post fact (11.1-14)', () => {
     expect(view.actions).toEqual({ like: true, comment: false, share: true });
   });
 
-  it('share false is carried and nothing else is gated by it (no server link is built or dropped)', () => {
+  it('share false is carried and withholds the share url (D-888); the server builds nothing either way (D-889)', () => {
     const origin = 'https://turma.example.com';
-    const withShare = postCardView(withActions(), NOW, tf, origin, SP);
+    const id = '0e000000-0000-4000-8000-0000000000a1';
     const noShare = postCardView(
       withActions({ like: true, comment: true, share: false }),
       NOW,
@@ -475,8 +475,35 @@ describe('postCardView carries the per-post fact (11.1-14)', () => {
       SP,
     );
     expect(noShare.actions).toEqual({ like: true, comment: true, share: false });
-    // D-889: the link the member could copy from the menu is the same with or without the fact.
-    expect(noShare.shareUrl).toBe(withShare.shareUrl);
+    // The screen hides the entry: no url, so no surface offers a copy row (WR-01, UI-D-888).
+    expect(noShare.shareUrl).toBeNull();
+    // Positive controls, each flipping one term back: share true, no fact, no community.
+    for (const candidate of [
+      withActions({ like: false, comment: false, share: true }),
+      withActions({ like: true, comment: false, share: true }),
+      withActions(),
+      post(),
+    ]) {
+      expect(postCardView(candidate, NOW, tf, origin, SP).shareUrl).toBe(`${origin}/post/${id}`);
+    }
+    // Only the share term governs it: like or comment false keeps the url.
+    for (const actions of [
+      { like: false, comment: true, share: true },
+      { like: true, comment: false, share: true },
+    ]) {
+      expect(postCardView(withActions(actions), NOW, tf, origin, SP).shareUrl).toBe(
+        `${origin}/post/${id}`,
+      );
+    }
+    // All three false withholds the url too; the other null conditions are unchanged.
+    expect(
+      postCardView(withActions({ like: false, comment: false, share: false }), NOW, tf, origin, SP)
+        .shareUrl,
+    ).toBeNull();
+    expect(postCardView(withActions(), NOW, tf, null, SP).shareUrl).toBeNull();
+    expect(
+      postCardView({ ...withActions(), access: 'sample' }, NOW, tf, origin, SP).shareUrl,
+    ).toBeNull();
   });
 
   it('a post with no community, a member community, no fact or all true has no actions key', () => {

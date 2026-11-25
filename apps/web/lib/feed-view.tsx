@@ -328,8 +328,16 @@ export function postCardBase(
     caption: post.caption,
     // UI-D-374 (08.2): a locked community's sample has no share link at all (a member who opens it
     // without access would land on the locked page anyway, and the card shows no share control).
+    // 11.1-19 (WR-01, D-888, UI-D-888): a viewer whose per-post share fact is false gets no url
+    // either, so NO surface offers the entry (the action row's send glyph, the "..." sheet's
+    // "Copiar link", the Reels share): a null url is the one switch each of them already reads, and
+    // the "..." control keeps its own rule (manageable, a url or reportable). The fact comes through
+    // `postActionsView`, the one reader. This is the screen's hiding only (D-889): the server issues
+    // and gates no link.
     shareUrl:
-      shareOrigin === null || post.access === 'sample' ? null : `${shareOrigin}/post/${post.id}`,
+      shareOrigin === null || post.access === 'sample' || !postActionsView(post).share
+        ? null
+        : `${shareOrigin}/post/${post.id}`,
     ...(post.access === 'sample' ? { readOnly: true } : {}),
     // 11.1-14 (UI-D-889): the viewer's own like/comment/share for this post, set here beside
     // `readOnly` so every surface that draws a card (every list, the community page, the post
