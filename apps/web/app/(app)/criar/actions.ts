@@ -5,7 +5,6 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getBootstrap } from '@/lib/bootstrap';
 import { createPost } from '@/lib/feed';
-import { isMemberComposer } from '@/lib/feed-view';
 import {
   asCommunityIssue,
   asMediaIssue,
@@ -56,13 +55,16 @@ export async function createPostAction(input: unknown): Promise<PostWriteResult>
   }
 
   // 11.1-20 (WR-02, D-888, T-11.1-73): 'refused' is the MEMBER lane's word only: a publish into a community
-  // by a viewer whose composed permissions make the member composer (the pair `/criar` reads to pin it).
-  // The lane is read on the server, lazily (only when a 403 has to be classified, so an accepted post and
-  // every other failure make no bootstrap call) and is never an argument of this action. A failed read
+  // by a viewer who does not speak for the organization (no `content.publish`). The lane is read on the
+  // server, lazily (only when a 403 has to be classified, so an accepted post and every other failure make
+  // no bootstrap call) and is never an argument of this action. It deliberately does NOT ask for
+  // `social.participate`: a refusal caused by `social` being turned off while the composer was open drops
+  // that key from the live bootstrap, and it must still be the neutral sentence (UI-D-893). A failed read
   // is false: the failure is then generic and keeps its log line.
   const { result, refusal } = await attemptPostWrite(() => createPost(body.data), {
     mapRefused: async () =>
-      body.data.communityId !== undefined && isMemberComposer((await getBootstrap()).permissions),
+      body.data.communityId !== undefined &&
+      !(await getBootstrap()).permissions.includes('content.publish'),
   });
   // The new card has to appear on the server-rendered home slot the admin lands back on; without
   // this they would read a cached page 1 that does not carry what they just published.

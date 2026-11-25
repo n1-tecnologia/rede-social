@@ -199,4 +199,22 @@ describe('createPostAction - the refused word is the member lane only (11.1-20, 
     await expect(createPostAction(BODY)).rejects.toThrow('REDIRECT:/participar');
     expect(mocks.getBootstrap).not.toHaveBeenCalled();
   });
+
+  it("W7. a buyer's refusal stays neutral when `social` was turned off while the composer was open", async () => {
+    // The live bootstrap after the 403 has lost every `social` key (feed.post.create, social.participate).
+    mocks.getBootstrap.mockResolvedValue({ permissions: [] });
+    mocks.createPost.mockRejectedValue(bare403());
+
+    expect(await createPostAction(BODY)).toEqual({ ok: false, code: 'refused' });
+    expect(console.error).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/comunidades/${COMMUNITY}`);
+
+    // positive control: a staff composer in the same state (content.publish, no social key) is generic and logged.
+    vi.mocked(console.error).mockClear();
+    mocks.revalidatePath.mockClear();
+    mocks.getBootstrap.mockResolvedValue({ permissions: ['content.publish'] });
+    expect(await createPostAction(BODY)).toEqual({ ok: false, code: 'generic' });
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
 });
