@@ -7,6 +7,7 @@ import { Reorder, useDragControls, useReducedMotion } from 'motion/react';
 import {
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -50,6 +51,13 @@ export interface HighlightManageItem {
   meta: string;
   /** The server-resolved cover (R-D-D), or null for the monogram (UI-D-62). */
   cover: { assetId: string; variantWidths: readonly number[] } | null;
+  /**
+   * 11.1-13 (UI-D-887): an optional FINISHED node the host builds (the neutral "Compradores" pill of an
+   * open highlight). It takes a third line of the title column under the meta line and becomes the
+   * body button's description, so the row's name stays the shipped edit label. Absent draws nothing:
+   * a row without a badge is exactly the shipped row. The module reads no flag and ships no word.
+   */
+  badge?: ReactNode;
 }
 
 export interface HighlightManageListLabels {
@@ -234,6 +242,7 @@ function ManageRow({
   onOpen,
 }: ManageRowProps) {
   const controls = useDragControls();
+  const badgeId = useId();
 
   const onHandleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
@@ -278,6 +287,7 @@ function ManageRow({
       <button
         type="button"
         aria-label={labels.edit(item.title)}
+        aria-describedby={item.badge ? badgeId : undefined}
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
       >
@@ -285,6 +295,11 @@ function ManageRow({
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="truncate text-sm font-bold text-text">{item.title}</span>
           <span className="truncate text-xs font-normal text-text-tertiary">{item.meta}</span>
+          {item.badge ? (
+            <span id={badgeId} className="flex min-w-0 items-center">
+              {item.badge}
+            </span>
+          ) : null}
         </span>
         <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
       </button>

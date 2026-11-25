@@ -619,3 +619,119 @@ describe('HighlightManager — the open-to-buyers switch (UI-D-886) and its mark
     expect(theSwitch()).toBeTruthy();
   });
 });
+
+/**
+ * 11.1-13 Task 2 (UI-D-887, A-UI-10): the administrator's mark on the manage list. The neutral
+ * "Compradores" pill (visible word + `sr-only` prefix "Aberto a ") appears on OPEN rows only, as the row
+ * button's description; the edit sheet's story rows are the same whether the highlight is open or not.
+ */
+describe('HighlightManager — the manage-list mark (UI-D-887)', () => {
+  const COMMUNITY = '44444444-4444-4444-8444-444444444444';
+  const row = (n: number, openToBuyers: boolean, communityId: string | null = COMMUNITY) => ({
+    ...HIGHLIGHT,
+    id: `1111111${n}-1111-4111-8111-111111111111`,
+    communityId,
+    title: `Destaque ${n}`,
+    editLabel: `Editar Destaque ${n}`,
+    openToBuyers,
+  });
+  const four = [row(1, true), row(2, false), row(3, true), row(4, false)];
+  const WORD = lookup('highlights.manage.openPill');
+  const PREFIX = lookup('highlights.manage.openPillPrefix');
+
+  const rowButton = (n: number) =>
+    screen.getByRole('button', {
+      name: lookup('highlights.manage.edit', { title: `Destaque ${n}` }),
+    });
+  const descriptionOf = (button: HTMLElement) => {
+    const id = button.getAttribute('aria-describedby');
+    return id === null ? null : (document.getElementById(id)?.textContent ?? null);
+  };
+
+  function list(props: { archived?: boolean; member?: boolean; communityId?: string | null } = {}) {
+    const communityId = props.communityId === undefined ? COMMUNITY : props.communityId;
+    return render(
+      <HighlightManager
+        place={{ communityId }}
+        placeLabel="Clube"
+        initialItems={four}
+        archived={props.archived ?? false}
+        editTarget={null}
+        publishHref="/stories/publicar"
+        member={props.member ?? false}
+      />,
+    );
+  }
+
+  it('R1. two open and two closed rows: the pill sits on the open ones only, named "Aberto a compradores"', () => {
+    list();
+
+    expect(screen.getAllByText(WORD)).toHaveLength(2);
+    for (const n of [1, 3]) {
+      expect(descriptionOf(rowButton(n))).toBe(`${PREFIX}${WORD}`);
+      expect(descriptionOf(rowButton(n))?.toLowerCase()).toBe('aberto a compradores');
+    }
+    for (const n of [2, 4]) expect(descriptionOf(rowButton(n))).toBeNull();
+
+    // The prefix is a screen-reader-only run, the visible word is the short one.
+    const pill = screen.getAllByText(WORD)[0]?.closest('span') as HTMLElement;
+    expect(pill.querySelector('.sr-only')?.textContent).toBe(PREFIX);
+  });
+
+  it('R2. closed rows carry nothing extra, and the row keeps the shipped min-h-16 geometry', () => {
+    list();
+    const closed = rowButton(2).closest('li') as HTMLElement;
+    expect(closed.textContent).not.toContain(WORD);
+    expect(closed.className).toContain('min-h-16');
+    expect((rowButton(1).closest('li') as HTMLElement).className).toContain('min-h-16');
+  });
+
+  it('R3. no mark where the switch itself does not exist: a member community, Início and an archived one', () => {
+    list({ member: true });
+    expect(screen.queryAllByText(WORD)).toHaveLength(0);
+    cleanup();
+    list({ archived: true });
+    expect(screen.queryAllByText(WORD)).toHaveLength(0);
+    cleanup();
+    list({ communityId: null });
+    expect(screen.queryAllByText(WORD)).toHaveLength(0);
+  });
+
+  it('R4. the edit sheet keeps its story rows unchanged for an open highlight (no author line, no pill)', async () => {
+    const story = {
+      id: '33333333-3333-4333-8333-333333333331',
+      thumb: { assetId: ASSET_ID, variantWidths: [640] },
+      mediaKind: 'image',
+      dateLabel: '12 nov',
+      isCover: false,
+      removeLabel: 'Remover do destaque o story de 12 nov',
+    };
+    const editor = async (openToBuyers: boolean) => {
+      const highlight = row(1, openToBuyers);
+      loadEdit.mockResolvedValue({ ok: true, highlight, items: [story] });
+      render(
+        <HighlightManager
+          place={{ communityId: COMMUNITY }}
+          placeLabel="Clube"
+          initialItems={[highlight]}
+          archived={false}
+          editTarget={highlight.id}
+          publishHref="/stories/publicar"
+        />,
+      );
+      await act(async () => {});
+      const dialog = screen.getByRole('dialog', { name: lookup('highlights.edit.title') });
+      const item = within(dialog)
+        .getByRole('button', { name: story.removeLabel })
+        .closest('li') as HTMLElement;
+      const html = item.outerHTML;
+      cleanup();
+      return html;
+    };
+
+    const open = await editor(true);
+    const closed = await editor(false);
+    expect(open).toBe(closed);
+    expect(open).not.toContain(WORD);
+  });
+});

@@ -140,3 +140,72 @@ describe('HighlightManageList — handle-only reorder with a keyboard equivalent
     expect(onOpen).toHaveBeenCalledWith('c');
   });
 });
+
+/**
+ * 11.1-13 (UI-D-887) — the optional `badge` node of a row: a finished node the host builds (the module
+ * ships no word), drawn on a THIRD line of the title column under the meta line. A row with no badge is
+ * exactly the shipped row; the row grows (`min-h-16`) instead of truncating the title or the meta.
+ */
+describe('HighlightManageList — the optional row badge (UI-D-887)', () => {
+  const badge = (name: string) => <span data-testid="row-badge">{`badge-${name}`}</span>;
+  const rowOf = (title: string) =>
+    screen.getByRole('button', { name: `edit:${title}` }).closest('li') as HTMLElement;
+
+  it('B1. only the rows given a badge draw one, on a third line under the meta line', () => {
+    render(
+      <HighlightManageList
+        {...props({
+          items: [
+            { ...A, badge: badge('a') },
+            B,
+            { ...C, badge: badge('c') },
+            { ...B, id: 'd', title: 'title-d' },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getAllByTestId('row-badge')).toHaveLength(2);
+    const column = screen.getByText('title-a').parentElement as HTMLElement;
+    const lines = Array.from(column.children);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toHaveTextContent('title-a');
+    expect(lines[1]).toHaveTextContent('meta-a');
+    expect(lines[2]).toHaveTextContent('badge-a');
+
+    // A closed row shows nothing extra: two lines, exactly the shipped row.
+    expect(screen.getByText('title-b').parentElement?.children).toHaveLength(2);
+    expect(rowOf('title-b').textContent).not.toContain('badge-');
+    expect(rowOf('title-c')).toHaveTextContent('badge-c');
+  });
+
+  it('B2. the row grows instead of truncating: min-h-16 stays and title and meta still truncate on their own lines', () => {
+    render(<HighlightManageList {...props({ items: [{ ...A, badge: badge('a') }] })} />);
+
+    const row = rowOf('title-a');
+    expect(row.className).toContain('min-h-16');
+    expect(screen.getByText('title-a').className).toContain('truncate');
+    expect(screen.getByText('meta-a').className).toContain('truncate');
+    // The badge line itself never truncates the pill away.
+    expect(screen.getByTestId('row-badge').parentElement?.className).not.toContain('truncate');
+  });
+
+  it('B3. the row keeps its name and the badge becomes its description; the order is untouched', () => {
+    const onOpen = vi.fn();
+    render(
+      <HighlightManageList {...props({ onOpen, items: [A, { ...B, badge: badge('b') }, C] })} />,
+    );
+
+    const body = screen.getByRole('button', { name: 'edit:title-b' });
+    const described = body.getAttribute('aria-describedby');
+    expect(described).toBeTruthy();
+    expect(document.getElementById(described as string)).toHaveTextContent('badge-b');
+    expect(screen.getByRole('button', { name: 'edit:title-a' })).not.toHaveAttribute(
+      'aria-describedby',
+    );
+    expect(drawnOrder()).toEqual(['title-a', 'title-b', 'title-c']);
+
+    fireEvent.click(body);
+    expect(onOpen).toHaveBeenCalledWith('b');
+  });
+});

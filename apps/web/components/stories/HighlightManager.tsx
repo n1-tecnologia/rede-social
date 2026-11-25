@@ -23,12 +23,13 @@ import {
   EmptyState,
   InfiniteScroll,
   Skeleton,
+  StatusPill,
   useToast,
 } from '@rede-social/ui';
 import { Bookmark, ImagePlus, Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addStoryToHighlightAction,
   createHighlightAction,
@@ -129,8 +130,14 @@ type PickerState = {
 const ACCEPT = mediaAcceptFor('image', 'cover');
 const PICKER_SKELETON = [0, 1, 2];
 
-function toManageItem(row: HighlightManageRowView): HighlightManageItem {
-  return { id: row.id, title: row.title, meta: row.meta, cover: row.cover };
+function toManageItem(row: HighlightManageRowView, badge?: ReactNode): HighlightManageItem {
+  return {
+    id: row.id,
+    title: row.title,
+    meta: row.meta,
+    cover: row.cover,
+    ...(badge === undefined ? {} : { badge }),
+  };
 }
 
 function toEditItem(view: HighlightEditStoryView): HighlightEditItem {
@@ -190,7 +197,31 @@ export function HighlightManager({
     confirmed.current = initialItems;
   }
 
-  const manageItems = useMemo(() => items.map(toManageItem), [items]);
+  /**
+   * 11.1-13 (UI-D-886, UI-D-887): whether this place has the open-to-buyers switch at all. The same fact
+   * gates the edit sheet's section and the manage list's mark, so the mark never shows where the switch
+   * does not exist (a member community, Início, an archived community).
+   */
+  const openSectionVisible = highlightOpenSectionVisible({ place, archived, member });
+  const openPillWord = t('highlights.manage.openPill');
+  const openPillPrefix = t('highlights.manage.openPillPrefix');
+  // UI-D-887: staff only (this screen answers not-found to anyone who cannot curate); the neutral
+  // "Compradores" pill reads "Aberto a compradores" through its `sr-only` prefix.
+  const manageItems = useMemo(
+    () =>
+      items.map((row) =>
+        toManageItem(
+          row,
+          openSectionVisible && highlightOpenState(row) ? (
+            <StatusPill tone="neutral">
+              <span className="sr-only">{openPillPrefix}</span>
+              {openPillWord}
+            </StatusPill>
+          ) : undefined,
+        ),
+      ),
+    [items, openSectionVisible, openPillPrefix, openPillWord],
+  );
 
   const replaceRow = useCallback((row: HighlightManageRowView) => {
     setItems((current) => current.map((item) => (item.id === row.id ? row : item)));
@@ -377,7 +408,6 @@ export function HighlightManager({
    */
   const [openWrite, setOpenWrite] = useState<{ id: string; next: boolean } | null>(null);
   const openWriting = useRef(false);
-  const openSectionVisible = highlightOpenSectionVisible({ place, archived, member });
 
   const setOpenToBuyers = async (next: boolean): Promise<void> => {
     if (!current || openWriting.current) return;
