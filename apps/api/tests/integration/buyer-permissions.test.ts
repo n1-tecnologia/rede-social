@@ -215,7 +215,7 @@ describe('11.1 tracer: a buyer publishes into an organization community', () => 
     expect(refused).toBe('42501');
   });
 
-  it('8. D-886/D-892 positive sibling of member-communities case 8: through the buyer\'s own claims the function answers true for post only while the flag is on, and never for story or openHighlight', async () => {
+  it("8. D-886/D-892 positive sibling of member-communities case 8: through the buyer's own claims the function answers true for post only while the flag is on, and never for story or openHighlight", async () => {
     const answers = async () =>
       adminSql.begin(async (tx) => {
         await tx`select set_config('request.jwt.claims', ${JSON.stringify({
