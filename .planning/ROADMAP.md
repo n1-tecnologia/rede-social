@@ -1825,13 +1825,13 @@ Plans:
 
 **UI hint**: yes — the product form (five checkboxes per linked community), the highlight "Aberto a compradores" switch, controls that disappear on the member screens, the buyer's story and post flows.
 
-**Plans:** 10/18 plans executed (planned 2026-11-24: 18 plans in 9 waves; the database, contract, service, pure-function and security plans do not wait for the sketch; plan 01 draws sketch 026 and stops at the approval that only Igor writes; web plans 12 to 17 carry the approval precondition; plan 18 holds the release, the ledger and the exit gate)
+**Plans:** 11/18 plans executed (planned 2026-11-24: 18 plans in 9 waves; the database, contract, service, pure-function and security plans do not wait for the sketch; plan 01 draws sketch 026 and stops at the approval that only Igor writes; web plans 12 to 17 carry the approval precondition; plan 18 holds the release, the ledger and the exit gate)
 
 Plans:
 
 **Wave 1**
 
-- [ ] 11.1-01-PLAN.md — Sketch 026: the 47 designed frames (product form, highlight screens, member surfaces, buyer story and post flows), README with `approved: false`, MANIFEST row; stops at Igor's approval
+- [x] 11.1-01-PLAN.md — Sketch 026: the 47 designed frames (product form, highlight screens, member surfaces, buyer story and post flows), README with `approved: false`, MANIFEST row; stops at Igor's approval
 - [x] 11.1-02-PLAN.md — Database tracer: the five flags on the product-to-community link, `open_to_buyers` on the highlight, the buyer scope function and its wrappers, the real `app.community_action_allowed`, the post insert gate, baseline of the known reds, pgTAP 241
 - [x] 11.1-05-PLAN.md — Contracts: per-link flags in the product body and read, `community.actions` on a post, `openToBuyers` on the highlight, the new issue codes and the open-counts schemas
 
@@ -2470,7 +2470,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10.1. Rede Social - Ingresso pago do evento pela Kiwify (INSERTED) | 19/19 | Complete    | 2026-11-13 |
 | 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 16/16 | In Progress|  |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 28/28 | In Progress|  |
-| 11.1. Permissões do comprador por produto numa comunidade (INSERTED) | 10/18 | In Progress|  |
+| 11.1. Permissões do comprador por produto numa comunidade (INSERTED) | 11/18 | In Progress|  |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 12.4. Abertura de chamado no suporte (INSERTED) | 22/22 | In Progress|  |
 | 12.5. Mensagem de voz no chat (INSERTED) | 18/18 | Complete    | 2026-11-17 |

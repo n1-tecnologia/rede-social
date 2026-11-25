@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "11.1"
 current_phase_name: Permissões do comprador por produto numa comunidade
-current_plan: 11
+current_plan: 12
 status: executing
-stopped_at: Completed 11.1-11-PLAN.md
-last_updated: "2026-11-25T13:34:32.941Z"
-last_activity: 2026-11-24
-last_activity_desc: Phase 11.1 execution started
-state_head: 21d2467e28597df0ad5bf0f2f78d4017520109c2
+stopped_at: Completed 11.1-01-PLAN.md (sketch gate approved; plans 01-11 done, next 12)
+last_updated: "2026-11-25T14:47:57.581Z"
+last_activity: 2026-11-25
+last_activity_desc: Completed 11.1-01 (sketch gate approved); next 11.1-12
+state_head: 46b30be2b6beab39e1d0c6815e10e7a9d7311fce
 progress:
   total_phases: 36
   completed_phases: 0
   total_plans: 537
-  completed_plans: 500
+  completed_plans: 502
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 11.1 (Permissões do comprador por produto numa comunidade) — EXECUTING
-Current Plan: 11
+Current Plan: 12
 Total Plans in Phase: 18
-Plan: 11 of 18
+Plan: 12 of 18
 Status: Ready to execute
-Last activity: 2026-11-24 — Phase 11.1 execution started
+Last activity: 2026-11-25 — Completed 11.1-01 (sketch 026 approved); plans 01-11 done, next 12
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -404,6 +404,7 @@ Progress: [███████████████████░] 160/162
 | Phase 11.1 P08 | 17min | 3 tasks | 6 files |
 | Phase 11.1 P09 | 14 min | 3 tasks | 7 files |
 | Phase 11.1 P11 | 19 min | 3 tasks | 3 files |
+| Phase 11.1 P01 | wall 16h45m (review wait) | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -1210,6 +1211,7 @@ Recent decisions affecting current work:
 - [Phase 11.1]: 11.1-03: deniedCommunityIds inlines the action literal (sql.raw over a closed union) because a policy is DDL and cannot carry a bind parameter — drizzle-kit rendered the interpolated action as $1 in ALTER POLICY, which does not apply
 - [Phase 11.1]: 11.1-07: a buyer is offered post and story only while the community is active (the scope map keeps archived communities, the server refuses both into them)
 - [Phase 11.1]: 11.1-04: only the two item gates widen for a buyer (ITEM_BUYER_OPEN AND the story-author term); highlight-level gates stay creator-only; stories_audience_gate branch 3 carries the locked-community term (D-894)
+- [Phase 11.1]: 11.1-01: sketch 026 (47 frames) approved provisionally by Igor 2026-11-25, every A-UI-1..A-UI-16 default kept; approval keys recorded by the orchestrator on his instruction 'altere voce e continue'; MANIFEST row 026 still pending — D-33/D-417 gate opened for web plans 12-17 (grep ^approved: true passes)
 
 ### Pending Todos
 
@@ -1355,6 +1357,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-25T13:34:32.573Z
-Stopped at: Completed 11.1-11-PLAN.md
+Last session: 2026-11-25T14:47:57.227Z
+Stopped at: Completed 11.1-01-PLAN.md (sketch gate approved; plans 01-11 done, next 12)
 Resume file: None
