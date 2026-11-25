@@ -1,4 +1,5 @@
 import { sqlClient } from '@rede-social/core/db';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type { CommunityPage, CommunitySummary } from '@rede-social/module-communities/contracts';
 import type { ProductDetail } from '@rede-social/module-store/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -92,6 +93,46 @@ const setFlags = (
            can_share = ${flags.share ?? true}, can_post = ${flags.post ?? false},
            can_story = ${flags.story ?? false}
      where product_id = ${product}::uuid and community_id = ${community}::uuid`;
+
+const setEntitlement = (product: string, status: 'active' | 'revoked', user = users.buyer) =>
+  adminSql`
+    update public.store_entitlements set status = ${status}
+     where product_id = ${product}::uuid and user_id = ${user}::uuid`;
+
+/** Runs `fn` with a demo module switched to `enabled`, then writes the module back ON (the fixture runs with all three on). */
+async function withModule<T>(
+  key: 'store' | 'social',
+  enabled: boolean,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const set = async (value: boolean) => {
+    await adminSql`
+      update public.tenant_modules set enabled = ${value}, updated_at = now()
+       where tenant_id = ${tenantId}::uuid and module_key = ${key}`;
+    moduleFlags.invalidate(tenantId);
+  };
+  await set(enabled);
+  try {
+    return await fn();
+  } finally {
+    await set(true);
+  }
+}
+
+/** A highlight of an organization community, written through the owner connection (the open switch has no route yet). */
+async function makeHighlight(community: string, open: boolean): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id, open_to_buyers)
+    select ${tenantId}::uuid, ${community}::uuid, ${`${PREFIX} destaque`}, 0, u.id, ${open}
+      from public.users u where u.email = 'admin@rede-demo.local'
+    returning id::text as id`;
+  return row?.id ?? '';
+}
+
+const clearHighlights = () =>
+  adminSql`
+    delete from public.story_highlights
+     where tenant_id = ${tenantId}::uuid and title = ${`${PREFIX} destaque`}`;
 
 async function createProduct(name: string, communityIds: string[]): Promise<string> {
   const res = await post('/v1/store/products', tokens.admin, {
@@ -194,5 +235,297 @@ describe('11.1-07 tracer: a buyer reads the community with their union in viewer
     // a community with no linked product is open and behaves as today for a member
     expect(await detailActions(tokens.buyer, fx.bare)).toEqual(TODAY_MEMBER);
     expect((await listActions(tokens.buyer)).get(fx.bare)).toEqual(TODAY_MEMBER);
+  });
+});
+
+describe('11.1-07 matrix: two products, social off, the open highlight, revoke, other tenant, list order', () => {
+  beforeAll(async () => {
+    fx.productB = await createProduct('produto B', [fx.main]);
+    await buy(fx.productB, tokens.buyer);
+  });
+
+  it('a. D-886: two products on one community give the union: like from one, post from the other, the rest false', async () => {
+    await setFlags(fx.productA, fx.main, { like: true, comment: false, share: false });
+    await setFlags(fx.productB, fx.main, { like: false, comment: false, share: false, post: true });
+    const union: Actions = { like: true, comment: false, share: false, post: true, story: false };
+    expect(await detailActions(tokens.buyer, fx.main)).toEqual(union);
+    expect((await listActions(tokens.buyer)).get(fx.main)).toEqual(union);
+    // adjacency: two products with equal flags give the same actions as one
+    await setFlags(fx.productB, fx.main, { like: true, comment: false, share: false, post: false });
+    await setFlags(fx.productA, fx.main, { like: true, comment: false, share: false, post: false });
+    const same: Actions = { like: true, comment: false, share: false, post: false, story: false };
+    expect(await detailActions(tokens.buyer, fx.main)).toEqual(same);
+    await setEntitlement(fx.productB, 'revoked');
+    expect(await detailActions(tokens.buyer, fx.main)).toEqual(same);
+    await setEntitlement(fx.productB, 'active');
+  });
+
+  it('b. D-882/D-718: with social off post and story are false whatever is ticked, like comment and share still follow the flags, and social back on restores them', async () => {
+    await setFlags(fx.productA, fx.main, {
+      like: false,
+      comment: true,
+      share: true,
+      post: true,
+      story: true,
+    });
+    await setFlags(fx.productB, fx.main, { like: false, comment: false, share: false });
+    const highlight = await makeHighlight(fx.main, true);
+    expect(highlight).not.toBe('');
+    const full: Actions = { like: false, comment: true, share: true, post: true, story: true };
+    expect(await detailActions(tokens.buyer, fx.main)).toEqual(full);
+    await withModule('social', false, async () => {
+      expect(await detailActions(tokens.buyer, fx.main)).toEqual({
+        like: false,
+        comment: true,
+        share: true,
+        post: false,
+        story: false,
+      });
+      expect((await listActions(tokens.buyer)).get(fx.main)).toEqual({
+        like: false,
+        comment: true,
+        share: true,
+        post: false,
+        story: false,
+      });
+    });
+    expect(await detailActions(tokens.buyer, fx.main)).toEqual(full);
+    // reading the community is unchanged: the same row, not a different error
+    await clearHighlights();
+  });
+
+  it('c. UI-D-888: story is false with no highlight open, true with one open highlight of THAT community, false when the only open one belongs to another, false again once closed', async () => {
+    await setFlags(fx.productA, fx.main, { like: true, comment: true, share: true, story: true });
+    await setFlags(fx.productB, fx.main, { like: true, comment: true, share: true });
+    await clearHighlights();
+    expect((await detailActions(tokens.buyer, fx.main)).story).toBe(false);
+    // a closed highlight does not count
+    const closed = await makeHighlight(fx.main, false);
+    expect((await detailActions(tokens.buyer, fx.main)).story).toBe(false);
+    // an open highlight of ANOTHER community does not count
+    await makeHighlight(fx.other, true);
+    expect((await detailActions(tokens.buyer, fx.main)).story).toBe(false);
+    // the highlight of THIS community, opened, does
+    await adminSql`update public.story_highlights set open_to_buyers = true where id = ${closed}::uuid`;
+    expect((await detailActions(tokens.buyer, fx.main)).story).toBe(true);
+    expect((await listActions(tokens.buyer)).get(fx.main)?.story).toBe(true);
+    // and the flag still decides: an open highlight with the flag off is no door
+    await setFlags(fx.productA, fx.main, { story: false });
+    expect((await detailActions(tokens.buyer, fx.main)).story).toBe(false);
+    await setFlags(fx.productA, fx.main, { story: true });
+    // closed again: false
+    await adminSql`update public.story_highlights set open_to_buyers = false where id = ${closed}::uuid`;
+    expect((await detailActions(tokens.buyer, fx.main)).story).toBe(false);
+    await clearHighlights();
+  });
+
+  it('d. D-887: a revoked entitlement removes the buyer actions at the next request, and a new active one brings them back', async () => {
+    await setFlags(fx.productA, fx.main, {
+      like: false,
+      comment: true,
+      share: true,
+      post: true,
+      story: true,
+    });
+    await setFlags(fx.productB, fx.main, { like: false, comment: false, share: false });
+    await makeHighlight(fx.main, true);
+    const full: Actions = { like: false, comment: true, share: true, post: true, story: true };
+    expect(await detailActions(tokens.buyer, fx.main)).toEqual(full);
+    await setEntitlement(fx.productA, 'revoked');
+    await setEntitlement(fx.productB, 'revoked');
+    const after = await request(`/v1/communities/${fx.main}`, tokens.buyer);
+    if (after.status === 200) {
+      const actions = ((await after.json()) as CommunitySummary).viewer.actions;
+      expect(actions.post).toBe(false);
+      expect(actions.story).toBe(false);
+      expect(actions).toEqual(TODAY_MEMBER);
+    }
+    await setEntitlement(fx.productA, 'active');
+    await setEntitlement(fx.productB, 'active');
+    expect(await detailActions(tokens.buyer, fx.main)).toEqual(full);
+    await clearHighlights();
+  });
+
+  it('e. BPERM-25: the same user with a membership in tenant B reads only tenant B values under tenant B claim, never tenant A flags', async () => {
+    const dual = await createSharedIdentity({
+      prefix: PREFIX,
+      memberships: [{ host: 'demo' }, { host: 'lab' }],
+    });
+    const demoToken = await signInAs(dual.email, dual.password);
+    await buy(fx.productA, demoToken);
+    await setFlags(fx.productA, fx.main, { like: false, comment: true, share: false, post: true });
+    await setFlags(fx.productB, fx.main, { like: false, comment: false, share: false });
+    // positive control: under tenant A the buyer actions are there
+    expect(await detailActions(demoToken, fx.main)).toEqual({
+      like: false,
+      comment: true,
+      share: false,
+      post: true,
+      story: false,
+    });
+    // under tenant B the same person never reads tenant A community, and every community of B reads B's own values
+    const labRequest = (path: string) =>
+      api.request(path, {
+        headers: { 'x-tenant-host': HOSTS.lab, authorization: `Bearer ${demoToken}` },
+      });
+    const detail = await labRequest(`/v1/communities/${fx.main}`);
+    expect(detail.status).toBe(404);
+    const list = await labRequest('/v1/communities?limit=25');
+    if (list.status === 200) {
+      const page = (await list.json()) as CommunityPage;
+      expect(page.items.map((item) => item.id)).not.toContain(fx.main);
+      for (const item of page.items) {
+        // tenant B holds no product link for this person: today's values for an organization community
+        if (item.kind === 'organization') expect(item.viewer.actions).toEqual(TODAY_MEMBER);
+      }
+    }
+  });
+
+  it('f. BPERM-15 ordering: each row reads its own scope key, so listing in two orders leaves every row actions equal', async () => {
+    await setFlags(fx.productA, fx.main, { like: false, comment: true, share: false, post: true });
+    await setFlags(fx.productB, fx.main, { like: false, comment: false, share: false });
+    await setFlags(fx.productOther, fx.other, {
+      like: true,
+      comment: false,
+      share: true,
+      post: false,
+    });
+    await buy(fx.productOther, tokens.buyer);
+    const order = (main: number, other: number, bare: number) =>
+      adminSql`
+        update public.communities set position = case id
+          when ${fx.main}::uuid then ${main}::int
+          when ${fx.other}::uuid then ${other}::int
+          else ${bare}::int end
+        where id in (${fx.main}::uuid, ${fx.other}::uuid, ${fx.bare}::uuid)`;
+    await order(1, 2, 3);
+    const first = await request('/v1/communities?limit=25', tokens.buyer);
+    const firstItems = ((await first.json()) as CommunityPage).items;
+    await order(3, 2, 1);
+    const second = await request('/v1/communities?limit=25', tokens.buyer);
+    const secondItems = ((await second.json()) as CommunityPage).items;
+    const ids = (items: CommunitySummary[]) =>
+      items.filter((i) => [fx.main, fx.other, fx.bare].includes(i.id)).map((i) => i.id);
+    expect(ids(firstItems)).toEqual([fx.main, fx.other, fx.bare]);
+    expect(ids(secondItems)).toEqual([fx.bare, fx.other, fx.main]);
+    const byId = (items: CommunitySummary[]) =>
+      new Map(items.map((item) => [item.id, item.viewer.actions]));
+    for (const id of [fx.main, fx.other, fx.bare]) {
+      expect(byId(firstItems).get(id), id).toEqual(byId(secondItems).get(id));
+    }
+    expect(byId(firstItems).get(fx.main)).toEqual({
+      like: false,
+      comment: true,
+      share: false,
+      post: true,
+      story: false,
+    });
+    expect(byId(firstItems).get(fx.other)).toEqual({
+      like: true,
+      comment: false,
+      share: true,
+      post: false,
+      story: false,
+    });
+    expect(byId(firstItems).get(fx.bare)).toEqual(TODAY_MEMBER);
+    // an empty list stays empty: the buyer owns no archived community, so the own-only archived list is empty
+    const archived = await request('/v1/communities?status=archived&limit=25', tokens.buyer);
+    expect(archived.status).toBe(200);
+    const archivedItems = ((await archived.json()) as CommunityPage).items.filter((i) =>
+      i.name.startsWith(PREFIX),
+    );
+    expect(archivedItems).toEqual([]);
+  });
+
+  it('g. D-892 / BPERM-15 empty: a member-created community, a community whose store module is off, and a staff viewer read what they read before', async () => {
+    await setFlags(fx.productA, fx.main, {
+      like: false,
+      comment: false,
+      share: false,
+      post: true,
+      story: true,
+    });
+    await setFlags(fx.productB, fx.main, { like: false, comment: false, share: false });
+    // a member-created community: no product can link it, so the buyer flags never apply
+    const made = await post('/v1/communities', tokens.buyer, { name: `${PREFIX} do membro` });
+    expect(made.status, await made.clone().text()).toBe(201);
+    fx.memberMade = ((await made.json()) as { id: string }).id;
+    expect(await detailActions(tokens.buyer, fx.memberMade)).toEqual(ALL_TRUE);
+    // store off: the link exists but the scope is empty, so the buyer reads what any member reads
+    await withModule('store', false, async () => {
+      expect(await detailActions(tokens.buyer, fx.main)).toEqual(TODAY_MEMBER);
+      expect((await listActions(tokens.buyer)).get(fx.main)).toEqual(TODAY_MEMBER);
+    });
+    // back on: the buyer scope returns
+    expect((await detailActions(tokens.buyer, fx.main)).post).toBe(true);
+    // staff holds every action regardless of the ticks
+    expect(await detailActions(tokens.admin, fx.main)).toEqual(ALL_TRUE);
+    // an archived organization community is still read, but the server refuses a post or a story into it, so the
+    // buyer is not offered either (the ticks below would otherwise say yes); like, comment and share follow the flags
+    await setFlags(fx.productOther, fx.other, {
+      like: true,
+      comment: true,
+      share: true,
+      post: true,
+      story: true,
+    });
+    await makeHighlight(fx.other, true);
+    expect(await detailActions(tokens.buyer, fx.other)).toEqual(ALL_TRUE);
+    await adminSql`update public.communities set status = 'archived' where id = ${fx.other}::uuid`;
+    const archivedRead = await request(`/v1/communities/${fx.other}`, tokens.buyer);
+    expect(archivedRead.status).toBe(200);
+    expect(((await archivedRead.json()) as CommunitySummary).viewer.actions).toEqual({
+      like: true,
+      comment: true,
+      share: true,
+      post: false,
+      story: false,
+    });
+    await adminSql`update public.communities set status = 'active' where id = ${fx.other}::uuid`;
+    await clearHighlights();
+  });
+
+  it('h. T-11.1-24 / BPERM-27: no community body carries a flag name, the scope, an open-highlight fact or a product id, and the viewer keeps its five strict booleans', async () => {
+    await setFlags(fx.productA, fx.main, {
+      like: true,
+      comment: true,
+      share: true,
+      post: true,
+      story: true,
+    });
+    await makeHighlight(fx.main, true);
+    const bodies = [
+      await (await request(`/v1/communities/${fx.main}`, tokens.buyer)).text(),
+      await (await request('/v1/communities?limit=25', tokens.buyer)).text(),
+    ];
+    for (const body of bodies) {
+      for (const needle of [
+        'can_like',
+        'can_comment',
+        'can_post',
+        'can_story',
+        'canLike',
+        'canPost',
+        'buyer_scope',
+        'buyerScope',
+        'openHighlight',
+        'open_to_buyers',
+        fx.productA,
+        fx.productB,
+        fx.productOther,
+      ]) {
+        expect(body.includes(needle), needle).toBe(false);
+      }
+    }
+    const detail = JSON.parse(bodies[0] ?? '{}') as CommunitySummary;
+    expect(Object.keys(detail.viewer.actions).sort()).toEqual([
+      'comment',
+      'like',
+      'post',
+      'share',
+      'story',
+    ]);
+    for (const value of Object.values(detail.viewer.actions)) expect(typeof value).toBe('boolean');
+    await clearHighlights();
   });
 });

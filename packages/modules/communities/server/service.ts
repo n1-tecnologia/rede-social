@@ -370,7 +370,8 @@ function parseBuyerScope(raw: unknown): BuyerScope | null {
  * tenant's claim), and it is the `bool_or` of every such product's link. `like`, `comment` and `share` are the three
  * flags. `post` is the flag AND the viewer holding `feed.post.create` (a member holds it only with `social` on, D-882),
  * or the organization's own rule. `story` is the flag AND an open highlight to save into (UI-D-888, the screen never
- * counts highlights) AND the viewer holding `stories.story.publish`, or the story rule above. Nothing else widens:
+ * counts highlights) AND the viewer holding `stories.story.publish`, or the story rule above; both only while the community is
+ * `active` (the server refuses a post or a story-save into an archived one). Nothing else widens:
  * the edit, curate, publish and owner fields are what they were, so the staff-only highlight screen keeps
  * answering not-found to a buyer. The scope itself never leaves this function: only the five booleans do.
  */
@@ -386,13 +387,18 @@ function viewerOf(row: CommunityRow, flags: CommunityViewerFlags): CommunityView
   const canStory = member ? canCurate : flags.canPublishStory && flags.canCurateOrg;
   // 11.1-07: a buyer's entry only ever exists for an organization community, and an absent or malformed one reads as none.
   const buyer = member ? null : parseBuyerScope(row.buyer_scope);
+  // The server refuses a post or a story-save into an archived community (the insert gate and `resolveCommunityTarget`),
+  // and the scope map keeps an archived community on purpose (the access OR ignores status), so the two controls that
+  // lead to those refusals are not offered for it; like, comment and share still follow the flags.
+  const writable = row.status === 'active';
   const actions: CommunityViewer['actions'] = buyer
     ? {
         like: buyer.like,
         comment: buyer.comment,
         share: buyer.share,
-        post: (buyer.post && flags.canPostMember === true) || canPublish,
-        story: (buyer.story && buyer.openHighlight && flags.canPublishStory) || canStory,
+        post: (writable && buyer.post && flags.canPostMember === true) || canPublish,
+        story:
+          (writable && buyer.story && buyer.openHighlight && flags.canPublishStory) || canStory,
       }
     : { like: true, comment: true, share: true, post: canPublish, story: canStory };
   return {
