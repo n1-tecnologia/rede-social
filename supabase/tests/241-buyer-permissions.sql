@@ -30,9 +30,16 @@ begin;
 -- 8. THE POST GATE MATRIX: member-created, archived, soft-deleted and un-linked communities, another tenant's community and
 --    a forged tenant stamp are refused with 42501; two products whose flags differ give the union; the positive control.
 --
+-- 20. THE CROSS-TENANT MATRIX (11.1-11, BPERM-25, D-886): every function and every gate of plans 02 to 04 driven as a member of
+--    tenant A against tenant B's rows and as the same user under tenant B's claim, each negative beside a positive control.
+-- 21. EMPTY AND SAME-NAME (11.1-11): a tenant that owns nothing answers empty or false and never errors; two tenants with a
+--    community of the same name and slug and one shared user never answer for each other; the answers do not depend on order.
+-- 22. THE META CHECK (11.1-11): the new functions and the policies that call them are listed from the catalog and compared with
+--    what section 20 exercised, so a function or a gate added later cannot ship without a cross-tenant negative.
+--
 -- Fixture ids use the `24100000-…` prefix and the tenants `pgtap-bperm-a` / `pgtap-bperm-b`. Like its siblings, this
 -- file ROLLS BACK.
-select plan(221);
+select plan(304);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-bperm-a', 'Permissoes A', '24100000-0000-4000-8000-000000000001');
@@ -1327,6 +1334,401 @@ select matches(current_setting('tests.plan_story'), 'InitPlan[^\n]*\n[^\n]*\n[^\
 select ok((select qual ~* 'story_highlight_items.*coalesce\(\(\s*select app\.community_locked_ids\(\)'
              from pg_policies where schemaname = 'public' and tablename = 'stories' and policyname = 'stories_audience_gate'),
   '19: the stored policy carries the coalesce-select idiom, and the term sits inside branch 3 (after the highlight items join)');
+
+-- ── fixture for sections 20 to 22 (11.1-11, as the migration role) ──────────────────────────────
+-- Every state the earlier sections may have left is put back explicitly, so these sections read from a known truth:
+-- M1 (…04, "the buyer") holds P1 and P6 in A (CA: like, comment, share, post on) and PB in B (CB: like, comment, share on, post
+-- off); BS1 (…1401) holds PS in A (CS: story on) and PBS in B (CB-historias: story off). Posts and comments of each tenant's
+-- administrator, four fresh stories of BS1 (two per tenant) and one open-highlight item per tenant carry the cross cases.
+-- `bperm_covered` records, as the file runs, which function and which gate each cross-tenant case exercised: section 22
+-- compares it with the catalog.
+create temp table bperm_covered (kind text not null, name text not null);
+update public.communities set status = 'active', deleted_at = null
+ where id in ('24100000-0000-4000-8000-0000000000c1', '24100000-0000-4000-8000-0000000000d1',
+              '24100000-0000-4000-8000-0000000014c1', '24100000-0000-4000-8000-0000000014d1');
+update public.tenant_modules set enabled = true
+ where tenant_id in ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000011')
+   and module_key in ('social', 'store');
+update public.store_product_communities
+   set can_like = true, can_comment = true, can_share = true, can_post = true, can_story = false
+ where product_id in ('24100000-0000-4000-8000-0000000000a1', '24100000-0000-4000-8000-0000000000a6')
+   and community_id = '24100000-0000-4000-8000-0000000000c1';
+update public.store_product_communities
+   set can_like = true, can_comment = true, can_share = true, can_post = false, can_story = false
+ where product_id = '24100000-0000-4000-8000-0000000000b1' and community_id = '24100000-0000-4000-8000-0000000000d1';
+update public.store_product_communities set can_story = true
+ where product_id = '24100000-0000-4000-8000-0000000014a1' and community_id = '24100000-0000-4000-8000-0000000014c1';
+update public.store_product_communities set can_story = false
+ where product_id = '24100000-0000-4000-8000-0000000014a3' and community_id = '24100000-0000-4000-8000-0000000014d1';
+update public.store_entitlements set status = 'active', revoked_at = null
+ where id in ('24100000-0000-4000-8000-0000000000e1', '24100000-0000-4000-8000-0000000000e2', '24100000-0000-4000-8000-0000000000e3',
+              '24100000-0000-4000-8000-0000000014e1', '24100000-0000-4000-8000-0000000014e4');
+update public.story_highlights set open_to_buyers = true
+ where id in ('24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-0000000014f8');
+-- the post of A carries an explicit, later `created_at`: every row of this file shares one `now()`, and the sample picks the
+-- newest tenant post of the locked community (ties would fall to a random uuid)
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility, community_id, created_at) values
+  ('24100000-0000-4000-8000-000000002001', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'cross A', 'tenant', '24100000-0000-4000-8000-0000000000c1', now() + interval '2 hours'),
+  ('24100000-0000-4000-8000-000000002011', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000012', 'cross B', 'tenant', '24100000-0000-4000-8000-0000000000d1', now());
+insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body) values
+  ('24100000-0000-4000-8000-000000002002', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000002001', '24100000-0000-4000-8000-000000000002', 'cross A'),
+  ('24100000-0000-4000-8000-000000002012', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000002011', '24100000-0000-4000-8000-000000000012', 'cross B');
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, variant_widths) values
+  ('24100000-0000-4000-8000-0000000020a1', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-0000000020a2', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-0000000020a3', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-0000000020a4', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}');
+insert into public.stories (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility, published_at, expires_at) values
+  ('24100000-0000-4000-8000-000000002021', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-0000000020a1', 'image', 's2021', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000002022', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-0000000020a2', 'image', 's2022', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000002023', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-0000000020a3', 'image', 's2023', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000002024', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-0000000020a4', 'image', 's2024', 'followers', now() - interval '1 hour', now() + interval '23 hours');
+insert into public.story_highlight_items (id, tenant_id, highlight_id, story_id, added_by_user_id) values
+  ('24100000-0000-4000-8000-000000002031', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000002021', '24100000-0000-4000-8000-000000001401'),
+  ('24100000-0000-4000-8000-000000002032', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000014f8', '24100000-0000-4000-8000-000000002022', '24100000-0000-4000-8000-000000001401');
+
+-- ── 20. the cross-tenant matrix of every new function and gate (11.1-11, BPERM-25, D-886; T-11.1-40) ──────
+-- Every negative below is a member of tenant A against tenant B's rows, or the SAME user under tenant B's claim, and each sits
+-- beside a positive control in the same tenant (the grant answers there, so the absence is isolation, not a broken fixture).
+
+-- 20a. the three functions. M1 (…04) under A's claim.
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c1', 'post'), true,
+  '20a: control: M1 holds post in A''s community CA under A''s claim');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000d1', 'like'), false,
+  '20a: …and tenant B''s community CB answers false for every action under A''s claim (like)');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000d1', 'post'), false,
+  '20a: …(post)');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000d1', 'post'),
+          app.community_action_allowed('24100000-0000-4000-8000-0000000020ff', 'post'),
+  '20a: a foreign community answers exactly what a community that exists nowhere answers');
+select is((select app.community_buyer_scope() ? '24100000-0000-4000-8000-0000000000c1'), true,
+  '20a: control: the scope map carries A''s community under A''s claim');
+select is((select app.community_buyer_scope() ? '24100000-0000-4000-8000-0000000000d1'), false,
+  '20a: …and never names tenant B''s community');
+select is((select app.community_buyer_scope() ? '24100000-0000-4000-8000-0000000000d1')
+         , (select app.community_buyer_scope() ? '24100000-0000-4000-8000-0000000020ff'),
+  '20a: …a foreign community key is absent exactly like one that exists nowhere');
+select ok(not ('24100000-0000-4000-8000-0000000000d1'::uuid = any (app.community_action_denied_ids('like'))),
+  '20a: the denied-ids lane form never names tenant B''s community under A''s claim');
+reset role;
+-- the same user under B's claim: B's own grant answers, A's never does
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000d1', 'like'), true,
+  '20a: control: the same user holds like in B''s community under B''s claim');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c1', 'like'), false,
+  '20a: BPERM-25: …and A''s community answers false under B''s claim (like)');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c1', 'post'), false,
+  '20a: …(post, the very action A''s link grants)');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000d1', 'post'), false,
+  '20a: …and B''s own link grants no post, so A''s post grant did not leak across (post in CB)');
+select is((select app.community_buyer_scope() ? '24100000-0000-4000-8000-0000000000d1'), true,
+  '20a: control: B''s map carries B''s community');
+select is((select app.community_buyer_scope() ? '24100000-0000-4000-8000-0000000000c1'), false,
+  '20a: …and not A''s');
+select is((select count(*)::int from jsonb_object_keys((select app.community_buyer_scope()))), 1,
+  '20a: …one key in all: the map holds only the claim''s tenant');
+select ok('24100000-0000-4000-8000-0000000000d1'::uuid = any (app.community_action_denied_ids('post')),
+  '20a: control: the denied-ids form names B''s community for post (B''s link ticks nothing there)');
+select ok(not ('24100000-0000-4000-8000-0000000000c1'::uuid = any (app.community_action_denied_ids('post'))),
+  '20a: …and never A''s community');
+reset role;
+-- staff fail closed in both tenants, and a lane with a tenant of its own but nothing in it answers empty
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select is((select app.community_buyer_scope()), '{}'::jsonb, '20a: staff of A: the scope map is empty (fail closed)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000012', 'admin_tenant');
+select is((select app.community_buyer_scope()), '{}'::jsonb, '20a: staff of B: the scope map is empty (fail closed)');
+reset role;
+insert into bperm_covered values
+  ('function', 'community_action_allowed'), ('function', 'community_action_denied_ids'), ('function', 'community_buyer_scope');
+
+-- 20b. the post gate (`feed_posts_social_insert_gate`)
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', 'cruzado', 'community', '24100000-0000-4000-8000-0000000000d1') $$,
+  '42501', null, '20b: a buyer of A posting into tenant B''s community (A''s id on the row) is refused (42501)');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004', 'cruzado', 'community', '24100000-0000-4000-8000-0000000000d1') $$,
+  '42501', null, '20b: …and with tenant B''s id forged on the row (42501)');
+select lives_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', 'controle A', 'community', '24100000-0000-4000-8000-0000000000c1') $$,
+  '20b: control: the same buyer posts into A''s own community');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004', 'cruzado', 'community', '24100000-0000-4000-8000-0000000000c1') $$,
+  '42501', null, '20b: BPERM-25: under B''s claim A''s post grant opens nothing in A''s community (42501)');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', 'cruzado', 'community', '24100000-0000-4000-8000-0000000000c1') $$,
+  '42501', null, '20b: …nor with A''s id forged on the row (42501)');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004', 'sem flag em B', 'community', '24100000-0000-4000-8000-0000000000d1') $$,
+  '42501', null, '20b: …and B''s own link ticks no post, so the buyer is refused in B too (42501)');
+reset role;
+update public.store_product_communities set can_post = true
+ where product_id = '24100000-0000-4000-8000-0000000000b1' and community_id = '24100000-0000-4000-8000-0000000000d1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004');
+select lives_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004', 'controle B', 'community', '24100000-0000-4000-8000-0000000000d1') $$,
+  '20b: control: with B''s own post flag on the same buyer posts into B''s community');
+reset role;
+update public.store_product_communities set can_post = false
+ where product_id = '24100000-0000-4000-8000-0000000000b1' and community_id = '24100000-0000-4000-8000-0000000000d1';
+insert into bperm_covered values ('policy', 'feed_posts_social_insert_gate');
+
+-- 20c. the like gate (`feed_likes_community_gate`), on a post and on a comment heart
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000002011') $$,
+  '42501', null, '20c: a buyer of A liking a post of tenant B is refused (42501)');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000002012', 'post') $$,
+  '42501', null, '20c: …and a heart on a comment of tenant B (42501)');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000002011') $$,
+  '42501', null, '20c: …with tenant B''s id forged on the row (42501)');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000002001') $$,
+  '20c: control: the same buyer likes A''s post');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000002002', 'post') $$,
+  '20c: control: …and hearts A''s comment');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000002001') $$,
+  '42501', null, '20c: BPERM-25: the same user under B''s claim cannot like A''s post (42501)');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000002002', 'post') $$,
+  '42501', null, '20c: …nor heart A''s comment (42501)');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000002011') $$,
+  '20c: control: under B''s claim the same user likes B''s post');
+reset role;
+insert into bperm_covered values ('policy', 'feed_likes_community_gate');
+
+-- 20d. the comment gate (`feed_comments_community_insert_gate`)
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000002011', '24100000-0000-4000-8000-000000000004', 'cruzado') $$,
+  '42501', null, '20d: a buyer of A commenting on a post of tenant B is refused (42501)');
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000002011', '24100000-0000-4000-8000-000000000004', 'cruzado') $$,
+  '42501', null, '20d: …with tenant B''s id forged on the row (42501)');
+select lives_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000002001', '24100000-0000-4000-8000-000000000004', 'controle A') $$,
+  '20d: control: the same buyer comments on A''s post');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000002001', '24100000-0000-4000-8000-000000000004', 'cruzado') $$,
+  '42501', null, '20d: BPERM-25: the same user under B''s claim cannot comment on A''s post (42501)');
+select lives_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000002011', '24100000-0000-4000-8000-000000000004', 'controle B') $$,
+  '20d: control: under B''s claim the same user comments on B''s post');
+reset role;
+insert into bperm_covered values ('policy', 'feed_comments_community_insert_gate');
+
+-- 20e. the item insert gate (`story_highlight_items_member_insert_gate`)
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f8', '24100000-0000-4000-8000-000000002023', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '20e: a buyer of A saving A''s story into tenant B''s open highlight is refused (42501)');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000014f8', '24100000-0000-4000-8000-000000002024', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '20e: …nor with tenant B''s id forged on the row, B''s own story included (42501)');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000002023', '24100000-0000-4000-8000-000000001401') $$,
+  '20e: control: the same buyer saves their own story into A''s open highlight');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000002024', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '20e: BPERM-25: under B''s claim A''s open highlight takes nothing (42501)');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000014f8', '24100000-0000-4000-8000-000000002024', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '20e: …and A''s story grant opens nothing in B (B''s link ticks no story: 42501)');
+reset role;
+update public.store_product_communities set can_story = true
+ where product_id = '24100000-0000-4000-8000-0000000014a3' and community_id = '24100000-0000-4000-8000-0000000014d1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000014f8', '24100000-0000-4000-8000-000000002024', '24100000-0000-4000-8000-000000001401') $$,
+  '20e: control: with B''s own story flag on the same user saves B''s story into B''s open highlight');
+reset role;
+insert into bperm_covered values ('policy', 'story_highlight_items_member_insert_gate');
+
+-- 20f. the item delete gate (`story_highlight_items_member_delete_gate`; a USING-filtered delete raises nothing, the row STAYS)
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok($$ delete from public.story_highlight_items where id = '24100000-0000-4000-8000-000000002032' $$,
+  '20f: a buyer of A deleting tenant B''s item raises nothing…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where id = '24100000-0000-4000-8000-000000002032'), 1,
+  '20f: …and B''s item stays');
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401');
+select lives_ok($$ delete from public.story_highlight_items where id = '24100000-0000-4000-8000-000000002031' $$,
+  '20f: BPERM-25: the same user under B''s claim deleting A''s item raises nothing…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where id = '24100000-0000-4000-8000-000000002031'), 1,
+  '20f: …and A''s item stays');
+update public.store_product_communities set can_story = false
+ where product_id = '24100000-0000-4000-8000-0000000014a3' and community_id = '24100000-0000-4000-8000-0000000014d1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401');
+select lives_ok($$ delete from public.story_highlight_items where id = '24100000-0000-4000-8000-000000002032' $$,
+  '20f: B''s own link without the story flag: the buyer''s own item delete raises nothing…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where id = '24100000-0000-4000-8000-000000002032'), 1,
+  '20f: …and the item stays (the grant must hold in B, not in A)');
+update public.store_product_communities set can_story = true
+ where product_id = '24100000-0000-4000-8000-0000000014a3' and community_id = '24100000-0000-4000-8000-0000000014d1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401');
+select lives_ok($$ delete from public.story_highlight_items where id = '24100000-0000-4000-8000-000000002032' $$,
+  '20f: control: with B''s story flag on the buyer removes their own item in B…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where id = '24100000-0000-4000-8000-000000002032'), 0,
+  '20f: …(gone)');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok($$ delete from public.story_highlight_items where id = '24100000-0000-4000-8000-000000002031' $$,
+  '20f: control: under A''s claim the same user removes their own item in A…');
+reset role;
+select is((select count(*)::int from public.story_highlight_items where id = '24100000-0000-4000-8000-000000002031'), 0,
+  '20f: …(gone)');
+insert into bperm_covered values ('policy', 'story_highlight_items_member_delete_gate');
+
+-- 20g. the audience gate (`stories_audience_gate`) and the free sample (`app.feed_sample_post_ids`)
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000002021'), 1,
+  '20g: control: BS1 reads their own story of A under A''s claim');
+select is((select count(*)::int from public.stories where id in ('24100000-0000-4000-8000-000000002022', '24100000-0000-4000-8000-000000002024')), 0,
+  '20g: …and no story of tenant B (not even their own B stories)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000002022'), 1,
+  '20g: control: the same user reads their own story of B under B''s claim');
+select is((select count(*)::int from public.stories where id in ('24100000-0000-4000-8000-000000002021', '24100000-0000-4000-8000-000000002023')), 0,
+  '20g: BPERM-25: …and no story of tenant A under B''s claim');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005');
+select ok('24100000-0000-4000-8000-000000002001'::uuid = any (app.feed_sample_post_ids()),
+  '20g: control: the locked member of A gets A''s newest tenant post as the sample of CA');
+select ok(not ('24100000-0000-4000-8000-000000002011'::uuid = any (app.feed_sample_post_ids())),
+  '20g: …and the sample never carries tenant B''s post');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004');
+select ok(not ('24100000-0000-4000-8000-000000002001'::uuid = any (app.feed_sample_post_ids())),
+  '20g: BPERM-25: under B''s claim the sample never carries tenant A''s post');
+reset role;
+
+-- ── 21. empty tenants and same-name communities (11.1-11, BPERM-25 empty and adjacency) ───────────────────
+-- A third tenant that owns no community, no product and no entitlement, with one member: everything answers empty or false.
+select tests.tenant('pgtap-bperm-c', 'Permissoes C', '24100000-0000-4000-8000-000000002101');
+select tests.auth_user('c1@bperm-c.local', '24100000-0000-4000-8000-000000002102');
+select tests.member('24100000-0000-4000-8000-000000002101', '24100000-0000-4000-8000-000000002102');
+insert into public.tenant_modules (tenant_id, module_key, enabled) values
+  ('24100000-0000-4000-8000-000000002101', 'social', true), ('24100000-0000-4000-8000-000000002101', 'store', true);
+select tests.as_tenant('24100000-0000-4000-8000-000000002101', '24100000-0000-4000-8000-000000002102');
+select lives_ok($$ select app.community_buyer_scope() $$, '21: BPERM-25 empty: the scope function runs in a tenant that owns nothing (no error)');
+select is((select app.community_buyer_scope()), '{}'::jsonb, '21: …and answers the empty map');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c1', 'like'), false,
+  '21: …every action on a community of another tenant answers false (like)');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000020ff', 'post'), false,
+  '21: …and on one that exists nowhere (post)');
+select is(app.community_action_denied_ids('like'), '{}'::uuid[], '21: …the denied-ids form is the empty array');
+select is(app.feed_sample_post_ids(), '{}'::uuid[], '21: …and the free sample is empty');
+select is((select count(*)::int from public.communities), 0, '21: …no community is visible');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000002101', '24100000-0000-4000-8000-000000002102', 'vazio', 'community', '24100000-0000-4000-8000-0000000000c1') $$,
+  '42501', null, '21: …and a post into a community of another tenant is refused (42501)');
+reset role;
+-- same name, same slug, two tenants, one user holding a product in each (the buyer, …04)
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, kind, position) values
+  ('24100000-0000-4000-8000-0000000020d2', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000012', 'Base A', 'base-a', 'organization', 5);
+insert into public.store_product_communities (tenant_id, product_id, community_id, can_post) values
+  ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000000b1', '24100000-0000-4000-8000-0000000020d2', true);
+select is((select count(distinct (name, slug))::int from public.communities
+            where id in ('24100000-0000-4000-8000-0000000000c1', '24100000-0000-4000-8000-0000000020d2')), 1,
+  '21: BPERM-25 adjacency: the two communities carry the SAME name and slug');
+select is((select count(distinct tenant_id)::int from public.communities
+            where id in ('24100000-0000-4000-8000-0000000000c1', '24100000-0000-4000-8000-0000000020d2')), 2,
+  '21: …in two different tenants');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c1', 'post'), true,
+  '21: control: under A''s claim the grant answers for A''s community');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000020d2', 'post'), false,
+  '21: …and never for the same-named community of tenant B, though B''s link ticks post for this very user');
+select is((select app.community_buyer_scope() ? '24100000-0000-4000-8000-0000000020d2'), false,
+  '21: …nor does A''s map name it');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000020d2', 'post'), true,
+  '21: control: under B''s claim B''s link answers for B''s community');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c1', 'post'), false,
+  '21: …and never for the same-named community of tenant A, though A''s link ticks post for this very user');
+reset role;
+-- ordering: the claim is applied before any lookup, so the answers do not depend on the order the ids are asked in
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select is(
+  (select jsonb_object_agg(q.id::text, app.community_action_allowed(q.id, 'post'))
+     from (values ('24100000-0000-4000-8000-0000000000c1'::uuid), ('24100000-0000-4000-8000-0000000020d2'::uuid),
+                  ('24100000-0000-4000-8000-0000000000d1'::uuid), ('24100000-0000-4000-8000-0000000020ff'::uuid)) q(id)),
+  (select jsonb_object_agg(q.id::text, app.community_action_allowed(q.id, 'post'))
+     from (values ('24100000-0000-4000-8000-0000000020ff'::uuid), ('24100000-0000-4000-8000-0000000000d1'::uuid),
+                  ('24100000-0000-4000-8000-0000000020d2'::uuid), ('24100000-0000-4000-8000-0000000000c1'::uuid)) q(id)),
+  '21: BPERM-25 ordering: asking for the same ids in the opposite order gives the same answers');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000d1', 'post'),
+          app.community_action_allowed('24100000-0000-4000-8000-0000000020ff', 'post'),
+  '21: …and a foreign id answers like one that does not exist (false either way)');
+reset role;
+
+-- ── 22. the meta check: no new function or gate ships without a cross-tenant case (11.1-11, T-11.1-40) ───
+-- `bperm_covered` was filled by sections 20 above, one row per function and per gate the cross cases exercised. The catalog is
+-- read here: every function that reads the buyer flags (or the scope) and every policy that calls one of them must be in it.
+select is(
+  array(select p.proname::text from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'app'
+           and p.prosrc ~* 'community_buyer_scope|community_action_allowed|community_action_denied_ids|can_like|can_comment|can_share|can_post|can_story|open_to_buyers'
+         order by 1),
+  array(select name from bperm_covered where kind = 'function' order by 1),
+  '22: every app function that reads the buyer flags or the scope is named in the cross-tenant matrix (a function added later without a negative fails here)');
+select is(
+  array(select policyname::text from pg_policies
+         where schemaname = 'public'
+           and (coalesce(qual, '') || coalesce(with_check, '')) ~* 'community_buyer_scope|community_action_allowed|community_action_denied_ids|open_to_buyers'
+         order by 1),
+  array(select name from bperm_covered where kind = 'policy' order by 1),
+  '22: every policy that calls one of them is named in the cross-tenant matrix (a gate added later without a negative fails here)');
+select is((select count(*)::int from bperm_covered where kind = 'function'), 3,
+  '22: the three functions of plan 02 are all covered');
+select is((select count(*)::int from bperm_covered where kind = 'policy'), 5,
+  '22: the five insert and delete gates of plans 02 to 04 are all covered');
 
 select * from finish();
 rollback;

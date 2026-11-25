@@ -101,8 +101,6 @@ const publish = (token: string, caption: string, communityId: string) =>
 const addItem = (token: string, highlightId: string, storyId: string) =>
   put(`/v1/stories/highlights/${highlightId}/stories/${storyId}`, token);
 
-const envelope = async (res: Response) => (await res.json()) as Envelope;
-
 /** The refusal every layer of this phase answers with: status 403, code FORBIDDEN and NO `details` key. */
 async function expectBare403(res: Response, where: string) {
   const text = await res.clone().text();
@@ -1616,3 +1614,174 @@ describe('11.1-11 matrix: a buyer of one tenant holds, reads and writes nothing 
 
 const removeItemOf = (token: string, highlightId: string, storyId: string) =>
   del(`/v1/stories/highlights/${highlightId}/stories/${storyId}`, token);
+
+// ── Task 3: the no-leak sweep of every member-readable body the phase touched (D-888, T-11.1-43) ──────────────────
+
+/** Every key name the flags travel under: none of them may reach a member-readable body (UI-D-887). */
+const FLAG_KEYS = [
+  'can_like',
+  'can_comment',
+  'can_share',
+  'can_post',
+  'can_story',
+  'canLike',
+  'canComment',
+  'canShare',
+  'canPost',
+  'canStory',
+  'communityPermissions',
+  'community_permissions',
+  'buyer_scope',
+  'buyerScope',
+  'openHighlight',
+  'open_highlight',
+  'open_to_buyers',
+];
+
+/** Fails when `text` carries a flag key, the scope, the open-highlight fact, an entitlement id or the open switch. */
+function expectNoFlagsOrEntitlements(text: string, where: string, entitlementIds: string[]) {
+  for (const key of [...FLAG_KEYS, 'openToBuyers']) {
+    expect(text.includes(key), `${where} must not carry "${key}"`).toBe(false);
+  }
+  for (const id of entitlementIds) {
+    expect(text.includes(id), `${where} must not carry the entitlement id ${id}`).toBe(false);
+  }
+}
+
+describe('11.1-11 leak: no member-readable body names a product, an entitlement, a flag or the open switch (D-888, T-11.1-43)', () => {
+  it('18. the community, feed, comment, highlight and story reads carry no product id or name, no entitlement id, no flag key; the manager reads carry them (the sweep is not blind)', async () => {
+    await rebuyBuyer2();
+    await setFlags({ like: true, comment: true, share: true, post: true, story: true });
+    await adminSql`update public.story_highlights set open_to_buyers = true where id = ${fx.hOpen}::uuid`;
+    const story = await insertStory(users.buyer2, 'story do varrimento');
+    expect((await addItem(tokens.buyer2, fx.hOpen, story)).status).toBe(200);
+    const mine = await publish(tokens.buyer2, `${PREFIX} post do varrimento`, fx.orgA);
+    expect(mine.status, await mine.clone().text()).toBe(201);
+    const minePost = ((await mine.json()) as FeedPost).id;
+    // a second, never-bought reader holds the community locked; both lanes are swept
+    const entitlements = (
+      await adminSql<{ id: string }[]>`
+        select id::text as id from public.store_entitlements
+         where product_id in (${fx.productA}::uuid, ${fx.productB}::uuid, ${b.productB}::uuid)`
+    ).map((row) => row.id);
+    expect(entitlements.length, 'the fixture holds entitlements to look for').toBeGreaterThan(0);
+    const productWords = [
+      fx.productA,
+      fx.productB,
+      b.productB,
+      `${PREFIX} produto A`,
+      `${PREFIX} produto B`,
+      `${PREFIX} produto lab`,
+    ];
+
+    const paths = [
+      '/v1/communities',
+      `/v1/communities/${fx.orgA}`,
+      `/v1/feed?communityId=${fx.orgA}&limit=25`,
+      '/v1/feed?limit=25',
+      '/v1/feed?scope=explorar&limit=25',
+      `/v1/feed/posts/${fx.adminPost}`,
+      `/v1/feed/posts/${minePost}`,
+      `/v1/feed/posts/${fx.adminPost}/comments`,
+      `/v1/stories/highlights?communityId=${fx.orgA}`,
+      `/v1/stories/highlights/${fx.hOpen}`,
+      '/v1/stories/highlights/catalog',
+      `/v1/stories/${story}`,
+      '/v1/stories',
+    ];
+    let swept = 0;
+    for (const [who, token] of [
+      ['buyer', tokens.buyer2],
+      ['reader', tokens.reader],
+    ] as const) {
+      for (const path of paths) {
+        const res = await get(path, token);
+        const text = await res.text();
+        // a locked reader may be refused or shown less: the rule is about what IS returned
+        expect([200, 403, 404], `${who} ${path} -> ${res.status}`).toContain(res.status);
+        expectNoFlagsOrEntitlements(text, `${who} ${path}`, entitlements);
+        for (const word of productWords) {
+          expect(text.includes(word), `${who} ${path} must not carry "${word}"`).toBe(false);
+          expect(text.normalize('NFD').includes(word.normalize('NFD'))).toBe(false);
+        }
+        if (res.status === 200) swept += 1;
+      }
+    }
+    expect(swept, 'the sweep read bodies, it did not just collect refusals').toBeGreaterThan(15);
+
+    // the buyer's own sees the facts they may act on, by their finished names (positive control for the paths above)
+    const buyerPost = await get(`/v1/feed/posts/${fx.adminPost}`, tokens.buyer2);
+    expect(buyerPost.status).toBe(200);
+    // the manager reads DO carry the switch and the flags, so the absences above are not a blind sweep
+    const curatorHighlight = await get(`/v1/stories/highlights/${fx.hOpen}`, tokens.admin);
+    expect(await curatorHighlight.text(), 'the curator read carries the switch').toContain(
+      'openToBuyers',
+    );
+    const curatorList = await get(
+      `/v1/stories/highlights?communityId=${fx.orgA}&scope=all`,
+      tokens.admin,
+    );
+    expect(await curatorList.text()).toContain('openToBuyers');
+    const managerProduct = await get(`/v1/store/products/${fx.productA}`, tokens.admin);
+    expect(
+      await managerProduct.text(),
+      'the manager product read carries the permissions',
+    ).toContain('communityPermissions');
+  });
+
+  it('19. the member product read, the product list, the community access read and the purchase answer carry no flag, no scope, no entitlement id and no other product; the subject product is allowed to name itself', async () => {
+    const entitlementsBefore = (
+      await adminSql<{ id: string }[]>`
+        select id::text as id from public.store_entitlements
+         where product_id in (${fx.productA}::uuid, ${fx.productB}::uuid, ${b.productB}::uuid)`
+    ).map((row) => row.id);
+    const readsOf = async (token: string, where: string, entitlementIds: string[]) => {
+      const seen: string[] = [];
+      for (const path of [
+        `/v1/store/products/${fx.productA}`,
+        '/v1/store/products',
+        `/v1/store/communities/${fx.orgA}/access`,
+        '/v1/store/community-access',
+      ]) {
+        const res = await get(path, token);
+        expect([200, 404], `${where} ${path} -> ${res.status}`).toContain(res.status);
+        const text = await res.text();
+        expectNoFlagsOrEntitlements(text, `${where} ${path}`, entitlementIds);
+        if (res.status === 200) seen.push(path);
+      }
+      expect(seen.length, `${where} read the product surfaces`).toBeGreaterThanOrEqual(3);
+    };
+    await readsOf(tokens.buyer2, 'buyer', entitlementsBefore);
+    await readsOf(tokens.reader, 'reader', entitlementsBefore);
+
+    // another tenant's product never appears in this tenant's product reads (the list and the single read)
+    const list = await (await get('/v1/store/products', tokens.buyer2)).text();
+    expect(list.includes(b.productB)).toBe(false);
+    expect(list.includes(`${PREFIX} produto lab`)).toBe(false);
+    expect(
+      list.includes(fx.productA),
+      'positive control: this tenant’s own product is listed',
+    ).toBe(true);
+
+    // the purchase answer: a reader buys product B (no flag ticked) and the answer names no flag and no entitlement
+    const bought = await post(`/v1/store/products/${fx.productB}/purchase`, tokens.reader, {
+      expectedAmountCents: 990,
+    });
+    const boughtText = await bought.text();
+    expect(bought.status, boughtText).toBe(200);
+    const after = (
+      await adminSql<{ id: string }[]>`
+        select id::text as id from public.store_entitlements
+         where product_id in (${fx.productA}::uuid, ${fx.productB}::uuid, ${b.productB}::uuid)`
+    ).map((row) => row.id);
+    expect(after.length).toBeGreaterThan(entitlementsBefore.length);
+    expectNoFlagsOrEntitlements(boughtText, 'the purchase answer', after);
+    expect(boughtText.includes(fx.productA), 'the purchase answer names no OTHER product').toBe(
+      false,
+    );
+    // and the reader who just bought now reads the community like any holder, with the same bodies
+    const community = await get(`/v1/communities/${fx.orgA}`, tokens.reader);
+    expect(community.status).toBe(200);
+    expectNoFlagsOrEntitlements(await community.text(), 'the new holder’s community read', after);
+  });
+});
