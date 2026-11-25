@@ -503,14 +503,35 @@ export async function getHighlight(highlightId: string): Promise<HighlightDetail
 /* ── The highlight sheet (05.2-06, D-110) ─────────────────────────────────────────────────────── */
 
 /**
- * `GET /v1/stories/highlights/catalog` — EVERY highlight a curator can act on, in one statement:
- * Início's first, then each ACTIVE community's in position order (never an archived one, and none at
- * all while the communities module is off). Manage-only: a member is refused 403 (T-05.2-26).
+ * `GET /v1/stories/highlights/catalog` — EVERY highlight the caller can act on, in one statement:
+ * for a curator Início's first, then each ACTIVE community's in position order (never an archived
+ * one, and none at all while the communities module is off). For a MEMBER (11.1, D-884) it is the
+ * highlights of the communities they create, plus the highlights the administrator OPENED in the
+ * organization communities their purchase holds the story permission for: a closed highlight is
+ * never in the answer, and the flag itself never crosses to a member. A caller with no story
+ * permission is refused 403 (T-05.2-26); the screens branch only on that refusal.
  */
 export async function getHighlightCatalog(): Promise<HighlightList> {
   const res = await apiFetch('/v1/stories/highlights/catalog');
   if (!res.ok) throw await apiError(res);
   return highlightListSchema.parse(await res.json());
+}
+
+/**
+ * 11.1-16 (UI-D-891 c, A-UI-13): whether the caller has ANY highlight to save a story into, read from
+ * the finished catalogue answer and nothing else (no role, no product, no community id). It is the
+ * fact behind the "Destacar" doors for a member who owns no community of their own: with no group
+ * the door is absent, never an empty sheet. It never throws and never navigates: an unreadable
+ * catalogue is `false`, which removes a door and costs nothing else (the API refuses regardless).
+ */
+export async function hasHighlightDestination(): Promise<boolean> {
+  try {
+    return (await getHighlightCatalog()).items.length > 0;
+  } catch (error) {
+    // Shape only: a highlight TITLE is tenant content and never reaches a log line (T-05-29).
+    console.error('stories.highlight_destination_failed', { error: String(error) });
+    return false;
+  }
 }
 
 /** `GET /v1/stories/{storyId}/highlights` — the ids of the highlights one story is in. Manage-only. */

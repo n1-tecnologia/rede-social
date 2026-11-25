@@ -303,6 +303,55 @@ function rowOrder(): string[] {
   );
 }
 
+describe('HighlightSheet — a group that cannot create (11.1-16, UI-D-891 b, D-884)', () => {
+  const BUYER: HighlightSheetPlace = {
+    key: 'b1',
+    label: 'place-b1',
+    communityId: 'b1',
+    rows: [{ id: 'hb1', title: 'title-hb1', cover: null }],
+    canCreate: false,
+  };
+
+  it('B1. a group with canCreate false draws its rows and NO "Novo destaque" row; the other groups keep theirs (the rule is per group)', () => {
+    render(<HighlightSheet {...singleProps({ places: [C1, BUYER] })} />);
+    expect(rowOrder()).toEqual(['none', 'label:c1', 'row:h3', 'create:c1', 'label:b1', 'row:hb1']);
+    expect(screen.getAllByRole('button', { name: 'create-label' })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'pick:title-hb1@place-b1' })).toBeInTheDocument();
+  });
+
+  it('B2. a group without the field behaves as before (absent keeps today), and a group with canCreate true is the same', () => {
+    render(<HighlightSheet {...singleProps({ places: [C1, { ...C2, canCreate: true }] })} />);
+    expect(screen.getAllByRole('button', { name: 'create-label' })).toHaveLength(2);
+  });
+
+  it('B3. choosing the open highlight of a buyer group selects it and closes', () => {
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    render(<HighlightSheet {...singleProps({ places: [BUYER], onSelect, onClose })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'pick:title-hb1@place-b1' }));
+    expect(onSelect).toHaveBeenCalledWith({ kind: 'highlight', highlightId: 'hb1' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('B4. the checklist draws a buyer group as plain switch rows (it never had a create row)', () => {
+    render(
+      <HighlightSheet
+        mode="checklist"
+        open
+        onClose={() => {}}
+        title="sheet-title"
+        places={[BUYER]}
+        selectedIds={['hb1']}
+        onToggle={async () => true}
+        rowLabel={(row, place) => `toggle:${row.title}@${place.label}`}
+        empty={<p>empty-node</p>}
+      />,
+    );
+    expect(screen.getByRole('switch', { name: 'toggle:title-hb1@place-b1' })).toBeChecked();
+    expect(screen.queryByText('create-label')).not.toBeInTheDocument();
+  });
+});
+
 describe('HighlightSheet — single-select mode (UI-D-68)', () => {
   it('S1. with an origin community: its group first, then "Nenhum", then Início, then the other groups', () => {
     render(<HighlightSheet {...singleProps({ originCommunityId: 'c1' })} />);

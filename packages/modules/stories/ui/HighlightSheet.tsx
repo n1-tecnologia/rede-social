@@ -213,6 +213,14 @@ export interface HighlightSheetPlace {
   label: string;
   communityId: string | null;
   rows: readonly HighlightSheetRow[];
+  /**
+   * 11.1-16 (UI-D-891 b, D-884): whether the host lets the member CREATE a highlight in this group. A
+   * buyer's group lists the highlights the administrator opened and nothing else, so the host sets
+   * `false` and the single-select sheet draws no "Novo destaque" row for it (the checklist never had
+   * one). The rule is per group, never per member: a creator who is also a buyer keeps the row in
+   * their own community's group. ABSENT reads `true`, so every shipped caller is unchanged.
+   */
+  canCreate?: boolean;
 }
 
 /**
@@ -539,24 +547,26 @@ function SingleSheet({
               </button>
             </li>
           ) : null}
-          <li>
-            <button
-              type="button"
-              data-highlight-sheet-item={`create:${place.key}`}
-              onClick={() => setCreatingFor(place)}
-              className={SELECT_ROW}
-            >
-              <span
-                aria-hidden
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 border-dashed border-border-secondary text-text-secondary"
+          {place.canCreate === false ? null : (
+            <li>
+              <button
+                type="button"
+                data-highlight-sheet-item={`create:${place.key}`}
+                onClick={() => setCreatingFor(place)}
+                className={SELECT_ROW}
               >
-                <Plus size={16} />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-sm font-bold text-text">
-                {createLabel}
-              </span>
-            </button>
-          </li>
+                <span
+                  aria-hidden
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 border-dashed border-border-secondary text-text-secondary"
+                >
+                  <Plus size={16} />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-bold text-text">
+                  {createLabel}
+                </span>
+              </button>
+            </li>
+          )}
         </ul>
       </div>
     );

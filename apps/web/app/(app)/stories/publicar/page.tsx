@@ -60,6 +60,16 @@ import { getHostTenant } from '@/lib/tenant-host';
  * `communities` module is off. The catalogue the API answers for a member is already scoped to their
  * own active communities, so there is never an "Início" group.
  *
+ * **The buyer's destinations (11.1-16, UI-D-891, D-883, D-884).** A buyer is a member whose purchase
+ * opened a community's story permission; the catalogue the API answers for them lists the highlights
+ * the administrator OPENED, and `viewer.actions.story` says where they may save. `offeredPlaces` turns
+ * that into one group per community with its open highlights in their own row order, marks a group the
+ * member cannot create in (`canCreate: false`, so the sheet draws no `createLabel` row and no title
+ * step for it, while a creator who is also a buyer keeps both in their own community's group), and
+ * drops a community with nothing open. With no group left the composer has no "Destaque" row at all
+ * and a `?comunidade=` for that community is ignored. The page compares no role: a destination is
+ * offered by what the server answered.
+ *
  * **There is no public render path.** The route lives inside the `(app)` group, so `proxy.ts`
  * bounces a session-less visitor to `/entrar` before this file runs, and it reads the session and
  * the host headers at request time — which is what keeps it OUT of the static route list
@@ -110,19 +120,31 @@ export default async function PublishStoryPage({
       (community.viewer.actions.story || (!isMember && community.kind !== 'member')),
   );
 
+  const places: OfferedPlace[] = offeredPlaces(
+    highlightPlacesView(catalog, communities, {
+      homeLabel: t('highlights.place.home'),
+      includeEmptyPlaces: true,
+      // A member has no "Início" group, whatever the catalogue holds (UI-D-704).
+      includeHome: !isMember,
+    }),
+    // 11.1-16 (UI-D-891 b, D-884): where the member may CREATE a highlight is the API's own
+    // per-community answer (`viewer.canCurate`: the creator of a member community). Only the member's
+    // groups are judged; the administrator is a curator wherever a group is offered, as shipped.
+    isMember
+      ? new Set(communities.filter((community) => community.viewer.canCurate).map(({ id }) => id))
+      : null,
+  );
+
   // A repeated `?comunidade=` arrives as an array; the FIRST value wins rather than the request
-  // failing — the `/criar` rule, verbatim.
+  // failing — the `/criar` rule, verbatim. It is resolved against the groups that are OFFERED (11.1-16,
+  // UI-D-891 c): a community the buyer holds `story` for but that has no open highlight offers
+  // nothing, so its id is ignored and the composer opens on "Nenhum".
   const requested = Array.isArray(params.comunidade) ? params.comunidade[0] : params.comunidade;
-  const originCommunityId = communities.some((item) => item.id === requested)
+  const originCommunityId = places.some(
+    (place) => place.communityId !== null && place.communityId === requested,
+  )
     ? (requested ?? null)
     : null;
-
-  const places: HighlightPlaceView[] = highlightPlacesView(catalog, communities, {
-    homeLabel: t('highlights.place.home'),
-    includeEmptyPlaces: true,
-    // A member has no "Início" group, whatever the catalogue holds (UI-D-704).
-    includeHome: !isMember,
-  });
 
   return (
     <StoryComposer
@@ -135,12 +157,40 @@ export default async function PublishStoryPage({
   );
 }
 
+/** A place as the composer draws it: the module's `HighlightSheetPlace`, `canCreate` set only when `false`. */
+type OfferedPlace = HighlightPlaceView & { canCreate?: false };
+
+/**
+ * 11.1-16 (UI-D-891 b, c, D-884): the destination groups a MEMBER is offered, from the catalogue the API
+ * answers for them (their own communities plus the open highlights of the communities their purchase
+ * opened) and the communities they may save a story into.
+ *
+ * - A group with no highlight is kept only where the member may create one (their own community: its
+ *   own "Novo destaque" row is the way in). A community the member only holds `story` for and where
+ *   nothing is open offers nothing: no group, and with no group left the composer has no "Destaque"
+ *   row and the sheet is never drawn empty.
+ * - A group the member may not create in carries `canCreate: false`, so the sheet's `createLabel`
+ *   row and title step never appear for it (the rule is per group, never per member).
+ * - `creatable` is `null` for the administrator, whose groups are returned exactly as built.
+ */
+function offeredPlaces(
+  places: readonly HighlightPlaceView[],
+  creatable: ReadonlySet<string> | null,
+): OfferedPlace[] {
+  if (creatable === null) return [...places];
+  return places.flatMap((place): OfferedPlace[] => {
+    const creates = place.communityId === null || creatable.has(place.communityId);
+    if (creates) return [place];
+    return place.rows.length > 0 ? [{ ...place, canCreate: false }] : [];
+  });
+}
+
 /**
  * D-112: no origin → "Nenhum" (the zero-tap default, 05.1 criterion 5); an origin with highlights →
  * its FIRST highlight in row order; an origin with none → `choose`, the gate.
  */
 function initialSelectionFor(
-  places: readonly HighlightPlaceView[],
+  places: readonly OfferedPlace[],
   originCommunityId: string | null,
 ): ComposerSelection {
   if (originCommunityId === null) return { kind: 'none' };

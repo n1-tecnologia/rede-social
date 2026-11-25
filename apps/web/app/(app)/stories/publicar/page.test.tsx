@@ -259,3 +259,114 @@ describe('/stories/publicar — the member screen (10-12, UI-D-702..UI-D-704)', 
     expect(props?.originCommunityId ?? null).toBeNull();
   });
 });
+
+/* ── 11.1-16 (UI-D-891, D-883, D-884): the buyer's destinations ─────────────────────────────────── */
+
+/** An ORGANIZATION community as a buyer reads it: `actions.story` true, nothing they curate. */
+function buyerCommunity(id: string, name: string, story = true) {
+  return {
+    ...community(id, name, { story, isOwner: false }),
+    kind: 'organization',
+    viewer: {
+      isOwner: false,
+      canPublish: false,
+      canEdit: false,
+      canCurate: false,
+      actions: { like: true, comment: true, share: true, post: false, story },
+    },
+  };
+}
+
+const H_X2 = '0000000a-1111-4111-8111-0000000000a2';
+const H_Y = '0000000a-1111-4111-8111-0000000000b1';
+
+describe('/stories/publicar — the buyer’s destinations (11.1-16, UI-D-891, D-884)', () => {
+  it('B1. TRACER: a buyer sees ONE group, the community of the open highlight, with that row and no create affordance; the origin pre-fills it', async () => {
+    mocks.communities = [buyerCommunity(X, 'Alfa')];
+    mocks.catalog = [summary(H_X, X, 'Aberto')];
+    const props = await render({ comunidade: X });
+    expect(props?.member).toBeDefined();
+    expect(props?.places).toEqual([
+      {
+        key: X,
+        label: 'Alfa',
+        communityId: X,
+        rows: [{ id: H_X, title: 'Aberto', cover: null }],
+        canCreate: false,
+      },
+    ]);
+    expect(props?.originCommunityId).toBe(X);
+    expect(props?.initialSelection).toEqual({ kind: 'highlight', highlightId: H_X });
+  });
+
+  it('B2. a creator of a member community who is also a buyer: two groups, "Novo destaque" in their own only; an empty own community stays, an empty buyer community does not', async () => {
+    mocks.communities = [
+      buyerCommunity(X, 'Alfa'),
+      community(Y, 'Delas', { story: true, isOwner: true }),
+      buyerCommunity(Z, 'Gama'),
+    ];
+    mocks.catalog = [summary(H_X, X, 'Aberto'), summary(H_Y, Y, 'Meu')];
+    const props = await render();
+    const places = (props?.places ?? []) as {
+      label: string;
+      canCreate?: boolean;
+      rows: unknown[];
+    }[];
+    // Gama has story true and no open highlight: it offers nothing.
+    expect(places.map((place) => place.label)).toEqual(['Alfa', 'Delas']);
+    expect(places[0]?.canCreate).toBe(false);
+    expect(places[1]?.canCreate).not.toBe(false);
+
+    mocks.catalog = [summary(H_X, X, 'Aberto')];
+    const emptyOwn = (await render())?.places as { label: string; canCreate?: boolean }[];
+    expect(emptyOwn.map((place) => place.label)).toEqual(['Alfa', 'Delas']);
+    expect(emptyOwn[1]?.canCreate).not.toBe(false);
+  });
+
+  it('B3. rows keep the catalogue’s own order inside the group, and one row is a plain row', async () => {
+    mocks.communities = [buyerCommunity(X, 'Alfa'), buyerCommunity(Z, 'Gama')];
+    mocks.catalog = [
+      summary(H_X, X, 'Primeiro'),
+      summary(H_X2, X, 'Segundo'),
+      summary(H_Y, Z, 'Único'),
+    ];
+    const places = (await render())?.places as { rows: { title: string }[] }[];
+    expect(places[0]?.rows.map((row) => row.title)).toEqual(['Primeiro', 'Segundo']);
+    expect(places[1]?.rows.map((row) => row.title)).toEqual(['Único']);
+  });
+
+  it('B4. no open highlight anywhere: no places (so no "Destaque" row and never an empty sheet), and the buyer still publishes plain', async () => {
+    mocks.communities = [buyerCommunity(X, 'Alfa')];
+    mocks.catalog = [];
+    const props = await render();
+    expect(props?.places).toEqual([]);
+    expect(props?.member).toBeDefined();
+    expect(props?.initialSelection).toEqual({ kind: 'none' });
+  });
+
+  it('B5. ?comunidade= for a community that is not an offered destination (story true but nothing open) opens on "Nenhum" with no error', async () => {
+    mocks.communities = [buyerCommunity(X, 'Alfa'), buyerCommunity(Z, 'Gama')];
+    mocks.catalog = [summary(H_X, X, 'Aberto')];
+    const props = await render({ comunidade: Z });
+    expect(props?.originCommunityId).toBeNull();
+    expect(props?.initialSelection).toEqual({ kind: 'none' });
+    expect(labelsOf(props)).toEqual(['Alfa']);
+  });
+
+  it('B6. a failed catalogue read degrades to no group for a buyer (never a group they cannot use)', async () => {
+    mocks.communities = [buyerCommunity(X, 'Alfa')];
+    mocks.getHighlightCatalog.mockRejectedValue(new Error('boom'));
+    const props = await render({ comunidade: X });
+    expect(props?.places).toEqual([]);
+    expect(props?.originCommunityId).toBeNull();
+  });
+
+  it('B7. the page compares no role and no id for the buyer: the same fixture with the manage permission keeps Início and every community with its create row', async () => {
+    mocks.permissions = [PUBLISH, MANAGE, 'content.publish'];
+    mocks.communities = [buyerCommunity(X, 'Alfa')];
+    mocks.catalog = [];
+    const places = (await render())?.places as { label: string; canCreate?: boolean }[];
+    expect(places.map((place) => place.label)).toEqual(['Início', 'Alfa']);
+    expect(places.every((place) => place.canCreate !== false)).toBe(true);
+  });
+});

@@ -1159,3 +1159,87 @@ describe('StoryComposer — the member’s destination (UI-D-704, D-716)', () =>
     expect(screen.getByRole('dialog')).toBeTruthy();
   });
 });
+
+/* ── 11.1-16 (UI-D-891, D-883, D-884): the buyer's destination sheet ──────────────────────────────── */
+
+describe('StoryComposer — the buyer’s destinations (11.1-16, UI-D-891, D-716)', () => {
+  const CREATE = lookup(catalog, 'highlights.select.create');
+  const buyerPlace = (): Place & { canCreate: false } => ({
+    key: A,
+    label: NAME_A,
+    communityId: A,
+    rows: [{ id: H_A1, title: 'Aberto', cover: null }],
+    canCreate: false,
+  });
+  const ownPlace = (): Place => ({ key: B, label: NAME_B, communityId: B, rows: [] });
+
+  it('X1. TRACER: the sheet lists the one open highlight, the notice sits on top, there is NO "Novo destaque", choosing it shows the frame notice and publishing sends that highlightId', async () => {
+    asMember({ places: [buyerPlace()] });
+    await completeUpload('image', IMAGE);
+    const dialog = await openSheet();
+    const notice = within(dialog).getByText(NOTICE);
+    expect(within(dialog).getByText(NAME_A)).toBeTruthy();
+    expect(
+      notice.compareDocumentPosition(within(dialog).getByText(NAME_A)) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(sheetItem(dialog, `row:${H_A1}`)).toBeTruthy();
+    expect(sheetItem(dialog, `create:${A}`)).toBeNull();
+    expect(within(dialog).queryByText(CREATE)).toBeNull();
+
+    await tap(sheetItem(dialog, `row:${H_A1}`) as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(destinationValue()).toBe(value(NAME_A, 'Aberto'));
+    const frame = screen.getByText(NOTICE);
+    expect(frame.className).toContain('text-white');
+
+    await publishNow();
+    expect(publish).toHaveBeenCalledWith(
+      { mediaAssetId: IMAGE, mediaKind: 'image', caption: '', highlightId: H_A1 },
+      { communityId: A },
+    );
+  });
+
+  it('X2. a creator who is also a buyer: "Novo destaque" appears once, in their own community’s group only', async () => {
+    asMember({ places: [buyerPlace(), ownPlace()] });
+    await completeUpload('image', IMAGE);
+    const dialog = await openSheet();
+    expect(sheetItem(dialog, `create:${A}`)).toBeNull();
+    expect(sheetItem(dialog, `create:${B}`)).toBeTruthy();
+    expect(within(dialog).getAllByText(CREATE)).toHaveLength(1);
+  });
+
+  it('X3. a destination refused at publish (403): the neutral sentence, the row resets, the buyer group leaves the sheet for the session, nothing names a product or a permission', async () => {
+    publish.mockResolvedValue({ ok: false, code: 'forbidden' });
+    asMember({ places: [buyerPlace(), ownPlace()] });
+    await completeUpload('image', IMAGE);
+    const dialog = await openSheet();
+    await tap(sheetItem(dialog, `row:${H_A1}`) as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await publishNow();
+    const alert = screen.getByRole('alert').textContent ?? '';
+    expect(alert).toBe('Você não pode publicar nesta comunidade.');
+    expect(alert).not.toMatch(/produto|compra|permiss|reembols|comprador|acesso/i);
+    expect(destinationValue()).toBe('Nenhum');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await act(async () => {
+      fireEvent.click(destinationRow() as HTMLElement);
+    });
+    const again = screen.getByRole('dialog');
+    expect(within(again).queryByText(NAME_A)).toBeNull();
+    expect(within(again).getByText(NAME_B)).toBeTruthy();
+  });
+
+  it('X4. with no group at all there is no "Destaque" row, and the buyer’s story still publishes to Explorar with no destination', async () => {
+    asMember({ places: [] });
+    await completeUpload('image', IMAGE);
+    expect(destinationRow()).toBeNull();
+    await publishNow();
+    expect(publish).toHaveBeenCalledWith(
+      { mediaAssetId: IMAGE, mediaKind: 'image', caption: '' },
+      { communityId: null },
+    );
+  });
+});

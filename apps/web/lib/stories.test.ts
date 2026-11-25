@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
-import { loadAuthorStories, loadStories, loadStoryAuthors, storyWriteIssue } from '@/lib/stories';
+import {
+  hasHighlightDestination,
+  loadAuthorStories,
+  loadStories,
+  loadStoryAuthors,
+  storyWriteIssue,
+} from '@/lib/stories';
 
 /**
  * `storyWriteIssue` is the ONE place the web reads a story-publish refusal out of the API envelope.
@@ -230,6 +236,56 @@ describe('loadStoryAuthors / loadAuthorStories — the row reads (10-12, UI-D-70
     await expect(loadAuthorStories(AUTHOR)).resolves.toEqual([]);
     vi.mocked(apiFetch).mockResolvedValueOnce(json(500, { error: { code: 'INTERNAL' } }));
     await expect(loadAuthorStories(AUTHOR)).resolves.toBeNull();
+    log.mockRestore();
+  });
+});
+
+/**
+ * 11.1-16 (UI-D-891 c, A-UI-13): `hasHighlightDestination` is the one fact behind the "Destacar" doors
+ * of a member with no community of their own. It reads the catalogue and nothing else, never throws,
+ * and an unreadable answer removes the door instead of opening an empty sheet.
+ */
+describe('hasHighlightDestination — a destination exists only if the catalogue lists one (11.1-16)', () => {
+  const H = '0000000a-1111-4111-8111-0000000000a1';
+  const C = '0c000000-0000-4000-8000-0000000000a1';
+
+  function catalog(items: unknown[]) {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ items }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+  }
+
+  it('8. one open highlight listed is a destination; an empty catalogue is none', async () => {
+    catalog([
+      {
+        id: H,
+        communityId: C,
+        title: 'Aberto',
+        position: 0,
+        coverAssetId: null,
+        coverVariantWidths: [],
+        coverStoryId: null,
+        coverChosen: false,
+        itemCount: 1,
+      },
+    ]);
+    await expect(hasHighlightDestination()).resolves.toBe(true);
+    catalog([]);
+    await expect(hasHighlightDestination()).resolves.toBe(false);
+  });
+
+  it('9. a refusal (403), a failed read and a malformed answer are all false and never throw, and no title reaches the log', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(apiFetch).mockResolvedValueOnce(new Response('{}', { status: 403 }));
+    await expect(hasHighlightDestination()).resolves.toBe(false);
+    vi.mocked(apiFetch).mockRejectedValueOnce(new Error('network'));
+    await expect(hasHighlightDestination()).resolves.toBe(false);
+    catalog([{ id: 'not-a-highlight' }]);
+    await expect(hasHighlightDestination()).resolves.toBe(false);
+    expect(log).toHaveBeenCalledWith('stories.highlight_destination_failed', expect.anything());
     log.mockRestore();
   });
 });
