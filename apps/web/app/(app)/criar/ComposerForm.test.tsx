@@ -789,6 +789,8 @@ async function publishRefused() {
   createPost.mockResolvedValue({ ok: false, code: 'refused' });
   fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
   await waitFor(() => expect(document.querySelector('[data-composer-error]')).not.toBeNull());
+  // The transition can still read "Publicando…" when the error lands under load; wait for the label to come back.
+  await waitFor(() => expect(screen.getByRole('button', { name: PUBLISH })).toBeTruthy());
 }
 
 describe('ComposerForm - a refused publish from the pinned composer (11.1-17 Task 2)', () => {
