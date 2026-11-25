@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "11.1"
 current_phase_name: Permissões do comprador por produto numa comunidade
-current_plan: 17
+current_plan: 18
 status: executing
-stopped_at: Completed 11.1-15-PLAN.md (comment surfaces and Reels rail; plans 01-16 done, wave 7 closed, next 17 of wave 8)
-last_updated: "2026-11-25T15:48:59.523Z"
+stopped_at: Completed 11.1-17-PLAN.md (buyer post flow, refusal and member spec; plans 01-17 done, wave 8 closed, next 18 of wave 9)
+last_updated: "2026-11-25T16:03:16.078Z"
 last_activity: 2026-11-25
-last_activity_desc: Completed 11.1-15 (comment surfaces and Reels rail); plans 01-16 done, wave 7 closed, next 17 (wave 8)
-state_head: ba21656999f22374fe4e82419db45a9d75d8140d
+last_activity_desc: Completed 11.1-17 (buyer post flow, refusal and member spec); plans 01-17 done, wave 8 closed, next 18 (wave 9)
+state_head: ca8a81bd92338b38b614e949b486bdba34e82949
 progress:
   total_phases: 36
   completed_phases: 0
   total_plans: 537
-  completed_plans: 507
+  completed_plans: 508
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 11.1 (Permissões do comprador por produto numa comunidade) — EXECUTING
-Current Plan: 17
+Current Plan: 18
 Total Plans in Phase: 18
-Plan: 17 of 18
+Plan: 18 of 18
 Status: Ready to execute
-Last activity: 2026-11-25 — Completed 11.1-15 (comment surfaces and Reels rail); plans 01-16 done, wave 7 closed, next 17 (wave 8)
+Last activity: 2026-11-25 — Completed 11.1-17 (buyer post flow, refusal and member spec); plans 01-17 done, wave 8 closed, next 18 (wave 9)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -410,6 +410,7 @@ Progress: [███████████████████░] 160/162
 | Phase 11.1 P16 | 12 min | 3 tasks | 16 files |
 | Phase 11.1 P13 | 9 min | 3 tasks | 16 files |
 | Phase 11.1 P15 | 95 min | 3 tasks | 20 files |
+| Phase 11.1 P17 | 9 min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -1371,6 +1372,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-25T15:48:59.161Z
-Stopped at: Completed 11.1-15-PLAN.md (comment surfaces and Reels rail; plans 01-16 done, wave 7 closed, next 17 of wave 8)
+Last session: 2026-11-25T16:03:15.705Z
+Stopped at: Completed 11.1-17-PLAN.md (buyer post flow, refusal and member spec; plans 01-17 done, wave 8 closed, next 18 of wave 9)
 Resume file: None

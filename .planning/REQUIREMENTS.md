@@ -529,10 +529,10 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **BPERM-18**: A locked community keeps its read-only sample (organization posts only) and the locked-member read of a buyer's story is closed *(D-892, D-356; confirm Open Questions 1 and 2)*
 - [x] **BPERM-19**: The product form shows five checkboxes per linked community with the specified defaults, helpers and focus rules, and saves the flags in the same request *(UI-D-883..UI-D-885)*
 - [x] **BPERM-20**: The highlight edit sheet has the "Aberto a compradores" switch (persisting at once, absent for member communities, Início and archived) and the manage list marks open highlights *(UI-D-886, UI-D-887)*
-- [ ] **BPERM-21**: A control the viewer's facts do not allow is not rendered on the post card, comment sheet, post detail, Reels rail and compose entries, and the row closes up or disappears *(D-888, D-889, UI-D-888, UI-D-889)*
+- [x] **BPERM-21**: A control the viewer's facts do not allow is not rendered on the post card, comment sheet, post detail, Reels rail and compose entries, and the row closes up or disappears *(D-888, D-889, UI-D-888, UI-D-889)*
 - [x] **BPERM-22**: The buyer's story flow offers only open highlights, keeps the visibility warning, hides the entry points when none is open *(D-883, UI-D-891)*
-- [ ] **BPERM-23**: The buyer's post flow is the member composer pinned to the community with the neutral refusal sentence and no silent change of destination *(UI-D-892, UI-D-893)*
-- [ ] **BPERM-24**: All new strings are pt-BR in the host catalogs, no member-readable string names a product, purchase or permission, and `scripts/check-ui-literals.sh` passes *(UI-D-882, UI-D-897)*
+- [x] **BPERM-23**: The buyer's post flow is the member composer pinned to the community with the neutral refusal sentence and no silent change of destination *(UI-D-892, UI-D-893)*
+- [x] **BPERM-24**: All new strings are pt-BR in the host catalogs, no member-readable string names a product, purchase or permission, and `scripts/check-ui-literals.sh` passes *(UI-D-882, UI-D-897)*
 - [x] **BPERM-25**: Every new or changed function, column and policy carries a cross-tenant negative with a positive control (pgTAP and integration): a buyer of tenant A never holds, reads or writes anything through a community, product, highlight or story of tenant B *(D-880, T-isolation)*
 - [x] **BPERM-26**: A member post limiter caps buyer-branch publishes per hour, every attempt counted *(D-880, Claude's discretion)*
 - [ ] **BPERM-27**: The release is expand-only and ordered (migrations on every tenant database, then API and worker, then web); every new response key is `.optional()` and emitted only at non-default values; the previous API and web keep working in each window named in `docs/DEPLOY.md` *(D-890, D-891)*
@@ -1284,10 +1284,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BPERM-18 | Phase 11.1 | Complete |
 | BPERM-19 | Phase 11.1 | Complete |
 | BPERM-20 | Phase 11.1 | Complete |
-| BPERM-21 | Phase 11.1 | Pending |
+| BPERM-21 | Phase 11.1 | Complete |
 | BPERM-22 | Phase 11.1 | Complete |
-| BPERM-23 | Phase 11.1 | Pending |
-| BPERM-24 | Phase 11.1 | Pending |
+| BPERM-23 | Phase 11.1 | Complete |
+| BPERM-24 | Phase 11.1 | Complete |
 | BPERM-25 | Phase 11.1 | Complete |
 | BPERM-26 | Phase 11.1 | Complete |
 | BPERM-27 | Phase 11.1 | Pending |
