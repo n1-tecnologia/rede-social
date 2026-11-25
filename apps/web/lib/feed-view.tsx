@@ -331,6 +331,11 @@ export function postCardBase(
     shareUrl:
       shareOrigin === null || post.access === 'sample' ? null : `${shareOrigin}/post/${post.id}`,
     ...(post.access === 'sample' ? { readOnly: true } : {}),
+    // 11.1-14 (UI-D-889): the viewer's own like/comment/share for this post, set here beside
+    // `readOnly` so every surface that draws a card (every list, the community page, the post
+    // detail and its deep link) reads ONE fact; a function cannot cross the server boundary the
+    // list's pages travel. Only when something is withheld: absent reads as all true.
+    ...cardActionsOf(post),
     author: {
       displayName: post.author.displayName,
       // D-52: the post is attributed to the PERSON, and their profile opens by direct link (D-47).
@@ -504,6 +509,17 @@ export function commentView(
     ...(comment.canReport === true ? { canReport: true } : {}),
     ...(comment.canBlock === true ? { canBlock: true } : {}),
   };
+}
+
+/**
+ * `{ actions }` for the card view, or nothing when the viewer keeps all three controls (the shipped
+ * card, byte for byte). It reads `postActionsView` and no role, product or entitlement.
+ */
+function cardActionsOf(post: Pick<FeedPost, 'community' | 'commentCount'>): {
+  actions?: { like: boolean; comment: boolean; share: boolean };
+} {
+  const { like, comment, share } = postActionsView(post);
+  return like && comment && share ? {} : { actions: { like, comment, share } };
 }
 
 /**

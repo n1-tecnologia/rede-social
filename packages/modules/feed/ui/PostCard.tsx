@@ -1,12 +1,19 @@
 'use client';
 
 import { type AdminIconId, Card } from '@rede-social/ui';
-import { Fragment, type ReactNode, useCallback } from 'react';
+import {
+  type FocusEvent,
+  Fragment,
+  type ReactNode,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+} from 'react';
 import type { AttachmentDescriptor } from './AttachmentRow';
 import { type LikeState, useOptimisticLike } from './LikeButton';
 import type { LinkPreviewCardProps } from './LinkPreviewCard';
 import { buildPostMeta, type CountTemplates, formatCountLabel } from './meta';
-import { PostActions } from './PostActions';
+import { PostActions, type PostActionsShow } from './PostActions';
 import { PostCaption } from './PostCaption';
 import { PostHeader } from './PostHeader';
 import { PostMedia, type PostMediaImage, type PostMediaLabels } from './PostMedia';
@@ -126,7 +133,17 @@ export type PostCardView = {
    * gets the read-only card without a per-host flag. The `readOnly` prop, when given, wins.
    */
   readOnly?: boolean;
+  /**
+   * 11.1-14 (UI-D-889): the viewer's own `like`, `comment` and `share` for THIS post, as finished
+   * facts set by the host's view builder (the same place `readOnly` is set, so every surface that
+   * draws a card reads one fact). Absent means all three, today's behaviour. The `actions` prop of
+   * the card, when given, wins.
+   */
+  actions?: PostCardActions;
 };
+
+/** The three controls of the card's action row, as booleans (11.1-14, UI-D-888). */
+export type PostCardActions = PostActionsShow;
 
 /**
  * What a like/unlike server action answers. The module models the refusal as a FLAG rather than a
@@ -195,11 +212,73 @@ export type PostCardProps = {
    */
   readOnly?: boolean;
   /**
+   * 11.1-14 (UI-D-888, A-UI-11): which of the three controls the viewer may use. A false control is
+   * not rendered and the rest close up; all three false draws the row-less meta with the comment
+   * count still the button that opens the read-only list; `like` false makes the double tap inert.
+   * Absent means all three (and `post.actions` is read), so a host that passes nothing renders
+   * exactly as before. Finished facts only: the module compares no role and the server refuses the
+   * write whatever the screen shows.
+   */
+  actions?: PostCardActions;
+  /**
    * The phone's flat block whatever the window: the platform preview's device, where a `md:` variant
    * would read the PANEL's width and round the card inside a phone.
    */
   phone?: boolean;
 };
+
+const ALL_ACTIONS: PostCardActions = { like: true, comment: true, share: true };
+
+/**
+ * UI-D-893: when the control that held focus is no longer among the facts after a re-read, focus
+ * moves to the nearest remaining control of the same row (the one that took its place, else the one
+ * before it), else to the card itself (`tabindex="-1"`), never to `body`. Nothing is announced and
+ * no scroll moves. It acts only when focus fell to the page: a member who moved on keeps their focus.
+ */
+function useActionFocus(show: PostCardActions) {
+  const held = useRef<{ control: keyof PostCardActions | null; card: HTMLElement | null }>({
+    control: null,
+    card: null,
+  });
+  useLayoutEffect(() => {
+    const { control, card } = held.current;
+    if (control === null || card === null || show[control]) return;
+    held.current.control = null;
+    if (!card.isConnected) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && active !== card) return;
+    const order: (keyof PostCardActions)[] = ['like', 'comment', 'share'];
+    const at = order.indexOf(control);
+    const remaining = order.filter((key) => show[key]);
+    const next =
+      remaining.find((key) => order.indexOf(key) > at) ?? remaining[remaining.length - 1];
+    const target =
+      next === undefined
+        ? null
+        : card.querySelector<HTMLElement>(
+            next === 'like' ? '[data-like-state]' : `[data-post-action="${next}"]`,
+          );
+    (target ?? card).focus({ preventScroll: true });
+  }, [show]);
+  return {
+    onFocus: (event: FocusEvent<HTMLElement>) => {
+      const target = event.target as HTMLElement;
+      held.current.card = event.currentTarget;
+      const row = target.closest<HTMLElement>('[data-like-state], [data-post-action]');
+      held.current.control =
+        row === null
+          ? null
+          : row.hasAttribute('data-like-state')
+            ? 'like'
+            : (row.getAttribute('data-post-action') as keyof PostCardActions);
+    },
+    onBlur: (event: FocusEvent<HTMLElement>) => {
+      // A blur from a control that was REMOVED keeps the memory (the effect needs it); a blur from
+      // one still in the page is the member moving on.
+      if ((event.target as HTMLElement).isConnected) held.current.control = null;
+    },
+  };
+}
 
 /** The phone's post: flat, no radius, no shadow, no dark hairline (it would draw at the screen's edges). */
 const CARD_PHONE = 'rounded-none pb-1 shadow-none focus:outline-none dark:border-0';
@@ -237,9 +316,13 @@ export function PostCard({
   onOpenVideo,
   suppressCommunity,
   readOnly: readOnlyProp,
+  actions: actionsProp,
   phone = false,
 }: PostCardProps) {
   const readOnly = readOnlyProp ?? post.readOnly === true;
+  const show: PostCardActions = actionsProp ?? post.actions ?? ALL_ACTIONS;
+  const rowless = !show.like && !show.comment && !show.share;
+  const focusGuard = useActionFocus(show);
   // The refusal envelope becomes a rejection, which is the one signal the optimistic engine reverts
   // on — so a refused like and a failed request behave identically, as they must.
   const toggleRequest = useCallback(
@@ -291,6 +374,8 @@ export function PostCard({
       // Focusable by script only: after a removal the list moves focus to the next card, and a
       // card that cannot take focus would drop it to the page (09-09, UI-D-497).
       tabIndex={-1}
+      onFocus={focusGuard.onFocus}
+      onBlur={focusGuard.onBlur}
       className={phone ? CARD_PHONE : CARD}
     >
       <PostHeader
@@ -314,27 +399,43 @@ export function PostCard({
         video={post.media.video}
         attachments={post.media.attachments}
         linkPreview={post.media.linkPreview}
-        onDoubleTapLike={readOnly ? undefined : toggle}
+        onDoubleTapLike={readOnly || !show.like ? undefined : toggle}
         onOpenVideo={onOpenVideo && !readOnly ? openVideo : undefined}
         labels={labels.media}
       />
       <PostCaption caption={post.caption} truncateAt={captionTruncateAt} moreLabel={labels.more} />
 
-      {readOnly ? (
+      {readOnly || rowless ? (
         // UI-D-374: the same row and gutter, no controls at all, the segments as plain text on the
         // left. The relative time stays a segment exactly as on the normal card (whose header also
         // shows it): the sample reads as an ordinary post with its controls taken away (sketch 008
         // finding 2, resolved in 08.2-09 by the UI-SPEC's own meta list and E08 "only the time").
+        // 11.1-14 (UI-D-888, A-UI-11): a viewer whose three facts are all false gets the SAME row-less
+        // meta, with one difference: they may read the comments, so the comment count (present only
+        // when comments exist) stays the button that opens the read-only list. A sample never does.
         <div className="flex items-center gap-2 px-4 pt-2 pb-3">
           <div
             data-post-meta
-            data-read-only
+            {...(readOnly ? { 'data-read-only': true } : { 'data-row-less': true })}
             className="flex min-w-0 flex-wrap items-center gap-x-1 text-xs font-normal text-text-tertiary tabular-nums"
           >
             {segments.map((segment, index) => (
               <Fragment key={segment}>
                 {index > 0 ? <span aria-hidden>·</span> : null}
-                <span>{segment}</span>
+                {!readOnly &&
+                commentLabel !== null &&
+                segment === commentLabel &&
+                onOpenComments ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenComments(post.id)}
+                    className="font-bold text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                  >
+                    {segment}
+                  </button>
+                ) : (
+                  <span>{segment}</span>
+                )}
               </Fragment>
             ))}
           </div>
@@ -342,6 +443,7 @@ export function PostCard({
       ) : (
         <div className="flex items-center justify-between gap-2 px-4 pt-2 pb-3">
           <PostActions
+            show={show}
             liked={state.liked}
             countLabel={likeLabel}
             pulseKey={pulseKey}

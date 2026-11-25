@@ -58,11 +58,12 @@ export {
 } from './LinkPreviewCard';
 export { linkify } from './linkify';
 export { buildPostMeta, type CountTemplates, formatCountLabel, type PostMetaInput } from './meta';
-export { PostActions, type PostActionsProps } from './PostActions';
+export { PostActions, type PostActionsProps, type PostActionsShow } from './PostActions';
 export { PostCaption, type PostCaptionProps } from './PostCaption';
 export {
   type LikeOutcome,
   PostCard,
+  type PostCardActions,
   type PostCardLabels,
   type PostCardMediaView,
   type PostCardProps,

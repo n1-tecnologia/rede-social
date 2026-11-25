@@ -18,7 +18,17 @@ import { LikeButton } from './LikeButton';
  * with no handler the control is still present but inert, because "the action row is always
  * present" is the contract and there is no "no actions" state (E09/empty).
  */
+/**
+ * 11.1-14 (UI-D-888, BPERM-21): which of the three controls the viewer's FINISHED facts allow. A
+ * control whose fact is false is not rendered at all (not in the DOM, not inert, not hidden by CSS)
+ * and the rest close up from the left in the shipped order. The module compares no role and names no
+ * product: the host hands booleans in.
+ */
+export type PostActionsShow = { like: boolean; comment: boolean; share: boolean };
+
 export type PostActionsProps = {
+  /** Absent means all three, the shipped row, so no existing host changes. */
+  show?: PostActionsShow;
   liked: boolean;
   /** Announced by the like control; `null` at zero (UI-D-21). */
   countLabel: string | null;
@@ -35,6 +45,7 @@ export type PostActionsProps = {
 };
 
 export function PostActions({
+  show,
   liked,
   countLabel,
   pulseKey,
@@ -45,16 +56,34 @@ export function PostActions({
 }: PostActionsProps) {
   return (
     <div className="-ml-2.5 flex shrink-0 items-center">
-      <LikeButton
-        liked={liked}
-        countLabel={countLabel}
-        likeLabel={labels.like}
-        unlikeLabel={labels.unlike}
-        pulseKey={pulseKey}
-        onToggle={onToggleLike}
-      />
-      <IconButton icon={MessageCircle} size={20} label={labels.comment} onClick={onComment} />
-      <IconButton icon={Send} size={20} label={labels.share} onClick={onShare} />
+      {show?.like === false ? null : (
+        <LikeButton
+          liked={liked}
+          countLabel={countLabel}
+          likeLabel={labels.like}
+          unlikeLabel={labels.unlike}
+          pulseKey={pulseKey}
+          onToggle={onToggleLike}
+        />
+      )}
+      {show?.comment === false ? null : (
+        <IconButton
+          icon={MessageCircle}
+          size={20}
+          label={labels.comment}
+          data-post-action="comment"
+          onClick={onComment}
+        />
+      )}
+      {show?.share === false ? null : (
+        <IconButton
+          icon={Send}
+          size={20}
+          label={labels.share}
+          data-post-action="share"
+          onClick={onShare}
+        />
+      )}
     </div>
   );
 }

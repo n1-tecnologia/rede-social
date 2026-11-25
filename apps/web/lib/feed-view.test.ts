@@ -431,3 +431,85 @@ describe('postActionsView (11.1-10)', () => {
     ).toBe(false);
   });
 });
+
+/**
+ * 11.1-14 (UI-D-889, D-888): the per-post fact rides on the card view, so every surface that draws a
+ * card (the community page list, Inicio, Explorar, the post detail and its deep link) reads one
+ * fact. Absent reads as all true: a post with no community, a member community or an API that
+ * predates the fact keeps the shipped card exactly, with no `actions` key at all.
+ */
+describe('postCardView carries the per-post fact (11.1-14)', () => {
+  const withActions = (actions?: {
+    like: boolean;
+    comment: boolean;
+    share: boolean;
+  }): FeedPost => ({
+    ...post(),
+    community: {
+      id: '33333333-3333-4333-8333-333333333333',
+      name: 'Turma',
+      slug: 'turma',
+      ...(actions === undefined ? {} : { actions }),
+    },
+  });
+
+  it('a post whose community fact withholds comment carries actions with comment false', () => {
+    const view = postCardView(
+      withActions({ like: true, comment: false, share: true }),
+      NOW,
+      tf,
+      null,
+      SP,
+    );
+    expect(view.actions).toEqual({ like: true, comment: false, share: true });
+  });
+
+  it('share false is carried and nothing else is gated by it (no server link is built or dropped)', () => {
+    const origin = 'https://turma.example.com';
+    const withShare = postCardView(withActions(), NOW, tf, origin, SP);
+    const noShare = postCardView(
+      withActions({ like: true, comment: true, share: false }),
+      NOW,
+      tf,
+      origin,
+      SP,
+    );
+    expect(noShare.actions).toEqual({ like: true, comment: true, share: false });
+    // D-889: the link the member could copy from the menu is the same with or without the fact.
+    expect(noShare.shareUrl).toBe(withShare.shareUrl);
+  });
+
+  it('a post with no community, a member community, no fact or all true has no actions key', () => {
+    for (const candidate of [
+      post(),
+      withActions(),
+      withActions({ like: true, comment: true, share: true }),
+    ]) {
+      expect('actions' in postCardView(candidate, NOW, tf, null, SP)).toBe(false);
+    }
+  });
+
+  it('all three false is carried whole, for the row-less card', () => {
+    const view = postCardView(
+      withActions({ like: false, comment: false, share: false }),
+      NOW,
+      tf,
+      null,
+      SP,
+    );
+    expect(view.actions).toEqual({ like: false, comment: false, share: false });
+  });
+
+  it('the community segment and the wording do not change with the fact', () => {
+    const open = postCardView(withActions(), NOW, tf, null, SP);
+    const closed = postCardView(
+      withActions({ like: false, comment: false, share: false }),
+      NOW,
+      tf,
+      null,
+      SP,
+    );
+    expect(closed.community).toEqual(open.community);
+    expect(closed.ariaLabel).toBe(open.ariaLabel);
+  });
+});
