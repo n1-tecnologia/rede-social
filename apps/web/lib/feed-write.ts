@@ -112,6 +112,20 @@ export function postWriteIssue(
 }
 
 /**
+ * 11.1-15 (UI-D-893, D-888): true when the API refused a feed write (a like, a comment, a comment
+ * heart) with a 403. It reads the STATUS and nothing else, never the code or a body detail: the
+ * member's screen reacts to "refused" and has no way to learn a reason (a missing flag, a revoked
+ * purchase and a switched-off module are one answer). The two named access refusals
+ * (`community_locked`, `follow_required`) are recognised by the caller BEFORE this runs and keep their
+ * own reactions; a 403 that carries a bootstrap redirect is also the caller's to send first. What the
+ * host does with 'refused' is to revert, keep the draft, and re-read the page facts (a refresh), so
+ * the control is gone on the next render.
+ */
+export function isRefusedWrite(error: unknown): boolean {
+  return error instanceof ApiClientError && error.status === 403;
+}
+
+/**
  * Runs one post write and maps its outcome.
  *
  * It deliberately does NOT revalidate: which paths a write invalidates is a decision that belongs

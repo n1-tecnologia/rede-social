@@ -99,13 +99,47 @@ describe.each(CASES)('%s', (_name, mock, call) => {
     await expect(call()).resolves.toEqual({ ok: false, code: 'community_locked' });
   });
 
-  it('answers generic to a 403 with any other word, a 403 without details and a 500', async () => {
-    for (const error of [
-      refusal(403, { access: 'something_else' }),
-      refusal(403),
-      refusal(500, { access: 'follow_required' }),
-    ]) {
-      mock().mockRejectedValueOnce(error);
+  it('answers generic to a 500 even when its details name follow_required', async () => {
+    mock().mockRejectedValueOnce(refusal(500, { access: 'follow_required' }));
+    await expect(call()).resolves.toMatchObject({ ok: false, code: 'generic' });
+  });
+
+  // 11.1-15 (UI-D-893, D-888): a WRITE the API refuses with any other 403 is "refused", whatever the
+  // body says (a reason is never read); a READ keeps answering generic. Every write sits beside the
+  // same case for its read twin so the one term that differs is the action.
+  const IS_WRITE = [
+    'likePostAction',
+    'unlikePostAction',
+    'likeCommentAction',
+    'unlikeCommentAction',
+    'createCommentAction',
+  ].includes(_name);
+
+  it(
+    IS_WRITE
+      ? 'answers refused to a 403 with any other word and to a 403 without details'
+      : 'answers generic to a 403 with any other word and to a 403 without details',
+    async () => {
+      for (const error of [refusal(403, { access: 'something_else' }), refusal(403)]) {
+        mock().mockRejectedValueOnce(error);
+        await expect(call()).resolves.toEqual({
+          ok: false,
+          code: IS_WRITE ? 'refused' : 'generic',
+        });
+      }
+    },
+  );
+
+  it('a refused write raises no log line and no redirect', async () => {
+    mock().mockRejectedValueOnce(refusal(403));
+    await call();
+    if (IS_WRITE) expect(logged).not.toHaveBeenCalled();
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('answers generic to a 404 and to a 400 (not a refusal)', async () => {
+    for (const status of [404, 400]) {
+      mock().mockRejectedValueOnce(refusal(status));
       await expect(call()).resolves.toMatchObject({ ok: false, code: 'generic' });
     }
   });

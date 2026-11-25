@@ -18,8 +18,10 @@ import { useReelsOverlay } from '@/components/reels/useReelsOverlay';
 import {
   isCommunityLockedCode,
   isFollowRequiredCode,
+  isRefusedCode,
   useCommunityLockedRefusal,
   useFollowRequiredRefusal,
+  useRefusedRefresh,
 } from './community-locked';
 import { type PostMenuSafety, useReportAndBlock } from './ReportAndBlock';
 import { useDeletePost } from './useDeletePost';
@@ -113,13 +115,19 @@ export function FeedSurface({ share, menu, reels, communityId, ...list }: FeedSu
   const genericError = share.error;
   // UI-D-376, UI-D-500: the card has reverted and the list has closed the sheet; the code picks the
   // reaction. An unknown code is the generic error toast.
+  // 11.1-15 (UI-D-893): a REFUSED write (a bare 403) re-reads the page facts so the control is gone.
+  const refused = useRefusedRefresh();
   const onLikeError = useCallback(
     (code?: string) => {
       if (isCommunityLockedCode(code)) locked();
       else if (isFollowRequiredCode(code)) followRequired();
-      else toast.show({ tone: 'error', message: genericError });
+      else {
+        // The shipped generic toast, whatever the reason: the screen never learns one.
+        toast.show({ tone: 'error', message: genericError });
+        if (isRefusedCode(code)) refused();
+      }
     },
-    [locked, followRequired, toast, genericError],
+    [locked, followRequired, refused, toast, genericError],
   );
   const onCommentsLocked = useCallback(
     (code: CommentAccessRefusal) => (isFollowRequiredCode(code) ? followRequired() : locked()),
@@ -197,6 +205,7 @@ export function FeedSurface({ share, menu, reels, communityId, ...list }: FeedSu
           list.comments
             ? {
                 ...list.comments,
+                onRefused: refused,
                 labels: safety.commentLabels(list.comments.labels),
                 onReportComment: safety.onReportComment,
                 onBlockComment: safety.onBlockComment,

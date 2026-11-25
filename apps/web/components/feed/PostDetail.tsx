@@ -24,8 +24,10 @@ import { consumeFocusAfterFollow } from '@/components/social/post-focus';
 import {
   isCommunityLockedCode,
   isFollowRequiredCode,
+  isRefusedCode,
   useCommunityLockedRefusal,
   useFollowRequiredRefusal,
+  useRefusedRefresh,
 } from './community-locked';
 import { type PostMenuSafety, useReportAndBlock } from './ReportAndBlock';
 import { useDeletePost } from './useDeletePost';
@@ -176,13 +178,18 @@ export function PostDetail({
   const t = useTranslations();
   const locked = useCommunityLockedRefusal(t('feed.errors.communityLocked'));
   const followRequired = useFollowRequiredRefusal(t('feed.errors.followRequired'));
+  // 11.1-15 (UI-D-893): a REFUSED write (a bare 403) re-reads the page facts, so the control is gone.
+  const refused = useRefusedRefresh();
   const likeFailed = useCallback(
     (code?: string) => {
       if (isCommunityLockedCode(code)) locked();
       else if (isFollowRequiredCode(code)) followRequired();
-      else failToast();
+      else {
+        failToast();
+        if (isRefusedCode(code)) refused();
+      }
     },
-    [locked, followRequired, failToast],
+    [locked, followRequired, refused, failToast],
   );
   const commentsLocked = useCallback(
     (code: CommentAccessRefusal) => (isFollowRequiredCode(code) ? followRequired() : locked()),
@@ -249,6 +256,7 @@ export function PostDetail({
         targetId={post.id}
         variant="inline"
         onLocked={commentsLocked}
+        onRefused={refused}
       />
       {overlay}
       {safety.element}

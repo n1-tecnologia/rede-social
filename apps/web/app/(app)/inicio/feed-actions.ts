@@ -34,6 +34,7 @@ import { commentView, postAdminLabel, postCardView } from '@/lib/feed-view';
 import {
   asMediaIssue,
   attemptPostWrite,
+  isRefusedWrite,
   type PostDeleteResult,
   type PostWriteResult,
 } from '@/lib/feed-write';
@@ -94,9 +95,16 @@ export type CommunityLockedCode = 'community_locked';
  */
 export type FollowRequiredCode = 'follow_required';
 
+/**
+ * 11.1-15 (UI-D-893, D-888): the API refused the write with a BARE 403 (the viewer's facts no longer
+ * allow it). The screen reverts as for any failure, shows only shipped generic copy, and re-reads the
+ * page facts so the control is gone; it branches on this word and never on a reason.
+ */
+export type WriteRefusedCode = 'refused';
+
 export type LikeActionResult =
   | { ok: true; liked: boolean; likeCount: number }
-  | { ok: false; code: 'generic' | CommunityLockedCode | FollowRequiredCode };
+  | { ok: false; code: 'generic' | CommunityLockedCode | FollowRequiredCode | WriteRefusedCode };
 
 /** True for the API's 403 `{ access: 'community_locked' }`, and for nothing else. */
 function isCommunityLocked(error: unknown): boolean {
@@ -228,6 +236,8 @@ async function toggle(
     if (isCommunityLocked(error)) return { ok: false, code: COMMUNITY_LOCKED };
     if (isFollowRequired(error)) return { ok: false, code: FOLLOW_REQUIRED };
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    // 11.1-15: a bare 403 is "refused" and nothing more; it is not an error worth a log line.
+    if (!refusal && isRefusedWrite(error)) return { ok: false, code: 'refused' };
     // Shape only: the log carries no caption and no member, so a refusal cannot leak post content
     // into the server log (T-04-40).
     if (!refusal) console.error('feed.like_failed', { error: String(error) });
@@ -335,7 +345,12 @@ export type CommentCreateResult =
   /** `reply_depth_exceeded` is the API's translation of the database's one-level refusal (D-60). */
   | {
       ok: false;
-      code: 'generic' | 'reply_depth_exceeded' | CommunityLockedCode | FollowRequiredCode;
+      code:
+        | 'generic'
+        | 'reply_depth_exceeded'
+        | CommunityLockedCode
+        | FollowRequiredCode
+        | WriteRefusedCode;
     };
 
 /**
@@ -464,6 +479,8 @@ export async function createCommentAction(
       result = { ok: false, code: issue };
     } else {
       if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+      // 11.1-15: a bare 403 is "refused" (the draft stays, the page facts are re-read), no log line.
+      if (!refusal && isRefusedWrite(error)) return { ok: false, code: 'refused' };
       if (!refusal) console.error('feed.comment.create_failed', { error: String(error) });
     }
   }
@@ -519,6 +536,7 @@ async function toggleComment(
     if (isCommunityLocked(error)) return { ok: false, code: COMMUNITY_LOCKED };
     if (isFollowRequired(error)) return { ok: false, code: FOLLOW_REQUIRED };
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal && isRefusedWrite(error)) return { ok: false, code: 'refused' };
     if (!refusal) console.error('feed.comment.like_failed', { error: String(error) });
   }
 

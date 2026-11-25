@@ -5,7 +5,7 @@ vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
 vi.mock('next/navigation', () => ({ redirect: vi.fn() }));
 
 const { ApiClientError } = await import('@/lib/bootstrap');
-const { asMemberIssue, postWriteIssue } = await import('@/lib/feed-write');
+const { asMemberIssue, isRefusedWrite, postWriteIssue } = await import('@/lib/feed-write');
 
 /**
  * 09-09 (UI-D-504 h, T-04-42, T-09-35): the composer's refusal vocabulary gains the CLOSED member
@@ -42,5 +42,34 @@ describe('asMemberIssue', () => {
     expect(asMemberIssue('too_many_images')).toBeNull();
     expect(asMemberIssue(undefined)).toBeNull();
     expect(asMemberIssue(42)).toBeNull();
+  });
+});
+
+/**
+ * 11.1-15 (UI-D-893, D-888): the screen's reaction to a write the server refused is NEUTRAL. The one
+ * word it branches on is "refused" - a bare 403 - and never a reason: the helper reads the status
+ * and nothing else (no code, no body detail), so a refusal for a missing flag, a revoked purchase or
+ * a turned-off module is the same answer to the screen.
+ */
+describe('isRefusedWrite (11.1-15)', () => {
+  it('is true for a 403, whatever its code or details say', () => {
+    expect(isRefusedWrite(new ApiClientError(403, 'FORBIDDEN'))).toBe(true);
+    expect(isRefusedWrite(new ApiClientError(403, 'SOMETHING_ELSE', { anything: 'x' }))).toBe(true);
+    expect(isRefusedWrite(new ApiClientError(403, 'FORBIDDEN', { reason: 'refund' }))).toBe(true);
+  });
+
+  it('reads nothing but the status: the SAME answer for two different bodies', () => {
+    const a = isRefusedWrite(new ApiClientError(403, 'FORBIDDEN', { a: 1 }));
+    const b = isRefusedWrite(new ApiClientError(403, 'OTHER', undefined));
+    expect(a).toBe(b);
+  });
+
+  it('is false for any other status and for anything that is not an API error', () => {
+    expect(isRefusedWrite(new ApiClientError(404, 'NOT_FOUND'))).toBe(false);
+    expect(isRefusedWrite(new ApiClientError(400, 'VALIDATION_FAILED'))).toBe(false);
+    expect(isRefusedWrite(new ApiClientError(500, 'INTERNAL'))).toBe(false);
+    expect(isRefusedWrite(new ApiClientError(401, 'UNAUTHENTICATED'))).toBe(false);
+    expect(isRefusedWrite(new Error('403'))).toBe(false);
+    expect(isRefusedWrite(null)).toBe(false);
   });
 });

@@ -4,8 +4,9 @@ import type { Bootstrap } from '@rede-social/contracts';
 import type { FeedPost } from '@rede-social/module-feed/contracts';
 import type { PostCardView } from '@rede-social/module-feed/ui';
 import { ToastProvider } from '@rede-social/ui';
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MotionGlobalConfig } from 'motion/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReelsOverlayBinding } from '../reels/ReelsOverlay';
 import type { PostDetailProps } from './PostDetail';
 
@@ -60,7 +61,8 @@ vi.mock('@/app/(app)/reels/reels-actions', () => ({
 vi.mock('@/components/media/FeedVideo', () => ({ suspendFeedVideos: () => () => {} }));
 vi.mock('./useSharePost', () => ({ useSharePost: () => vi.fn() }));
 vi.mock('./useDeletePost', () => ({ useDeletePost: () => vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
+const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
 vi.mock('next-intl', async (importOriginal) => {
   const { createTranslator } = await importOriginal<typeof import('next-intl')>();
   const { loadMessages } = await import('@/i18n/messages');
@@ -77,6 +79,9 @@ const { commentActionProps, feedCommentsProps, postCardLabels } = await import('
 const { getTranslations } = await import('next-intl/server');
 const { postCardView } = await import('@/lib/feed-view');
 
+MotionGlobalConfig.skipAnimations = true;
+
+beforeEach(() => refresh.mockClear());
 afterEach(cleanup);
 
 const SHIPPED_EMPTY = 'Nenhum comentário ainda. Seja o primeiro!';
@@ -151,11 +156,11 @@ async function page(post: FeedPost): Promise<{ props: PostDetailProps; card: Pos
   return { props, card };
 }
 
-async function show(post: FeedPost) {
+async function show(post: FeedPost, overrides: Partial<PostDetailProps> = {}) {
   const { props } = await page(post);
   return render(
     <ToastProvider>
-      <PostDetail {...props} />
+      <PostDetail {...props} {...overrides} />
     </ToastProvider>,
   );
 }
@@ -231,5 +236,51 @@ describe('the card of a post nobody commented on offers no entry to an empty she
     await show(feedPost());
     expect(screen.queryByRole('button', { name: /coment/i })).not.toBeNull();
     expect(screen.queryByRole('button', { name: /curtir/i })).not.toBeNull();
+  });
+});
+
+describe('a refused write on the detail page is neutral and re-reads the facts (UI-D-893)', () => {
+  it('a refused like reverts, shows the shipped generic sentence and refreshes the page', async () => {
+    const onLike = vi.fn(async () => ({ ok: false, code: 'refused' }) as const);
+    await show(feedPost(), { onLike });
+    const heart = screen.getByRole('button', { name: /curtir/i });
+    await act(async () => {
+      fireEvent.click(heart);
+    });
+    expect(onLike).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Algo deu errado. Tente novamente.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /curtir/i }).getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).not.toMatch(/produto|compra|permiss|reembolso/i);
+  });
+
+  it('a generic failure reverts and toasts the same sentence but does NOT refresh', async () => {
+    const onLike = vi.fn(async () => ({ ok: false, code: 'generic' }) as const);
+    await show(feedPost(), { onLike });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /curtir/i }));
+    });
+    expect(screen.getByText('Algo deu errado. Tente novamente.')).toBeTruthy();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('a refused comment keeps the draft with the shipped inline error and refreshes the page', async () => {
+    const { props } = await page(feedPost());
+    const onCreateComment = vi.fn().mockResolvedValue({ ok: false, code: 'refused' });
+    await show(feedPost(), { comments: { ...props.comments, onCreateComment } });
+    const field = screen.getByPlaceholderText(/coment/i) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(field, { target: { value: 'Meu rascunho' } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Enviar comentário' }));
+    });
+    expect(onCreateComment).toHaveBeenCalledTimes(1);
+    expect((screen.getByPlaceholderText(/coment/i) as HTMLTextAreaElement).value).toBe(
+      'Meu rascunho',
+    );
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

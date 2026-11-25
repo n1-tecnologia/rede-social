@@ -66,3 +66,29 @@ export function useFollowRequiredRefusal(
 export function isFollowRequiredCode(code: string | undefined): boolean {
   return code === 'follow_required';
 }
+
+/**
+ * 11.1-15 (UI-D-893, D-888): the write came back REFUSED (a bare 403). The one word every host
+ * branches on; the reason is never read, and the code is never shown.
+ */
+export function isRefusedCode(code: string | undefined): boolean {
+  return code === 'refused';
+}
+
+/**
+ * 11.1-15 (UI-D-893): the ONE reaction to a feed write the API refused with a bare 403 - the viewer's
+ * facts changed (a revoke, a refund, a flag turned off) while the screen still drew the control. The
+ * caller has already reverted its optimistic state; this re-reads the page facts (`router.refresh()`)
+ * so the control is gone on the next render. It raises NO toast of its own and names nothing: a like
+ * shows the shipped generic toast through its own error path, a comment keeps its draft and the
+ * shipped inline error until the re-read removes the field.
+ *
+ * `refresh: false` is the Reels overlay over a feed, for the reason the two hooks above give: a
+ * refresh would hand the list underneath a new first page and lose the place the member scrolled to.
+ */
+export function useRefusedRefresh({ refresh = true }: { refresh?: boolean } = {}): () => void {
+  const router = useRouter();
+  return useCallback(() => {
+    if (refresh) router.refresh();
+  }, [router, refresh]);
+}
