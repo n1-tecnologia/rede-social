@@ -57,6 +57,8 @@ import {
   type PermissionLink,
   linksChanged as permissionLinksChanged,
   permissionsForLink,
+  showNoOpenHighlightNote,
+  showSocialOffNote,
   toProductLinksBody,
 } from '@/lib/store-permissions';
 import {
@@ -178,6 +180,18 @@ export interface ProductFormProps {
    * A create has none.
    */
   communityPermissions?: readonly ProductCommunityPermission[];
+  /**
+   * 11.1-12 (UI-D-884 (2)): whether the tenant's `social` module is effectively on, from
+   * `bootstrap.modules` (data, never a role comparison). Off draws ONE helper line per form; the two
+   * post boxes stay drawn and editable either way. Absent reads as on.
+   */
+  socialOn?: boolean;
+  /**
+   * 11.1-12 (UI-D-884 (3), A-UI-5): the number of highlights open to buyers per community id, from the
+   * staff-only open-counts read, or `null` when that read failed. A community missing from the record
+   * has no known count: no helper for it.
+   */
+  openHighlightCounts?: Readonly<Record<string, number>> | null;
 }
 
 /**
@@ -262,6 +276,8 @@ export function ProductForm({
   categories = [],
   initialCategory = null,
   communityPermissions,
+  socialOn = true,
+  openHighlightCounts = null,
 }: ProductFormProps) {
   const t = useTranslations('store');
   /** Full-key translator for the shared `lib/store-view` builders (`store.lockWarning.…`). */
@@ -319,6 +335,8 @@ export function ProductForm({
   const categoryWire = category === NO_CATEGORY ? null : category;
   const categoryLabelId = useId();
   const categoryHintId = useId();
+  /** UI-D-885: the id of the form's ONE social-off line, `aria-describedby` of every post box. */
+  const socialNoteId = useId();
 
   const [gatewayId, setGatewayId] = useState(payment?.externalProductId ?? '');
   const [checkoutUrl, setCheckoutUrl] = useState(payment?.checkoutUrl ?? '');
@@ -729,6 +747,9 @@ export function ProductForm({
       ? t('form.save')
       : t('form.create');
 
+  /** UI-D-884 (2): the one social-off line, from data (`socialOn`), never a role. */
+  const socialNote = showSocialOffNote({ socialOn, communityCount: selectedRows.length });
+
   const pickerRows = (communities ?? []).map((community) => ({ ...community, coverAlt: '' }));
 
   return (
@@ -1104,6 +1125,11 @@ export function ProductForm({
                       community={row}
                       value={permissions[row.id] ?? defaultPermissions()}
                       disabled={pending}
+                      socialNoteId={socialNote ? socialNoteId : undefined}
+                      noOpenHighlight={showNoOpenHighlightNote({
+                        story: (permissions[row.id] ?? defaultPermissions()).story,
+                        openHighlights: openHighlightCounts?.[row.id],
+                      })}
                       onChange={(next) =>
                         setPermissions((current) => ({ ...current, [row.id]: next }))
                       }
@@ -1131,6 +1157,22 @@ export function ProductForm({
                 : t('form.communities.choose')}
             </Button>
             <p className="text-xs font-normal text-text-tertiary">{t('form.communities.helper')}</p>
+            {/* UI-D-884: the helper stack. The always-on line shows while a community is chosen; the
+                social-off line shows ONCE per form (the boxes stay drawn and keep their values). */}
+            {selectedRows.length > 0 ? (
+              <p data-product-permissions-helper className="text-xs font-normal text-text-tertiary">
+                {t('form.communities.permissions.helper')}
+              </p>
+            ) : null}
+            {socialNote ? (
+              <p
+                id={socialNoteId}
+                data-product-permissions-social-off
+                className="text-xs font-normal text-text-tertiary"
+              >
+                {t('form.communities.permissions.socialOff')}
+              </p>
+            ) : null}
 
             <CommunityPickerSheet
               open={pickerOpen}

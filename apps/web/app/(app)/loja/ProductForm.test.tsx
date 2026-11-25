@@ -1755,3 +1755,223 @@ describe('ProductForm — the permission group (11.1-12, UI-D-883, D-890, D-891)
     expect(screen.getByText(/^Nenhuma comunidade\./)).toBeTruthy();
   });
 });
+
+describe('ProductForm — the helper stack, stored values and the lock-preview rule (11.1-12, UI-D-884)', () => {
+  const ALWAYS =
+    'As permissões valem para quem já tem o produto e mudam assim que você salvar. Quem tiver mais de um produto da mesma comunidade soma as permissões.';
+  const SOCIAL_OFF = 'Postar na comunidade e Postar story só funcionam com a Rede social ligada.';
+  const NO_OPEN =
+    'Nenhum destaque desta comunidade está aberto a compradores. Abra um na tela de destaques da comunidade para o story funcionar.';
+
+  const BOTH = [
+    { id: C1, name: 'Mentoria ao vivo', coverAssetId: null, coverVariantWidths: [640] },
+    { id: C2, name: 'Bastidores da mentoria', coverAssetId: null, coverVariantWidths: [640] },
+  ];
+  const BOTH_INITIAL = { ...EDIT_INITIAL, communities: BOTH };
+
+  const group = (id: string) =>
+    document.querySelector(`[data-product-community="${id}"] fieldset`) as HTMLFieldSetElement;
+  const box = (id: string, label: string) =>
+    Array.from(group(id).querySelectorAll<HTMLLabelElement>('label'))
+      .find((row) => row.textContent === label)
+      ?.querySelector('input') as HTMLInputElement;
+  const states = (id: string) =>
+    Array.from(group(id).querySelectorAll<HTMLInputElement>('input')).map((i) => i.checked);
+
+  async function saveForm() {
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+  }
+
+  function pickAdd(name: string) {
+    fireEvent.click(screen.getByRole('button', { name: /^(Escolher|Alterar) comunidades$/ }));
+    fireEvent.click(screen.getByRole('button', { name: `${name}, não incluída` }));
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+  }
+
+  it('H1. (a) edit mode seeds each existing link from the stored values; a link with none stored reads the defaults', () => {
+    renderEdit({
+      initial: BOTH_INITIAL,
+      communityPermissions: [
+        { communityId: C2, like: false, comment: false, share: true, post: true, story: true },
+      ],
+    });
+    expect(states(C1)).toEqual([true, true, true, false, false]);
+    expect(states(C2)).toEqual([false, false, true, true, true]);
+  });
+
+  it('H2. (b) the always-on helper shows once while a community is chosen and never with none', () => {
+    renderCreate();
+    expect(screen.queryByText(ALWAYS)).toBeNull();
+    pickAdd('Mentoria ao vivo');
+    pickAdd('Bastidores da mentoria');
+    expect(screen.getAllByText(ALWAYS)).toHaveLength(1);
+  });
+
+  it('H3. (b) with social off ONE line shows for two communities, the post boxes stay editable and keep their values', () => {
+    renderEdit({
+      initial: BOTH_INITIAL,
+      socialOn: false,
+      communityPermissions: [
+        { communityId: C1, like: true, comment: true, share: true, post: true, story: true },
+      ],
+    });
+    expect(screen.getAllByText(SOCIAL_OFF)).toHaveLength(1);
+    expect(states(C1)).toEqual([true, true, true, true, true]);
+    for (const id of [C1, C2]) {
+      expect(box(id, 'Postar na comunidade').disabled).toBe(false);
+      expect(box(id, 'Postar story').disabled).toBe(false);
+    }
+    fireEvent.click(box(C2, 'Postar na comunidade'));
+    expect(box(C2, 'Postar na comunidade').checked).toBe(true);
+  });
+
+  it('H4. (b) with social on, or with no community chosen, the social-off line is absent', () => {
+    renderEdit({ initial: BOTH_INITIAL, socialOn: true });
+    expect(screen.queryByText(SOCIAL_OFF)).toBeNull();
+    cleanup();
+    renderCreate({ socialOn: false });
+    expect(screen.queryByText(SOCIAL_OFF)).toBeNull();
+    pickAdd('Mentoria ao vivo');
+    expect(screen.getAllByText(SOCIAL_OFF)).toHaveLength(1);
+  });
+
+  it('H5. (c) the no-open-highlight line shows only with Postar story ticked and a count of exactly 0, as plain text', () => {
+    renderEdit({
+      initial: BOTH_INITIAL,
+      openHighlightCounts: { [C1]: 0, [C2]: 0 },
+      communityPermissions: [
+        { communityId: C1, like: true, comment: true, share: true, post: false, story: true },
+      ],
+    });
+    // C1 has story ticked and zero open: the line. C2 has story unticked: nothing.
+    expect(screen.getAllByText(NO_OPEN)).toHaveLength(1);
+    const line = screen.getByText(NO_OPEN);
+    expect(document.querySelector(`[data-product-community="${C1}"]`)?.contains(line)).toBe(true);
+    expect(line.closest('a')).toBeNull();
+    expect(line.querySelector('a')).toBeNull();
+
+    // Ticking story on C2 shows its line; unticking C1's story removes C1's.
+    fireEvent.click(box(C2, 'Postar story'));
+    expect(screen.getAllByText(NO_OPEN)).toHaveLength(2);
+    fireEvent.click(box(C1, 'Postar story'));
+    expect(screen.getAllByText(NO_OPEN)).toHaveLength(1);
+  });
+
+  it('H6. (c) an absent, failed or non-zero count shows no helper at all', () => {
+    const story = [
+      { communityId: C1, like: true, comment: true, share: true, post: false, story: true },
+    ];
+    renderEdit({ communityPermissions: story });
+    expect(screen.queryByText(NO_OPEN)).toBeNull();
+    cleanup();
+    renderEdit({ communityPermissions: story, openHighlightCounts: null });
+    expect(screen.queryByText(NO_OPEN)).toBeNull();
+    cleanup();
+    renderEdit({ communityPermissions: story, openHighlightCounts: {} });
+    expect(screen.queryByText(NO_OPEN)).toBeNull();
+    cleanup();
+    renderEdit({ communityPermissions: story, openHighlightCounts: { [C1]: 2 } });
+    expect(screen.queryByText(NO_OPEN)).toBeNull();
+  });
+
+  it('H7. (d) a flags-only edit on an existing link saves without the lock preview and opens no dialog', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit();
+    fireEvent.click(box(C1, 'Compartilhar'));
+    await saveForm();
+    expect(lockPreview).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(update).toHaveBeenCalledWith(P, {
+      communityLinks: [
+        { communityId: C1, like: true, comment: true, share: false, post: false, story: false },
+      ],
+    });
+  });
+
+  it('H8. (d) adding a community still asks the shipped preview, for the added one only, and a flag change is carried with it', async () => {
+    lockPreview.mockResolvedValue({
+      ok: true,
+      items: [{ communityId: C2, membersLosingAccess: 4 }],
+    });
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit();
+    pickAdd('Bastidores da mentoria');
+    fireEvent.click(box(C2, 'Postar na comunidade'));
+    await saveForm();
+    expect(lockPreview).toHaveBeenCalledWith({ productId: P, communityIds: [C2] });
+    expect(update).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('dialog', { name: 'Tornar Bastidores da mentoria exclusiva?' });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Tornar exclusiva' }));
+    });
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(update.mock.calls[0]?.[1]).toEqual({
+      communityLinks: [
+        { communityId: C1, like: true, comment: true, share: true, post: false, story: false },
+        { communityId: C2, like: true, comment: true, share: true, post: true, story: false },
+      ],
+    });
+  });
+
+  it('H9. (e) removing a community and choosing it again restarts from the defaults', () => {
+    renderEdit({
+      communityPermissions: [
+        { communityId: C1, like: false, comment: false, share: false, post: true, story: true },
+      ],
+    });
+    expect(states(C1)).toEqual([false, false, false, true, true]);
+    fireEvent.click(screen.getByRole('button', { name: 'Remover Mentoria ao vivo' }));
+    expect(document.querySelector(`[data-product-community="${C1}"]`)).toBeNull();
+    pickAdd('Mentoria ao vivo');
+    expect(states(C1)).toEqual([true, true, true, false, false]);
+  });
+
+  it('H10. (e) an existing link removed and chosen again is a change to save, sent with its defaults', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({
+      communityPermissions: [
+        { communityId: C1, like: false, comment: true, share: true, post: false, story: false },
+      ],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Remover Mentoria ao vivo' }));
+    pickAdd('Mentoria ao vivo');
+    expect(submitButton().disabled).toBe(false);
+    await saveForm();
+    expect(update).toHaveBeenCalledWith(P, {
+      communityLinks: [
+        { communityId: C1, like: true, comment: true, share: true, post: false, story: false },
+      ],
+    });
+  });
+
+  it('H11. (f) a refused save keeps every tick as the administrator left it', async () => {
+    update.mockResolvedValue({ ok: false, code: 'generic' });
+    renderEdit({ initial: BOTH_INITIAL });
+    fireEvent.click(box(C1, 'Postar story'));
+    fireEvent.click(box(C2, 'Curtir'));
+    await saveForm();
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível salvar. Revise os campos e tente novamente.',
+    });
+    expect(states(C1)).toEqual([true, true, true, false, true]);
+    expect(states(C2)).toEqual([false, true, true, false, false]);
+  });
+
+  it('H12. all five unticked is valid: no warning and the save carries five false', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit();
+    for (const label of ['Curtir', 'Comentar', 'Compartilhar']) fireEvent.click(box(C1, label));
+    expect(states(C1)).toEqual([false, false, false, false, false]);
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    await saveForm();
+    expect(update).toHaveBeenCalledWith(P, {
+      communityLinks: [
+        { communityId: C1, like: false, comment: false, share: false, post: false, story: false },
+      ],
+    });
+  });
+});

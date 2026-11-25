@@ -1,6 +1,7 @@
 import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
 import { PAYMENTS_PERMISSIONS } from '@rede-social/module-payments/contracts';
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
+import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ProductForm } from '@/app/(app)/loja/ProductForm';
@@ -18,6 +19,7 @@ import {
   productFormCourseView,
   productFormLiveView,
 } from '@/lib/store-view';
+import { loadOpenHighlightCounts } from '@/lib/stories-open-counts';
 
 /**
  * `/loja/novo` (08.2-10, D-362, STORE-02, UI-D-377): the create half of the product form.
@@ -76,6 +78,18 @@ export default async function NewProductPage() {
           coverVariantWidths: community.coverVariantWidths,
         }));
 
+  // 11.1-12 (UI-D-884): `social` effective on, as data from the bootstrap (never a role comparison).
+  const socialOn = bootstrap.modules.some((module) => module.key === 'social');
+  // The "no highlight is open to buyers" helper stands on the staff-only open-counts read: asked only
+  // while `stories` is on and the viewer manages stories, and a failed read is `null` (no helper).
+  const storiesRead =
+    bootstrap.modules.some((module) => module.key === 'stories') &&
+    bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
+  const openHighlightCounts =
+    storiesRead && communities !== null
+      ? await loadOpenHighlightCounts(communities.map((community) => community.id))
+      : null;
+
   const courses: ProductFormLinkList<ProductFormCourse> | null =
     courseLoad === null
       ? null
@@ -110,6 +124,8 @@ export default async function NewProductPage() {
       lives={lives}
       payment={payment}
       categories={categories}
+      socialOn={socialOn}
+      openHighlightCounts={openHighlightCounts}
     />
   );
 }
