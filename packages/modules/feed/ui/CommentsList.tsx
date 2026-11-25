@@ -74,6 +74,14 @@ import { type CountTemplates, formatCountLabel } from './meta';
  */
 export type CommentAccessRefusal = 'community_locked' | 'follow_required';
 
+/**
+ * 11.1-15 (UI-D-893): a write the server refused with a BARE 403 (a flag the viewer's facts no longer
+ * hold, a revoked purchase). The screen branches on THIS word only, never on a reason: the list reverts
+ * as for any failure and tells the host once through `onRefused`, which re-reads the page facts so the
+ * control is gone. The two access refusals above keep their own reactions.
+ */
+export type CommentWriteRefusal = 'refused';
+
 /** What a comment/replies page action answers. A refusal and a rejection are the same outcome. */
 export type CommentPageOutcome =
   | { ok: true; items: CommentView[]; nextCursor: string | null }
@@ -91,7 +99,12 @@ export type CommentCreateOutcome =
   | { ok: true; comment: CommentView }
   | {
       ok: false;
-      code?: 'generic' | 'reply_depth_exceeded' | 'story_comment_no_reply' | CommentAccessRefusal;
+      code?:
+        | 'generic'
+        | 'reply_depth_exceeded'
+        | 'story_comment_no_reply'
+        | CommentAccessRefusal
+        | CommentWriteRefusal;
     };
 
 /**
@@ -104,7 +117,7 @@ export type CommentDeleteOutcome = { ok: boolean; code?: 'gone' | 'generic' };
 /** What a comment like/unlike answers — the authoritative pair, read back in the writing txn. */
 export type CommentLikeOutcome =
   | { ok: true; liked: boolean; likeCount: number }
-  | { ok: false; code?: 'generic' | CommentAccessRefusal };
+  | { ok: false; code?: 'generic' | CommentAccessRefusal | CommentWriteRefusal };
 
 /** The viewer, for the optimistic row only. The server's reconciled row replaces all of it. */
 export type CommentViewer = {
@@ -119,6 +132,12 @@ export type CommentsListLabels = {
   region: string;
   /** UI-SPEC E10/empty: the centred single line, shown ONLY when the page really is empty. */
   emptyLabel: string;
+  /**
+   * 11.1-15 (UI-D-888, UI-D-895): the empty line for a viewer who cannot comment — the shipped
+   * invitation ("Seja o primeiro!") would point at an action they cannot take. Absent keeps
+   * `emptyLabel` (a host that predates it, today's behaviour).
+   */
+  emptyReadOnlyLabel?: string;
   /** UI-D-22: the comment list itself could not be read. */
   errorLabel: string;
   /** UI-D-22: one root's replies could not be read; the thread does NOT collapse. */
@@ -241,6 +260,21 @@ export type CommentsListProps = {
    */
   onReportComment?: (comment: CommentView) => void;
   onBlockComment?: (comment: CommentView) => void;
+  /**
+   * 11.1-15 (D-888, UI-D-888): whether the viewer may comment where this list is open. False removes
+   * the composer and every "Responder"; the list stays fully readable and a comment the viewer wrote
+   * keeps its own menu (the rider on the comment, not the community flag). ABSENT means true: a host
+   * that passes nothing renders as before. The server refuses the write whatever the screen shows.
+   */
+  canComment?: boolean;
+  /** 11.1-15: whether the viewer may like. False removes the heart on every comment, replies included. */
+  canLikeComment?: boolean;
+  /**
+   * 11.1-15 (UI-D-893): raised once after a write the server refused with a bare 403 (a comment, a
+   * reply or a comment heart), AFTER the list has reverted. The host re-reads the page facts so the
+   * control disappears; the list shows nothing extra and never learns a reason.
+   */
+  onRefused?: () => void;
 };
 
 /** The pinned root thread, already mapped by the host. */
@@ -334,16 +368,25 @@ export function CommentsList({
   highlightCommentId,
   onReportComment,
   onBlockComment,
+  canComment = true,
+  canLikeComment = true,
+  onRefused,
 }: CommentsListProps) {
-  /** UI-D-376, UI-D-500: hand either closed refusal to the host with its code; all else is ignored. */
+  /**
+   * UI-D-376, UI-D-500: hand either closed refusal to the host with its code; all else is ignored.
+   * 11.1-15 (UI-D-893): a bare refusal is `onRefused()`, with no code, so nothing downstream can
+   * branch on a reason.
+   */
   const reportLocked = useCallback(
     (outcome: { ok: boolean; code?: string }) => {
       if (outcome.ok) return;
       if (outcome.code === 'community_locked' || outcome.code === 'follow_required') {
         onLocked?.(outcome.code);
+      } else if (outcome.code === 'refused') {
+        onRefused?.();
       }
     },
-    [onLocked],
+    [onLocked, onRefused],
   );
   // D-82. Read once, near the top, because six things below branch on it and a scattered
   // `variant === 'flat'` is how the two lists start becoming two components.
@@ -820,19 +863,25 @@ export function CommentsList({
   useEffect(() => {
     if (!pendingFocus) return;
     const frame = requestAnimationFrame(() => {
+      // 11.1-15: with no composer (the viewer cannot comment) the list itself is where focus lands,
+      // never `<body>` (UI-D-288, UI-D-893).
+      const fallback = () => {
+        if (canComment) setFocusKey((key) => key + 1);
+        else sectionRef.current?.focus({ preventScroll: true });
+      };
       if (pendingFocus.kind === 'input') {
-        setFocusKey((key) => key + 1);
+        fallback();
       } else {
         const row = sectionRef.current?.querySelector<HTMLElement>(
           `[data-comment-id="${CSS.escape(pendingFocus.id)}"]`,
         );
         if (row) row.focus({ preventScroll: false });
-        else setFocusKey((key) => key + 1);
+        else fallback();
       }
       setPendingFocus(null);
     });
     return () => cancelAnimationFrame(frame);
-  }, [pendingFocus]);
+  }, [pendingFocus, canComment]);
 
   /** The dialog's copy for the row being confirmed: the moderator's, or the author's own. */
   const moderationDialog =
@@ -846,6 +895,12 @@ export function CommentsList({
       : confirming.authorRemoved
         ? labels.item.removedAuthor
         : (confirming.author.displayName ?? labels.item.removedAuthor);
+
+  // 11.1-15: a re-read can take the right to comment away while a reply chip is up; the chip goes
+  // with the composer so a later restore never resurrects a target the viewer did not choose.
+  useEffect(() => {
+    if (!canComment) setReplyTarget(null);
+  }, [canComment]);
 
   const startReply = useCallback((comment: CommentView) => {
     setReplyTarget({ commentId: comment.id, name: comment.author.displayName ?? '' });
@@ -916,7 +971,7 @@ export function CommentsList({
             onDelete={removalOf(reply) !== null ? setConfirming : undefined}
             onReport={onReportComment}
             onBlock={onBlockComment}
-            onToggleLike={(row) => void toggleLike(row)}
+            onToggleLike={canLikeComment ? (row) => void toggleLike(row) : undefined}
             highlighted={reply.id === highlightCommentId}
           />
         ))}
@@ -977,7 +1032,9 @@ export function CommentsList({
         data-comments-empty
         className="px-4 py-10 text-center text-sm font-normal text-text-tertiary"
       >
-        {labels.emptyLabel}
+        {!canComment && labels.emptyReadOnlyLabel !== undefined
+          ? labels.emptyReadOnlyLabel
+          : labels.emptyLabel}
       </p>
     );
   } else {
@@ -996,11 +1053,11 @@ export function CommentsList({
               // D-82: BOTH handlers are withheld in the flat variant, and withholding them is what
               // removes the controls — `CommentItem` chooses its shell from the handlers it was
               // given, so there is no second branch anywhere about what a comment looks like.
-              onReply={flat ? undefined : startReply}
+              onReply={flat || !canComment ? undefined : startReply}
               onDelete={removalOf(comment) !== null ? setConfirming : undefined}
               onReport={onReportComment}
               onBlock={onBlockComment}
-              onToggleLike={flat ? undefined : (row) => void toggleLike(row)}
+              onToggleLike={flat || !canLikeComment ? undefined : (row) => void toggleLike(row)}
               highlighted={!flat && comment.id === highlightCommentId}
             >
               {renderToggle(comment)}
@@ -1031,9 +1088,15 @@ export function CommentsList({
       ref={sectionRef}
       aria-label={labels.region}
       data-comments-list
+      // 11.1-15: focusable only when there is no composer to take focus after a removal.
+      tabIndex={canComment ? undefined : -1}
       // In a sheet the list fills the primitive's unpadded `scroll="content"` body and shrinks with
       // it: the sheet's HEIGHT is the primitive's cap, never set here (UI-D-18).
-      className={cn('flex flex-col', variant !== 'inline' && 'min-h-0 flex-auto')}
+      className={cn(
+        'flex flex-col',
+        variant !== 'inline' && 'min-h-0 flex-auto',
+        !canComment && 'outline-none',
+      )}
     >
       {/* E10/partial: the body and the composer are independent — the composer is rendered OUTSIDE
           the chain above, so a failed or still-loading list never takes the input away. In a sheet
@@ -1052,27 +1115,29 @@ export function CommentsList({
         {body}
       </div>
 
-      <CommentInput
-        viewerAvatarUrl={viewer.avatarUrl}
-        viewerLabel={labels.viewerLabel}
-        placeholder={labels.placeholder}
-        submitLabel={labels.submitLabel}
-        replyTarget={chip}
-        onDismissReply={() => setReplyTarget(null)}
-        onSubmit={submit}
-        errorLabel={
-          submitError === null
-            ? null
-            : submitError === 'reply_depth_exceeded'
-              ? labels.replyDepthErrorLabel
-              : submitError === 'story_comment_no_reply'
-                ? labels.storyNoReplyErrorLabel
-                : labels.submitErrorLabel
-        }
-        onClearError={() => setSubmitError(null)}
-        focusKey={focusKey}
-        variant={variant}
-      />
+      {canComment ? (
+        <CommentInput
+          viewerAvatarUrl={viewer.avatarUrl}
+          viewerLabel={labels.viewerLabel}
+          placeholder={labels.placeholder}
+          submitLabel={labels.submitLabel}
+          replyTarget={chip}
+          onDismissReply={() => setReplyTarget(null)}
+          onSubmit={submit}
+          errorLabel={
+            submitError === null
+              ? null
+              : submitError === 'reply_depth_exceeded'
+                ? labels.replyDepthErrorLabel
+                : submitError === 'story_comment_no_reply'
+                  ? labels.storyNoReplyErrorLabel
+                  : labels.submitErrorLabel
+          }
+          onClearError={() => setSubmitError(null)}
+          focusKey={focusKey}
+          variant={variant}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={confirming !== null}

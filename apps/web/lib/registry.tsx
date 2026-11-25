@@ -43,7 +43,13 @@ import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { withAuthorInstagrams } from '@/lib/author-instagram';
 import { loadFeed } from '@/lib/feed';
-import { composerEntryFor, postAdminLabel, postCardView } from '@/lib/feed-view';
+import {
+  composerEntryFor,
+  type FeedPostActionsFacts,
+  postActionsView,
+  postAdminLabel,
+  postCardView,
+} from '@/lib/feed-view';
 import { coursesAreas } from '@/lib/member-area';
 import type { InstagramByMember } from '@/lib/profile-instagram';
 import { storeAreas } from '@/lib/store-area';
@@ -430,6 +436,9 @@ export function feedCommentsProps(
     labels: {
       region: tf('comments.region'),
       emptyLabel: tf('comments.empty'),
+      // 11.1-15 (UI-D-888, UI-D-895): the line a viewer who cannot comment reads instead of the
+      // invitation; the list picks it only when the viewer's `comment` fact is false.
+      emptyReadOnlyLabel: tf('comments.emptyReadOnly'),
       errorLabel: tf('errors.comments'),
       errorRepliesLabel: tf('errors.replies'),
       retryLabel: tf('comments.retry'),
@@ -493,6 +502,23 @@ export function feedCommentsProps(
       },
     },
   };
+}
+
+/**
+ * 11.1-15 (D-888, UI-D-888, UI-D-889): the two booleans the comment list takes for ONE post, built
+ * from `postActionsView` (plan 10) and no role, product or entitlement. A host that renders the list
+ * for a single post (the post detail page) spreads this beside `feedCommentsProps`; the column's
+ * shared sheet and the Reels sheet cannot, because they serve many posts, so the lists read the
+ * per-post fact off each post's own view data (`PostCardView.actions`). Both read ONE fact, built by
+ * the one view builder, so no surface can disagree with the card beside it. `like` governs the heart
+ * on each comment; `comment` governs the composer and every "Responder".
+ */
+export function commentActionProps(post: FeedPostActionsFacts): {
+  canComment: boolean;
+  canLikeComment: boolean;
+} {
+  const { comment, like } = postActionsView(post);
+  return { canComment: comment, canLikeComment: like };
 }
 
 /**

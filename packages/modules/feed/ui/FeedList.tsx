@@ -78,7 +78,16 @@ export type PostCardOverride = {
  */
 export type FeedCommentsProps = Omit<
   CommentSheetProps,
-  'open' | 'onClose' | 'targetId' | 'initialItems' | 'initialCursor' | 'onCountChange'
+  | 'open'
+  | 'onClose'
+  | 'targetId'
+  | 'initialItems'
+  | 'initialCursor'
+  | 'onCountChange'
+  // 11.1-15 (UI-D-889): the viewer's per-post facts. The sheet is ONE for the column, so the host
+  // cannot fix them once; the list reads them from the post the sheet is open on (`post.actions`).
+  | 'canComment'
+  | 'canLikeComment'
 >;
 
 /**
@@ -349,6 +358,9 @@ export function FeedList({
   /** Which post the shared OVERFLOW menu is open on (04-09) — one sheet for the whole column. */
   const [menuTarget, setMenuTarget] = useState<PostMenuTarget | null>(null);
   const [countDeltas, setCountDeltas] = useState<Record<string, number>>({});
+  /** 11.1-15: the viewer's facts for the post the shared sheet is open on, if the view carries them. */
+  const openActions =
+    commentsOpenFor === null ? undefined : items.find((row) => row.id === commentsOpenFor)?.actions;
 
   // The SERVER sent a different first page (a navigation, not a refresh): re-seed rather than merge.
   // Adjusting state during render is React's documented alternative to an effect.
@@ -714,6 +726,10 @@ export function FeedList({
       {comments ? (
         <CommentSheet
           {...comments}
+          // 11.1-15 (UI-D-888, UI-D-889): the facts of the post the shared sheet is open on, read
+          // from its view as data; a post with no fact (or none open) reads as all true.
+          canComment={openActions?.comment ?? true}
+          canLikeComment={openActions?.like ?? true}
           open={commentsOpenFor !== null}
           onClose={() => setCommentsOpenFor(null)}
           targetId={commentsOpenFor ?? ''}

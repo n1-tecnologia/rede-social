@@ -540,9 +540,10 @@ export type PostActionsView = {
   commentCountOpensList: boolean;
 };
 
-export function postActionsView(
-  post: Pick<FeedPost, 'community' | 'commentCount'>,
-): PostActionsView {
+/** What `postActionsView` reads of a post: its community (with the viewer's fact) and its count. */
+export type FeedPostActionsFacts = Pick<FeedPost, 'community' | 'commentCount'>;
+
+export function postActionsView(post: FeedPostActionsFacts): PostActionsView {
   const actions = post.community?.actions;
   const like = actions?.like ?? true;
   const comment = actions?.comment ?? true;
