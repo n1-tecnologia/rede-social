@@ -432,7 +432,7 @@ const addHighlightItemRoute = createRoute({
     },
     403: {
       description:
-        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist.',
+        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist. 11.1-09: a buyer holding `stories.story.publish` may add or remove ONLY their own story in a highlight the administrator opened to buyers (`openToBuyers`) of an active organization community where a product they hold ticks the story permission; every other combination (a closed highlight, a missing flag, a missing grant, an item that is not theirs) is this same bare 403.',
     },
     404: {
       description:
@@ -466,7 +466,7 @@ const updateHighlightRoute = createRoute({
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.highlight` = `title_invalid` (empty after trimming, or longer than 50) or `archived` (the highlight’s community is archived and takes no curation); or with `details.issues` for a body naming neither `title` nor `cover`. Nothing is written.',
+        '`VALIDATION_FAILED` with `details.highlight` = `title_invalid` (empty after trimming, or longer than 50) or `archived` (the highlight’s community is archived and takes no curation); or with `details.issues` for a body naming neither `title` nor `cover`. Nothing is written. 11.1-09: `openToBuyers` (the switch that lets buyers use the highlight, curators only) is refused with `details.highlight` = `open_unavailable` for an Início highlight, a member community\u2019s highlight or an archived community\u2019s.',
     },
     403: {
       description:
@@ -518,7 +518,7 @@ const removeHighlightItemRoute = createRoute({
     },
     403: {
       description:
-        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist.',
+        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist. 11.1-09: a buyer holding `stories.story.publish` may add or remove ONLY their own story in a highlight the administrator opened to buyers (`openToBuyers`) of an active organization community where a product they hold ticks the story permission; every other combination (a closed highlight, a missing flag, a missing grant, an item that is not theirs) is this same bare 403.',
     },
     404: {
       description:

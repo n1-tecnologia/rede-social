@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import { sqlClient } from '@rede-social/core/db';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import {
@@ -6,7 +7,7 @@ import {
   storyPublishLimiter,
 } from '@rede-social/core/server/safety/limits';
 import type { ProductDetail } from '@rede-social/module-store/contracts';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   adminSql,
   api,
@@ -157,7 +158,9 @@ const itemsOf = async (highlightId: string) =>
 async function sweep(): Promise<void> {
   const products = adminSql`select id from public.store_products where name like ${`${PREFIX}%`}`;
   await adminSql`delete from public.story_highlights where title like ${`${PREFIX}%`}`;
-  await adminSql`delete from public.stories where caption like ${`${PREFIX}%`}`;
+  await adminSql`
+    with gone as (delete from public.stories where caption like ${`${PREFIX}%`} returning media_asset_id)
+    delete from public.media_assets where id in (select media_asset_id from gone)`;
   if (createdAssets.length > 0) {
     await adminSql`delete from public.media_assets where id = any (${createdAssets}::uuid[])`;
   }
@@ -631,5 +634,401 @@ describe('11.1-09 open-counts: the product form\u2019s staff-only read', () => {
       expect(res.status, query.slice(0, 40)).toBe(400);
       expect((await envelope(res)).error.code).toBe('VALIDATION_FAILED');
     }
+  });
+});
+
+/** Everything the process wrote to its log descriptors while `fn` ran (pino writes asynchronously, so the spy stays on a moment). */
+async function captured<T>(fn: () => Promise<T>): Promise<{ value: T; lines: string }> {
+  const chunks: string[] = [];
+  const realWrite = fs.write;
+  const realWriteSync = fs.writeSync;
+  const writeSpy = vi.spyOn(fs, 'write').mockImplementation(((fd: number, ...args: unknown[]) => {
+    if (fd !== 1 && fd !== 2) return (realWrite as (...a: unknown[]) => void)(fd, ...args);
+    const data = String(args[0]);
+    chunks.push(data);
+    const callback = args.find((arg) => typeof arg === 'function') as
+      | ((error: null, written: number) => void)
+      | undefined;
+    callback?.(null, Buffer.byteLength(data));
+  }) as never);
+  const syncSpy = vi.spyOn(fs, 'writeSync').mockImplementation(((
+    fd: number,
+    ...args: unknown[]
+  ) => {
+    if (fd !== 1 && fd !== 2) return (realWriteSync as (...a: unknown[]) => number)(fd, ...args);
+    chunks.push(String(args[0]));
+    return Buffer.byteLength(String(args[0]));
+  }) as never);
+  try {
+    const value = await fn();
+    await new Promise<void>((resolve) => setTimeout(resolve, 150));
+    return { value, lines: chunks.join('') };
+  } finally {
+    writeSpy.mockRestore();
+    syncSpy.mockRestore();
+  }
+}
+
+/** A refusal body as bytes: the request id is per request, so it is the one field dropped before comparing. */
+async function bytesOf(res: Response): Promise<string> {
+  const body = (await res.json()) as Envelope & { error: { requestId?: string } };
+  const { requestId: _requestId, ...error } = body.error;
+  return JSON.stringify({ error });
+}
+
+/** `n` stories of `author`, each with a ready asset, all held by `highlightId` (set-based, through the owner connection). */
+async function fillHighlight(highlightId: string, author: string, n: number): Promise<string[]> {
+  const rows = await adminSql<{ id: string }[]>`
+    with a as (
+      insert into public.media_assets
+        (id, tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths)
+      select gen_random_uuid(), ${tenantId}::uuid, ${author}::uuid, 'image', 'story', 'ready', 'supabase',
+             'image/webp', 1024, '{640}'::int[]
+        from generate_series(1, ${n}::int)
+      returning id
+    ), s as (
+      insert into public.stories
+        (tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility)
+      select ${tenantId}::uuid, ${author}::uuid, a.id, 'image', ${`${PREFIX} cheio`}, 'followers' from a
+      returning id
+    ), i as (
+      insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+      select ${tenantId}::uuid, ${highlightId}::uuid, s.id, ${author}::uuid from s
+      returning story_id
+    )
+    select story_id::text as id from i`;
+  return rows.map((row) => row.id);
+}
+
+const clearItems = (highlightId: string) =>
+  adminSql`delete from public.story_highlight_items where highlight_id = ${highlightId}::uuid`;
+
+const storyAlive = async (storyId: string): Promise<boolean> => {
+  const [row] = await adminSql<{ deleted_at: string | null }[]>`
+    select deleted_at::text as deleted_at from public.stories where id = ${storyId}::uuid`;
+  return row !== undefined && row.deleted_at === null;
+};
+
+const itemExists = async (highlightId: string, storyId: string): Promise<boolean> =>
+  (await itemsOf(highlightId)).some((item) => item.story_id === storyId);
+
+describe('11.1-09 removal: a buyer removes only their own item while the permission lasts (D-885, D-895, D-887)', () => {
+  let h = '';
+
+  it('1. BPERM-13: the buyer removes their own item from an open highlight; the story survives; the last item leaves an empty OPEN highlight', async () => {
+    h = await insertHighlight({ title: 'remocao', open: true });
+    await setStoryFlag(true);
+    const story = await insertStory({ author: users.buyer, label: 'remover' });
+    expect((await addItem(tokens.buyer, h, story)).status).toBe(200);
+    const res = await removeItem(tokens.buyer, h, story);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await res.json()).toEqual({ highlighted: false, highlightCount: 0 });
+    expect(await itemsOf(h)).toHaveLength(0);
+    expect(await storyAlive(story)).toBe(true);
+    expect(await openFlagOf(h), 'the empty highlight stays open').toBe(true);
+  });
+
+  it('2. D-895/D-887: another buyer\u2019s item, a flipped flag, a revoked entitlement and a closed highlight are each the bare 403 and the item stays; the administrator removes it and the story survives', async () => {
+    const mine = await insertStory({ author: users.buyer, label: 'minha' });
+    const theirs = await insertStory({ author: users.buyer2, label: 'dela' });
+    const reseed = async () => {
+      await clearItems(h);
+      await setOpen(h, true);
+      await setStoryFlag(true);
+      expect((await addItem(tokens.buyer, h, mine)).status).toBe(200);
+      expect((await addItem(tokens.buyer2, h, theirs)).status).toBe(200);
+    };
+
+    await reseed();
+    await expectBare403(await removeItem(tokens.buyer, h, theirs), 'another buyer item');
+    expect(await itemExists(h, theirs)).toBe(true);
+
+    await setStoryFlag(false);
+    await expectBare403(await removeItem(tokens.buyer, h, mine), 'flag unticked');
+    expect(await itemExists(h, mine)).toBe(true);
+    await setStoryFlag(true);
+
+    await adminSql`
+      update public.store_entitlements set status = 'revoked', revoked_at = now()
+       where user_id = ${users.buyer}::uuid and product_id = ${fx.productA}::uuid`;
+    await expectBare403(await removeItem(tokens.buyer, h, mine), 'revoked entitlement');
+    expect(await itemExists(h, mine)).toBe(true);
+    // nothing is hidden or removed automatically (D-887), and the buyer still deletes the story itself
+    expect(await storyAlive(mine)).toBe(true);
+    await adminSql`
+      update public.store_entitlements set status = 'active', revoked_at = null
+       where user_id = ${users.buyer}::uuid and product_id = ${fx.productA}::uuid`;
+
+    await setOpen(h, false);
+    await expectBare403(await removeItem(tokens.buyer, h, mine), 'closed highlight');
+    expect(await itemExists(h, mine)).toBe(true);
+    // the administrator removes any item of a closed highlight, and the story is left alone
+    const staff = await removeItem(tokens.admin, h, mine);
+    expect(staff.status, await staff.clone().text()).toBe(200);
+    expect(await itemExists(h, mine)).toBe(false);
+    expect(await storyAlive(mine)).toBe(true);
+    await setOpen(h, true);
+
+    // positive control: with everything back the buyer removes their own item
+    expect((await addItem(tokens.buyer, h, mine)).status).toBe(200);
+    expect((await removeItem(tokens.buyer, h, mine)).status).toBe(200);
+  });
+
+  it('3. BPERM-13 empty and ordering: a story that is not in the highlight is the idempotent answer and touches nothing, an unknown story is 404, and removing a middle item leaves the order of the others', async () => {
+    await clearItems(h);
+    const s1 = await insertStory({ author: users.buyer, label: 'ordem-1' });
+    const s2 = await insertStory({ author: users.buyer2, label: 'ordem-2' });
+    const s3 = await insertStory({ author: users.buyer, label: 'ordem-3' });
+    expect((await addItem(tokens.buyer, h, s1)).status).toBe(200);
+    expect((await addItem(tokens.buyer2, h, s2)).status).toBe(200);
+    expect((await addItem(tokens.buyer, h, s3)).status).toBe(200);
+    expect((await itemsOf(h)).map((item) => item.story_id)).toEqual([s1, s2, s3]);
+
+    const absent = await insertStory({ author: users.buyer, label: 'ausente' });
+    const none = await removeItem(tokens.buyer, h, absent);
+    expect(none.status).toBe(200);
+    expect((await itemsOf(h)).map((item) => item.story_id)).toEqual([s1, s2, s3]);
+    expect((await removeItem(tokens.buyer, h, randomUUID())).status).toBe(404);
+
+    expect((await removeItem(tokens.buyer2, h, s2)).status).toBe(200);
+    expect((await itemsOf(h)).map((item) => item.story_id)).toEqual([s1, s3]);
+  });
+
+  it('4. D-887: after a refund the buyer still soft-deletes their own story, and the item of an administrator\u2019s removal leaves the story itself', async () => {
+    await clearItems(h);
+    const story = await insertStory({ author: users.buyer, label: 'apos-reembolso' });
+    expect((await addItem(tokens.buyer, h, story)).status).toBe(200);
+    await adminSql`
+      update public.store_entitlements set status = 'revoked', revoked_at = now()
+       where user_id = ${users.buyer}::uuid and product_id = ${fx.productA}::uuid`;
+    const deleted = await del(`/v1/stories/${story}`, tokens.buyer);
+    expect(deleted.status, await deleted.clone().text()).toBe(204);
+    expect(await storyAlive(story)).toBe(false);
+    await adminSql`
+      update public.store_entitlements set status = 'active', revoked_at = null
+       where user_id = ${users.buyer}::uuid and product_id = ${fx.productA}::uuid`;
+  });
+});
+
+describe('11.1-09 publish with a highlight: saving is publishing (D-883)', () => {
+  it('1. a buyer publishes a story into an open highlight: 201, the item exists; a closed or a foreign highlight is refused and NO story is created', async () => {
+    const open = await insertHighlight({ title: 'publicar', open: true });
+    await setStoryFlag(true);
+    const asset = await makeAsset(users.buyer);
+    const ok = await post('/v1/stories', tokens.buyer, {
+      mediaAssetId: asset,
+      mediaKind: 'image',
+      caption: `${PREFIX} publicada`,
+      highlightId: open,
+    });
+    expect(ok.status, await ok.clone().text()).toBe(201);
+    const created = (await ok.json()) as { id: string };
+    expect(await itemExists(open, created.id)).toBe(true);
+
+    await setOpen(open, false);
+    const refusedAsset = await makeAsset(users.buyer);
+    const closed = await post('/v1/stories', tokens.buyer, {
+      mediaAssetId: refusedAsset,
+      mediaKind: 'image',
+      caption: `${PREFIX} recusada`,
+      highlightId: open,
+    });
+    await expectBare403(closed, 'publish into a closed highlight');
+    const foreignAsset = await makeAsset(users.buyer);
+    const foreign = await post('/v1/stories', tokens.buyer, {
+      mediaAssetId: foreignAsset,
+      mediaKind: 'image',
+      caption: `${PREFIX} estrangeira`,
+      highlightId: fx.foreignHighlight,
+    });
+    expect(foreign.status).toBe(404);
+    const stored = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.stories
+       where caption in (${`${PREFIX} recusada`}, ${`${PREFIX} estrangeira`})`;
+    expect(stored[0]?.n, 'a refused destination creates no story').toBe(0);
+  });
+
+  it('2. the publish limiter counts every attempt, a refused one included: the 31st attempt is 429', async () => {
+    const closed = await insertHighlight({ title: 'limite', open: false });
+    storyPublishLimiter.reset();
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 31; attempt++) {
+      const res = await post('/v1/stories', tokens.buyer2, {
+        mediaAssetId: randomUUID(),
+        mediaKind: 'image',
+        caption: `${PREFIX} limite`,
+        highlightId: closed,
+      });
+      statuses.push(res.status);
+    }
+    expect(statuses.slice(0, 30).every((status) => status === 403)).toBe(true);
+    expect(statuses[30]).toBe(429);
+  });
+
+  it('3. the administrator publishes an organization story into the same open highlight as before', async () => {
+    const open = await insertHighlight({ title: 'publicar-admin', open: true });
+    const asset = await makeAsset(users.admin);
+    const res = await post('/v1/stories', tokens.admin, {
+      mediaAssetId: asset,
+      mediaKind: 'image',
+      caption: `${PREFIX} do admin`,
+      highlightId: open,
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+  });
+});
+
+describe('11.1-09 edge matrix (BPERM-12, BPERM-08, BPERM-25)', () => {
+  it('1. adjacency: a story exactly at its 24 hour expiry and one just inside are both saveable; an expired story stays readable through the highlight', async () => {
+    const h = await insertHighlight({ title: 'bordas', open: true });
+    await setStoryFlag(true);
+    const exact = await insertStory({
+      author: users.buyer,
+      label: 'borda-exata',
+      publishedAt: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+      expiresAt: new Date(Date.now()).toISOString(),
+    });
+    const inside = await insertStory({
+      author: users.buyer,
+      label: 'borda-dentro',
+      publishedAt: new Date(Date.now() - (24 * 3600 - 60) * 1000).toISOString(),
+      expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
+    });
+    expect((await addItem(tokens.buyer, h, exact)).status).toBe(200);
+    expect((await addItem(tokens.buyer, h, inside)).status).toBe(200);
+    // everyone who can read the community reads them, past the 24 hours (D-716): a second buyer, beside a locked reader
+    const detail = await get(`/v1/stories/highlights/${h}`, tokens.buyer2);
+    expect(detail.status, await detail.clone().text()).toBe(200);
+    const items = ((await detail.json()) as { items: { id: string; isActive: boolean }[] }).items;
+    expect(items.find((item) => item.id === exact)?.isActive).toBe(false);
+    expect(items.map((item) => item.id)).toEqual(expect.arrayContaining([exact, inside]));
+    expect((await get(`/v1/stories/highlights/${h}`, tokens.reader)).status).toBe(404);
+    expect((await get(`/v1/stories/${exact}`, tokens.buyer2)).status).toBe(200);
+    expect(
+      (await get(`/v1/stories/${exact}`, tokens.reader)).status,
+      'a locked member reads no story a buyer saved',
+    ).toBe(404);
+  });
+
+  it('2. empty and idempotency: an open highlight with no items takes the first, the same story twice leaves one item and the same answer', async () => {
+    const h = await insertHighlight({ title: 'vazio', open: true });
+    const story = await insertStory({ author: users.buyer, label: 'primeira' });
+    expect(await itemsOf(h)).toHaveLength(0);
+    const first = await addItem(tokens.buyer, h, story);
+    const again = await addItem(tokens.buyer, h, story);
+    expect(first.status).toBe(200);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ highlighted: true, highlightCount: 1 });
+    expect(await itemsOf(h)).toHaveLength(1);
+    expect(
+      (await addItem(tokens.buyer, h, randomUUID())).status,
+      'nothing to add is the bare 404',
+    ).toBe(404);
+  });
+
+  it('3. item cap: a highlight at the cap answers the existing full issue to a buyer, a repeat of a held story stays idempotent, and two buyers racing for the last place fill exactly the capacity', async () => {
+    const h = await insertHighlight({ title: 'capacidade', open: true });
+    const held = await fillHighlight(h, users.buyer, 98);
+    const last = await insertStory({ author: users.buyer, label: 'ultima' });
+    const mine = await insertStory({ author: users.buyer2, label: 'concorrente' });
+    // two buyers race for the 99th... then one place: first fill to 99
+    const filler = await insertStory({ author: users.buyer, label: 'enchimento' });
+    expect((await addItem(tokens.buyer, h, filler)).status).toBe(200);
+    expect(await itemsOf(h)).toHaveLength(99);
+
+    const [a, b] = await Promise.all([
+      addItem(tokens.buyer, h, last),
+      addItem(tokens.buyer2, h, mine),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([200, 400]);
+    const full = a.status === 400 ? a : b;
+    expect((await envelope(full)).error.details).toEqual({ highlight: 'full' });
+    expect(await itemsOf(h), 'exactly the capacity').toHaveLength(100);
+
+    const repeat = await addItem(tokens.buyer, h, held[0] ?? '');
+    expect(repeat.status, 'a story already held is the idempotent answer at the cap').toBe(200);
+    expect(await itemsOf(h)).toHaveLength(100);
+  });
+
+  it('4. concurrency: a close racing an add either lands after the item (it stays) or refuses the add with the bare 403, never a 500', async () => {
+    for (let round = 0; round < 3; round++) {
+      const h = await insertHighlight({ title: `corrida-${round}`, open: true });
+      const story = await insertStory({ author: users.buyer, label: `corrida-${round}` });
+      const [added, closed] = await Promise.all([
+        addItem(tokens.buyer, h, story),
+        patch(`/v1/stories/highlights/${h}`, tokens.admin, { openToBuyers: false }),
+      ]);
+      expect(closed.status).toBe(200);
+      expect(await openFlagOf(h)).toBe(false);
+      if (added.status === 200) {
+        expect(await itemExists(h, story), 'a close after the item leaves the item (D-887)').toBe(
+          true,
+        );
+      } else {
+        await expectBare403(added, `round ${round}`);
+        expect(await itemExists(h, story)).toBe(false);
+      }
+    }
+  });
+
+  it('5. BPERM-08: a closed highlight, a missing flag and a missing grant answer the SAME bytes (status, code, body, no details) and no product, flag or open-state word reaches a body or a log line', async () => {
+    const h = await insertHighlight({ title: 'bytes', open: true });
+    const story = await insertStory({ author: users.buyer, label: 'bytes' });
+    const forbidden = [
+      `${PREFIX} produto`,
+      fx.productA,
+      fx.orgA,
+      'can_story',
+      'canStory',
+      'openToBuyers',
+      'open_to_buyers',
+    ];
+
+    const closed = await captured(async () => {
+      await setOpen(h, false);
+      return addItem(tokens.buyer, h, story);
+    });
+    await setOpen(h, true);
+    const noFlag = await captured(async () => {
+      await setStoryFlag(false);
+      return addItem(tokens.buyer, h, story);
+    });
+    await setStoryFlag(true);
+    const noGrant = await captured(async () => addItem(tokens.reader, h, story));
+
+    const bodies: string[] = [];
+    for (const [label, run] of [
+      ['closed', closed],
+      ['no flag', noFlag],
+      ['no grant', noGrant],
+    ] as const) {
+      expect(run.value.status, label).toBe(403);
+      const text = await run.value.clone().text();
+      for (const word of forbidden) {
+        expect(text.includes(word), `${label} body must not carry "${word}"`).toBe(false);
+        expect(run.lines.includes(word), `${label} log must not carry "${word}"`).toBe(false);
+      }
+      bodies.push(await bytesOf(run.value));
+    }
+    expect(new Set(bodies).size, 'the three refusals are byte-identical').toBe(1);
+    expect(bodies[0]).not.toContain('details');
+  });
+
+  it('6. BPERM-25: tenant B grants a buyer of tenant A nothing and tenant A\u2019s highlight routes answer the bare 404 for it, each beside a positive control', async () => {
+    const story = await insertStory({ author: users.buyer, label: 'estrangeira' });
+    for (const res of [
+      await addItem(tokens.buyer, fx.foreignHighlight, story),
+      await removeItem(tokens.buyer, fx.foreignHighlight, story),
+      await patch(`/v1/stories/highlights/${fx.foreignHighlight}`, tokens.admin, {
+        openToBuyers: true,
+      }),
+      await get(`/v1/stories/highlights/${fx.foreignHighlight}`, tokens.buyer),
+    ]) {
+      expect(res.status).toBe(404);
+      expect(await envelope(res)).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    }
+    expect(await openFlagOf(fx.foreignHighlight)).toBe(true);
+    const own = await insertHighlight({ title: 'controle', open: true });
+    expect((await addItem(tokens.buyer, own, story)).status).toBe(200);
   });
 });
