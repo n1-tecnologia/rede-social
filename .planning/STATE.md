@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: "11.1"
 current_phase_name: Permissões do comprador por produto numa comunidade
 current_plan: 18
-status: executing
-stopped_at: Completed 11.1-17-PLAN.md (buyer post flow, refusal and member spec; plans 01-17 done, wave 8 closed, next 18 of wave 9)
-last_updated: "2026-11-25T16:03:16.078Z"
+status: verifying
+stopped_at: Completed 11.1-18-PLAN.md (release half; all 18 plans executed, verification pending)
+last_updated: "2026-11-25T16:33:46.041Z"
 last_activity: 2026-11-25
-last_activity_desc: Completed 11.1-17 (buyer post flow, refusal and member spec); plans 01-17 done, wave 8 closed, next 18 (wave 9)
-state_head: ca8a81bd92338b38b614e949b486bdba34e82949
+last_activity_desc: Completed 11.1-18 (release half: DEPLOY.md section, owner ledger P1..P34 all pending, exit gate vs baseline); all 18 plans executed, verification pending
+state_head: a584f23602d06e69f8093dfffc924d730803815c
 progress:
   total_phases: 36
   completed_phases: 0
   total_plans: 537
-  completed_plans: 508
+  completed_plans: 509
   percent: 0
 ---
 
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 11.1 (Permissões do comprador por produto numa comunidade) — EXECUTING
+Phase: 11.1 (Permissões do comprador por produto numa comunidade) — ALL 18 PLANS EXECUTED, VERIFICATION PENDING
 Current Plan: 18
 Total Plans in Phase: 18
 Plan: 18 of 18
-Status: Ready to execute
-Last activity: 2026-11-25 — Completed 11.1-17 (buyer post flow, refusal and member spec); plans 01-17 done, wave 8 closed, next 18 (wave 9)
+Status: All 18 plans executed — verification pending (the phase is not closed)
+Last activity: 2026-11-25 — Completed 11.1-18 (release half: DEPLOY.md section, owner ledger P1..P34 all pending, exit gate vs baseline); all 18 plans executed, verification pending
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -411,6 +411,7 @@ Progress: [███████████████████░] 160/162
 | Phase 11.1 P13 | 9 min | 3 tasks | 16 files |
 | Phase 11.1 P15 | 95 min | 3 tasks | 20 files |
 | Phase 11.1 P17 | 9 min | 3 tasks | 12 files |
+| Phase 11.1 P18 | 31 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -1227,6 +1228,7 @@ Recent decisions affecting current work:
 - [Phase 11.1]: 11.1-15: the comment surfaces read the facts of the post a shared sheet is open on (post.actions, ReelView.actions) as data; the registry builds the booleans only for the detail page
 - [Phase 11.1]: 11.1-15: a bare 403 on a like, a comment or a comment heart is the single word refused, read from the status alone; hosts revert, keep the draft and re-read the page, the Reels overlay does not refresh
 - [Phase 11.1]: 11.1-15: the Reels rail is not drawn at all when like, comment and share are all withheld; each control is optional on ReelRail
+- [Phase 11.1]: 11.1-18: release order is migrations, then API and worker together, then web (inverse of Phase 11), because every new response key is optional and emitted only at non-default values — the previous web never meets a new key while links hold the defaults; the new API is safe against the previous web
 
 ### Pending Todos
 
@@ -1372,6 +1374,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-25T16:03:15.705Z
-Stopped at: Completed 11.1-17-PLAN.md (buyer post flow, refusal and member spec; plans 01-17 done, wave 8 closed, next 18 of wave 9)
+Last session: 2026-11-25T16:33:42.329Z
+Stopped at: Completed 11.1-18-PLAN.md (release half; all 18 plans executed, verification pending)
 Resume file: None

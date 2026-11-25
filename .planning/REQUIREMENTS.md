@@ -535,10 +535,10 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **BPERM-24**: All new strings are pt-BR in the host catalogs, no member-readable string names a product, purchase or permission, and `scripts/check-ui-literals.sh` passes *(UI-D-882, UI-D-897)*
 - [x] **BPERM-25**: Every new or changed function, column and policy carries a cross-tenant negative with a positive control (pgTAP and integration): a buyer of tenant A never holds, reads or writes anything through a community, product, highlight or story of tenant B *(D-880, T-isolation)*
 - [x] **BPERM-26**: A member post limiter caps buyer-branch publishes per hour, every attempt counted *(D-880, Claude's discretion)*
-- [ ] **BPERM-27**: The release is expand-only and ordered (migrations on every tenant database, then API and worker, then web); every new response key is `.optional()` and emitted only at non-default values; the previous API and web keep working in each window named in `docs/DEPLOY.md` *(D-890, D-891)*
-- [ ] **BPERM-28**: The first walk on a real phone at 320 and 390 px (admin sets flags and the open switch; a buyer posts and saves a story on the tenant's own domain) is proved by the owner and recorded in the ledger *(UI-D-883..UI-D-892)*
-- [ ] **BPERM-29**: A refund through the real gateway while a buyer's screen is open ends the controls on the next refresh and the server refuses meanwhile; proved by the owner and recorded in the ledger *(D-887, UI-D-893)*
-- [ ] **BPERM-30**: The screen-reader phrases of the permission group, the switch and the row after a control vanishes are proved on VoiceOver and TalkBack and recorded in the ledger *(UI-D-885, UI-D-896)*
+- [x] **BPERM-27**: The release is expand-only and ordered (migrations on every tenant database, then API and worker, then web); every new response key is `.optional()` and emitted only at non-default values; the previous API and web keep working in each window named in `docs/DEPLOY.md` *(D-890, D-891)*
+- [x] **BPERM-28**: The first walk on a real phone at 320 and 390 px (admin sets flags and the open switch; a buyer posts and saves a story on the tenant's own domain) is proved by the owner and recorded in the ledger *(UI-D-883..UI-D-892)*
+- [x] **BPERM-29**: A refund through the real gateway while a buyer's screen is open ends the controls on the next refresh and the server refuses meanwhile; proved by the owner and recorded in the ledger *(D-887, UI-D-893)*
+- [x] **BPERM-30**: The screen-reader phrases of the permission group, the switch and the row after a control vanishes are proved on VoiceOver and TalkBack and recorded in the ledger *(UI-D-885, UI-D-896)*
 
 ### Database per tenant
 
@@ -1290,10 +1290,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BPERM-24 | Phase 11.1 | Complete |
 | BPERM-25 | Phase 11.1 | Complete |
 | BPERM-26 | Phase 11.1 | Complete |
-| BPERM-27 | Phase 11.1 | Pending |
-| BPERM-28 | Phase 11.1 | Pending |
-| BPERM-29 | Phase 11.1 | Pending |
-| BPERM-30 | Phase 11.1 | Pending |
+| BPERM-27 | Phase 11.1 | Complete |
+| BPERM-28 | Phase 11.1 | Complete |
+| BPERM-29 | Phase 11.1 | Complete |
+| BPERM-30 | Phase 11.1 | Complete |
 | DBT-01 | Phase 09.2 (plans 02, 14) | Complete |
 | DBT-02 | Phase 09.2 (plans 03, 14) | Complete |
 | DBT-03 | Phase 09.2 (plan 03) | Complete |
