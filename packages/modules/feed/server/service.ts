@@ -1030,6 +1030,22 @@ function isInsufficientPrivilege(error: unknown): boolean {
   return false;
 }
 
+/**
+ * 11.1-08 (D-888, Pitfall 3): the member-only translation of a database refusal. The guard of a like, a comment or a
+ * comment heart reads the buyer's grant in one statement and the write checks it again in the next, so a revoke or an
+ * unticked flag committing between the two reaches the write as a `42501` from the restrictive gate. For a MEMBER that is
+ * the same bare `403 FORBIDDEN` the guard answers (no `details`), so the two paths are indistinguishable. A `42501` for
+ * staff is NEVER masked: a staff lane has no grant to lose, so it can only be a real policy bug, and it stays a 500.
+ * Use as `.catch(refuseMemberPrivilege(ctx))` on the transaction promise.
+ */
+const refuseMemberPrivilege =
+  (ctx: RequestContext) =>
+  (error: unknown): never => {
+    if (ctx.role === 'member' && isInsufficientPrivilege(error))
+      throw new ApiError(403, 'FORBIDDEN');
+    throw error;
+  };
+
 /** The insert order the gallery's `position` comes from: images, then the video, then the files. */
 function wantedMediaFor(
   images: string[],
@@ -2072,6 +2088,23 @@ async function assertPostInteractive(
 }
 
 /**
+ * 11.1-08 (D-888, D-891): the comment-id routes' version of the denied test. A comment heart follows the SAME `like` flag as
+ * a post like, but the comment routes have no post guard, so ONE pre-read of the comment's post community asks the same
+ * list (`app.community_action_denied_ids('like')`). The inner join to `feed_posts` is the point: a STORY comment has no
+ * post, so it yields no row, skips the test and reaches the database constraint's own 400 `story_comment_not_likeable`; a
+ * comment the lane cannot read yields no row either and keeps the 404 or `follow_required` of the existing read-back. The
+ * refusal is the bare 403, never a body that names a product, a flag or a community.
+ */
+async function assertCommentLikeAllowed(tx: Tx, commentId: string): Promise<void> {
+  const rows = await tx.execute<{ denied: boolean }>(sql`
+    select (p.community_id is not null and p.community_id = any (${deniedCommunityIds('like')})) as denied
+      from feed_comments c
+      join feed_posts p on p.id = c.post_id
+     where c.id = ${commentId}::uuid and c.deleted_at is null`);
+  if (rows[0]?.denied) throw new ApiError(403, 'FORBIDDEN');
+}
+
+/**
  * 09-05 (D-469, UI-D-500) — the comment-id routes' version of the same miss: the comment is not
  * visible to the caller, so ask `app.feed_social_locked_comment` whether it belongs to a followers-only
  * post the caller may not read. True is the 403 `follow_required` (no author); false is the bare 404.
@@ -2128,7 +2161,7 @@ export async function likePost(
     const row = rows[0];
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     return { likeCount: row.like_count, authorUserId: row.author_user_id };
-  });
+  }).catch(refuseMemberPrivilege(ctx));
 
   emit(ctx, 'post.liked', {
     tenantId: ctx.tenantId,
@@ -2201,9 +2234,11 @@ export async function unlikePost(
  */
 export async function likeComment(ctx: RequestContext, commentId: string) {
   const { likeCount, authorUserId } = await withTenantTx(ctx, async (tx) => {
-    // 08.2 (D-356): no guard needed. A comment of a locked community's post is invisible under the
+    // 08.2 (D-356): no LOCKED guard needed. A comment of a locked community's post is invisible under the
     // restrictive `feed_comments_community_gate`, so the insert selects nothing and the read-back
     // below answers the bare 404; `feed_likes_community_gate` refuses the row even if it got here.
+    // 11.1-08 (D-888): the DENIED test needs its own pre-read, before the write.
+    await assertCommentLikeAllowed(tx, commentId);
     try {
       await tx.execute(sql`
         insert into feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
@@ -2227,7 +2262,7 @@ export async function likeComment(ctx: RequestContext, commentId: string) {
     // followers-only post the caller may not read, else the bare 404. The throw rolls the insert back.
     if (!row) return refuseHiddenComment(tx, commentId);
     return { likeCount: row.like_count, authorUserId: row.author_user_id };
-  });
+  }).catch(refuseMemberPrivilege(ctx));
 
   emit(ctx, 'comment.liked', {
     tenantId: ctx.tenantId,
@@ -2244,7 +2279,8 @@ export async function unlikeComment(ctx: RequestContext, commentId: string) {
   const { likeCount, authorUserId, removed } = await withTenantTx(ctx, async (tx) => {
     // 08.2 (D-356): a comment of a locked community's post is invisible under
     // `feed_comments_community_gate`, so the read-back below answers the bare 404 and the transaction
-    // rolls the delete back with it.
+    // rolls the delete back with it. 11.1-08 (D-888): a buyer who lost `like` is refused first, the heart stays.
+    await assertCommentLikeAllowed(tx, commentId);
     const deleted = await tx.execute<{ id: string }>(sql`
       delete from feed_likes
        where user_id = ${ctx.userId}::uuid and comment_id = ${commentId}::uuid
@@ -2302,7 +2338,7 @@ export async function createComment(
   const created = await withTenantTx(ctx, async (tx) => {
     // 08.2: 403 community_locked on the sample or a hidden post, 404 on any other miss, before
     // the insert (P58, WR-02).
-    await assertPostInteractive(tx, postId, opts);
+    await assertPostInteractive(tx, postId, opts, 'comment');
     let inserted: { id: string }[];
     try {
       inserted =
@@ -2350,7 +2386,7 @@ export async function createComment(
     const row = rows[0];
     if (!row) throw new ApiError(500, 'INTERNAL');
     return row;
-  });
+  }).catch(refuseMemberPrivilege(ctx));
 
   emit(ctx, 'comment.created', {
     tenantId: ctx.tenantId,
