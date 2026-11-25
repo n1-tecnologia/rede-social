@@ -25,6 +25,8 @@ import type {
   LockPreviewBody,
   ProductCard,
   ProductCommunity,
+  ProductCommunityLink,
+  ProductCommunityPermission,
   ProductCourse,
   ProductDetail,
   ProductInput,
@@ -83,6 +85,16 @@ type ProductRow = {
 
 type CommunityRow = { id: string; name: string; cover_asset_id: string | null };
 
+/** One link's five buyer flags as the table stores them (11.1, D-890, D-891). */
+type LinkFlagsRow = {
+  community_id: string;
+  can_like: boolean;
+  can_comment: boolean;
+  can_share: boolean;
+  can_post: boolean;
+  can_story: boolean;
+};
+
 type CourseRow = {
   id: string;
   title: string;
@@ -110,6 +122,34 @@ const PURCHASE_REFUSALS: Partial<Record<PurchaseOutcome, 'unavailable' | 'price_
 
 /** A Postgres `uuid[]` literal from ids the contract already proved are uuids. */
 const uuidArray = (ids: readonly string[]) => `{${ids.join(',')}}`;
+
+/** A Postgres `boolean[]` literal (11.1): the flags of a `communityLinks` array, parallel to its ids. */
+const boolArray = (values: readonly boolean[]) =>
+  `{${values.map((v) => (v ? 't' : 'f')).join(',')}}`;
+
+/**
+ * 11.1 (D-890, D-891): the set of links a product write replaces, in ONE of its two body forms. `ids`
+ * is what `communityIds` always meant (a new link takes the table defaults, an existing one is left
+ * alone); `links` is `communityLinks` (a new link takes the flags sent, an existing one is updated to
+ * them). The contract refuses a body that carries both, so a write has exactly one.
+ */
+type LinkSet =
+  | { kind: 'ids'; ids: readonly string[] }
+  | { kind: 'links'; links: readonly ProductCommunityLink[] };
+
+/** The ids a `LinkSet` names, for the shared `resolveCommunities` check. */
+const linkSetIds = (set: LinkSet): string[] =>
+  set.kind === 'ids' ? [...set.ids] : set.links.map((link) => link.communityId);
+
+/** The `LinkSet` of a body, or undefined when it names neither form (the links are then untouched). */
+const linkSetOf = (body: {
+  communityIds?: readonly string[];
+  communityLinks?: readonly ProductCommunityLink[];
+}): LinkSet | undefined => {
+  if (body.communityLinks !== undefined) return { kind: 'links', links: body.communityLinks };
+  if (body.communityIds !== undefined) return { kind: 'ids', ids: body.communityIds };
+  return undefined;
+};
 
 /**
  * The two input validators below are SHARED by every product write (`createProduct` and, since
@@ -244,6 +284,90 @@ async function linkedCommunities(
        and c.deleted_at is null
      order by c.position asc, c.last_activity_at desc, c.id desc`);
   return rows.map((row) => ({ id: row.id, name: row.name, coverAssetId: row.cover_asset_id }));
+}
+
+/**
+ * 11.1 (D-891): the buyer flags of a product's ACTIVE, live links that DIFFER from today's defaults
+ * (like, comment and share on, post and story off), in the Comunidades list order. The MANAGER read
+ * only: the caller composes it into a detail the route already restricted to `store.product.manage`
+ * (`createProduct`, `readDetail` with `canManage`), and no member-readable shape ever names a flag
+ * (D-888, T-11.1-22). A link to an archived community is not listed (the form cannot show it) and its
+ * flags survive every replace (CR-02).
+ */
+async function linkedPermissions(
+  tx: Tx,
+  ctx: RequestContext,
+  productId: string,
+): Promise<ProductCommunityPermission[]> {
+  const rows = await tx.execute<LinkFlagsRow>(sql`
+    select l.community_id, l.can_like, l.can_comment, l.can_share, l.can_post, l.can_story
+      from store_product_communities l
+      join communities c on c.id = l.community_id and c.tenant_id = l.tenant_id
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and l.product_id = ${productId}::uuid
+       and c.status = 'active'
+       and c.deleted_at is null
+       and (l.can_like, l.can_comment, l.can_share, l.can_post, l.can_story)
+           is distinct from (true, true, true, false, false)
+     order by c.position asc, c.last_activity_at desc, c.id desc`);
+  return rows.map((row) => ({
+    communityId: row.community_id,
+    like: row.can_like,
+    comment: row.can_comment,
+    share: row.can_share,
+    post: row.can_post,
+    story: row.can_story,
+  }));
+}
+
+/** `{ communityPermissions }` when there is a non-default link, nothing at all otherwise (D-891). */
+const permissionsKey = (list: ProductCommunityPermission[]) =>
+  list.length > 0 ? { communityPermissions: list } : {};
+
+/**
+ * Writes the links of a `communityLinks` set with their flags (11.1, D-890, D-891). `upsert = false`
+ * is the create path (a new product has no link, plain insert). `upsert = true` is the replace path:
+ * `on conflict ... do update` takes the flags the form sent, and the `where ... is distinct from` makes
+ * an unchanged re-save write NOTHING (no new row version, T-11.1-23). The tenant id is pinned from the
+ * context, never from the body, and the table's admin-only write policies still apply.
+ */
+async function insertLinkFlags(
+  tx: Tx,
+  ctx: RequestContext,
+  productId: string,
+  links: readonly ProductCommunityLink[],
+  upsert: boolean,
+): Promise<void> {
+  if (links.length === 0) return;
+  const ids = uuidArray(links.map((l) => l.communityId));
+  const likes = boolArray(links.map((l) => l.like));
+  const comments = boolArray(links.map((l) => l.comment));
+  const shares = boolArray(links.map((l) => l.share));
+  const posts = boolArray(links.map((l) => l.post));
+  const stories = boolArray(links.map((l) => l.story));
+  const arbiter = upsert
+    ? sql`
+    on conflict (tenant_id, product_id, community_id) do update
+       set can_like = excluded.can_like,
+           can_comment = excluded.can_comment,
+           can_share = excluded.can_share,
+           can_post = excluded.can_post,
+           can_story = excluded.can_story
+     where (store_product_communities.can_like, store_product_communities.can_comment,
+            store_product_communities.can_share, store_product_communities.can_post,
+            store_product_communities.can_story)
+           is distinct from (excluded.can_like, excluded.can_comment, excluded.can_share,
+                             excluded.can_post, excluded.can_story)`
+    : sql`on conflict (tenant_id, product_id, community_id) do nothing`;
+  await tx.execute(sql`
+    insert into store_product_communities
+           (tenant_id, product_id, community_id, can_like, can_comment, can_share, can_post, can_story)
+    select ${ctx.tenantId}::uuid, ${productId}::uuid, f.community_id, f.can_like, f.can_comment,
+           f.can_share, f.can_post, f.can_story
+      from unnest(${ids}::uuid[], ${likes}::boolean[], ${comments}::boolean[], ${shares}::boolean[],
+                  ${posts}::boolean[], ${stories}::boolean[])
+           as f(community_id, can_like, can_comment, can_share, can_post, can_story)
+    ${arbiter}`);
 }
 
 /**
@@ -441,7 +565,9 @@ export async function createProduct(
   const detail = await withTenantTx(ctx, async (tx) => {
     await ensureSeeded(tx, ctx);
     await resolveImageAsset(tx, ctx, input.imageAssetId);
-    await resolveCommunities(tx, ctx, input.communityIds);
+    // 11.1 (D-890): the ids of `communityLinks` run through the SAME check as `communityIds`.
+    const linkSet = linkSetOf(input) ?? { kind: 'ids' as const, ids: [] };
+    await resolveCommunities(tx, ctx, linkSetIds(linkSet));
     await resolveCourses(tx, ctx, input.courseIds, null);
     await resolveLives(tx, ctx, input.liveIds, null);
     // OQ-3: an ABSENT key applies the name guess (the tenant's category with that slug, else none), an
@@ -461,11 +587,14 @@ export async function createProduct(
     const product = inserted[0];
     if (!product) throw new ApiError(500, 'INTERNAL');
 
-    if (input.communityIds.length > 0) {
+    if (linkSet.kind === 'links') {
+      // 11.1: a NEW product has no link yet, so the flags the form sent are written as they are.
+      await insertLinkFlags(tx, ctx, product.id, linkSet.links, false);
+    } else if (linkSet.ids.length > 0) {
       await tx.execute(sql`
         insert into store_product_communities (tenant_id, product_id, community_id)
         select ${ctx.tenantId}::uuid, ${product.id}::uuid, ids.id
-          from unnest(${uuidArray(input.communityIds)}::uuid[]) as ids(id)
+          from unnest(${uuidArray(linkSet.ids)}::uuid[]) as ids(id)
         on conflict (tenant_id, product_id, community_id) do nothing`);
     }
     if (input.courseIds.length > 0) {
@@ -498,6 +627,7 @@ export async function createProduct(
       // A product the caller just created: nobody holds it yet.
       owned: false,
       communities,
+      ...permissionsKey(await linkedPermissions(tx, ctx, product.id)),
       // The creator holds `store.product.manage` (the route guard): the manager-only lists.
       courses,
       lives,
@@ -820,6 +950,9 @@ async function readDetail(
          and e.product_id = ${productId}::uuid
          and e.status = 'active'`);
     detail.holderCount = counted[0]?.n ?? 0;
+    // 11.1 (D-891): the buyer flags, manager-only and only where they differ from the defaults.
+    const permissions = await linkedPermissions(tx, ctx, product.id);
+    if (permissions.length > 0) detail.communityPermissions = permissions;
     // Manager-only (08.4, R-Pitfall 5): a member's detail never names a course a product opens.
     detail.courses = await linkedCourses(tx, ctx, product.id);
     detail.lives = await linkedLives(tx, ctx, product.id);
@@ -1556,13 +1689,24 @@ export async function getLiveAccess(
  * to every member without access (archived communities stay readable) at the commit of an
  * unrelated edit, and no screen could ever put the link back. So the set the caller replaces is
  * exactly the set the caller could see.
+ *
+ * 11.1 (D-363, D-890, D-891): the set arrives in ONE of two forms and the form decides what an
+ * EXISTING link's flags do. `communityIds` keeps `on conflict do nothing`: the flags already stored
+ * survive and a new link takes the table defaults (like, comment and share on; post and story off),
+ * so the previous web, which knows no flag, can never wipe or reset one. `communityLinks` upserts the
+ * five flags (`insertLinkFlags`): a changed flag on an existing link persists, and
+ * `where ... is distinct from` makes an unchanged re-save write no row at all. Either way the delete
+ * branch is the same, last writer wins with a whole set, and a link to an archived community survives
+ * with its flags. A flag change never changes WHO unlocks a community (any active linked product
+ * unlocks, D-886); only the lock preview (newly added communities) is about access.
  */
 async function replaceLinks(
   tx: Tx,
   ctx: RequestContext,
   productId: string,
-  communityIds: readonly string[],
+  set: LinkSet,
 ): Promise<void> {
+  const ids = linkSetIds(set);
   await tx.execute(sql`
     delete from store_product_communities l
      using communities c
@@ -1572,12 +1716,17 @@ async function replaceLinks(
        and c.tenant_id = l.tenant_id
        and c.status = 'active'
        and c.deleted_at is null
-       and l.community_id <> all (${uuidArray(communityIds)}::uuid[])`);
-  if (communityIds.length === 0) return;
+       and l.community_id <> all (${uuidArray(ids)}::uuid[])`);
+  if (ids.length === 0) return;
+  if (set.kind === 'links') {
+    // 11.1 (D-891): the flags of an existing link follow what the form sent.
+    await insertLinkFlags(tx, ctx, productId, set.links, true);
+    return;
+  }
   await tx.execute(sql`
     insert into store_product_communities (tenant_id, product_id, community_id)
     select ${ctx.tenantId}::uuid, ${productId}::uuid, ids.id
-      from unnest(${uuidArray(communityIds)}::uuid[]) as ids(id)
+      from unnest(${uuidArray(ids)}::uuid[]) as ids(id)
     on conflict (tenant_id, product_id, community_id) do nothing`);
 }
 
@@ -1655,8 +1804,10 @@ async function lockProduct(tx: Tx, ctx: RequestContext, productId: string): Prom
 /**
  * `PATCH /v1/store/products/{productId}` (D-363, D-361, STORE-02, STORE-03). ONE transaction: the
  * product row is locked first, then the given columns change (and `updated_at`), and when
- * `communityIds` is present the ACTIVE link set is replaced (last writer wins with a whole set,
- * P13; links to archived or removed communities are kept, CR-02); `courseIds` and `liveIds` likewise
+ * `communityIds` or `communityLinks` is present the ACTIVE link set is replaced (last writer wins
+ * with a whole set, P13; links to archived or removed communities are kept, CR-02; `communityLinks`
+ * also writes each link's buyer flags, 11.1, D-891, while a body with NEITHER key leaves every link
+ * and flag untouched, D-363); `courseIds` and `liveIds` likewise
  * replace the linkable course and live links (08.4, D-418; links to archived courses and cancelled
  * lives are kept).
  * A new price changes only this row; existing orders keep their snapshotted `amount_cents`
@@ -1673,7 +1824,8 @@ export async function updateProduct(
     if (!(await lockProduct(tx, ctx, productId))) return null;
     await ensureSeeded(tx, ctx);
     if (patch.imageAssetId !== undefined) await resolveImageAsset(tx, ctx, patch.imageAssetId);
-    if (patch.communityIds !== undefined) await resolveCommunities(tx, ctx, patch.communityIds);
+    const linkSet = linkSetOf(patch);
+    if (linkSet !== undefined) await resolveCommunities(tx, ctx, linkSetIds(linkSet));
     if (patch.courseIds !== undefined) {
       await resolveCourses(tx, ctx, patch.courseIds, productId);
     }
@@ -1695,9 +1847,7 @@ export async function updateProduct(
          set ${sql.join(sets, sql`, `)}
        where id = ${productId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid`);
-    if (patch.communityIds !== undefined) {
-      await replaceLinks(tx, ctx, productId, patch.communityIds);
-    }
+    if (linkSet !== undefined) await replaceLinks(tx, ctx, productId, linkSet);
     if (patch.courseIds !== undefined) {
       await replaceCourseLinks(tx, ctx, productId, patch.courseIds);
     }
