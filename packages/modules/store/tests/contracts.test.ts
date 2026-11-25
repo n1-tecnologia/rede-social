@@ -1004,3 +1004,73 @@ describe('store per-link buyer flags (11.1-05, D-890, D-891)', () => {
     ).toBe(false);
   });
 });
+
+describe('store contract compatibility, previous and new release payloads (11.1-05, BPERM-27)', () => {
+  const previousCreate = {
+    name: 'Curso',
+    priceCents: 1990,
+    description: 'x',
+    imageAssetId: null,
+    communityIds: [id(1), id(2)],
+    courseIds: [],
+    liveIds: [],
+  };
+  const flags = { like: true, comment: false, share: true, post: true, story: false };
+  const newCreate = {
+    name: 'Curso',
+    priceCents: 1990,
+    communityLinks: [
+      { communityId: id(1), ...flags },
+      { communityId: id(2), ...flags, post: false },
+    ],
+  };
+
+  it('the previous-release create and patch payloads parse unchanged', () => {
+    expect(productInputSchema.parse(previousCreate)).toEqual(previousCreate);
+    expect(productPatchSchema.parse({ communityIds: [id(1)] })).toEqual({ communityIds: [id(1)] });
+    expect(productPatchSchema.parse({ name: 'Novo' })).toEqual({ name: 'Novo' });
+  });
+
+  it('the new-release payloads parse, and the manager read with communityPermissions parses', () => {
+    expect(productInputSchema.parse(newCreate).communityLinks).toEqual(newCreate.communityLinks);
+    expect(
+      productPatchSchema.parse({ communityLinks: newCreate.communityLinks }).communityLinks,
+    ).toEqual(newCreate.communityLinks);
+    const detail = {
+      id: id(9),
+      name: 'Curso',
+      description: '',
+      priceCents: 1990,
+      currency: 'BRL',
+      imageAssetId: null,
+      status: 'active',
+      owned: false,
+      communities: [],
+      unlockedCourses: [],
+      unlockedLives: [],
+      communityPermissions: [{ communityId: id(1), ...flags }],
+    };
+    expect(productDetailSchema.safeParse(detail).success).toBe(true);
+  });
+
+  it('an unknown extra key is still refused on every changed schema', () => {
+    expect(productInputSchema.safeParse({ ...newCreate, extra: 1 }).success).toBe(false);
+    expect(productPatchSchema.safeParse({ communityLinks: [], extra: 1 }).success).toBe(false);
+    expect(
+      productDetailSchema.safeParse({
+        id: id(9),
+        name: 'Curso',
+        description: '',
+        priceCents: 1990,
+        currency: 'BRL',
+        imageAssetId: null,
+        status: 'active',
+        owned: false,
+        communities: [],
+        unlockedCourses: [],
+        unlockedLives: [],
+        extra: 1,
+      }).success,
+    ).toBe(false);
+  });
+});

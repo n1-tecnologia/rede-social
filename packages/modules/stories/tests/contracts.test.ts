@@ -312,3 +312,40 @@ describe('11.1 highlight openToBuyers, its issue code and the open-counts schema
     expect(openHighlightCountsSchema.safeParse({ items: [], total: 1 }).success).toBe(false);
   });
 });
+
+describe('highlight contract compatibility, previous and new release (11.1-05, BPERM-02, BPERM-27)', () => {
+  const previous = {
+    id: ASSET,
+    communityId: null,
+    title: 'Aulas',
+    position: 0,
+    coverAssetId: null,
+    coverVariantWidths: [],
+    coverStoryId: null,
+    coverChosen: false,
+    itemCount: 2,
+  };
+
+  it('a previous-release highlight summary and a title-only patch parse unchanged', () => {
+    expect(highlightSummarySchema.parse(previous)).toEqual(previous);
+    expect(updateHighlightSchema.parse({ title: 'Novo' })).toEqual({ title: 'Novo' });
+    expect(updateHighlightSchema.parse({ cover: null })).toEqual({ cover: null });
+  });
+
+  it('a new-release summary and patch carrying openToBuyers parse', () => {
+    expect(highlightSummarySchema.parse({ ...previous, openToBuyers: true }).openToBuyers).toBe(
+      true,
+    );
+    expect(updateHighlightSchema.parse({ title: 'Novo', openToBuyers: true })).toEqual({
+      title: 'Novo',
+      openToBuyers: true,
+    });
+  });
+
+  it('an unknown extra key is still refused on the summary and on the patch', () => {
+    expect(
+      highlightSummarySchema.safeParse({ ...previous, openToBuyers: true, extra: 1 }).success,
+    ).toBe(false);
+    expect(updateHighlightSchema.safeParse({ title: 'Novo', extra: 1 }).success).toBe(false);
+  });
+});

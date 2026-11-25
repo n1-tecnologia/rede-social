@@ -7,6 +7,7 @@ import {
   feedPageSchema,
   feedPostSchema,
   feedQuerySchema,
+  postCommunitySchema,
   postLockedAuthorSchema,
 } from '../contracts/index';
 
@@ -198,5 +199,32 @@ describe('feedPostSchema.removal (D-475)', () => {
     expect(feedPostSchema.safeParse({ ...POST, removal: null }).success).toBe(false);
     expect(feedPostSchema.safeParse({ ...POST, removal: 'own' }).success).toBe(false);
     expect(feedPostSchema.safeParse({ ...POST, removal: 'admin' }).success).toBe(false);
+  });
+});
+
+describe('postCommunitySchema.actions compatibility, previous and new release (11.1-05, BPERM-16, BPERM-27)', () => {
+  const previous = { id: UUID, name: 'Turma', slug: 'turma' };
+  const next = { ...previous, actions: { like: true, comment: false, share: true } };
+
+  it('a previous-release community summary parses unchanged, inside a post too', () => {
+    expect(postCommunitySchema.parse(previous)).toEqual(previous);
+    expect(
+      feedPostSchema.parse({ ...POST, communityId: UUID, community: previous }).community,
+    ).toEqual(previous);
+  });
+
+  it('a new-release summary with actions parses, inside a post too', () => {
+    expect(postCommunitySchema.parse(next)).toEqual(next);
+    expect(feedPostSchema.parse({ ...POST, communityId: UUID, community: next }).community).toEqual(
+      next,
+    );
+  });
+
+  it('an unknown extra key is still refused, on the summary and inside actions', () => {
+    expect(postCommunitySchema.safeParse({ ...next, extra: 1 }).success).toBe(false);
+    expect(
+      postCommunitySchema.safeParse({ ...previous, actions: { ...next.actions, post: true } })
+        .success,
+    ).toBe(false);
   });
 });
