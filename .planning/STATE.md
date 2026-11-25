@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: "11.1"
 current_phase_name: Permissões do comprador por produto numa comunidade
-current_plan: 18
-status: verifying
-stopped_at: Completed 11.1-18-PLAN.md (release half; all 18 plans executed, verification pending)
-last_updated: "2026-11-25T16:33:46.041Z"
+current_plan: 19
+status: ready_to_execute
+stopped_at: Planned gap closure 11.1-19 (WR-01 share menu) and 11.1-20 (WR-02 + BPERM-28..30 rows); plan-checker passed; next /gsd-execute-phase 11.1 --gaps-only
+last_updated: "2026-11-25T18:10:00.000Z"
 last_activity: 2026-11-25
-last_activity_desc: Completed 11.1-18 (release half: DEPLOY.md section, owner ledger P1..P34 all pending, exit gate vs baseline); all 18 plans executed, verification pending
-state_head: a584f23602d06e69f8093dfffc924d730803815c
+last_activity_desc: Planned the verification gap closure for 11.1 (plans 19 and 20, wave 1, checker passed); 18 plans executed, verification gaps_found
+state_head: 155edce3
 progress:
   total_phases: 36
   completed_phases: 0
-  total_plans: 537
+  total_plans: 539
   completed_plans: 509
   percent: 0
 ---
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 11.1 (Permissões do comprador por produto numa comunidade) — ALL 18 PLANS EXECUTED, VERIFICATION PENDING
-Current Plan: 18
-Total Plans in Phase: 18
-Plan: 18 of 18
-Status: All 18 plans executed — verification pending (the phase is not closed)
-Last activity: 2026-11-25 — Completed 11.1-18 (release half: DEPLOY.md section, owner ledger P1..P34 all pending, exit gate vs baseline); all 18 plans executed, verification pending
+Phase: 11.1 (Permissões do comprador por produto numa comunidade) — 18 PLANS EXECUTED, VERIFICATION gaps_found, GAP CLOSURE 19 AND 20 PLANNED
+Current Plan: 19
+Total Plans in Phase: 20
+Plan: 19 of 20 (18 executed; 19 and 20 are gap_closure plans, wave 1, not started)
+Status: Ready to execute the gap plans (`/gsd-execute-phase 11.1 --gaps-only`), then re-verify (expect human_needed because the 34-row ledger is all pending); the phase is not closed
+Last activity: 2026-11-25 — Planned the verification gap closure: 11.1-19 (WR-01, "Copiar link" in the "..." menu, BPERM-21) and 11.1-20 (WR-02 `mapRefused` scoped to the member lane, BPERM-28..30 rows back to Pending); plan-checker passed, decision coverage 17/17
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
