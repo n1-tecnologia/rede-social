@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { sqlClient } from '@rede-social/core/db';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
-import { storyPublishLimiter } from '@rede-social/core/server/safety/limits';
+import {
+  communityCreateLimiter,
+  storyPublishLimiter,
+} from '@rede-social/core/server/safety/limits';
 import type { ProductDetail } from '@rede-social/module-store/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -224,6 +227,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   storyPublishLimiter.reset();
+  communityCreateLimiter.reset();
 });
 
 afterAll(async () => {
@@ -306,5 +310,326 @@ describe('11.1-09 tracer: a buyer saves their own story into an open highlight',
     const staff = await addItem(tokens.admin, fx.hOpen, orgStory);
     expect(staff.status, await staff.clone().text()).toBe(200);
     await adminSql`delete from public.story_highlight_items where highlight_id = ${fx.hOpen}::uuid`;
+  });
+});
+
+const get = (path: string, token: string) => request(path, token);
+
+/** A highlight written through the owner connection returns its flag; the route reads must agree with it. */
+const openFlagOf = async (highlightId: string): Promise<boolean> => {
+  const [row] = await adminSql<{ open_to_buyers: boolean }[]>`
+    select open_to_buyers from public.story_highlights where id = ${highlightId}::uuid`;
+  return row?.open_to_buyers === true;
+};
+const updatedAtOf = async (highlightId: string): Promise<string> => {
+  const [row] = await adminSql<{ updated_at: string }[]>`
+    select updated_at::text as updated_at from public.story_highlights where id = ${highlightId}::uuid`;
+  return row?.updated_at ?? '';
+};
+
+/** A MEMBER community made through the real route by `token` (the creator curates its highlights). */
+async function memberCommunity(token: string, label: string): Promise<string> {
+  const res = await post('/v1/communities', token, { name: `${PREFIX} ${label}` });
+  expect(res.status, `member community ${label} -> ${await res.clone().text()}`).toBe(201);
+  return ((await res.json()) as { id: string }).id;
+}
+
+describe('11.1-09 toggle: openToBuyers is the curator\u2019s single switch', () => {
+  it('1. D-884/UI-D-886 (BPERM-02 a, b): a highlight reads closed by default; the manager opens and closes it with one PATCH field on the curator reads, and highlight.updated moves updated_at only on a real change', async () => {
+    const created = await post('/v1/stories/highlights', tokens.admin, {
+      communityId: fx.orgA,
+      title: `${PREFIX} interruptor`,
+    });
+    expect(created.status, await created.clone().text()).toBe(201);
+    const made = (await created.json()) as { id: string };
+    expect(made).not.toHaveProperty('openToBuyers');
+    expect(await openFlagOf(made.id)).toBe(false);
+
+    const first = await patch(`/v1/stories/highlights/${made.id}`, tokens.admin, {
+      openToBuyers: true,
+    });
+    expect(first.status, await first.clone().text()).toBe(200);
+    expect(((await first.json()) as { openToBuyers?: boolean }).openToBuyers).toBe(true);
+    expect(await openFlagOf(made.id)).toBe(true);
+    const stamp = await updatedAtOf(made.id);
+
+    const repeat = await patch(`/v1/stories/highlights/${made.id}`, tokens.admin, {
+      openToBuyers: true,
+    });
+    expect(repeat.status).toBe(200);
+    expect(await updatedAtOf(made.id), 'an identical PATCH moves nothing').toBe(stamp);
+
+    const listed = await get(
+      `/v1/stories/highlights?communityId=${fx.orgA}&scope=all`,
+      tokens.admin,
+    );
+    expect(listed.status).toBe(200);
+    const items = ((await listed.json()) as { items: { id: string; openToBuyers?: boolean }[] })
+      .items;
+    expect(items.find((item) => item.id === made.id)?.openToBuyers).toBe(true);
+    const detail = await get(`/v1/stories/highlights/${made.id}`, tokens.admin);
+    expect(detail.status).toBe(200);
+    expect(
+      ((await detail.json()) as { highlight: { openToBuyers?: boolean } }).highlight.openToBuyers,
+    ).toBe(true);
+    const catalog = await get('/v1/stories/highlights/catalog', tokens.admin);
+    const catalogItems = (
+      (await catalog.json()) as { items: { id: string; openToBuyers?: boolean }[] }
+    ).items;
+    expect(catalogItems.find((item) => item.id === made.id)?.openToBuyers).toBe(true);
+
+    const closed = await patch(`/v1/stories/highlights/${made.id}`, tokens.admin, {
+      openToBuyers: false,
+    });
+    expect(closed.status).toBe(200);
+    expect(await closed.json()).not.toHaveProperty('openToBuyers');
+    expect(await openFlagOf(made.id)).toBe(false);
+    expect(await updatedAtOf(made.id), 'a real change moved updated_at').not.toBe(stamp);
+  });
+
+  it('2. T-11.1-35 (BPERM-02 d): the switch is refused open_unavailable for an Inicio highlight, a member community highlight (also for its creator, who cannot flip it) and an archived community highlight', async () => {
+    const inicio = await insertHighlight({ title: 'inicio', communityId: null });
+    const res = await patch(`/v1/stories/highlights/${inicio}`, tokens.admin, {
+      openToBuyers: true,
+    });
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).error.details).toEqual({ highlight: 'open_unavailable' });
+    expect(await openFlagOf(inicio)).toBe(false);
+
+    const own = await memberCommunity(tokens.buyer, 'da compradora');
+    const created = await post('/v1/stories/highlights', tokens.buyer, {
+      communityId: own,
+      title: `${PREFIX} da criadora`,
+    });
+    expect(created.status, await created.clone().text()).toBe(201);
+    const ownHighlight = ((await created.json()) as { id: string }).id;
+    const creatorFlip = await patch(`/v1/stories/highlights/${ownHighlight}`, tokens.buyer, {
+      openToBuyers: true,
+    });
+    expect(creatorFlip.status).toBe(400);
+    expect((await envelope(creatorFlip)).error.details).toEqual({ highlight: 'open_unavailable' });
+    // the creator still renames it with the same route: the switch is the only refusal
+    const rename = await patch(`/v1/stories/highlights/${ownHighlight}`, tokens.buyer, {
+      title: `${PREFIX} renomeado`,
+    });
+    expect(rename.status).toBe(200);
+    expect(await openFlagOf(ownHighlight)).toBe(false);
+    // the administrator is not the curator of a member community: the bare 403
+    await expectBare403(
+      await patch(`/v1/stories/highlights/${ownHighlight}`, tokens.admin, { openToBuyers: true }),
+      'admin on a member community',
+    );
+
+    const archivedCommunity = await post('/v1/communities', tokens.admin, {
+      name: `${PREFIX} arquivada`,
+    });
+    const archivedId = ((await archivedCommunity.json()) as { id: string }).id;
+    const archivedHighlight = await insertHighlight({
+      title: 'arquivada',
+      communityId: archivedId,
+    });
+    await adminSql`update public.communities set status = 'archived' where id = ${archivedId}::uuid`;
+    const archived = await patch(`/v1/stories/highlights/${archivedHighlight}`, tokens.admin, {
+      openToBuyers: true,
+    });
+    expect(archived.status).toBe(400);
+    expect((await envelope(archived)).error.details).toEqual({ highlight: 'open_unavailable' });
+    expect(await openFlagOf(archivedHighlight)).toBe(false);
+  });
+
+  it('3. T-11.1-32: a member, a buyer and the support user are refused 403 on the switch beside the manager control, and a buyer touches no highlight-level write', async () => {
+    const target = await insertHighlight({ title: 'protegido' });
+    for (const [who, token] of [
+      ['reader', tokens.reader],
+      ['buyer', tokens.buyer],
+    ] as const) {
+      await expectBare403(
+        await patch(`/v1/stories/highlights/${target}`, token, { openToBuyers: true }),
+        `${who} toggling`,
+      );
+      await expectBare403(
+        await patch(`/v1/stories/highlights/${target}`, token, { title: `${PREFIX} x` }),
+        `${who} renaming`,
+      );
+      await expectBare403(
+        await post('/v1/stories/highlights', token, { communityId: fx.orgA, title: `${PREFIX} y` }),
+        `${who} creating`,
+      );
+      await expectBare403(await del(`/v1/stories/highlights/${target}`, token), `${who} deleting`);
+      await expectBare403(
+        await request('/v1/stories/highlights/order', token, {
+          method: 'PUT',
+          body: JSON.stringify({ communityId: fx.orgA, highlightIds: [target] }),
+        }),
+        `${who} reordering`,
+      );
+    }
+    const support = await signInAs('support@rede-demo.local', SEED_PASSWORD);
+    await expectBare403(
+      await patch(`/v1/stories/highlights/${target}`, support, { openToBuyers: true }),
+      'support toggling',
+    );
+    expect(await openFlagOf(target)).toBe(false);
+    const control = await patch(`/v1/stories/highlights/${target}`, tokens.admin, {
+      openToBuyers: true,
+    });
+    expect(control.status, 'manager control').toBe(200);
+    expect(await openFlagOf(target)).toBe(true);
+  });
+
+  it('4. UI-D-887 (BPERM-02 c): no member-facing read carries the flag, open or closed (list, detail, the story, the community page and list, the buyer catalogue)', async () => {
+    const story = await insertStory({ author: users.admin, label: 'leitura' });
+    const shown = await insertHighlight({ title: 'leitura', open: false });
+    const added = await addItem(tokens.admin, shown, story);
+    expect(added.status).toBe(200);
+
+    const reads = async (where: string) => {
+      for (const token of [tokens.buyer, tokens.buyer2]) {
+        for (const path of [
+          `/v1/stories/highlights?communityId=${fx.orgA}`,
+          `/v1/stories/highlights/${shown}`,
+          `/v1/stories/${story}`,
+          `/v1/communities/${fx.orgA}`,
+          '/v1/communities',
+          '/v1/stories/highlights/catalog',
+        ]) {
+          const res = await get(path, token);
+          const text = await res.text();
+          expect([200, 403, 404], `${where} ${path} -> ${res.status}`).toContain(res.status);
+          expect(text.includes('openToBuyers'), `${where} ${path}`).toBe(false);
+          expect(text.includes('open_to_buyers'), `${where} ${path}`).toBe(false);
+        }
+      }
+    };
+    await reads('closed');
+    await setOpen(shown, true);
+    await setStoryFlag(true);
+    await reads('open');
+    // the same open highlight read as a curator carries it: the one place it shows
+    const curator = await get(`/v1/stories/highlights/${shown}`, tokens.admin);
+    expect(await curator.text()).toContain('openToBuyers');
+  });
+});
+
+describe('11.1-09 catalogue: a buyer is offered only the open highlights they hold the story grant for', () => {
+  const ids: { a1: string; a2: string; closed: string; other: string } = {
+    a1: '',
+    a2: '',
+    closed: '',
+    other: '',
+  };
+
+  const catalogOf = async (token: string) => {
+    const res = await get('/v1/stories/highlights/catalog', token);
+    expect(res.status, await res.clone().text()).toBe(200);
+    return ((await res.json()) as { items: { id: string; communityId: string | null }[] }).items;
+  };
+
+  /** The buyer's rows for the ORGANIZATION community (the creator's own member community is a different group). */
+  const orgAOf = async (token: string) =>
+    (await catalogOf(token)).filter((item) => item.communityId === fx.orgA);
+
+  it('1. UI-D-891 (BPERM-14): open highlights of the community where story is granted, grouped by community and in their own position, no flag on a row; a closed one and one of a community without the grant are absent', async () => {
+    await adminSql`delete from public.story_highlights where title like ${`${PREFIX} cat-%`}`;
+    await setStoryFlag(true);
+    ids.a1 = await insertHighlight({ title: 'cat-a1', open: true });
+    ids.closed = await insertHighlight({ title: 'cat-fechado', open: false });
+    ids.a2 = await insertHighlight({ title: 'cat-a2', open: true });
+    ids.other = await insertHighlight({ title: 'cat-orgB', communityId: fx.orgB, open: true });
+
+    const items = await catalogOf(tokens.buyer);
+    const mine = items.filter((item) => item.communityId === fx.orgA).map((item) => item.id);
+    // position order of the place: a1 was written before a2 (the closed one between them is absent)
+    expect(mine.filter((id) => id === ids.a1 || id === ids.a2)).toEqual([ids.a1, ids.a2]);
+    expect(items.map((item) => item.id)).not.toContain(ids.closed);
+    expect(items.map((item) => item.id)).not.toContain(ids.other);
+    for (const item of items) expect(item).not.toHaveProperty('openToBuyers');
+  });
+
+  it('2. BPERM-14 adjacency: unticking story, revoking the entitlement or archiving the community each empty the buyer\u2019s group beside the positive control', async () => {
+    await setStoryFlag(false);
+    expect((await catalogOf(tokens.buyer)).map((item) => item.id)).not.toContain(ids.a1);
+    await setStoryFlag(true);
+    expect((await catalogOf(tokens.buyer)).map((item) => item.id)).toContain(ids.a1);
+
+    await adminSql`
+      update public.store_entitlements set status = 'revoked', revoked_at = now()
+       where user_id = ${users.buyer}::uuid and product_id = ${fx.productA}::uuid`;
+    expect(await orgAOf(tokens.buyer)).toEqual([]);
+    await adminSql`
+      update public.store_entitlements set status = 'active', revoked_at = null
+       where user_id = ${users.buyer}::uuid and product_id = ${fx.productA}::uuid`;
+    expect((await catalogOf(tokens.buyer)).map((item) => item.id)).toContain(ids.a1);
+
+    await adminSql`update public.communities set status = 'archived' where id = ${fx.orgA}::uuid`;
+    expect(await orgAOf(tokens.buyer)).toEqual([]);
+    await adminSql`update public.communities set status = 'active' where id = ${fx.orgA}::uuid`;
+    expect((await catalogOf(tokens.buyer)).map((item) => item.id)).toContain(ids.a1);
+  });
+
+  it('3. BPERM-14 empty: a member with no grant gets an empty catalogue, social off is the route guard\u2019s 403, and a creator keeps their own community in the same answer', async () => {
+    expect(await catalogOf(tokens.reader)).toEqual([]);
+
+    const own = await memberCommunity(tokens.buyer, 'catalogo');
+    const ownHighlight = await post('/v1/stories/highlights', tokens.buyer, {
+      communityId: own,
+      title: `${PREFIX} cat-propria`,
+    });
+    expect(ownHighlight.status).toBe(201);
+    const ownId = ((await ownHighlight.json()) as { id: string }).id;
+    const items = await catalogOf(tokens.buyer);
+    expect(items.map((item) => item.id)).toEqual(expect.arrayContaining([ownId, ids.a1, ids.a2]));
+    for (const item of items) expect(item).not.toHaveProperty('openToBuyers');
+
+    await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${tenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(tenantId);
+    await expectBare403(await get('/v1/stories/highlights/catalog', tokens.buyer), 'social off');
+    await adminSql`
+      update public.tenant_modules set enabled = true
+       where tenant_id = ${tenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(tenantId);
+  });
+});
+
+describe('11.1-09 open-counts: the product form\u2019s staff-only read', () => {
+  it('1. UI-D-884 (3): the manager gets one row per ACTIVE ORGANIZATION community named; member, archived, foreign and unknown ids are absent; a buyer and a member are refused 403', async () => {
+    await adminSql`delete from public.story_highlights where title like ${`${PREFIX} oc-%`} or title like ${`${PREFIX} cat-%`}`;
+    await insertHighlight({ title: 'oc-1', open: true });
+    await insertHighlight({ title: 'oc-2', open: true });
+    await insertHighlight({ title: 'oc-3', open: false });
+    const memberOwned = await memberCommunity(tokens.buyer2, 'contagem');
+    const archived = await post('/v1/communities', tokens.admin, { name: `${PREFIX} oc-arq` });
+    const archivedId = ((await archived.json()) as { id: string }).id;
+    await adminSql`update public.communities set status = 'archived' where id = ${archivedId}::uuid`;
+    const unknown = randomUUID();
+    const ids = [fx.orgA, fx.orgB, memberOwned, archivedId, unknown].join(',');
+
+    const res = await get(`/v1/stories/highlights/open-counts?communityIds=${ids}`, tokens.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as { items: { communityId: string; openHighlights: number }[] };
+    const byId = new Map(body.items.map((item) => [item.communityId, item.openHighlights]));
+    expect(byId.get(fx.orgA)).toBeGreaterThanOrEqual(2);
+    expect(byId.get(fx.orgB)).toBe(0);
+    expect(byId.has(memberOwned)).toBe(false);
+    expect(byId.has(archivedId)).toBe(false);
+    expect(byId.has(unknown)).toBe(false);
+
+    for (const token of [tokens.buyer, tokens.reader]) {
+      await expectBare403(
+        await get(`/v1/stories/highlights/open-counts?communityIds=${fx.orgA}`, token),
+        'open-counts for a non-manager',
+      );
+    }
+  });
+
+  it('2. a malformed, empty or oversized communityIds is the contract\u2019s 400 and nothing is read', async () => {
+    const many = Array.from({ length: 51 }, () => randomUUID()).join(',');
+    for (const query of ['communityIds=not-a-uuid', 'communityIds=', `communityIds=${many}`, '']) {
+      const res = await get(`/v1/stories/highlights/open-counts?${query}`, tokens.admin);
+      expect(res.status, query.slice(0, 40)).toBe(400);
+      expect((await envelope(res)).error.code).toBe('VALIDATION_FAILED');
+    }
   });
 });

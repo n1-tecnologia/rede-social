@@ -18,6 +18,8 @@ import {
   highlightMembershipResultSchema,
   highlightSummarySchema,
   markStoriesSeenSchema,
+  openHighlightCountsQuerySchema,
+  openHighlightCountsSchema,
   publishStorySchema,
   reorderHighlightsSchema,
   STORY_HIGHLIGHT_ISSUE_SET,
@@ -36,6 +38,7 @@ import {
 } from '../contracts/index';
 import {
   addStoryToHighlight,
+  countOpenHighlights,
   createHighlight,
   createStoryComment,
   deleteHighlight,
@@ -332,6 +335,31 @@ const reorderHighlightsRoute = createRoute({
       description:
         'The named community is unknown, another tenant’s, removed, or the `communities` module is off. One bare code, no details (D-23).',
     },
+  },
+});
+
+/**
+ * 11.1-09 (UI-D-884 (3), D-884): how many highlights of each named community are OPEN to buyers, for the product form's
+ * helper text. Staff only: the literal `stories.story.manage` guard (a member, a creator and a buyer are refused 403). A
+ * LITERAL path like `catalog` and `order`, declared and registered BEFORE `GET /highlights/{highlightId}`, which would
+ * otherwise 404 on it (not a uuid). A failed or absent read is a benign absence for the form.
+ */
+const openCountsRoute = createRoute({
+  method: 'get',
+  path: '/highlights/open-counts',
+  middleware: [requirePermission('stories.story.manage')] as const,
+  request: { query: openHighlightCountsQuerySchema },
+  responses: {
+    200: {
+      description:
+        'One row per requested community that is an ACTIVE ORGANIZATION community of this tenant, with the number of its highlights open to buyers (0 allowed). A member community, an archived or removed one, another tenant\u2019s and an unknown id are absent. With the `communities` module off the list is empty.',
+      content: { 'application/json': { schema: openHighlightCountsSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: `communityIds` is one comma-separated string of 1 to 50 uuids.',
+    },
+    403: { description: 'The caller does not hold `stories.story.manage`.' },
   },
 });
 
@@ -790,6 +818,10 @@ export const storiesRoutes = stories
       await reorderHighlights(ctx, c.req.valid('json'), await highlightCaller(ctx)),
       200,
     );
+  })
+  .openapi(openCountsRoute, async (c) => {
+    const ctx = c.get('ctx');
+    return c.json(await countOpenHighlights(ctx, c.req.valid('query').communityIds), 200);
   })
   .openapi(getHighlightRoute, async (c) => {
     const ctx = c.get('ctx');
