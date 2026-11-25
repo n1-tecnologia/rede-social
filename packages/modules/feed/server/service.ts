@@ -16,6 +16,10 @@ import {
 import { recordModerationAction } from '@rede-social/core/server/moderation/log';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
+import {
+  memberCommunityPostLimiter,
+  safetyLimiterKey,
+} from '@rede-social/core/server/safety/limits';
 import { sql } from 'drizzle-orm';
 import type {
   CommentsQuery,
@@ -77,6 +81,13 @@ type FeedRow = {
   /** The `left join public.communities` half (05-03). Both null for a tenant-wide post. */
   community_name: string | null;
   community_slug: string | null;
+  /**
+   * 11.1-08 (D-886, UI-D-889): this post's community entry of the caller's buyer scope map
+   * (`app.community_buyer_scope()`), a scalar InitPlan of the projection: no join and no statement. `null` for a post with no
+   * community, for staff, and for a community with no product link or a member-created one. Only `toPost` reads it, through
+   * `communityActionsOf`; it never reaches the wire. Optional so a hand-written row of a test still types.
+   */
+  buyer_scope?: unknown;
   like_count: number;
   comment_count: number;
   viewer_liked: boolean;
@@ -148,6 +159,11 @@ const postProjection = (viewerUserId: string, extraColumns: ReturnType<typeof sq
            p.community_id,
            c.name as community_name,
            c.slug as community_slug,
+           -- 11.1-08 (UI-D-889): the viewer's buyer entry of THIS post's community. The scope call is an uncorrelated scalar
+           -- subquery, so it plans as ONE InitPlan per statement (pinned by 242-buyer-permissions-plans.sql), never as a
+           -- per-row SubPlan and never as a join: the page stays one statement. The map is read through \`->\` on the row's own
+           -- community id; a post with no community reads null.
+           (select app.community_buyer_scope()) -> p.community_id::text as buyer_scope,
            p.like_count,
            p.comment_count,
            (pl.id is not null) as viewer_liked,
@@ -283,6 +299,42 @@ const reportRiders = (
   return { canReport: notOwn, canBlock: notOwn && authorRole === 'member' && viewerIsMember };
 };
 
+/**
+ * 11.1-08 (BPERM-16, UI-D-889): the viewer's OWN `like`, `comment` and `share` in the post's community, and ONLY when at
+ * least one of them is withheld. TOTAL: the driver hands `jsonb` back parsed, but a string is accepted too; anything that is
+ * not an object, or whose three members are not literal booleans, reads as NO entry. ABSENT means all three are true, so a
+ * post with no community, in a member community, with no linked product, in a staff lane, or whose viewer holds all three
+ * carries no key at all and is byte for byte what it was before. The five-name scope map (`post`, `story`, `openHighlight`
+ * included) never leaves the service: only these three booleans do, and never a product, an entitlement or a flag name.
+ */
+function communityActionsOf(
+  raw: unknown,
+): { like: boolean; comment: boolean; share: boolean } | null {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const entry = value as Record<string, unknown>;
+  const { like, comment, share } = entry;
+  if (typeof like !== 'boolean' || typeof comment !== 'boolean' || typeof share !== 'boolean') {
+    return null;
+  }
+  return like && comment && share ? null : { like, comment, share };
+}
+
+/** The optional `actions` key of the post's community label: present only when something is withheld. */
+const communityActionsOfRow = (
+  row: FeedRow,
+): { actions?: { like: boolean; comment: boolean; share: boolean } } => {
+  const actions = communityActionsOf(row.buyer_scope);
+  return actions === null ? {} : { actions };
+};
+
 const toPost = (
   row: FeedRow,
   viewerUserId: string,
@@ -307,7 +359,12 @@ const toPost = (
   // with an empty name — the label is either complete or absent, never a blank link.
   community:
     row.community_id !== null && row.community_name !== null && row.community_slug !== null
-      ? { id: row.community_id, name: row.community_name, slug: row.community_slug }
+      ? {
+          id: row.community_id,
+          name: row.community_name,
+          slug: row.community_slug,
+          ...communityActionsOfRow(row),
+        }
       : null,
   canManage: row.author_user_id === viewerUserId,
   ...reportRiders(row.author_user_id, row.author_role, viewerUserId, viewerIsMember),
@@ -1289,10 +1346,17 @@ async function resolveCommunityTarget(
   } else if (!isMember) {
     // Branch 2: the organization's voice, in an organization community.
     audience = 'tenant';
-  } else if (await communityActionAllowed(tx, community.id, 'post')) {
+  } else {
+    // 11.1-08 (D-896, T-11.1-28, A-11.1-LIM): the buyer branch is the ONLY one a limiter guards. Every attempt counts, a
+    // refused one included, BEFORE the permission read and before any write (the one statement ahead of it is the community
+    // row above, which is what tells this branch from the creator's and the organization's). A member post with no
+    // community, the creator's own member community and every staff post never reach this line.
+    if (!memberCommunityPostLimiter.consume(safetyLimiterKey(ctx))) {
+      throw new ApiError(429, 'RATE_LIMITED');
+    }
     // Branch 3 (11.1-02, D-880, D-881): a member whose ACTIVE product entitlements grant `post` in this organization
     // community. The SQL function is the union over those entitlements; the insert gate repeats it with its own terms.
-    audience = 'community';
+    if (await communityActionAllowed(tx, community.id, 'post')) audience = 'community';
   }
   if (audience === null) throw new ApiError(403, 'FORBIDDEN');
 

@@ -89,7 +89,10 @@ who does not follow the author (`follow_required`, with `postLockedAuthorSchema`
 ## Kernel dependencies
 
 - `@rede-social/core/db/community-gate` (08.2: `LOCKED_COMMUNITY_IDS`, the kernel gate seam behind
-  the restrictive `feed_posts_community_gate` policy and the community page's sample-only read)
+  the restrictive `feed_posts_community_gate` policy and the community page's sample-only read;
+  11.1-08: `deniedCommunityIds`, the communities where a buyer's product grants lack `like` or
+  `comment`, asked by the interaction guard so the service and the restrictive like and comment
+  gates read one definition)
 - `@rede-social/core/db/rls`
 - `@rede-social/core/db/schema`
 - `@rede-social/core/db/social-gate` (09-03: `SOCIAL_VISIBLE_AUTHOR_IDS`, `SOCIAL_ENABLED`,
@@ -98,8 +101,9 @@ who does not follow the author (`follow_required`, with `postLockedAuthorSchema`
 - `@rede-social/core/db/tenant-tx`
 - `@rede-social/core/server/auth/context`
 - `@rede-social/core/server/auth/require-auth`
-- `@rede-social/core/server/communities/action-gate` (10-05: `communityActionAllowed`, the reserved Escopo
-  branch of the post owner decision; false while the SQL stub answers false)
+- `@rede-social/core/server/communities/action-gate` (10-05: `communityActionAllowed`, the Escopo
+  branch of the post owner decision; live since 11.1-02, true for a member whose active product
+  entitlements grant `post` in an organization community)
 - `@rede-social/core/server/events/bus`
 - `@rede-social/core/server/http/api-error`
 - `@rede-social/core/server/jobs/boss`
@@ -113,6 +117,8 @@ who does not follow the author (`follow_required`, with `postLockedAuthorSchema`
 - `@rede-social/core/server/notifications/source`
 - `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
+- `@rede-social/core/server/safety/limits` (11.1-08: `memberCommunityPostLimiter` and `safetyLimiterKey`,
+  the 30 per hour ceiling on a buyer's post into an organization community)
 - `@rede-social/core/ui`
 
 ## Navigation

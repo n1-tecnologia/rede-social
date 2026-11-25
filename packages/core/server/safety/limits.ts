@@ -41,6 +41,23 @@ export const storyPublishLimiter: AttemptLimiter = createAttemptLimiter({
 });
 
 /**
+ * 11.1-08 (D-896, T-11.1-28; assumption A-11.1-LIM, the number and the reading are the planner's, not Igor's): the abuse
+ * ceiling of the BUYER's post, the one door a product opens in an organization community. 30 attempts per member per hour,
+ * the story figure above, with the same in-process limiter and the same `user:{tenant}:{user}` key. The reading adopted for
+ * D-896 ("before any read") is: every ATTEMPT counts, a refused one included, BEFORE the permission read and before any
+ * write; the only statement ahead of it is the community row that tells the buyer's branch from the others. It is consumed
+ * ONLY when the author is a member posting into an ORGANIZATION community; a member's post with no community, a creator's
+ * post in their own member community and every staff post never touch it. Per process like its siblings: the effective
+ * ceiling is the number times the instance count, still a hard stop on a flood.
+ */
+export const COMMUNITY_POSTS_PER_HOUR = 30;
+
+export const memberCommunityPostLimiter: AttemptLimiter = createAttemptLimiter({
+  max: COMMUNITY_POSTS_PER_HOUR,
+  windowMs: HOUR_MS,
+});
+
+/**
  * 11-08 (D-719, D-720; T-11-07; Claude's discretion, assumption A6, the numbers are the planner's, not Igor's): the abuse
  * ceilings of the direct conversation. A member may send 30 direct messages a MINUTE (a fast typist stays well under)
  * and open 20 NEW conversations an HOUR (a member rarely starts more than a handful). Both are the same in-process
