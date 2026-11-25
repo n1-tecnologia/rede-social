@@ -79,6 +79,13 @@ type CommunityRow = {
   creator_display_name: string | null;
   creator_avatar_asset_id: string | null;
   /**
+   * 11.1-07 (D-886): this community's entry of the caller's buyer scope map (`app.community_buyer_scope()`), a scalar
+   * InitPlan of the projection, so it costs no join and no statement. `null` for staff, a locked or unlinked community,
+   * a member-created community and a tenant with `store` off. Only `viewerOf` reads it, through `parseBuyerScope`; it
+   * never reaches the wire. Optional so a hand-written row of a test still types.
+   */
+  buyer_scope?: unknown;
+  /**
    * The caller's own ACTIVE member communities, selected through `extra` only when the caller may create
    * (`memberQuota`). A scalar InitPlan, so it costs no second statement and no per-row work.
    */
@@ -238,7 +245,8 @@ function communityProjection(ctx: RequestContext, extra: SQL | null = null) {
            am.role as creator_role,
            am.id as creator_membership_id,
            ap.display_name as creator_display_name,
-           ap.avatar_asset_id as creator_avatar_asset_id
+           ap.avatar_asset_id as creator_avatar_asset_id,
+           (select app.community_buyer_scope()) -> c.id::text as buyer_scope
            ${extra ?? sql``}
       from communities c
       left join media_assets a on a.id = c.cover_asset_id
@@ -267,8 +275,14 @@ export type CommunityViewerFlags = {
   canCurateOrg: boolean;
   /** `communities.community.manage_own`: the member creator's key over their own community. */
   canManageOwn: boolean;
-  /** `stories.story.publish`: the member creator's story key. */
+  /** `stories.story.publish`: the member creator's story key (and a buyer's, with `social` and `stories` on). */
   canPublishStory: boolean;
+  /**
+   * 11.1-07 (D-882): `feed.post.create` held by the viewer, which a member holds only while `social` is effective. A
+   * buyer's `post` needs it as well as the product's flag, so with `social` off the control is gone whatever is
+   * ticked. Optional and fail-closed: absent reads `false`, so a caller that forgets it hides the control, never shows it.
+   */
+  canPostMember?: boolean;
   /** `communities.community.create`: may create (and therefore has a quota). */
   canCreate: boolean;
   /**
@@ -292,7 +306,46 @@ export function communityViewerFlags(
     canCurateOrg: has('stories.story.manage'),
     canManageOwn: has('communities.community.manage_own'),
     canPublishStory: has('stories.story.publish'),
+    canPostMember: has('feed.post.create'),
     canCreate: has('communities.community.create'),
+  };
+}
+
+/** One community's entry of `app.community_buyer_scope()`: the union of the buyer's flags (11.1-07, D-886). */
+type BuyerScope = {
+  like: boolean;
+  comment: boolean;
+  share: boolean;
+  post: boolean;
+  story: boolean;
+  openHighlight: boolean;
+};
+
+/**
+ * 11.1-07: the projection's `buyer_scope` column to a typed entry, TOTAL. The driver hands `jsonb` back parsed, but a
+ * string is accepted too; anything that is not an object, or whose six members are not literal booleans, reads as NO
+ * entry (today's values), never as a partial grant. `=== true` per member, so a truthy lookalike grants nothing.
+ */
+function parseBuyerScope(raw: unknown): BuyerScope | null {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const entry = value as Record<string, unknown>;
+  const keys = ['like', 'comment', 'share', 'post', 'story', 'openHighlight'] as const;
+  if (!keys.every((key) => typeof entry[key] === 'boolean')) return null;
+  return {
+    like: entry.like === true,
+    comment: entry.comment === true,
+    share: entry.share === true,
+    post: entry.post === true,
+    story: entry.story === true,
+    openHighlight: entry.openHighlight === true,
   };
 }
 
@@ -303,15 +356,23 @@ export function communityViewerFlags(
  * `canEdit` and `canCurate` require the matching member KEY as well as ownership, so a flag never promises a
  * write the route would refuse (an owner whose `social` was switched off, a creator whose role changed).
  *
- * **`actions` is the Escopo seam, computed here and nowhere else.** `post` takes the value of
+ * **`actions` is the Escopo seam, computed here and nowhere else.** Without a buyer scope entry `post` takes the value of
  * `canPublish` (today the owner rule of D-706) and `story` follows the STORY rule (review WR-02): the story
  * permissions, which exist only while the `stories` module is composed, plus the community rule (the
  * organization's manage half, or the creator of a member community). It is not `canPublish`: with `stories`
  * off the post rule still holds while the story door leads to a route that redirects away. `like` and `comment` are `true` for every caller the
  * community is returned to (the interaction routes carry no per-route permission, D-701) and `share` is
- * `true` wherever the community is readable (no share gate exists). The per-product action scope built
- * after Phase 11 refines these five at THIS site; this phase adds no per-row grant lookup, because it
- * would change the list statement and its query budget.
+ * `true` wherever the community is readable (no share gate exists).
+ *
+ * **11.1-07 (D-886, D-892): with a buyer scope entry the five are the UNION of the buyer's flags.** The entry exists
+ * only for a member holding an ACTIVE entitlement to a product linked to this ORGANIZATION community, with `store`
+ * on (the database function fails closed for staff, a locked or unlinked community, a member-created one and another
+ * tenant's claim), and it is the `bool_or` of every such product's link. `like`, `comment` and `share` are the three
+ * flags. `post` is the flag AND the viewer holding `feed.post.create` (a member holds it only with `social` on, D-882),
+ * or the organization's own rule. `story` is the flag AND an open highlight to save into (UI-D-888, the screen never
+ * counts highlights) AND the viewer holding `stories.story.publish`, or the story rule above. Nothing else widens:
+ * the edit, curate, publish and owner fields are what they were, so the staff-only highlight screen keeps
+ * answering not-found to a buyer. The scope itself never leaves this function: only the five booleans do.
  */
 function viewerOf(row: CommunityRow, flags: CommunityViewerFlags): CommunityViewer {
   const member = row.kind === 'member';
@@ -323,12 +384,23 @@ function viewerOf(row: CommunityRow, flags: CommunityViewerFlags): CommunityView
   // halves (the pre-Phase-10 gate: `stories.story.publish` and `stories.story.manage`); a member
   // community needs its creator holding `stories.story.publish`, which is `canCurate` there.
   const canStory = member ? canCurate : flags.canPublishStory && flags.canCurateOrg;
+  // 11.1-07: a buyer's entry only ever exists for an organization community, and an absent or malformed one reads as none.
+  const buyer = member ? null : parseBuyerScope(row.buyer_scope);
+  const actions: CommunityViewer['actions'] = buyer
+    ? {
+        like: buyer.like,
+        comment: buyer.comment,
+        share: buyer.share,
+        post: (buyer.post && flags.canPostMember === true) || canPublish,
+        story: (buyer.story && buyer.openHighlight && flags.canPublishStory) || canStory,
+      }
+    : { like: true, comment: true, share: true, post: canPublish, story: canStory };
   return {
     isOwner,
     canPublish,
     canEdit,
     canCurate,
-    actions: { like: true, comment: true, share: true, post: canPublish, story: canStory },
+    actions,
     // 11-15 (D-733, A-11-ROLE; the feed's `reportRiders` in the same words): `canReport` when the viewer did not
     // create it (either kind); `canBlock` only for another member's MEMBER community whose live creator is a
     // `member`, and only for a viewer whose own role of record is `member`.
