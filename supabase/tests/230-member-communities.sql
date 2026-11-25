@@ -7,7 +7,8 @@ begin;
 -- 1. THE TRACER: a member creates a community stamped `kind = 'member'` (creator = the session user, the sentinel
 --    position 1000000); a second member cannot update it; a forged creator, a forged `'organization'` kind and an
 --    admin lane inserting `'member'` are refused with 42501. Every negative sits beside a positive control. The
---    Escopo stub `app.community_action_allowed` answers `false` for both member lanes, so the seam changes no answer.
+--    buyer-grant function `app.community_action_allowed` answers `false` for both member lanes (no product grant exists in this
+--    fixture), so the seam changes no answer; the grant itself is proved in 241-buyer-permissions.sql.
 -- 2. THE SELECT TRUTH TABLE of a member community and of an organization community, per lane: every live lane of the
 --    tenant reads both, another tenant's member and a lane with no claims read nothing.
 -- 3. THE HIDDEN-CREATOR TABLE (D-708, EP-26, EP-27): `blocked_at` set, a soft-deleted membership and a status other
@@ -24,11 +25,12 @@ begin;
 -- 7. EP-47: the four policies are RESTRICTIVE, so they AND with the tenant isolation whatever the creation order.
 -- 8. `social` OFF (D-718): a member insert raises 42501, the community stays readable, and the creator's own edit
 --    still succeeds (assumption A11: no `social_enabled()` term in the update gate).
--- 9. THE ESCOPO STUB `app.community_action_allowed`: false for each of the five reserved actions, for a null
---    community, for an unknown and a null action, and for every lane, with the catalog facts of the seam pattern
---    (SECURITY DEFINER, empty `search_path`, EXECUTE for `authenticated` and not for `anon`); the same catalog facts
---    for the definer `app.member_community_hidden_ids()`. WHEN THE ESCOPO PHASE INSTALLS THE REAL BODY it replaces
---    the constant-false assertions of this section (the catalog assertions stay).
+-- 9. NO PRODUCT GRANT, `app.community_action_allowed`: since 11.1-02 the function answers through a buyer's product
+--    grant. This fixture has no product, link or entitlement, so it is false for each of the five actions, for a null
+--    community, for an unknown and a null action, and for every lane (the assertions are now negatives that pin the
+--    ABSENCE of a grant; the positive side lives in 241-buyer-permissions.sql), with the catalog facts of the seam
+--    pattern (SECURITY DEFINER, empty `search_path`, EXECUTE for `authenticated` and not for `anon`); the same catalog
+--    facts for the definer `app.member_community_hidden_ids()`.
 --
 -- Fixture ids use the `23000000-…` prefix and the tenants `pgtap-mcomm-a` / `pgtap-mcomm-b`. Like its siblings,
 -- this file ROLLS BACK.
@@ -102,11 +104,11 @@ select results_eq(
   $$ with u as (update public.communities set name = 'Da M1, editada' where id = '23000000-0000-4000-8000-0000000000c1' returning 1) select count(*)::int from u $$,
   ARRAY[1], '1: M1 updates their own community: one row (positive control)');
 select is(app.community_action_allowed('23000000-0000-4000-8000-0000000000c1'::uuid, 'post'), false,
-  '1: the Escopo stub answers false for the creator lane');
+  '1: no product grant: the creator lane answers false');
 reset role;
 select tests.as_tenant('23000000-0000-4000-8000-000000000001', '23000000-0000-4000-8000-000000000005');
 select is(app.community_action_allowed('23000000-0000-4000-8000-0000000000c1'::uuid, 'post'), false,
-  '1: the Escopo stub answers false for another member lane');
+  '1: no product grant: another member lane answers false');
 reset role;
 select tests.as_tenant('23000000-0000-4000-8000-000000000001', '23000000-0000-4000-8000-000000000002', 'admin_tenant');
 select throws_ok(
@@ -318,9 +320,9 @@ reset role;
 update public.tenant_modules set enabled = true
  where tenant_id = '23000000-0000-4000-8000-000000000001' and module_key = 'social';
 
--- ── 9. the Escopo stub and the catalog facts ───────────────────────────────────────────────────
+-- ── 9. no product grant, and the catalog facts ───────────────────────────────────────────────────
 select tests.as_tenant('23000000-0000-4000-8000-000000000001', '23000000-0000-4000-8000-000000000004');
-select is(app.community_action_allowed('23000000-0000-4000-8000-0000000000c1'::uuid, 'like'), false, '9: the stub answers false for like on a member community');
+select is(app.community_action_allowed('23000000-0000-4000-8000-0000000000c1'::uuid, 'like'), false, '9: no product grant: false for like on a member community');
 select is(app.community_action_allowed('23000000-0000-4000-8000-0000000000c1'::uuid, 'comment'), false, '9: …for comment');
 select is(app.community_action_allowed('23000000-0000-4000-8000-0000000000c1'::uuid, 'share'), false, '9: …for share');
 select is(app.community_action_allowed('23000000-0000-4000-8000-0000000000c1'::uuid, 'post'), false, '9: …for post');
@@ -362,7 +364,7 @@ select is((select bool_or(app.community_action_allowed(c.id, a.x)) from (values 
 reset role;
 -- the catalog facts (the seam pattern of 20261008171502_community_gate_seam.sql)
 select is((select prosecdef from pg_proc where oid = to_regprocedure('app.community_action_allowed(uuid, text)')), true,
-  '9: the stub is SECURITY DEFINER');
+  '9: the function is SECURITY DEFINER');
 select ok((select 'search_path=""' = any (proconfig) from pg_proc where oid = to_regprocedure('app.community_action_allowed(uuid, text)')),
   '9: …with an empty search_path');
 select ok(has_function_privilege('authenticated', 'app.community_action_allowed(uuid, text)', 'EXECUTE')

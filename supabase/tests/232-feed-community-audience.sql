@@ -7,7 +7,8 @@ begin;
 --    a `'community'` post without one and an unknown value raise 23514.
 -- 2. THE INSERT GATE (as the member lane): the owner of an active member community inserts a `'community'` post;
 --    another member, an admin lane, a null community and a post into an ORGANIZATION community raise 42501 (the
---    last is the Escopo seam: the reserved branch calls `app.community_action_allowed`, which answers false), each
+--    last is the buyer branch: it calls `app.community_action_allowed`, which answers false because no product grant
+--    exists in this fixture; the grant itself is proved in 241-buyer-permissions.sql), each
 --    beside a positive control.
 -- 3. THE SELECT TRUTH TABLE: every live lane of the tenant reads a `'community'` post (no follower test, no
 --    staff exemption needed), another tenant and a lane with no claims read nothing, `social` off still reads it
@@ -92,7 +93,7 @@ select lives_ok(
 select throws_ok(
   $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
      values ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000004', 'na da organizacao', 'community', '23200000-0000-4000-8000-0000000000c1') $$,
-  '42501', null, '2: M1 cannot publish a community post in an ORGANIZATION community (the Escopo branch is false)');
+  '42501', null, '2: M1 cannot publish a community post in an ORGANIZATION community (no product grant exists)');
 select throws_ok(
   $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
      values ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000004', 'sem comunidade', 'community', null) $$,

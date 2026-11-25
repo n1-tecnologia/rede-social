@@ -214,4 +214,27 @@ describe('11.1 tracer: a buyer publishes into an organization community', () => 
       .catch((error: { code?: string }) => error.code ?? 'error');
     expect(refused).toBe('42501');
   });
+
+  it('8. D-886/D-892 positive sibling of member-communities case 8: through the buyer\'s own claims the function answers true for post only while the flag is on, and never for story or openHighlight', async () => {
+    const answers = async () =>
+      adminSql.begin(async (tx) => {
+        await tx`select set_config('request.jwt.claims', ${JSON.stringify({
+          sub: users.buyer,
+          role: 'authenticated',
+          tenant_id: tenantId,
+          tenant_role: 'member',
+        })}, true)`;
+        await tx`set local role authenticated`;
+        const [row] = await tx<{ post: boolean; story: boolean; open: boolean; like: boolean }[]>`
+          select app.community_action_allowed(${fx.community}::uuid, 'post') as post,
+                 app.community_action_allowed(${fx.community}::uuid, 'story') as story,
+                 app.community_action_allowed(${fx.community}::uuid, 'openHighlight') as open,
+                 app.community_action_allowed(${fx.community}::uuid, 'like') as "like"`;
+        return row;
+      });
+    await setFlags({ canPost: true });
+    expect(await answers()).toEqual({ post: true, story: false, open: false, like: true });
+    await setFlags({ canPost: false });
+    expect(await answers()).toEqual({ post: false, story: false, open: false, like: true });
+  });
 });

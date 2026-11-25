@@ -11,9 +11,28 @@ begin;
 --    same community still passes. Every negative sits beside a positive control (the state is put back, then the
 --    insert passes again).
 --
+-- 3. CATALOG AND DEFAULTS (D-890, D-891): the five link flags and `story_highlights.open_to_buyers` exist, are NOT NULL and
+--    carry the defaults; a link or a highlight written naming no flag reads today's behaviour; two writes for one product
+--    and community collide on the unique index and leave one row.
+-- 4. THE SCOPE MAP TRUTH TABLE (`app.community_buyer_scope`, D-886, D-887, D-892): one product, two products with equal
+--    flags (one entry), two products whose flags differ (the union), a revoked entitlement (`{}` at the next statement)
+--    and a new active one, the `store` module off, staff by claim, a null role and a lane with no claims (`{}`), the same
+--    user under another tenant's claim, a member-created, an archived and a soft-deleted community that carry a link, and
+--    `openHighlight` only while an open highlight exists.
+-- 5. THE WRAPPERS: `app.community_action_allowed` answers true only for the five lowercase names (never `openHighlight`, a
+--    case variant, a padded name, an empty string or a null) and never null; `app.community_action_denied_ids` is the lane
+--    form (staff: empty set; a null role denies; a community with no link is never in it).
+-- 6. THE EQUIVALENCE INVARIANT: for every community and every action, the map, the allowed wrapper and the denied-ids
+--    membership agree with the union computed straight from the links and the active entitlements, for seven lanes.
+-- 7. THE CATALOG: all three functions are SECURITY DEFINER, stable, with an empty `search_path`, executable by
+--    `authenticated` and not by `anon`; the stub-first order left the final bodies in place and the policy still depends
+--    on the same function.
+-- 8. THE POST GATE MATRIX: member-created, archived, soft-deleted and un-linked communities, another tenant's community and
+--    a forged tenant stamp are refused with 42501; two products whose flags differ give the union; the positive control.
+--
 -- Fixture ids use the `24100000-…` prefix and the tenants `pgtap-bperm-a` / `pgtap-bperm-b`. Like its siblings, this
 -- file ROLLS BACK.
-select plan(14);
+select plan(80);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-bperm-a', 'Permissoes A', '24100000-0000-4000-8000-000000000001');
@@ -149,6 +168,340 @@ select throws_ok(
   $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
      values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004', 'em B', 'community', '24100000-0000-4000-8000-0000000000d1') $$,
   '42501', null, '2: BPERM-25: the buyer''s post flag lives in tenant A only; in tenant B the same user is refused (42501)');
+reset role;
+
+-- ── fixture for sections 3 to 8 (as the migration role; section 2 put every state back) ────────
+select tests.auth_user('m3@bperm-a.local', '24100000-0000-4000-8000-000000000006');
+select tests.auth_user('m4@bperm-a.local', '24100000-0000-4000-8000-000000000007');
+select tests.auth_user('m5@bperm-a.local', '24100000-0000-4000-8000-000000000008');
+select tests.member('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000006');
+select tests.member('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000007');
+select tests.member('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000008');
+-- CA (c1, above): organization, linked to P1 and P6 (equal flags). CA2 (c2): organization, linked to P2 and P3 (different
+-- flags). CNL (c3): organization, NO link. CM (c4): a MEMBER community made by the plain member, carrying a link. CAR (c5):
+-- organization, archived, linked. CDEL (c6): organization, soft-deleted, linked.
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, kind, position, status, deleted_at) values
+  ('24100000-0000-4000-8000-0000000000c2', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'Dois produtos', 'dois-produtos', 'organization', 1, 'active', null),
+  ('24100000-0000-4000-8000-0000000000c3', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'Sem produto', 'sem-produto', 'organization', 2, 'active', null),
+  ('24100000-0000-4000-8000-0000000000c4', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005', 'De membro', 'de-membro', 'member', 1000000, 'active', null),
+  ('24100000-0000-4000-8000-0000000000c5', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'Arquivada', 'arquivada', 'organization', 3, 'archived', null),
+  ('24100000-0000-4000-8000-0000000000c6', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'Apagada', 'apagada', 'organization', 4, 'active', now());
+insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents, status) values
+  ('24100000-0000-4000-8000-0000000000a2', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'P2', 100, 'active'),
+  ('24100000-0000-4000-8000-0000000000a3', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'P3', 100, 'active'),
+  ('24100000-0000-4000-8000-0000000000a5', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'P5', 100, 'active'),
+  ('24100000-0000-4000-8000-0000000000a6', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'P6', 100, 'active');
+insert into public.store_product_communities (tenant_id, product_id, community_id, can_like, can_comment, can_share, can_post, can_story) values
+  -- P6 -> CA with the SAME flags as P1 -> CA (like, comment, share, post on; story off)
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000a6', '24100000-0000-4000-8000-0000000000c1', true, true, true, true, false),
+  -- P2 -> CA2: like only. P3 -> CA2: post only. The union holds like and post.
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000a2', '24100000-0000-4000-8000-0000000000c2', true, false, false, false, false),
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000a3', '24100000-0000-4000-8000-0000000000c2', false, false, false, true, false),
+  -- P5 -> a member community, an archived and a soft-deleted organization community, each with post on
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000a5', '24100000-0000-4000-8000-0000000000c4', true, true, true, true, true),
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000a5', '24100000-0000-4000-8000-0000000000c5', true, true, true, true, false),
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000a5', '24100000-0000-4000-8000-0000000000c6', true, true, true, true, false);
+insert into public.store_entitlements (id, tenant_id, user_id, product_id, source, granted_by_user_id) values
+  -- M1 also holds P6 (equal flags with P1 on the same community)
+  ('24100000-0000-4000-8000-0000000000e3', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-0000000000a6', 'grant', '24100000-0000-4000-8000-000000000002'),
+  -- M3 holds P2 and P3 (the union), M4 holds P1 (the revoke subject), M5 holds P5
+  ('24100000-0000-4000-8000-0000000000e4', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000006', '24100000-0000-4000-8000-0000000000a2', 'grant', '24100000-0000-4000-8000-000000000002'),
+  ('24100000-0000-4000-8000-0000000000e5', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000006', '24100000-0000-4000-8000-0000000000a3', 'grant', '24100000-0000-4000-8000-000000000002'),
+  ('24100000-0000-4000-8000-0000000000e6', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000007', '24100000-0000-4000-8000-0000000000a1', 'grant', '24100000-0000-4000-8000-000000000002'),
+  ('24100000-0000-4000-8000-0000000000e7', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000008', '24100000-0000-4000-8000-0000000000a5', 'grant', '24100000-0000-4000-8000-000000000002');
+-- one highlight of CA, written naming no flag (section 3 reads its default)
+insert into public.story_highlights (id, tenant_id, community_id, title, position, created_by_user_id) values
+  ('24100000-0000-4000-8000-0000000000f1', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000c1', 'Aula', 0, '24100000-0000-4000-8000-000000000002');
+
+-- ── 3. catalog and defaults ────────────────────────────────────────────────────────────────────
+select is(
+  (select string_agg(a.attname::text || ':' || a.attnotnull::text || ':' || pg_get_expr(d.adbin, d.adrelid), ',' order by a.attname::text)
+     from pg_attribute a join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+    where a.attrelid = 'public.store_product_communities'::regclass
+      and a.attname::text in ('can_like', 'can_comment', 'can_share', 'can_post', 'can_story')),
+  'can_comment:true:true,can_like:true:true,can_post:true:false,can_share:true:true,can_story:true:false',
+  '3: the five link flags are NOT NULL with the defaults like, comment, share on and post, story off');
+select is(
+  (select a.attnotnull::text || ':' || pg_get_expr(d.adbin, d.adrelid)
+     from pg_attribute a join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+    where a.attrelid = 'public.story_highlights'::regclass and a.attname::text = 'open_to_buyers'),
+  'true:false', '3: story_highlights.open_to_buyers is NOT NULL and defaults to false');
+select results_eq(
+  $$ select can_like, can_comment, can_share, can_post, can_story from public.store_product_communities
+      where product_id = '24100000-0000-4000-8000-0000000000b1' $$,
+  $$ values (true, true, true, false, false) $$,
+  '3: BPERM-01 empty: a link written naming no flag reads true, true, true, false, false');
+select results_eq(
+  $$ select open_to_buyers from public.story_highlights where id = '24100000-0000-4000-8000-0000000000f1' $$,
+  ARRAY[false], '3: …and a highlight written naming no flag is closed to buyers');
+select throws_ok(
+  $$ insert into public.store_product_communities (tenant_id, product_id, community_id, can_story)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000a1', '24100000-0000-4000-8000-0000000000c1', true) $$,
+  '23505', null, '3: BPERM-01 adjacency: a second write for the same product and community collides on the unique index');
+select results_eq(
+  $$ select count(*)::int, bool_and(can_post), bool_and(not can_story) from public.store_product_communities
+      where product_id = '24100000-0000-4000-8000-0000000000a1' and community_id = '24100000-0000-4000-8000-0000000000c1' $$,
+  $$ values (1, true, true) $$,
+  '3: …and the one row keeps its stored flags (the migration and the collision leave a stored flag untouched)');
+
+-- ── 4. the scope map truth table ───────────────────────────────────────────────────────────────
+-- M1: P1 and P6 on the SAME community with equal flags -> ONE entry (adjacency); a closed highlight exists
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select is((select app.community_buyer_scope()),
+  '{"24100000-0000-4000-8000-0000000000c1": {"like": true, "comment": true, "share": true, "post": true, "story": false, "openHighlight": false}}'::jsonb,
+  '4: BPERM-03: two products with equal flags on one community give ONE map entry with those flags, openHighlight false');
+select is((select count(*)::int from jsonb_object_keys((select app.community_buyer_scope()))), 1,
+  '4: …exactly one key (the other tenant''s community, the un-linked and member-created ones are absent)');
+select is((select count(distinct s)::int from (select app.community_buyer_scope() as s from generate_series(1, 3)) q), 1,
+  '4: BPERM-03 idempotency: the function is stable, repeated calls return the same map');
+reset role;
+-- M3: two products whose flags differ -> the union (like from P2, post from P3)
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000006');
+select is((select app.community_buyer_scope()),
+  '{"24100000-0000-4000-8000-0000000000c2": {"like": true, "comment": false, "share": false, "post": true, "story": false, "openHighlight": false}}'::jsonb,
+  '4: D-886: two products with different flags give the union (like from one, post from the other)');
+reset role;
+-- M5: the member-created and the soft-deleted community are absent; the archived organization one stays (like the access OR)
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000008');
+select is((select app.community_buyer_scope()),
+  '{"24100000-0000-4000-8000-0000000000c5": {"like": true, "comment": true, "share": true, "post": true, "story": false, "openHighlight": false}}'::jsonb,
+  '4: D-880: a member-created and a soft-deleted community that carry a link are absent; an archived organization one is not (the gate refuses it)');
+reset role;
+-- M2: no entitlement at all
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005');
+select is((select app.community_buyer_scope()), '{}'::jsonb, '4: BPERM-03 empty: a member with no entitlement gets the empty map');
+reset role;
+-- openHighlight follows an open highlight of the community, and only while it exists
+update public.story_highlights set open_to_buyers = true where id = '24100000-0000-4000-8000-0000000000f1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select is((select app.community_buyer_scope() -> '24100000-0000-4000-8000-0000000000c1' ->> 'openHighlight'), 'true',
+  '4: D-884: openHighlight is true while an open highlight exists in the community');
+reset role;
+update public.story_highlights set open_to_buyers = false where id = '24100000-0000-4000-8000-0000000000f1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select is((select app.community_buyer_scope() -> '24100000-0000-4000-8000-0000000000c1' ->> 'openHighlight'), 'false',
+  '4: …and false again once the highlight is closed');
+reset role;
+-- revoke: M4 holds P1 -> the entitlement is revoked -> the map is empty at the next statement; a new active one returns it
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000007');
+select isnt((select app.community_buyer_scope()), '{}'::jsonb, '4: D-887: M4 holding P1 has a non-empty map (positive control)');
+reset role;
+update public.store_entitlements set status = 'revoked', revoked_at = now() where id = '24100000-0000-4000-8000-0000000000e6';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000007');
+select is((select app.community_buyer_scope()), '{}'::jsonb, '4: BPERM-05: the entitlement revoked, the map is empty at the next statement');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c1'::uuid, 'like'), false,
+  '4: …and the wrapper answers false for even the default like');
+reset role;
+insert into public.store_entitlements (id, tenant_id, user_id, product_id, source, granted_by_user_id) values
+  ('24100000-0000-4000-8000-0000000000e8', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000007', '24100000-0000-4000-8000-0000000000a1', 'grant', '24100000-0000-4000-8000-000000000002');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000007');
+select isnt((select app.community_buyer_scope()), '{}'::jsonb, '4: …a new active entitlement returns the grant');
+reset role;
+-- the store module off: nothing is granted
+update public.tenant_modules set enabled = false
+ where tenant_id = '24100000-0000-4000-8000-000000000001' and module_key = 'store';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select is((select app.community_buyer_scope()), '{}'::jsonb, '4: the store module off gives the empty map');
+reset role;
+update public.tenant_modules set enabled = true
+ where tenant_id = '24100000-0000-4000-8000-000000000001' and module_key = 'store';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select isnt((select app.community_buyer_scope()), '{}'::jsonb, '4: …and the module back on returns the grant (positive control)');
+reset role;
+-- staff by claim, a null role and a lane with no claims hold no product grant even with an entitlement of their own
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select is((select app.community_buyer_scope()), '{}'::jsonb, '4: D-892: the admin_tenant lane gets the empty map');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000003', 'support_tenant');
+select is((select app.community_buyer_scope()), '{}'::jsonb, '4: …the support_tenant lane too');
+reset role;
+-- the buyer's own claim with the role stripped: the explicit member claim is required
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', null);
+select is((select app.community_buyer_scope()), '{}'::jsonb, '4: a null role holds no grant even for the buyer of P1');
+reset role;
+select tests.as_tenant_without_claims();
+select is((select app.community_buyer_scope()), '{}'::jsonb, '4: a lane with no claims gets the empty map');
+reset role;
+-- BPERM-25: the same user under tenant B's claim holds only tenant B's grant
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004');
+select is((select app.community_buyer_scope()),
+  '{"24100000-0000-4000-8000-0000000000d1": {"like": true, "comment": true, "share": true, "post": false, "story": false, "openHighlight": false}}'::jsonb,
+  '4: BPERM-25: the buyer under tenant B''s claim holds only tenant B''s community, never tenant A''s');
+reset role;
+
+-- ── 5. the wrappers ────────────────────────────────────────────────────────────────────────────
+-- an OPEN highlight exists in CA while the allowed wrapper is asked: 'openHighlight' must still answer false
+update public.story_highlights set open_to_buyers = true where id = '24100000-0000-4000-8000-0000000000f1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select results_eq(
+  $$ select coalesce(a.x, 'zz-null') collate "C", app.community_action_allowed('24100000-0000-4000-8000-0000000000c1'::uuid, a.x)
+       from (values ('like'), ('comment'), ('share'), ('post'), ('story'), ('openHighlight'), ('Like'), ('POST'), ('post '), (''), (null::text)) a(x)
+      order by 1 $$,
+  $$ values (''::text collate "C", false), ('Like', false), ('POST', false), ('comment', true), ('like', true),
+            ('openHighlight', false), ('post', true), ('post ', false), ('share', true), ('story', false), ('zz-null', false) $$,
+  '5: BPERM-04: only the five lowercase names answer, and only through a product grant: openHighlight (while an open highlight exists), case variants, a padded name, an empty string and a null answer false');
+select is(app.community_action_allowed(null, 'post'), false, '5: BPERM-04 empty: a null community answers false, never null');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000ff'::uuid, 'post'), false, '5: …a bogus community id answers false');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c3'::uuid, 'like'), false, '5: …an organization community with no linked product answers false (D-892)');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c4'::uuid, 'post'), false, '5: …a member-created community answers false (D-880) though it carries a link');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000d1'::uuid, 'like'), false, '5: …another tenant''s community answers false (BPERM-25)');
+-- the lane form: communities that carry a link and where the action is NOT held. M1 holds like in CA only.
+select is(array(select unnest(app.community_action_denied_ids('like')) order by 1),
+  array['24100000-0000-4000-8000-0000000000c2', '24100000-0000-4000-8000-0000000000c5', '24100000-0000-4000-8000-0000000000c6']::uuid[],
+  '5: denied_ids(like) for M1 holds the linked organization communities where like is not held; the held one, the un-linked one and the member-created one are not in it');
+select is(array(select unnest(app.community_action_denied_ids('story')) order by 1),
+  array['24100000-0000-4000-8000-0000000000c1', '24100000-0000-4000-8000-0000000000c2', '24100000-0000-4000-8000-0000000000c5', '24100000-0000-4000-8000-0000000000c6']::uuid[],
+  '5: denied_ids(story) adds the community where story is not held');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select is(app.community_action_denied_ids('like'), '{}'::uuid[], '5: D-892: staff by claim get the empty denied set');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c1'::uuid, 'post'), false, '5: …and the allowed wrapper never grants staff (they hold every action by role, not by product)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000003', 'support_tenant');
+select is(app.community_action_denied_ids('like'), '{}'::uuid[], '5: …the support_tenant lane too');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', null);
+select is(array(select unnest(app.community_action_denied_ids('like')) order by 1),
+  array['24100000-0000-4000-8000-0000000000c1', '24100000-0000-4000-8000-0000000000c2', '24100000-0000-4000-8000-0000000000c5', '24100000-0000-4000-8000-0000000000c6']::uuid[],
+  '5: D-888: a null role takes the member branch and denies every linked organization community, the buyer''s own included');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c1'::uuid, 'like'), false, '5: …and the allowed wrapper answers false for a null role');
+reset role;
+select tests.as_tenant_without_claims();
+select is(app.community_action_denied_ids('like'), '{}'::uuid[], '5: a lane with no claims has no tenant, so the denied set is empty (the tenant policies match nothing)');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c1'::uuid, 'like'), false, '5: …and the allowed wrapper answers false');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004');
+select is(app.community_action_denied_ids('like'), '{}'::uuid[], '5: BPERM-25: under tenant B''s claim the buyer holds like in B''s community, so nothing of B is denied and tenant A is not reached');
+select is(array(select unnest(app.community_action_denied_ids('post'))), array['24100000-0000-4000-8000-0000000000d1']::uuid[],
+  '5: …and post (off in B) denies exactly B''s community');
+reset role;
+update public.story_highlights set open_to_buyers = false where id = '24100000-0000-4000-8000-0000000000f1';
+
+-- ── 6. the equivalence invariant ───────────────────────────────────────────────────────────────
+-- For one lane (user, tenant, role): for every fixture community and every action, the map, the allowed wrapper and the
+-- denied-ids membership are compared with the union computed straight from the links and the active entitlements. The
+-- claims are set WITHOUT switching role (the definers bypass RLS themselves), so the direct union reads every row.
+create function pg_temp.equiv(p_user uuid, p_tenant uuid, p_role text) returns bigint
+language plpgsql as $$
+declare
+  v_bad bigint;
+begin
+  perform set_config('request.jwt.claims',
+    jsonb_build_object('sub', p_user::text, 'role', 'authenticated', 'tenant_id', p_tenant::text, 'tenant_role', p_role)::text, true);
+  select count(*) into v_bad
+    from (values ('24100000-0000-4000-8000-0000000000c1'::uuid), ('24100000-0000-4000-8000-0000000000c2'::uuid),
+                 ('24100000-0000-4000-8000-0000000000c3'::uuid), ('24100000-0000-4000-8000-0000000000c4'::uuid),
+                 ('24100000-0000-4000-8000-0000000000c5'::uuid), ('24100000-0000-4000-8000-0000000000c6'::uuid),
+                 ('24100000-0000-4000-8000-0000000000d1'::uuid), ('24100000-0000-4000-8000-0000000000ff'::uuid),
+                 (null::uuid)) c(id)
+   cross join (values ('like'), ('comment'), ('share'), ('post'), ('story')) a(x)
+   cross join lateral (
+     select coalesce((
+              select bool_or(case a.x when 'like' then l.can_like when 'comment' then l.can_comment
+                                      when 'share' then l.can_share when 'post' then l.can_post else l.can_story end)
+                from public.store_product_communities l
+                join public.store_entitlements e on e.tenant_id = l.tenant_id and e.product_id = l.product_id
+                join public.communities cc on cc.id = l.community_id and cc.tenant_id = l.tenant_id
+               where l.community_id = c.id and l.tenant_id = p_tenant
+                 and e.user_id = p_user and e.status = 'active'
+                 and p_role = 'member' and cc.kind = 'organization' and cc.deleted_at is null
+                 and exists (select 1 from public.tenant_modules tm
+                              where tm.tenant_id = p_tenant and tm.module_key = 'store' and tm.enabled)), false) as want,
+            (coalesce(p_role, '') not in ('admin_tenant', 'support_tenant')
+              and exists (select 1 from public.store_product_communities l
+                            join public.communities cc on cc.id = l.community_id and cc.tenant_id = l.tenant_id
+                           where l.community_id = c.id and l.tenant_id = p_tenant and cc.kind = 'organization'
+                             and exists (select 1 from public.tenant_modules tm
+                                          where tm.tenant_id = p_tenant and tm.module_key = 'store' and tm.enabled))) as linked
+   ) w
+   where coalesce((app.community_buyer_scope() -> c.id::text ->> a.x) = 'true', false) is distinct from w.want
+      or app.community_action_allowed(c.id, a.x) is distinct from w.want
+      or coalesce(c.id = any (app.community_action_denied_ids(a.x)), false) is distinct from (w.linked and not w.want);
+  perform set_config('request.jwt.claims', '', true);
+  return v_bad;
+end
+$$;
+select is(pg_temp.equiv('24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000000001', 'member'), 0::bigint,
+  '6: the buyer of P1 and P6: the map, the allowed wrapper and the denied set equal the direct union for every community and action');
+select is(pg_temp.equiv('24100000-0000-4000-8000-000000000006', '24100000-0000-4000-8000-000000000001', 'member'), 0::bigint,
+  '6: the holder of P2 and P3 (the union): all three agree');
+select is(pg_temp.equiv('24100000-0000-4000-8000-000000000008', '24100000-0000-4000-8000-000000000001', 'member'), 0::bigint,
+  '6: the holder of P5 (member-created, archived and soft-deleted links): all three agree');
+select is(pg_temp.equiv('24100000-0000-4000-8000-000000000005', '24100000-0000-4000-8000-000000000001', 'member'), 0::bigint,
+  '6: the member with no entitlement: all three agree');
+select is(pg_temp.equiv('24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000000011', 'member'), 0::bigint,
+  '6: BPERM-25: the buyer under tenant B''s claim: all three agree');
+select is(pg_temp.equiv('24100000-0000-4000-8000-000000000002', '24100000-0000-4000-8000-000000000001', 'admin_tenant'), 0::bigint,
+  '6: the admin_tenant lane: all three agree (nothing granted, nothing denied)');
+select is(pg_temp.equiv('24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000000001', null), 0::bigint,
+  '6: the buyer with a null role: all three agree (no grant, every linked community denied)');
+
+-- ── 7. the catalog ─────────────────────────────────────────────────────────────────────────────
+select ok((select prosecdef and provolatile = 's' and 'search_path=""' = any (proconfig)
+             from pg_proc where oid = to_regprocedure('app.community_buyer_scope()')),
+  '7: community_buyer_scope is SECURITY DEFINER, stable, with an empty search_path');
+select ok((select prosecdef and provolatile = 's' and 'search_path=""' = any (proconfig)
+             from pg_proc where oid = to_regprocedure('app.community_action_allowed(uuid, text)')),
+  '7: community_action_allowed is SECURITY DEFINER, stable, with an empty search_path');
+select ok((select prosecdef and provolatile = 's' and 'search_path=""' = any (proconfig)
+             from pg_proc where oid = to_regprocedure('app.community_action_denied_ids(text)')),
+  '7: community_action_denied_ids is SECURITY DEFINER, stable, with an empty search_path');
+select ok(has_function_privilege('authenticated', 'app.community_buyer_scope()', 'EXECUTE')
+          and not has_function_privilege('anon', 'app.community_buyer_scope()', 'EXECUTE'),
+  '7: community_buyer_scope is executable by authenticated and not by anon');
+select ok(has_function_privilege('authenticated', 'app.community_action_allowed(uuid, text)', 'EXECUTE')
+          and not has_function_privilege('anon', 'app.community_action_allowed(uuid, text)', 'EXECUTE'),
+  '7: community_action_allowed is executable by authenticated and not by anon');
+select ok(has_function_privilege('authenticated', 'app.community_action_denied_ids(text)', 'EXECUTE')
+          and not has_function_privilege('anon', 'app.community_action_denied_ids(text)', 'EXECUTE'),
+  '7: community_action_denied_ids is executable by authenticated and not by anon');
+select ok((select pg_get_functiondef(oid) like '%community_buyer_scope%' from pg_proc where oid = to_regprocedure('app.community_action_allowed(uuid, text)')),
+  '7: the replaced body of community_action_allowed is the product-grant one, not the constant-false stub');
+select ok((select pg_get_functiondef(oid) like '%store_product_communities%' from pg_proc where oid = to_regprocedure('app.community_action_denied_ids(text)')),
+  '7: the stub-first order left the STORE body of community_action_denied_ids in place');
+select ok(exists (select 1 from pg_depend d join pg_policy p on p.oid = d.objid and d.classid = 'pg_policy'::regclass
+                   where d.refobjid = to_regprocedure('app.community_action_allowed(uuid, text)')
+                     and p.polname = 'feed_posts_social_insert_gate'),
+  '7: feed_posts_social_insert_gate still depends on the same function (create or replace kept the OID)');
+
+-- ── 8. the post gate matrix ────────────────────────────────────────────────────────────────────
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000008');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000008', 'em membro', 'community', '24100000-0000-4000-8000-0000000000c4') $$,
+  '42501', null, '8: D-880: a buyer flagged post on a link to a MEMBER-created community is refused (42501)');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000008', 'em arquivada', 'community', '24100000-0000-4000-8000-0000000000c5') $$,
+  '42501', null, '8: …in an archived organization community (42501)');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000008', 'em apagada', 'community', '24100000-0000-4000-8000-0000000000c6') $$,
+  '42501', null, '8: …in a soft-deleted organization community (42501)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', 'sem link', 'community', '24100000-0000-4000-8000-0000000000c3') $$,
+  '42501', null, '8: D-892: an organization community with no linked product grants no member post (42501)');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', 'de outro tenant', 'community', '24100000-0000-4000-8000-0000000000d1') $$,
+  '42501', null, '8: BPERM-25: tenant A''s row naming tenant B''s community is refused (42501)');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004', 'carimbo forjado', 'community', '24100000-0000-4000-8000-0000000000d1') $$,
+  '42501', null, '8: …and a forged tenant stamp is refused (42501)');
+select lives_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', 'com produto', 'community', '24100000-0000-4000-8000-0000000000c1') $$,
+  '8: the buyer of P1 and P6 publishes into CA (positive control for the refusals above)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000006');
+select lives_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000006', 'uniao', 'community', '24100000-0000-4000-8000-0000000000c2') $$,
+  '8: D-886: the holder of P2 (post off) and P3 (post on) publishes into CA2: the union grants post');
 reset role;
 
 select * from finish();

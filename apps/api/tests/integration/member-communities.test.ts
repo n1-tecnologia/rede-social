@@ -329,7 +329,7 @@ describe('10 tracer', () => {
     }
   });
 
-  it('7. Escopo seam (no behaviour change): Marcos naming an ORGANIZATION community is 403 with no post stored; the admin posts there (201, no audience key, the organization voice)', async () => {
+  it('7. no product grant (no behaviour change): Marcos naming an ORGANIZATION community is 403 with no post stored; the admin posts there (201, no audience key, the organization voice)', async () => {
     const before = await postsIn(orgCommunityId);
     const refused = await publish(tokens.marcos, {
       caption: `${PREFIX}na comunidade da organização`,
@@ -351,7 +351,7 @@ describe('10 tracer', () => {
     expect(row?.visibility).toBe('tenant');
   });
 
-  it('8. Escopo seam: app.community_action_allowed answers false for the five actions on a member and on an organization community', async () => {
+  it('8. no product grant: app.community_action_allowed answers false for the five actions on a member and on an organization community (the grant itself is proved in buyer-permissions.test.ts)', async () => {
     for (const communityId of [made.community?.id ?? '', orgCommunityId]) {
       for (const action of ['like', 'comment', 'share', 'post', 'story']) {
         const [row] = await adminSql<{ allowed: boolean | null }[]>`
