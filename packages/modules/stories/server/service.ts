@@ -20,6 +20,7 @@ import {
   type HighlightList,
   type HighlightMembershipResult,
   type HighlightSummary,
+  type OpenHighlightCounts,
   type PublishStory,
   type ReorderHighlights,
   STORY_HIGHLIGHT_MAX_ITEMS,
@@ -309,7 +310,11 @@ function toPage(
  *      author is not in it, D-708);
  *   3. a member story saved in a HIGHLIGHT of a community the caller can read passes with `social` on or off
  *      (D-716, D-718): the form plan 04 measured (`10-04-SPIKE.md`, `CHOSEN_FORM: EXISTS_JOIN`); the inner
- *      `communities` read runs under the caller's RLS, so a hidden creator's community closes it.
+ *      `communities` read runs under the caller's RLS, so a hidden creator's community closes it. 11.1-09 (D-894,
+ *      BPERM-18): the same inner read carries the LOCKED-community term (`c.id <> all (LOCKED_COMMUNITY_IDS)`, the
+ *      coalesced kernel InitPlan, empty for staff and for a community with no linked product), side by side with
+ *      branch 3 of `stories_audience_gate`, so a story a buyer saved in an organization highlight is the bare 404 for a
+ *      member locked out of that community in the statement as well as in the policy.
  *
  * `canModerate` is rendered as a LITERAL (`true` / `false`), never a bound parameter, so the statement keeps
  * one shape per caller kind. Reads the alias `s`.
@@ -328,7 +333,8 @@ function memberStoryVisible(canModerate: boolean): SQL {
                select 1 from communities c
                 where c.id = h.community_id
                   and c.tenant_id = app.tenant_id()
-                  and c.deleted_at is null)))`;
+                  and c.deleted_at is null
+                  and c.id <> all (${LOCKED_COMMUNITY_IDS}))))`;
 }
 
 /** What every story read by id needs besides the context: the moderator flag the route computed. */
@@ -779,6 +785,21 @@ function isInsufficientPrivilege(error: unknown): boolean {
   return false;
 }
 
+/**
+ * 11.1-09 (D-888): a buyer's grant can end between the place read and the item write (a refund, an unticked flag, a
+ * closed highlight): the database gate then raises `42501`. For a MEMBER that is the same bare `403 FORBIDDEN` the place
+ * seam answers, so the two paths cannot be told apart; for staff a `42501` is never masked (a staff lane has no grant to
+ * lose, so it is a real policy bug and stays a 500). Use as `.catch(refuseMemberPrivilege(ctx))` on the transaction.
+ */
+const refuseMemberPrivilege =
+  (ctx: RequestContext) =>
+  (error: unknown): never => {
+    if (ctx.role === 'member' && isInsufficientPrivilege(error)) {
+      throw new ApiError(403, 'FORBIDDEN');
+    }
+    throw error;
+  };
+
 /** What the asset lookup inside `publishStory`'s transaction needs to decide. */
 type AssetRow = { kind: string; purpose: string; status: string };
 
@@ -880,7 +901,8 @@ export async function publishStory(
     withTenantTx(ctx, async (tx) => {
       // BEFORE the asset: a refused destination is the first thing the caller is told (see above).
       if (highlightId !== undefined && gate !== null) {
-        await resolveHighlight(tx, ctx, highlightId, 'curate', gate);
+        // 11.1-09 (D-883): a buyer saving their own story AT PUBLISH into an open highlight is a `contribute`.
+        await resolveHighlight(tx, ctx, highlightId, 'contribute', gate);
         await assertHighlightHasRoom(tx, ctx, highlightId, null);
       }
       if (newHighlight !== undefined && gate !== null) {
@@ -1899,8 +1921,25 @@ async function readPlaceGate(ctx: RequestContext, caller: HighlightCaller): Prom
   };
 }
 
-/** What a place-resolving caller intends: reading, taking content down, or adding/curating it. */
-type PlaceIntent = 'read' | 'takedown' | 'curate';
+/**
+ * What a place-resolving caller intends: reading, taking content down, or adding/curating it.
+ *
+ * 11.1-09 (D-884, D-885) adds `contribute`: putting ONE story into a highlight, or taking one out (item add and
+ * remove, and a publish with a `highlightId`) and nothing else. It applies the curator rule first (today's: a holder
+ * of `stories.story.manage`, or the creator of a member community, with the add/archived rules of `curate` for an add
+ * and of `takedown` for a removal), and only then the BUYER rule below. Every highlight-level write (`newHighlight`,
+ * `createHighlight`, `updateHighlight`, `deleteHighlight`, `reorderHighlights`) keeps `curate` or `takedown`, so a
+ * buyer is refused 403 on each of them.
+ */
+type PlaceIntent = 'read' | 'takedown' | 'curate' | 'contribute';
+
+/**
+ * 11.1-09: what a `contribute` caller adds to the place question: whether the highlight is OPEN to buyers
+ * (`open_to_buyers`, read from the highlight row) and whether the act is a REMOVAL (a removal is a take-down for a
+ * curator: allowed on an archived community). Ignored by every other intent.
+ */
+type Contribution = { open: boolean; removal: boolean };
+const NO_CONTRIBUTION: Contribution = { open: false, removal: false };
 
 /**
  * A highlight's PLACE as a SQL predicate on `alias.community_id` — one of exactly two literal
@@ -1949,6 +1988,7 @@ async function resolveHighlightPlace(
   communityId: string | null,
   intent: PlaceIntent,
   gate: PlaceGate,
+  contribution: Contribution = NO_CONTRIBUTION,
 ): Promise<PlaceView> {
   if (communityId === null) {
     // Início is the organization's own place: reading is open, writing is the manage half.
@@ -1966,8 +2006,13 @@ async function resolveHighlightPlace(
   // UPDATE policy, `communities_member_update_gate`, so a member who is not the creator would read ZERO
   // rows and the refusal would be the 404 of a miss instead of the 403 the seam owes a place that exists
   // and is not theirs. The lock is taken below, only for a caller who may curate.
-  const rows = await tx.execute<{ kind: string; owner: string | null; locked: boolean }>(sql`
-    select c.kind, c.created_by_user_id as owner,
+  const rows = await tx.execute<{
+    kind: string;
+    owner: string | null;
+    status: string;
+    locked: boolean;
+  }>(sql`
+    select c.kind, c.created_by_user_id as owner, c.status,
            (c.id = any (${LOCKED_COMMUNITY_IDS})) as locked
       from communities c
      where c.id = ${communityId}::uuid
@@ -1995,7 +2040,19 @@ async function resolveHighlightPlace(
       ? gate.canManage
       : community.owner === ctx.userId && gate.canPublish;
   if (intent === 'read') return { curator };
-  if (!curator) throw new ApiError(403, 'FORBIDDEN');
+  if (!curator) {
+    // 11.1-09 (D-884, D-885, D-895): a non-curator may still CONTRIBUTE (add or remove one of their own stories) when
+    // the buyer rule holds. It takes NO row lock: `for share` also passes the UPDATE policy of `communities`, which a
+    // buyer fails, and the database gates (plan 04) carry the same terms, so a status flip between this read and the
+    // write is refused there. Every failure of the rule is the bare 403 and names nothing (D-888).
+    if (
+      intent === 'contribute' &&
+      (await buyerMayContribute(tx, communityId, community, gate, contribution))
+    ) {
+      return { curator: false };
+    }
+    throw new ApiError(403, 'FORBIDDEN');
+  }
   if (community.kind === 'member') {
     // 10-10 (T-10-38, D-718): a creator's highlight write exists only while `social` is on, but no row-level policy
     // of the highlight tables carries a `social` term, so inside the 30 s flags-cache window the guard and the
@@ -2018,10 +2075,40 @@ async function resolveHighlightPlace(
      for share`);
   const status = locked[0]?.status;
   if (status === undefined) throw new ApiError(404, 'NOT_FOUND');
-  if (intent === 'curate' && status !== 'active') {
+  // an ADD refuses an archived community; a take-down (and a removal by a curator) never does
+  const adding = intent === 'curate' || (intent === 'contribute' && !contribution.removal);
+  if (adding && status !== 'active') {
     throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'archived' });
   }
   return { curator };
+}
+
+/**
+ * 11.1-09 (D-883, D-884, D-885, D-895): the BUYER rule of the `contribute` intent, in the terms the database gates
+ * carry (`ITEM_BUYER_OPEN`): an ORGANIZATION community that is active (not deleted: the read above), a caller holding
+ * `stories.story.publish` (the `gate` flag, composed with `social`), `social` on (a SQL read, never the flags cache),
+ * the highlight OPEN to buyers and `app.community_action_allowed(community, 'story')` (the union over the caller's
+ * ACTIVE entitlements, so a refund or an unticked flag ends it at once). `false` is always the caller's bare 403.
+ */
+async function buyerMayContribute(
+  tx: Tx,
+  communityId: string,
+  community: { kind: string; status: string },
+  gate: PlaceGate,
+  contribution: Contribution,
+): Promise<boolean> {
+  if (
+    community.kind !== 'organization' ||
+    community.status !== 'active' ||
+    !gate.canPublish ||
+    !contribution.open
+  ) {
+    return false;
+  }
+  const answer = await tx.execute<{ social: boolean; allowed: boolean }>(sql`
+    select app.social_enabled() as social,
+           app.community_action_allowed(${communityId}::uuid, 'story') as allowed`);
+  return answer[0]?.social === true && answer[0]?.allowed === true;
 }
 
 /** What `resolveHighlightPlace` answers beside its refusals: may this caller CURATE the place (D-713). */
@@ -2034,7 +2121,11 @@ type HighlightRef = {
   title: string;
   cover_story_id: string | null;
   cover_asset_id: string | null;
+  open_to_buyers: boolean;
 };
+
+/** `resolveHighlight`'s answer: the row, and whether the caller CURATES its place (false for a buyer). */
+type ResolvedHighlight = HighlightRef & { curator: boolean };
 
 /**
  * Resolve ONE highlight in-lane, then its place through `resolveHighlightPlace` — the entry every
@@ -2050,6 +2141,14 @@ type HighlightRef = {
  * - The place rules are NOT restated here (R-D-K): `curate` refuses an archived community,
  *   `takedown` does not, and the `communities` module being off is the bare 404 — all decided by
  *   the one seam.
+ * - **`contribute` (11.1-09, D-884, D-885).** The highlight's own `open_to_buyers` travels into the place seam, which
+ *   judges a curator first and a buyer second. A BUYER cannot take the row lock (`for update` also passes the UPDATE
+ *   policy of the table, which a buyer fails, and the lock would read zero rows), so every `contribute` caller first
+ *   takes ONE transaction-scoped advisory lock keyed on the highlight id: two buyers adding at the item cap, or a
+ *   buyer and the administrator, serialise on it exactly as two administrators do on the row lock, and `full` stays
+ *   exact. A buyer then re-reads the row (a close that committed while the lock was awaited is the bare 403, D-895);
+ *   a close that commits after this point is refused by the database gate on the insert (a 42501 the caller maps to
+ *   the same 403), or lands after the item, which then stays (D-887).
  */
 async function resolveHighlight(
   tx: Tx,
@@ -2057,10 +2156,11 @@ async function resolveHighlight(
   highlightId: string,
   intent: PlaceIntent,
   gate: PlaceGate,
-): Promise<HighlightRef> {
+  options: { removal?: boolean } = {},
+): Promise<ResolvedHighlight> {
   const read = (lock: ReturnType<typeof sql>) =>
     tx.execute<HighlightRef>(sql`
-      select h.id, h.community_id, h.title, h.cover_story_id, h.cover_asset_id
+      select h.id, h.community_id, h.title, h.cover_story_id, h.cover_asset_id, h.open_to_buyers
         from story_highlights h
        where h.id = ${highlightId}::uuid
          and h.tenant_id = ${ctx.tenantId}::uuid
@@ -2071,13 +2171,27 @@ async function resolveHighlight(
   // instead of the 403 the seam owes a highlight that exists and is not theirs.
   const first = (await read(sql``))[0];
   if (!first) throw new ApiError(404, 'NOT_FOUND');
-  await resolveHighlightPlace(tx, ctx, first.community_id, intent, gate);
-  if (intent === 'read') return first;
+  const place = await resolveHighlightPlace(tx, ctx, first.community_id, intent, gate, {
+    open: first.open_to_buyers,
+    removal: options.removal === true,
+  });
+  if (intent === 'read') return { ...first, curator: place.curator };
+  if (intent === 'contribute') {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${highlightId}::text, 1109))`,
+    );
+    if (!place.curator) {
+      const again = (await read(sql``))[0];
+      if (!again) throw new ApiError(404, 'NOT_FOUND');
+      if (!again.open_to_buyers) throw new ApiError(403, 'FORBIDDEN');
+      return { ...again, curator: false };
+    }
+  }
   // A write intent that got this far may curate the place, so the lock is taken now and the columns a write
   // compares are the LOCKED ones (a rename that committed in between is seen, not overwritten).
   const locked = (await read(sql`for update`))[0];
   if (!locked) throw new ApiError(404, 'NOT_FOUND');
-  return locked;
+  return { ...locked, curator: true };
 }
 
 /**
@@ -2110,6 +2224,7 @@ type HighlightSummaryRow = {
   cover_story_id: string | null;
   cover_chosen: boolean | null;
   item_count: number;
+  open_to_buyers: boolean;
 };
 
 /**
@@ -2140,6 +2255,7 @@ function highlightProjection(where: SQL) {
              h.community_id,
              h.title,
              h.position,
+             h.open_to_buyers,
              h.cover_story_id,
              cover.asset_id as cover_asset_id,
              cover.variant_widths as cover_variant_widths,
@@ -2195,8 +2311,14 @@ function highlightProjection(where: SQL) {
     ) hp`;
 }
 
-/** Row → published contract. */
-const toHighlight = (row: HighlightSummaryRow): HighlightSummary => ({
+/**
+ * Row → published contract. `curator` is set by the CALLER that already proved the read is a curator's (UI-D-887, T-11.1-34):
+ * `openToBuyers: true` rides only then, so no member-facing read (the story band, a member's list or detail, the
+ * community page, a buyer's catalogue) can tell an open highlight from a closed one. Never inferred from the row or the
+ * role here.
+ */
+const toHighlight = (row: HighlightSummaryRow, curator = false): HighlightSummary => ({
+  ...(curator && row.open_to_buyers === true ? { openToBuyers: true } : {}),
   id: row.id,
   communityId: row.community_id,
   title: row.title,
@@ -2344,7 +2466,7 @@ export async function createHighlight(
     'story highlight created',
   );
 
-  return toHighlight(created);
+  return toHighlight(created, true);
 }
 
 /**
@@ -2410,7 +2532,8 @@ export async function addStoryToHighlight(
   const gate = await readPlaceGate(ctx, caller);
 
   const { highlightCount, created } = await withTenantTx(ctx, async (tx) => {
-    await resolveHighlight(tx, ctx, highlightId, 'curate', gate);
+    // 11.1-09 (D-884, D-885): `contribute` = the curator rule of `curate`, then the buyer rule (open highlight, own story).
+    await resolveHighlight(tx, ctx, highlightId, 'contribute', gate);
 
     // 10-09 (Pitfall 9): the caller's own predicate is IN the select, so another member's or the admin's story
     // is the same bare 404 an unknown id gets, and nothing is written.
@@ -2427,7 +2550,7 @@ export async function addStoryToHighlight(
 
     const created = await insertHighlightItem(tx, ctx, highlightId, storyId, caller);
     return { highlightCount: await readHighlightCount(tx, ctx, storyId), created };
-  });
+  }).catch(refuseMemberPrivilege(ctx));
 
   if (created) {
     emit(ctx, 'story.highlighted', {
@@ -2498,7 +2621,7 @@ export async function listHighlights(
     'story highlights listed',
   );
 
-  return { items: rows.map(toHighlight) };
+  return { items: rows.map((row) => toHighlight(row, all)) };
 }
 
 /**
@@ -2567,7 +2690,7 @@ export async function getHighlight(
   );
 
   return {
-    highlight: toHighlight(detail.highlight),
+    highlight: toHighlight(detail.highlight, detail.curator),
     items: detail.items.map((row) => toStory(row, ctx)),
   };
 }
@@ -2662,8 +2785,40 @@ export async function updateHighlight(
   const gate = await readPlaceGate(ctx, caller);
 
   const { row, changed } = await withTenantTx(ctx, async (tx) => {
-    const current = await resolveHighlight(tx, ctx, highlightId, 'curate', gate);
+    // 11.1-09 (D-884, UI-D-886): the switch is refused with the closed issue `open_unavailable` for an archived
+    // community too, so the archived refusal of the place seam is re-coded ONLY when the body carries the switch.
+    const current = await resolveHighlight(tx, ctx, highlightId, 'curate', gate).catch(
+      (error: unknown) => {
+        if (
+          input.openToBuyers !== undefined &&
+          error instanceof ApiError &&
+          error.status === 400 &&
+          (error.details as { highlight?: string } | undefined)?.highlight === 'archived'
+        ) {
+          throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'open_unavailable' });
+        }
+        throw error;
+      },
+    );
+    // The switch exists only on a highlight of an ORGANIZATION community (not Início, not a member community): the
+    // database stays inert for the rest because every buyer gate requires `kind = 'organization'` (T-11.1-35).
+    if (input.openToBuyers !== undefined) {
+      const organization =
+        current.community_id === null
+          ? []
+          : await tx.execute<{ id: string }>(sql`
+              select c.id from communities c
+               where c.id = ${current.community_id}::uuid
+                 and c.tenant_id = ${ctx.tenantId}::uuid
+                 and c.kind = 'organization'
+                 and c.status = 'active'
+                 and c.deleted_at is null`);
+      if (!organization[0]) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'open_unavailable' });
+      }
+    }
 
+    const open = input.openToBuyers ?? current.open_to_buyers;
     const title = requestedTitle ?? current.title;
     const cover =
       input.cover === undefined
@@ -2675,11 +2830,12 @@ export async function updateHighlight(
          set title = ${title},
              cover_story_id = ${cover.coverStoryId}::uuid,
              cover_asset_id = ${cover.coverAssetId}::uuid,
+             open_to_buyers = ${open},
              updated_at = now()
        where id = ${highlightId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid
-         and (title, cover_story_id, cover_asset_id)
-             is distinct from (${title}::text, ${cover.coverStoryId}::uuid, ${cover.coverAssetId}::uuid)
+         and (title, cover_story_id, cover_asset_id, open_to_buyers)
+             is distinct from (${title}::text, ${cover.coverStoryId}::uuid, ${cover.coverAssetId}::uuid, ${open}::boolean)
       returning id`);
 
     const rows = await tx.execute<HighlightSummaryRow>(sql`
@@ -2707,6 +2863,7 @@ export async function updateHighlight(
       changed,
       // Flags and LENGTHS, never the words (T-05.2-17).
       titleLength: requestedTitle?.length ?? null,
+      openToBuyers: input.openToBuyers ?? 'unchanged',
       cover:
         input.cover === undefined
           ? 'unchanged'
@@ -2719,7 +2876,7 @@ export async function updateHighlight(
     'story highlight updated',
   );
 
-  return toHighlight(row);
+  return toHighlight(row, true);
 }
 
 /**
@@ -2797,13 +2954,24 @@ export async function removeStoryFromHighlight(
   const gate = await readPlaceGate(ctx, caller);
 
   const { highlightCount, removed } = await withTenantTx(ctx, async (tx) => {
-    await resolveHighlight(tx, ctx, highlightId, 'takedown', gate);
+    // 11.1-09 (D-885, D-895): `contribute` with `removal` = the curator's take-down (allowed on an archived community),
+    // else the buyer rule: an OPEN highlight of an active organization community while the grant lasts. After a refund,
+    // an unticked flag or a closed highlight the buyer's remove is the bare 403 and the item stays; an administrator
+    // removes it (the curator branch, unchanged).
+    const resolved = await resolveHighlight(tx, ctx, highlightId, 'contribute', gate, {
+      removal: true,
+    });
 
-    const stories = await tx.execute<{ id: string }>(sql`
-      select s.id from stories s
+    const stories = await tx.execute<{ id: string; author_user_id: string }>(sql`
+      select s.id, s.author_user_id from stories s
        where s.id = ${storyId}::uuid
          and s.tenant_id = ${ctx.tenantId}::uuid`);
-    if (!stories[0]) throw new ApiError(404, 'NOT_FOUND');
+    const story = stories[0];
+    if (!story) throw new ApiError(404, 'NOT_FOUND');
+    // A buyer removes only their OWN story's item (D-885); the database delete gate says the same (`ITEM_STORY_AUTHOR`).
+    if (!resolved.curator && story.author_user_id !== ctx.userId) {
+      throw new ApiError(403, 'FORBIDDEN');
+    }
 
     const deleted = await tx.execute<{ id: string }>(sql`
       delete from story_highlight_items
@@ -2813,7 +2981,20 @@ export async function removeStoryFromHighlight(
       returning id`);
     const removed = deleted.length > 0;
 
-    if (removed) {
+    if (!removed && !resolved.curator) {
+      // A delete filtered out by the row-level gate raises nothing: the grant ended between the place read and the
+      // statement. When the pair is still there, that is the bare 403, never the idempotent 200 of an absent pair.
+      const still = await tx.execute<{ id: string }>(sql`
+        select i.id from story_highlight_items i
+         where i.highlight_id = ${highlightId}::uuid
+           and i.story_id = ${storyId}::uuid
+           and i.tenant_id = ${ctx.tenantId}::uuid`);
+      if (still[0]) throw new ApiError(403, 'FORBIDDEN');
+    }
+
+    // The chosen-cover pointer is the administrator's column: a buyer's lane cannot write it (the highlight update
+    // gate is creator-only), and the read-time cover rule already ignores a pointer to a story that is not an item.
+    if (removed && resolved.curator) {
       await tx.execute(sql`
         update story_highlights set cover_story_id = null, updated_at = now()
          where id = ${highlightId}::uuid
@@ -2822,7 +3003,7 @@ export async function removeStoryFromHighlight(
     }
 
     return { highlightCount: await readHighlightCount(tx, ctx, storyId), removed };
-  });
+  }).catch(refuseMemberPrivilege(ctx));
 
   if (removed) {
     emit(ctx, 'story.unhighlighted', {
@@ -2939,7 +3120,7 @@ export async function reorderHighlights(
     'story highlights reordered',
   );
 
-  return { items: rows.map(toHighlight) };
+  return { items: rows.map((row) => toHighlight(row, true)) };
 }
 
 /**
@@ -2962,6 +3143,9 @@ export async function reorderHighlights(
  * - With the `communities` module OFF no community highlight is listed at all (HIGHLIGHT-04) — the
  *   rows are untouched and come back with the module.
  * - It is the CURATOR's read (empty highlights are included); the route guard is the any-of literal.
+ * - 11.1-09: for a non-manager the offer also holds the OPEN highlights of organization communities the caller's
+ *   grants tick `story` for (a buyer's destinations); those rows are ordered like the member branch (community, then the
+ *   highlight's own position) and carry NO `openToBuyers` (only the manager's read does).
  */
 export async function listHighlightCatalog(
   ctx: RequestContext,
@@ -2995,6 +3179,21 @@ export async function listHighlightCatalog(
                   and hm.deleted_at is null)
         )`;
 
+  // 11.1-09 (D-883, D-884, UI-D-891, BPERM-14): a BUYER is also offered the OPEN highlights of ACTIVE ORGANIZATION
+  // communities where the union of their active entitlements ticks `story` (`app.community_action_allowed`, the same
+  // function the item gates call). A closed highlight, a community without the grant (a locked one, a refunded one) and a
+  // member community other than the caller's own are absent, and `social` off removes the whole branch with
+  // `stories.story.publish`.
+  const buyerOpenPlaces = sql`(h.open_to_buyers and exists (
+          select 1 from communities hc
+           where hc.id = h.community_id
+             and hc.tenant_id = ${ctx.tenantId}::uuid
+             and hc.kind = 'organization'
+             and hc.status = 'active'
+             and hc.deleted_at is null
+             and app.community_action_allowed(hc.id, 'story')
+        ))`;
+
   const manager = gate.canManage;
   // Fail closed: a caller holding neither flag is offered nothing.
   const offered = manager
@@ -3002,7 +3201,7 @@ export async function listHighlightCatalog(
       ? sql`(h.community_id is null or ${organizationPlaces})`
       : sql`h.community_id is null`
     : gate.canPublish && gate.communitiesOn
-      ? ownMemberPlaces
+      ? sql`(${ownMemberPlaces} or ${buyerOpenPlaces})`
       : sql`false`;
 
   const rows = await withTenantTx(ctx, (tx) =>
@@ -3029,7 +3228,60 @@ export async function listHighlightCatalog(
     'story highlight catalog listed',
   );
 
-  return { items: rows.map(toHighlight) };
+  return { items: rows.map((row) => toHighlight(row, manager)) };
+}
+
+/**
+ * `GET /v1/stories/highlights/open-counts?communityIds=` (11.1-09, UI-D-884 (3)): how many highlights of each named
+ * community are OPEN to buyers, for the product form's helper text. Staff only (the route's `stories.story.manage` guard).
+ * It answers a row for every named community that is an ACTIVE ORGANIZATION community of THIS tenant, not removed (the
+ * count may be 0); a member community, an archived or removed one, another tenant's and an unknown id are simply absent,
+ * so the read confirms nothing about them. With the `communities` module off it is an empty list. The ids are a closed
+ * contract (`openHighlightCountsQuerySchema`, uuid-validated, at most `STORY_OPEN_COUNTS_MAX_COMMUNITIES`), travelling as
+ * ONE array literal. Never a member read.
+ */
+export async function countOpenHighlights(
+  ctx: RequestContext,
+  communityIds: string[],
+): Promise<OpenHighlightCounts> {
+  const communitiesOn = await moduleFlags.isEnabled(ctx, 'communities');
+  if (!communitiesOn || communityIds.length === 0) return { items: [] };
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<{ community_id: string; open_highlights: number }>(sql`
+      select c.id as community_id,
+             (select count(*)::int
+                from story_highlights h
+               where h.community_id = c.id
+                 and h.tenant_id = c.tenant_id
+                 and h.open_to_buyers) as open_highlights
+        from communities c
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.id = any (${`{${communityIds.join(',')}}`}::uuid[])
+         and c.kind = 'organization'
+         and c.status = 'active'
+         and c.deleted_at is null
+       order by c.id`),
+  );
+
+  log.info(
+    {
+      event: 'stories.open_counts',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      requested: communityIds.length,
+      returned: rows.length,
+    },
+    'open highlight counts read',
+  );
+
+  return {
+    items: rows.map((row) => ({
+      communityId: row.community_id,
+      openHighlights: row.open_highlights,
+    })),
+  };
 }
 
 /**
