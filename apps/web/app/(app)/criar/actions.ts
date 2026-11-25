@@ -3,7 +3,9 @@
 import { createPostSchema } from '@rede-social/module-feed/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { getBootstrap } from '@/lib/bootstrap';
 import { createPost } from '@/lib/feed';
+import { isMemberComposer } from '@/lib/feed-view';
 import {
   asCommunityIssue,
   asMediaIssue,
@@ -53,8 +55,14 @@ export async function createPostAction(input: unknown): Promise<PostWriteResult>
     return { ok: false, code: empty ? 'empty_post' : 'generic' };
   }
 
+  // 11.1-20 (WR-02, D-888, T-11.1-73): 'refused' is the MEMBER lane's word only: a publish into a community
+  // by a viewer whose composed permissions make the member composer (the pair `/criar` reads to pin it).
+  // The lane is read on the server, lazily (only when a 403 has to be classified, so an accepted post and
+  // every other failure make no bootstrap call) and is never an argument of this action. A failed read
+  // is false: the failure is then generic and keeps its log line.
   const { result, refusal } = await attemptPostWrite(() => createPost(body.data), {
-    mapRefused: true,
+    mapRefused: async () =>
+      body.data.communityId !== undefined && isMemberComposer((await getBootstrap()).permissions),
   });
   // The new card has to appear on the server-rendered home slot the admin lands back on; without
   // this they would read a cached page 1 that does not carry what they just published.
@@ -66,7 +74,8 @@ export async function createPostAction(input: unknown): Promise<PostWriteResult>
     if (body.data.communityId) revalidatePath(`/comunidades/${body.data.communityId}`);
   }
 
-  // 11.1-17 (UI-D-893, D-888): a refused post into a community means the viewer's facts changed (a refund,
+  // 11.1-17 (UI-D-893, D-888): a refused post into a community (only the member lane gets the word, 11.1-20)
+  // means the viewer's facts changed (a refund,
   // `social` turned off, the community archived while the composer was open). The composer stays put and
   // says one neutral sentence; what has to be re-read is the PAGE THE COMPOSE ENTRIES LIVE ON, so the
   // community page is revalidated and the router cache drops its stale copy. `/criar` itself is never

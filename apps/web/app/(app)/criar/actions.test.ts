@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   createPost: vi.fn(),
+  getBootstrap: vi.fn(),
   revalidatePath: vi.fn(),
   redirect: vi.fn((path: string) => {
     throw new Error(`REDIRECT:${path}`);
@@ -22,6 +23,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
 vi.mock('@/lib/feed', () => ({ createPost: (...args: unknown[]) => mocks.createPost(...args) }));
+vi.mock('@/lib/bootstrap', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/bootstrap')>()),
+  getBootstrap: (...args: unknown[]) => mocks.getBootstrap(...args),
+}));
 vi.mock('next/cache', () => ({ revalidatePath: (path: string) => mocks.revalidatePath(path) }));
 vi.mock('next/navigation', () => ({ redirect: (path: string) => mocks.redirect(path) }));
 
@@ -30,9 +35,19 @@ const { createPostAction } = await import('./actions');
 
 const COMMUNITY = '6e1d2d3f-8b52-4d63-8e4b-1f7a2c3d4e51';
 const BODY = { caption: 'Preparei um resumo da aula de hoje.', communityId: COMMUNITY };
+const BODY_NO_COMMUNITY = { caption: 'Preparei um resumo da aula de hoje.' };
+
+/** The buyer's composed permissions: they speak as a member (no `content.publish`). */
+const MEMBER_LANE = { permissions: ['feed.post.create', 'social.participate'] };
+/** The organization's composer: `content.publish` on top, so never the member lane. */
+const STAFF_LANE = {
+  permissions: ['feed.post.create', 'content.publish', 'social.participate'],
+};
 
 beforeEach(() => {
   mocks.createPost.mockReset();
+  mocks.getBootstrap.mockReset();
+  mocks.getBootstrap.mockResolvedValue(MEMBER_LANE);
   mocks.revalidatePath.mockClear();
   mocks.redirect.mockClear();
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -104,5 +119,84 @@ describe('createPostAction - a refused publish (11.1-17, UI-D-893)', () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/inicio');
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/post/POST_NEW');
     expect(mocks.revalidatePath).toHaveBeenCalledWith(`/comunidades/${COMMUNITY}`);
+  });
+});
+
+/**
+ * 11.1-20 (WR-02, D-888, UI-D-893, T-11.1-72, T-11.1-73): the word 'refused' is the MEMBER lane's only
+ * (a publish into a community by a viewer whose composed permissions make the member composer). A 403
+ * anywhere else is the generic answer with its log line, exactly as before Phase 11.1. The lane is read
+ * on the server, lazily, only when a 403 has to be classified.
+ */
+describe('createPostAction - the refused word is the member lane only (11.1-20, WR-02)', () => {
+  const bare403 = () => new ApiClientError(403, 'FORBIDDEN');
+
+  it("W1. a staff composer's bare 403 into a community is generic, logged once, and revalidates nothing", async () => {
+    mocks.getBootstrap.mockResolvedValue(STAFF_LANE);
+    mocks.createPost.mockRejectedValue(bare403());
+
+    const result = await createPostAction(BODY);
+
+    expect(result).toEqual({ ok: false, code: 'generic' });
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(console.error).mock.calls[0]?.[0]).toBe('feed.post.write_failed');
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+
+    // positive control: the same 403 from the member lane flips back to the word.
+    mocks.getBootstrap.mockResolvedValue(MEMBER_LANE);
+    expect(await createPostAction(BODY)).toEqual({ ok: false, code: 'refused' });
+  });
+
+  it('W2. the member lane stays refused: no log line, the community page revalidated', async () => {
+    mocks.createPost.mockRejectedValue(bare403());
+
+    expect(await createPostAction(BODY)).toEqual({ ok: false, code: 'refused' });
+    expect(console.error).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).toHaveBeenCalledTimes(1);
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/comunidades/${COMMUNITY}`);
+  });
+
+  it('W3. a member with no community (the Explorar composer) is generic and logged, as before 11.1', async () => {
+    mocks.createPost.mockRejectedValue(bare403());
+
+    expect(await createPostAction(BODY_NO_COMMUNITY)).toEqual({ ok: false, code: 'generic' });
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+
+    // positive control: the same member with a community in the body is refused.
+    vi.mocked(console.error).mockClear();
+    expect(await createPostAction(BODY)).toEqual({ ok: false, code: 'refused' });
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it('W4. fails safe: a lane read that rejects is generic and logged once', async () => {
+    mocks.getBootstrap.mockRejectedValue(new ApiClientError(500, 'INTERNAL'));
+    mocks.createPost.mockRejectedValue(bare403());
+
+    expect(await createPostAction(BODY)).toEqual({ ok: false, code: 'generic' });
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('W5. the lane is read lazily: an accepted post, a 500 and a 404 never read it; a 403 reads it once', async () => {
+    mocks.createPost.mockResolvedValue({ id: 'POST_NEW' });
+    await createPostAction(BODY);
+    mocks.createPost.mockRejectedValue(new ApiClientError(500, 'INTERNAL'));
+    await createPostAction(BODY);
+    mocks.createPost.mockRejectedValue(new ApiClientError(404, 'NOT_FOUND'));
+    await createPostAction(BODY);
+    expect(mocks.getBootstrap).not.toHaveBeenCalled();
+
+    mocks.createPost.mockRejectedValue(bare403());
+    await createPostAction(BODY);
+    expect(mocks.getBootstrap).toHaveBeenCalledTimes(1);
+  });
+
+  it('W6. a 403 that carries a bootstrap redirect still redirects and reads no lane', async () => {
+    mocks.createPost.mockRejectedValue(new ApiClientError(403, 'TENANT_HOST_MISMATCH'));
+
+    await expect(createPostAction(BODY)).rejects.toThrow('REDIRECT:/participar');
+    expect(mocks.getBootstrap).not.toHaveBeenCalled();
   });
 });

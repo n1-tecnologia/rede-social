@@ -126,8 +126,24 @@ export function isRefusedWrite(error: unknown): boolean {
   return error instanceof ApiClientError && error.status === 403;
 }
 
+/** Resolves the `mapRefused` option: a boolean as is, a predicate awaited, a rejected predicate as false. */
+async function resolveLane(option: boolean | (() => boolean | Promise<boolean>)): Promise<boolean> {
+  if (typeof option === 'boolean') return option;
+  try {
+    return (await option()) === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Runs one post write and maps its outcome.
+ *
+ * `mapRefused` (11.1-17, 11.1-20): the caller that owns the BUYER's lane asks for a bare 403 to be the one
+ * word 'refused'. It is a boolean, or a function returning a boolean or a promise of one, which is awaited
+ * ONLY on the 403 path (after the named-issue and bootstrap-redirect checks), so a caller can read the lane
+ * lazily and an accepted post or any other failure pays nothing. A predicate that rejects counts as false.
+ * The caller owns the lane: a 403 outside it is logged like any other failure.
  *
  * It deliberately does NOT revalidate: which paths a write invalidates is a decision that belongs
  * to the action owning the request — `deletePostAction` already makes it inline — and burying it
@@ -135,7 +151,7 @@ export function isRefusedWrite(error: unknown): boolean {
  */
 export async function attemptPostWrite(
   run: () => Promise<FeedPost>,
-  options: { mapRefused?: boolean } = {},
+  options: { mapRefused?: boolean | (() => boolean | Promise<boolean>) } = {},
 ): Promise<{ result: PostWriteResult; refusal: string | null }> {
   try {
     const post = await run();
@@ -145,11 +161,17 @@ export async function attemptPostWrite(
     if (issue) return { result: { ok: false, code: issue }, refusal: null };
 
     const refusal = error instanceof ApiClientError ? bootstrapRedirectPath(error) : null;
-    // 11.1-17 (UI-D-893, D-888): a bare 403 on a CREATE (the buyer's pinned composer) is the one word
-    // 'refused', read from the status alone and tried AFTER the bootstrap redirects, so a 403 that carries
-    // one of those still redirects. No log line: nothing about the refusal is worth recording, and the
-    // reason (a missing flag, a revoked purchase, a switched-off module) must never reach a screen.
-    if (!refusal && options.mapRefused && isRefusedWrite(error)) {
+    // 11.1-17 (UI-D-893, D-888): a bare 403 on a CREATE from the buyer's lane (the caller decides the lane,
+    // 11.1-20 WR-02) is the one word 'refused', read from the status alone and tried AFTER the bootstrap
+    // redirects, so a 403 that carries one of those still redirects. No log line for it: nothing about the
+    // refusal is worth recording, and the reason (a missing flag, a revoked purchase, a switched-off module)
+    // must never reach a screen. A 403 outside the lane falls through to the generic result and its log line.
+    if (
+      !refusal &&
+      options.mapRefused &&
+      isRefusedWrite(error) &&
+      (await resolveLane(options.mapRefused))
+    ) {
       return { result: { ok: false, code: 'refused' }, refusal: null };
     }
     // Shape only: a caption is member content and never reaches a log line (T-04-05/T-04-40).
