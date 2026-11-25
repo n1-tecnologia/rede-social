@@ -1,6 +1,6 @@
 import type { AccessRefusal, PostAccess } from '@rede-social/contracts/access';
 import type { ReportSubjectType } from '@rede-social/contracts/moderation';
-import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
+import { deniedCommunityIds, LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
 import { SOCIAL_ENABLED, SOCIAL_VISIBLE_AUTHOR_IDS } from '@rede-social/core/db/social-gate';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
@@ -2019,6 +2019,13 @@ function isStoryCommentLikeViolation(error: unknown): boolean {
  * T-08-08) adds the author's live membership to this ONE statement as a `left join`, and nothing at
  * all for everyone else.
  *
+ * 11.1-08 (D-888, D-891): the optional `action` (`'like'` for a like, an unlike and a comment heart, `'comment'` for a
+ * comment or a reply) adds ONE more test, AFTER the locked one and only for a post the lane reads: the post's community in
+ * `app.community_action_denied_ids(action)` is a BARE `403 FORBIDDEN` with no `details`, so a screen that forgot the
+ * `community.actions` fact still cannot write. The fixed order is `community_locked`, then the hidden-post 404 or
+ * `follow_required`, then this bare 403: a request failing two ways answers deterministically, and a foreign or missing
+ * post is a 404, never a 403. `listComments` passes no action, so reading is never reduced (UI-D-890).
+ *
  * The restrictive `feed_likes_community_gate` insert check, `feed_comments_community_gate` and the
  * social gate's inheritance (`feed_posts_social_gate` through the inner `exists` of comments and
  * likes) are the structural backstop for a route that forgot this call, and for a link that commits
@@ -2028,9 +2035,18 @@ async function assertPostInteractive(
   tx: Tx,
   postId: string,
   opts: { canModerate: boolean },
+  action?: 'like' | 'comment',
 ): Promise<void> {
-  const rows = await tx.execute<{ locked: boolean }>(sql`
-    select (p.community_id is not null and p.community_id = any (${LOCKED_COMMUNITY_IDS})) as locked
+  // 11.1-08 (D-888): with an `action`, the SAME statement also answers whether this caller's product grants lack it in the
+  // post's community (`app.community_action_denied_ids`, the list the database gates read: ONE definition). Without an
+  // action the column is a constant false, so reading (`listComments`) is never reduced (UI-D-890).
+  const deniedColumn =
+    action === undefined
+      ? sql`false`
+      : sql`(p.community_id is not null and p.community_id = any (${deniedCommunityIds(action)}))`;
+  const rows = await tx.execute<{ locked: boolean; denied: boolean }>(sql`
+    select (p.community_id is not null and p.community_id = any (${LOCKED_COMMUNITY_IDS})) as locked,
+           ${deniedColumn} as denied
       from feed_posts p
       ${
         opts.canModerate
@@ -2041,6 +2057,10 @@ async function assertPostInteractive(
        and ${memberPostVisible(opts.canModerate, true)}`);
   const row = rows[0];
   if (row?.locked) throw new ApiError(403, 'FORBIDDEN', { access: COMMUNITY_LOCKED });
+  // D-888: AFTER the locked test (a locked member keeps its own code) and only for a post the lane reads (a foreign or
+  // missing one falls through to the 404 below, so the refusal is never an existence oracle). BARE: no `details`, nothing
+  // that names a product, a flag or a community, and the same bytes for a missing flag and a revoked entitlement.
+  if (row?.denied) throw new ApiError(403, 'FORBIDDEN');
   if (row) return;
   const hidden = await tx.execute<{ community_id: string | null }>(sql`
     select app.feed_locked_post_community(${postId}::uuid) as community_id`);
@@ -2091,7 +2111,7 @@ export async function likePost(
   const { likeCount, authorUserId } = await withTenantTx(ctx, async (tx) => {
     // 08.2: 403 community_locked on the sample or a hidden post, 404 on any other miss, before
     // the insert (P58, WR-02).
-    await assertPostInteractive(tx, postId, opts);
+    await assertPostInteractive(tx, postId, opts, 'like');
     // The insert SELECTS the post rather than trusting the path parameter, so a like can only ever
     // name a row this lane can see and that is not soft-deleted.
     await tx.execute(sql`
@@ -2135,7 +2155,7 @@ export async function unlikePost(
   const { likeCount, authorUserId, removed } = await withTenantTx(ctx, async (tx) => {
     // 08.2: refused BEFORE the delete (P58, P59): a like the member placed before the community was
     // locked stays exactly as it was, and the counter does not move.
-    await assertPostInteractive(tx, postId, opts);
+    await assertPostInteractive(tx, postId, opts, 'like');
     const deleted = await tx.execute<{ id: string }>(sql`
       delete from feed_likes
        where user_id = ${ctx.userId}::uuid and post_id = ${postId}::uuid
