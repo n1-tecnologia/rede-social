@@ -116,7 +116,8 @@
         "bodyWithReplies": "Ele e as respostas saem da conversa para todos os membros.",
         "confirm": "Excluir",
         "cancel": "Cancelar"
-      }
+      },
+      "emptyReadOnly": "Nenhum comentário ainda."
     },
     "notFound": {
       "title": "Publicação não encontrada",
@@ -204,6 +205,11 @@
         "tooManyAttachments": "Você pode anexar até {limit} arquivos.",
         "assetNotUsable": "Não foi possível usar uma das mídias. Tente enviá-la de novo.",
         "notFound": "Esta publicação não existe mais."
+      },
+      "member": {
+        "errors": {
+          "communityForbidden": "Você não pode publicar nesta comunidade."
+        }
       }
     }
   }

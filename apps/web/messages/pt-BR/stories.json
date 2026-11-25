@@ -94,7 +94,9 @@
         "drag": "Mover {title}",
         "dragHint": "Use as setas para cima e para baixo para mudar a posição.",
         "moved": "{title} agora está na posição {position} de {total}.",
-        "archivedNote": "Esta comunidade foi arquivada. Você ainda pode remover stories e excluir destaques."
+        "archivedNote": "Esta comunidade foi arquivada. Você ainda pode remover stories e excluir destaques.",
+        "openPill": "Compradores",
+        "openPillPrefix": "Aberto a "
       },
       "empty": {
         "title": "Nenhum destaque ainda",
@@ -118,7 +120,14 @@
         "emptyBody": "Só você vê este destaque. Ele aparece para os membros quando tiver um story.",
         "archivedNote": "Esta comunidade foi arquivada. Não é possível mudar a capa, o nome ou adicionar stories.",
         "saveName": "Salvar nome",
-        "savingName": "Salvando…"
+        "savingName": "Salvando…",
+        "openToBuyers": {
+          "label": "Aberto a compradores",
+          "helper": "Quem comprou um produto com a permissão de postar story pode salvar os próprios stories neste destaque. Todos os membros da comunidade veem os stories salvos. Se você fechar, os stories que já foram salvos continuam aqui até você removê-los.",
+          "socialOff": "Compradores só salvam stories com a Rede social ligada.",
+          "toastOn": "Destaque aberto a compradores.",
+          "toastOff": "Destaque fechado a compradores."
+        }
       },
       "cover": {
         "title": "Escolher capa",

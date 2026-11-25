@@ -233,7 +233,19 @@
         "change": "Alterar comunidades",
         "remove": "Remover {community}",
         "none": "Nenhuma comunidade. A compra fica registrada e a entrega acontece fora do app.",
-        "helper": "Quem tiver este produto vê estas comunidades por completo. Para os demais, elas ficam exclusivas."
+        "helper": "Quem tiver este produto vê estas comunidades por completo. Para os demais, elas ficam exclusivas.",
+        "permissions": {
+          "legend": "Quem comprar pode:",
+          "legendCommunity": " em {community}",
+          "like": "Curtir",
+          "comment": "Comentar",
+          "share": "Compartilhar",
+          "post": "Postar na comunidade",
+          "story": "Postar story",
+          "helper": "As permissões valem para quem já tem o produto e mudam assim que você salvar. Quem tiver mais de um produto da mesma comunidade soma as permissões.",
+          "socialOff": "Postar na comunidade e Postar story só funcionam com a Rede social ligada.",
+          "noOpenHighlight": "Nenhum destaque desta comunidade está aberto a compradores. Abra um na tela de destaques da comunidade para o story funcionar."
+        }
       },
       "picker": {
         "title": "Comunidades liberadas",
