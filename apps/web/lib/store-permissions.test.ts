@@ -7,8 +7,11 @@ import { describe, expect, it } from 'vitest';
 import {
   type BuyerPermissions,
   defaultPermissions,
+  linksChanged,
   originalLinks,
   PERMISSION_ORDER,
+  showNoOpenHighlightNote,
+  showSocialOffNote,
   toProductLinksBody,
 } from '@/lib/store-permissions';
 
@@ -127,5 +130,64 @@ describe('originalLinks', () => {
       story: false,
     });
     expect(originalLinks([A], undefined).get(A)).toEqual(defaultPermissions());
+  });
+});
+
+describe('linksChanged (UI-D-884, A-UI-4)', () => {
+  const original = new Map([
+    [A, defaultPermissions()],
+    [B, { ...defaultPermissions(), post: true }],
+  ]);
+
+  it('is false when the id set and every flag are what is stored (order does not matter)', () => {
+    expect(linksChanged([link(A), link(B, { post: true })], original)).toBe(false);
+    expect(linksChanged([link(B, { post: true }), link(A)], original)).toBe(false);
+  });
+
+  it('is true when the id set changes: a community added or removed', () => {
+    expect(linksChanged([link(A)], original)).toBe(true);
+    const C = '33333333-3333-4333-8333-333333333333';
+    expect(linksChanged([link(A), link(B, { post: true }), link(C)], original)).toBe(true);
+  });
+
+  it('is true for a flags-only change on an existing link', () => {
+    expect(linksChanged([link(A, { like: false }), link(B, { post: true })], original)).toBe(true);
+  });
+
+  it('a removed and re-chosen community starts from the defaults (A-UI-6)', () => {
+    // B was stored with post on; choosing it again at the defaults is a flags change.
+    expect(linksChanged([link(A), link(B)], original)).toBe(true);
+  });
+
+  it('an empty selection against an empty original is no change', () => {
+    expect(linksChanged([], new Map())).toBe(false);
+  });
+});
+
+describe('showSocialOffNote (UI-D-884 (2), A-UI-3)', () => {
+  it('is true only with social off and at least one community chosen', () => {
+    expect(showSocialOffNote({ socialOn: false, communityCount: 1 })).toBe(true);
+    expect(showSocialOffNote({ socialOn: false, communityCount: 5 })).toBe(true);
+    expect(showSocialOffNote({ socialOn: false, communityCount: 0 })).toBe(false);
+    expect(showSocialOffNote({ socialOn: true, communityCount: 3 })).toBe(false);
+  });
+});
+
+describe('showNoOpenHighlightNote (UI-D-884 (3), A-UI-5)', () => {
+  it('is true only with story ticked and a known zero', () => {
+    expect(showNoOpenHighlightNote({ story: true, openHighlights: 0 })).toBe(true);
+  });
+
+  it('is false for an absent, null or failed count and for one or more', () => {
+    expect(showNoOpenHighlightNote({ story: true, openHighlights: undefined })).toBe(false);
+    expect(showNoOpenHighlightNote({ story: true, openHighlights: null })).toBe(false);
+    expect(showNoOpenHighlightNote({ story: true, openHighlights: Number.NaN })).toBe(false);
+    expect(showNoOpenHighlightNote({ story: true, openHighlights: -1 })).toBe(false);
+    expect(showNoOpenHighlightNote({ story: true, openHighlights: 1 })).toBe(false);
+    expect(showNoOpenHighlightNote({ story: true, openHighlights: 7 })).toBe(false);
+  });
+
+  it('is false without story ticked, whatever the count', () => {
+    expect(showNoOpenHighlightNote({ story: false, openHighlights: 0 })).toBe(false);
   });
 });

@@ -505,3 +505,38 @@ export function commentView(
     ...(comment.canBlock === true ? { canBlock: true } : {}),
   };
 }
+
+/**
+ * 11.1-10 (UI-D-888, UI-D-889, A-UI-11, BPERM-21): the controls of one post card as FINISHED FACTS.
+ * `post.community.actions` is the viewer's own `like`, `comment` and `share` in the post's community,
+ * emitted only when one of the three is false. ABSENT reads as all true: an API older than the web, a
+ * post with no community and a post in a member community (which carries no `actions`) all keep
+ * today's behaviour, the server refusing the write whatever the screen shows. `showRow` is false only
+ * when all three are false (the shipped row-less meta); `commentCountOpensList` keeps the comment
+ * count the button that opens the read-only list when comments exist and the row is absent. It reads
+ * no role and no product.
+ */
+export type PostActionsView = {
+  like: boolean;
+  comment: boolean;
+  share: boolean;
+  showRow: boolean;
+  commentCountOpensList: boolean;
+};
+
+export function postActionsView(
+  post: Pick<FeedPost, 'community' | 'commentCount'>,
+): PostActionsView {
+  const actions = post.community?.actions;
+  const like = actions?.like ?? true;
+  const comment = actions?.comment ?? true;
+  const share = actions?.share ?? true;
+  const showRow = like || comment || share;
+  return {
+    like,
+    comment,
+    share,
+    showRow,
+    commentCountOpensList: !showRow && post.commentCount > 0,
+  };
+}

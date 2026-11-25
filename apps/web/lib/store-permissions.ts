@@ -105,3 +105,42 @@ export function toProductLinksBody(
   if (!wouldChange) return { communityIds: selected.map((entry) => entry.communityId) };
   return { communityLinks: selected.map(linkOf) };
 }
+
+/**
+ * True when the selection differs from what the product stores: a community added or removed, or any
+ * flag of a kept link changed (UI-D-884 (4), A-UI-4). A flags-only change IS a change and opens no
+ * lock preview, which runs only for ADDED communities; this fact says only "there is something to
+ * save". A community removed and chosen again is a NEW selection that starts from the defaults
+ * (A-UI-6), so against a stored non-default link it reads as changed.
+ */
+export function linksChanged(
+  selected: readonly PermissionLink[],
+  original: ReadonlyMap<string, BuyerPermissions>,
+): boolean {
+  if (selected.length !== original.size) return true;
+  return selected.some((entry) => {
+    const stored = original.get(entry.communityId);
+    return stored === undefined || !sameFlags(entry, stored);
+  });
+}
+
+/**
+ * The `social`-off helper line of UI-D-884 (2): shown ONCE per form (not once per community) when the
+ * tenant's `social` module is off and at least one community is chosen. The two post boxes stay drawn
+ * and keep their stored values either way (A-UI-3); `socialOn` is data from the bootstrap, never a role.
+ */
+export function showSocialOffNote(input: { socialOn: boolean; communityCount: number }): boolean {
+  return !input.socialOn && input.communityCount > 0;
+}
+
+/**
+ * The no-open-highlight helper line of UI-D-884 (3), plain text under one community's group: only
+ * while "Postar story" is ticked AND the count of open highlights is a known zero. An absent, null,
+ * failed (NaN or negative) or non-zero count shows nothing (A-UI-5).
+ */
+export function showNoOpenHighlightNote(input: {
+  story: boolean;
+  openHighlights: number | null | undefined;
+}): boolean {
+  return input.story && input.openHighlights === 0;
+}

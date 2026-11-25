@@ -9,6 +9,7 @@ import {
   commentView,
   composerEntryFor,
   isMemberComposer,
+  postActionsView,
   postAdminLabel,
   postCardBase,
   postCardView,
@@ -361,5 +362,72 @@ describe('postCardView — the author’s Instagram line (2026-10-09)', () => {
     expect('handle' in postCardView(post(), NOW, tf, null, SP, null, null, forged).author).toBe(
       false,
     );
+  });
+});
+
+/**
+ * 11.1-10 (UI-D-888, UI-D-889, A-UI-11, BPERM-21): `postActionsView` maps the finished per-post fact
+ * `post.community.actions` to the controls a card draws. Absent reads as all true (an API older than
+ * the web, a post with no community, a member community), the row closes only when all three are
+ * false, and the comment count stays the button that opens the read-only list.
+ */
+describe('postActionsView (11.1-10)', () => {
+  const community = (actions?: { like: boolean; comment: boolean; share: boolean }) => ({
+    id: '33333333-3333-4333-8333-333333333333',
+    name: 'Turma',
+    slug: 'turma',
+    ...(actions === undefined ? {} : { actions }),
+  });
+  const cases: Array<[boolean, boolean, boolean]> = [];
+  for (const like of [true, false])
+    for (const comment of [true, false])
+      for (const share of [true, false]) cases.push([like, comment, share]);
+
+  it.each(cases)(
+    'like=%s comment=%s share=%s: the row is absent only for all three false',
+    (like, comment, share) => {
+      const view = postActionsView({
+        community: community({ like, comment, share }),
+        commentCount: 4,
+      });
+      expect(view).toEqual({
+        like,
+        comment,
+        share,
+        showRow: like || comment || share,
+        commentCountOpensList: !(like || comment || share),
+      });
+    },
+  );
+
+  it('absent actions, a post with no community and a member community all read as all true', () => {
+    for (const post of [
+      { community: community(), commentCount: 3 },
+      { community: null, commentCount: 3 },
+    ]) {
+      expect(postActionsView(post)).toEqual({
+        like: true,
+        comment: true,
+        share: true,
+        showRow: true,
+        commentCountOpensList: false,
+      });
+    }
+  });
+
+  it('the comment count opens the list only when comments exist and the row is absent', () => {
+    const none = { like: false, comment: false, share: false };
+    expect(
+      postActionsView({ community: community(none), commentCount: 0 }).commentCountOpensList,
+    ).toBe(false);
+    expect(
+      postActionsView({ community: community(none), commentCount: 1 }).commentCountOpensList,
+    ).toBe(true);
+    expect(
+      postActionsView({
+        community: community({ like: true, comment: false, share: false }),
+        commentCount: 9,
+      }).commentCountOpensList,
+    ).toBe(false);
   });
 });
