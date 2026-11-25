@@ -166,7 +166,8 @@
         "moderation.spec.ts",
         "phase8-smoke.spec.ts",
         "csp.spec.ts",
-        "safety.spec.ts"
+        "safety.spec.ts",
+        "buyer-permissions-admin.spec.ts"
       ]
     },
     {
@@ -181,7 +182,8 @@
         "moderation.spec.ts",
         "phase8-smoke.spec.ts",
         "csp.spec.ts",
-        "platform-wizard.spec.ts"
+        "platform-wizard.spec.ts",
+        "buyer-permissions-admin.spec.ts"
       ]
     },
     {
@@ -205,7 +207,8 @@
         "feed-composer.spec.ts",
         "store.spec.ts",
         "profile.spec.ts",
-        "safety.spec.ts"
+        "safety.spec.ts",
+        "buyer-permissions-admin.spec.ts"
       ]
     },
     {
@@ -731,7 +734,13 @@
         "apps/web/app/(app)/cursos/{ScreenHeader,MemberSection,MemberEmptyCard,FilterMenu,admin-styles}*",
         "packages/modules/courses/ui/member/recipes.ts"
       ],
-      "specs": ["store.spec.ts", "shell.spec.ts", "profile.spec.ts", "courses-admin.spec.ts"]
+      "specs": [
+        "store.spec.ts",
+        "shell.spec.ts",
+        "profile.spec.ts",
+        "courses-admin.spec.ts",
+        "buyer-permissions-admin.spec.ts"
+      ]
     },
     {
       "id": "payments-web",
