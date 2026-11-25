@@ -417,6 +417,7 @@ export function StoryComposer({
       title_invalid: t('publish.errors.titleInvalid', { limit: STORY_HIGHLIGHT_MAX_TITLE }),
       full: t('highlights.errors.full', { limit: STORY_HIGHLIGHT_MAX_ITEMS }),
       order_stale: t('publish.errors.failed'),
+      open_unavailable: t('publish.errors.failed'),
       not_found: t('publish.errors.failed'),
       forbidden: t('publish.errors.failed'),
       generic: t('publish.errors.failed'),

@@ -248,8 +248,9 @@ async function toggleHighlightMembership(
 export type HighlightPlace = { communityId: string | null };
 
 /**
- * The closed answer of a curation write. `archived`, `title_invalid`, `order_stale` and `full` are
- * the API's `details.highlight` vocabulary, each with its own copy; everything else — the bare 404
+ * The closed answer of a curation write. `archived`, `title_invalid`, `order_stale`, `full` and
+ * `open_unavailable` (11.1, the open-to-buyers switch refused; shown as the generic copy until the
+ * curation screen gives it its own) are the API's `details.highlight` vocabulary; everything else — the bare 404
  * (unknown, another tenant's, a cover asset not `ready` yet), a 403, a transport failure — is
  * `generic`, and the admin retries.
  */
@@ -258,6 +259,7 @@ export type HighlightCurationCode =
   | 'title_invalid'
   | 'order_stale'
   | 'full'
+  | 'open_unavailable'
   | 'generic';
 
 export type HighlightCurationResult<T extends object = object> =
