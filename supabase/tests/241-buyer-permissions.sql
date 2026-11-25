@@ -32,7 +32,7 @@ begin;
 --
 -- Fixture ids use the `24100000-…` prefix and the tenants `pgtap-bperm-a` / `pgtap-bperm-b`. Like its siblings, this
 -- file ROLLS BACK.
-select plan(80);
+select plan(97);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-bperm-a', 'Permissoes A', '24100000-0000-4000-8000-000000000001');
@@ -502,6 +502,122 @@ select lives_ok(
   $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
      values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000006', 'uniao', 'community', '24100000-0000-4000-8000-0000000000c2') $$,
   '8: D-886: the holder of P2 (post off) and P3 (post on) publishes into CA2: the union grants post');
+reset role;
+
+-- ── fixture for sections 9 to 13 (as the migration role) ────────────────────────────────────────
+-- U9 (…09) holds P7 and P8. CL7 (c7): organization, linked to P7 with like and comment OFF. CL8 (c8): organization, linked to
+-- P8 with like and comment ON. Posts: PL7 in CL7, PL8 in CL8, PL3 in CA3 (c3, no link), PLN with no community. Comments: one
+-- on each of PL7 and PL8 and PLN, plus a STORY comment (no post).
+select tests.auth_user('u9@bperm-a.local', '24100000-0000-4000-8000-000000000009');
+select tests.member('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009');
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, kind, position) values
+  ('24100000-0000-4000-8000-0000000000c7', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'Sem curtir', 'sem-curtir', 'organization', 5),
+  ('24100000-0000-4000-8000-0000000000c8', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'Com curtir', 'com-curtir', 'organization', 6);
+insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents, status) values
+  ('24100000-0000-4000-8000-0000000000a7', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'P7', 100, 'active'),
+  ('24100000-0000-4000-8000-0000000000a8', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'P8', 100, 'active');
+insert into public.store_product_communities (tenant_id, product_id, community_id, can_like, can_comment, can_share, can_post, can_story) values
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000a7', '24100000-0000-4000-8000-0000000000c7', false, false, true, false, false),
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000a8', '24100000-0000-4000-8000-0000000000c8', true, true, true, false, false);
+insert into public.store_entitlements (id, tenant_id, user_id, product_id, source, granted_by_user_id) values
+  ('24100000-0000-4000-8000-0000000000e9', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', '24100000-0000-4000-8000-0000000000a7', 'grant', '24100000-0000-4000-8000-000000000002'),
+  ('24100000-0000-4000-8000-0000000000ea', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', '24100000-0000-4000-8000-0000000000a8', 'grant', '24100000-0000-4000-8000-000000000002');
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility, community_id) values
+  ('24100000-0000-4000-8000-000000000b71', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'pl7', 'tenant', '24100000-0000-4000-8000-0000000000c7'),
+  ('24100000-0000-4000-8000-000000000b72', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'pl8', 'tenant', '24100000-0000-4000-8000-0000000000c8'),
+  ('24100000-0000-4000-8000-000000000b73', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'pl3', 'tenant', '24100000-0000-4000-8000-0000000000c3'),
+  ('24100000-0000-4000-8000-000000000b74', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'pln', 'tenant', null);
+insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body) values
+  ('24100000-0000-4000-8000-000000000d71', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b71', '24100000-0000-4000-8000-000000000002', 'c7'),
+  ('24100000-0000-4000-8000-000000000d72', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b72', '24100000-0000-4000-8000-000000000002', 'c8'),
+  ('24100000-0000-4000-8000-000000000d73', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b74', '24100000-0000-4000-8000-000000000002', 'cn');
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, variant_widths) values
+  ('24100000-0000-4000-8000-000000000aa1', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}');
+insert into public.stories (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, published_at, expires_at) values
+  ('24100000-0000-4000-8000-000000000ab1', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002',
+   '24100000-0000-4000-8000-000000000aa1', 'image', 'historia', now() - interval '1 hour', now() + interval '23 hours');
+insert into public.feed_comments (id, tenant_id, story_id, author_user_id, body) values
+  ('24100000-0000-4000-8000-000000000d74', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000ab1', '24100000-0000-4000-8000-000000000002', 'comentario da historia');
+
+-- ── 9. the like gate (11.1-03, D-888, D-891, D-892; BPERM-06) ───────────────────────────────────
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', '24100000-0000-4000-8000-000000000b71') $$,
+  '42501', null, '9: BPERM-06: a buyer whose union lacks like is refused a like on a post of that community (42501)');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', '24100000-0000-4000-8000-000000000b71') $$,
+  '42501', null, '9: …and the refusal repeats identically (idempotent)');
+select is((select count(*)::int from public.feed_likes where post_id = '24100000-0000-4000-8000-000000000b71'), 0,
+  '9: …and leaves no row');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', '24100000-0000-4000-8000-000000000b72') $$,
+  '9: the same buyer likes a post of the community whose product holds like (positive control)');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', '24100000-0000-4000-8000-000000000b74') $$,
+  '9: …and a post with no community (positive control)');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', '24100000-0000-4000-8000-000000000d71', 'post') $$,
+  '42501', null, '9: D-891: the heart on a comment of that community follows like and is refused (42501)');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', '24100000-0000-4000-8000-000000000d72', 'post') $$,
+  '9: …and the heart on a comment of the community that holds like passes (positive control)');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', '24100000-0000-4000-8000-000000000d74', 'post') $$,
+  '23503', null, '9: Pitfall 1: a heart on a STORY comment passes the policy and reaches the foreign key (23503), never a 42501');
+reset role;
+-- the member with no entitlement: locked in CL7 (linked, not held), refused through the locked term; CA3 has no link
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005', '24100000-0000-4000-8000-000000000b71') $$,
+  '42501', null, '9: a locked member is still refused (the locked term survives the rewrite)');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005', '24100000-0000-4000-8000-000000000b73') $$,
+  '9: D-892: a like on a post of an organization community with NO linked product passes (never denied)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', '24100000-0000-4000-8000-000000000b71') $$,
+  '9: D-892: staff by claim like a post of the same community (the denied set is empty for them)');
+reset role;
+select ok((select with_check like '%community_locked_ids%' and with_check like '%community_action_denied_ids%' and lower(with_check) like '%left join%'
+             from pg_policies where schemaname = 'public' and tablename = 'feed_likes' and policyname = 'feed_likes_community_gate'),
+  '9: the policy carries the locked term, the denied term and the left join of the comment branch');
+-- BPERM-25: another tenant's lane never reaches tenant A's post, and the gates leak nothing
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000000b72') $$,
+  '42501', null, '9: BPERM-25: the buyer under tenant B''s claim is refused a like on tenant A''s post (42501)');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000004', '24100000-0000-4000-8000-000000000b72') $$,
+  '42501', null, '9: …and so is a row stamped with tenant A');
+reset role;
+-- the flag flips: a like passes once the flag is on; deleting a like the buyer already gave is never gated
+update public.store_product_communities set can_like = true where product_id = '24100000-0000-4000-8000-0000000000a7';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', '24100000-0000-4000-8000-000000000b71') $$,
+  '9: with the flag turned on the same like passes');
+reset role;
+update public.store_product_communities set can_like = false where product_id = '24100000-0000-4000-8000-0000000000a7';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009');
+select lives_ok(
+  $$ delete from public.feed_likes where user_id = '24100000-0000-4000-8000-000000000009' and post_id = '24100000-0000-4000-8000-000000000b71' $$,
+  '9: BPERM-06: deleting a like is not an insert, the gate does not touch it (the service guard owns it)');
+select is((select count(*)::int from public.feed_likes where user_id = '24100000-0000-4000-8000-000000000009' and post_id = '24100000-0000-4000-8000-000000000b71'), 0,
+  '9: …and the like is gone');
 reset role;
 
 select * from finish();

@@ -1,4 +1,4 @@
-import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
+import { deniedCommunityIds, LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
 import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
 import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import {
@@ -29,6 +29,13 @@ import { authenticatedRole } from 'drizzle-orm/supabase';
  * `*_feed_community_sample.sql`). The coalesce wrapper keeps it an InitPlan (RESEARCH Pitfall 1).
  */
 export const SAMPLE_POST_IDS = sql`coalesce((select app.feed_sample_post_ids()), '{}'::uuid[])`;
+
+/**
+ * 11.1-03 (D-888, D-891, D-892): the communities where the caller's product grants lack `like` / `comment` (the
+ * scope definition of 11.1-02, `app.community_action_denied_ids`). Built once per action, an InitPlan like the
+ * locked ids: `community_id <> all (${DENIED_LIKE_COMMUNITY_IDS})`.
+ */
+const DENIED_LIKE_COMMUNITY_IDS = deniedCommunityIds('like');
 
 /**
  * 09.3-06 (D-555): the ids of this tenant's SOFT-DELETED communities (`app.community_deleted_ids()`, a
@@ -799,6 +806,16 @@ export const feedLikes = pgTable(
     // this is the structural backstop, so a like that passed the guard just before a link committed
     // still raises 42501. Story likes (`post_id` and `comment_id` null) pass both branches. Existing
     // likes are untouched (no update/delete restriction, P59).
+    //
+    // 11.1-03 (D-888, D-891, D-892; BPERM-06): the DENIED term. A buyer whose union of product grants lacks
+    // `like` in the post's community is refused 42501 too: `p.community_id <> all (DENIED_LIKE)`, beside the
+    // locked term (locked answers first in the service; a locked community is also in the denied set, which is
+    // consistent and harmless). The heart on a comment is a row of this same table, so it follows the SAME
+    // flag: the comment branch reaches the post through a LEFT join, so a STORY comment (no post) has
+    // `p.community_id is null` and passes the policy, then reaches the foreign key exactly as before (the
+    // 400 `story_comment_not_likeable` stays a 400, never a 500). A community with no linked product is never
+    // in the denied set; staff by claim get the empty set. Deleting a like is not an insert: this gate never
+    // touches it (the service guard of plan 08 owns the buyer who lost `like`).
     pgPolicy('feed_likes_community_gate', {
       as: 'restrictive',
       for: 'insert',
@@ -806,9 +823,16 @@ export const feedLikes = pgTable(
       withCheck: sql`(post_id is null or exists (
           select 1 from public.feed_posts p
            where p.id = feed_likes.post_id
-             and (p.community_id is null or p.community_id <> all (${LOCKED_COMMUNITY_IDS}))))
+             and (p.community_id is null
+                  or (p.community_id <> all (${LOCKED_COMMUNITY_IDS})
+                      and p.community_id <> all (${DENIED_LIKE_COMMUNITY_IDS})))))
         and (comment_id is null or exists (
-          select 1 from public.feed_comments c where c.id = feed_likes.comment_id))`,
+          select 1 from public.feed_comments c
+            left join public.feed_posts p on p.id = c.post_id
+           where c.id = feed_likes.comment_id
+             and (p.community_id is null
+                  or (p.community_id <> all (${LOCKED_COMMUNITY_IDS})
+                      and p.community_id <> all (${DENIED_LIKE_COMMUNITY_IDS})))))`,
     }),
     // 10-04 (D-705, MSTORY-04; T-10-09): the STORY gate on likes, the twin of `feed_comments_story_gate`
     // above (same reason, same inner `exists` under the caller's RLS, so a member story's audience is the

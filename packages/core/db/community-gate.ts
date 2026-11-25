@@ -41,7 +41,9 @@ export const LOCKED_COMMUNITY_IDS: SQL = sql`coalesce((select app.community_lock
  * `community_id <> all (${deniedCommunityIds('like')})`, evaluated once per statement as an InitPlan.
  */
 export const deniedCommunityIds = (action: 'like' | 'comment'): SQL =>
-  sql`coalesce((select app.community_action_denied_ids(${action})), '{}'::uuid[])`;
+  // The action is INLINED as a literal (`sql.raw`, a closed two-name union): a policy is DDL and cannot carry a
+  // bind parameter, so `${action}` would be emitted as `$1` and the migration would not apply.
+  sql`coalesce((select app.community_action_denied_ids('${sql.raw(action)}')), '{}'::uuid[])`;
 
 /** The explicit-user form, for lanes whose claims are not the viewer (the notifications worker). */
 export const lockedCommunityIdsFor = (userId: string): SQL =>
