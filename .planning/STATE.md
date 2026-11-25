@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 current_phase: "11.1"
 current_phase_name: Permissões do comprador por produto numa comunidade
 current_plan: 20
-status: verifying
-stopped_at: Completed 11.1-20-PLAN.md
-last_updated: "2026-11-25T19:15:45.913Z"
+status: human_needed
+stopped_at: Gap closure 11.1-19 and 11.1-20 executed, re-verification human_needed 6/7 (fbb76d1c); UAT file written; phase not closed
+last_updated: "2026-11-25T19:55:00.000Z"
 last_activity: 2026-11-25
-last_activity_desc: Phase 11.1 execution started
+last_activity_desc: Gap closure executed (WR-01 share menu, WR-02 refused lane, BPERM-28..30 rows pending), gate 41/41, re-verified human_needed; waiting on the owner's ledger P1..P34 and the IN-01 decision
 state_head: 1c0f65d6acaf02e5e25aadae2f1be800f537946f
 progress:
   total_phases: 36
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 11.1 (Permissões do comprador por produto numa comunidade) — EXECUTING GAP CLOSURE (plans 19 and 20)
+Phase: 11.1 (Permissões do comprador por produto numa comunidade) — ALL 20 PLANS EXECUTED, RE-VERIFIED human_needed (6/7), NOT CLOSED
 Current Plan: 20
 Total Plans in Phase: 20
-Plan: 20 of 20 (18 executed earlier; 19 and 20 are the gap_closure plans)
-Status: Phase complete — ready for verification
-Last activity: 2026-11-25 — Phase 11.1 gap-closure execution started (--gaps-only)
+Plan: 20 of 20 (18 + gap closure 19 and 20)
+Status: Human verification needed: 11.1-UAT.md holds 7 pending items (sketch 026 confirmation, phone walk 320/390 px, real refund, VoiceOver/TalkBack, two Playwright specs, hosted release P1..P34, IN-01 unlike decision); nothing pushed
+Last activity: 2026-11-25 — Gap closure executed and re-verified (human_needed 6/7, no gaps remaining); a closure word from Igor or `/gsd-verify-work 11.1` is the next step
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
