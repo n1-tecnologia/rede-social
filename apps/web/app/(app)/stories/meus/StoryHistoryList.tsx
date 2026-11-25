@@ -68,7 +68,8 @@ export interface StoryHistoryListProps {
   publishHref: string;
   /**
    * 10-12 (UI-D-705): the member's "Seus stories". Absent: the administrator's list, unchanged.
-   * `canHighlight` is whether the member owns an active community: "Destacar" is offered only then.
+   * `canHighlight` is whether the member may save a story into a highlight (they own an active
+   * community, or the administrator opened one for them, 11.1-16): "Destacar" is offered only then.
    */
   member?: { canHighlight: boolean };
 }
@@ -85,6 +86,18 @@ type HighlightSheetState = {
   /** 10-12: where a member's empty sheet sends "Criar destaque" (their most recently active community). */
   createHref: string | null;
 };
+
+/**
+ * 11.1-16: whether a member's sheet read has somewhere to save into: a group to switch, or a community
+ * of their own to create a highlight in. Only the server's own facts (the places and the owner's
+ * `createHref`), no role and no id.
+ */
+function memberHasDestination(result: {
+  places: readonly unknown[];
+  createHref?: string;
+}): boolean {
+  return result.places.length > 0 || result.createHref !== undefined;
+}
 
 /** Six rows at the REAL 48×64 thumbnail geometry, so nothing jumps when content replaces them. */
 const SKELETON_ROWS = [0, 1, 2, 3, 4, 5];
@@ -127,6 +140,12 @@ export function StoryHistoryList({
   const [sheet, setSheet] = useState<HighlightSheetState | null>(null);
   /** A second "Destacar" while a read is in flight is a no-op. */
   const sheetReading = useRef(false);
+  /**
+   * 11.1-16 (UI-D-891 c, UI-D-893): a member's read that found nothing to save into (no highlight left
+   * open, no community of their own) removes the "Destacar" entry for the rest of the visit, exactly
+   * as a re-render with the fact false would; it is never explained.
+   */
+  const [doorGone, setDoorGone] = useState(false);
 
   const loadMore = useCallback(() => {
     if (!cursor) return;
@@ -161,7 +180,11 @@ export function StoryHistoryList({
       let opened = false;
       try {
         const result = await loadHighlightSheetAction(story.id);
-        if (result.ok) {
+        if (result.ok && member && !memberHasDestination(result)) {
+          // A highlight the administrator closed since the page rendered: no sheet is ever drawn empty
+          // for a member who cannot create one (no "Criar destaque" for a buyer).
+          setDoorGone(true);
+        } else if (result.ok) {
           setSheet({
             storyId: story.id,
             places: result.places,
@@ -180,8 +203,39 @@ export function StoryHistoryList({
       // than the toast, because the admin would act on it (UI E12 error).
       if (!opened) failToast();
     },
-    [failToast],
+    [failToast, member],
   );
+
+  /**
+   * 11.1-16 (UI-D-891 g, UI-D-893): after a member's refused write the screen is never the guard, so it
+   * reads the sheet again: a highlight that is no longer open leaves the list, and with nothing left to
+   * save into the sheet closes and the entry goes. The switch already reverted in the machine; the new
+   * `selectedIds` identity re-seeds every switch from what the server holds. A failed read keeps what
+   * is on screen (the toast already said so).
+   */
+  const rereadSheet = useCallback(async (storyId: string) => {
+    try {
+      const result = await loadHighlightSheetAction(storyId);
+      if (!result.ok) return;
+      if (!memberHasDestination(result)) {
+        setSheet((current) => (current ? { ...current, open: false } : current));
+        setDoorGone(true);
+        return;
+      }
+      setSheet((current) =>
+        current && current.storyId === storyId
+          ? {
+              ...current,
+              places: result.places,
+              selectedIds: result.selectedIds,
+              createHref: result.createHref ?? null,
+            }
+          : current,
+      );
+    } catch {
+      // The same answer as `{ ok: false }`: keep the sheet as it is.
+    }
+  }, []);
 
   // Stable by habit: `BottomSheet`'s focus trap reads `onClose` through a ref and arms once per
   // opening, so a new identity would no longer move the focus.
@@ -242,10 +296,13 @@ export function StoryHistoryList({
               ? t('highlights.errors.full', { limit: STORY_HIGHLIGHT_MAX_ITEMS })
               : t('highlights.errors.generic'),
       });
+      // A member's refusal other than a full highlight is the answer to a door that closed meanwhile:
+      // read the destinations again so it is gone (11.1-16). The branch is on "refused" only.
+      if (member && result.code !== 'full') void rereadSheet(sheetStoryId);
       // `false` is what makes the sheet's machine REVERT the switch; the row's count is untouched.
       return false;
     },
-    [sheetStoryId, applyHighlightCount, toast, t],
+    [sheetStoryId, applyHighlightCount, toast, t, member, rereadSheet],
   );
 
   const confirmDelete = useCallback(async () => {
@@ -362,7 +419,7 @@ export function StoryHistoryList({
       >
         <div className="flex flex-col gap-1">
           {/* A member is offered "Destacar" only with a community of their own (UI-D-705). */}
-          {member && !member.canHighlight ? null : (
+          {member && (!member.canHighlight || doorGone) ? null : (
             <StoryMenuRow
               icon={Bookmark}
               label={t('history.menu.highlight')}

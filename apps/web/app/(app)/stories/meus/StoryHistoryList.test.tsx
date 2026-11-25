@@ -234,3 +234,196 @@ describe('StoryHistoryList — a member’s "Seus stories" (10-12, UI-D-705)', (
     );
   });
 });
+
+/**
+ * 11.1-16 (UI-D-891 c, e, g, D-885): the buyer's checklist. A buyer is a member with no community of
+ * their own, so the read carries no `createHref`. They see the open highlights only, switch their own
+ * story off with no confirmation, are asked once before the first switch-on, are never offered an
+ * empty sheet or a "Criar destaque", and a refused write reverts with the generic toast and re-reads
+ * the catalogue so the row (or the whole door) disappears.
+ */
+describe('StoryHistoryList — the buyer’s checklist (11.1-16, UI-D-891)', () => {
+  const HIGHLIGHT_2 = '0000000a-1111-4111-8111-000000000002';
+  /** `history.errors.generic`: a sheet that could not open. */
+  const GENERIC = 'Algo deu errado. Tente novamente.';
+  /** `highlights.errors.generic`: the shipped toast of a refused switch. */
+  const REFUSED = 'Não foi possível salvar. Tente novamente.';
+
+  const place = (rows: { id: string; title: string }[]) => ({
+    key: COMMUNITY,
+    label: 'Comunidade aberta',
+    communityId: COMMUNITY,
+    rows: rows.map((entry) => ({ ...entry, cover: null })),
+    canCreate: false,
+  });
+
+  async function openChecklist() {
+    const menu = await openMenu();
+    await act(async () => {
+      fireEvent.click(within(menu).getByRole('button', { name: 'Destacar' }));
+    });
+    return screen.findByRole('dialog', { name: 'Destacar story' });
+  }
+
+  it('Y1. removing one’s own story from an open highlight is the switch turned off: one write, no confirmation', async () => {
+    loadSheet.mockResolvedValue({
+      ok: true,
+      places: [place([{ id: HIGHLIGHT, title: 'Aberto' }])],
+      selectedIds: [HIGHLIGHT],
+    });
+    list({ member: { canHighlight: true } });
+    const sheet = await openChecklist();
+    const toggle = within(sheet).getByRole('switch', {
+      name: 'Destacar em Aberto, Comunidade aberta',
+    });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    await waitFor(() =>
+      expect(removeFromHighlight).toHaveBeenCalledWith(STORY, HIGHLIGHT, {
+        communityId: COMMUNITY,
+        revalidate: true,
+      }),
+    );
+    expect(screen.queryByRole('dialog', { name: 'Mostrar este story na comunidade?' })).toBeNull();
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('Y2. a highlight the administrator closed after the save is not a row: one switch only, and the screen removes nothing', async () => {
+    const CLOSED = '0000000a-1111-4111-8111-0000000000cc';
+    loadSheet.mockResolvedValue({
+      ok: true,
+      places: [place([{ id: HIGHLIGHT, title: 'Aberto' }])],
+      selectedIds: [HIGHLIGHT, CLOSED],
+    });
+    list({ member: { canHighlight: true } });
+    const sheet = await openChecklist();
+    expect(within(sheet).getAllByRole('switch')).toHaveLength(1);
+    expect(removeFromHighlight).not.toHaveBeenCalled();
+  });
+
+  it('Y3. the first switch-on asks "Mostrar este story na comunidade?" once, the notice sits above the group, and there is no create row or "Criar destaque"', async () => {
+    loadSheet.mockResolvedValue({
+      ok: true,
+      places: [
+        place([
+          { id: HIGHLIGHT, title: 'Aberto' },
+          { id: HIGHLIGHT_2, title: 'Outro' },
+        ]),
+      ],
+      selectedIds: [],
+    });
+    list({ member: { canHighlight: true } });
+    const sheet = await openChecklist();
+    expect(
+      within(sheet).getByText('Todos os membros verão este story na comunidade.'),
+    ).toBeTruthy();
+    expect(within(sheet).queryByText('Criar destaque')).toBeNull();
+    fireEvent.click(
+      within(sheet).getByRole('switch', { name: 'Destacar em Aberto, Comunidade aberta' }),
+    );
+    const confirm = await screen.findByRole('dialog', {
+      name: 'Mostrar este story na comunidade?',
+    });
+    expect(addToHighlight).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Mostrar na comunidade' }));
+    });
+    await waitFor(() => expect(addToHighlight).toHaveBeenCalledTimes(1));
+    // The second switch-on of the same opening writes at once.
+    fireEvent.click(
+      within(sheet).getByRole('switch', { name: 'Destacar em Outro, Comunidade aberta' }),
+    );
+    await waitFor(() => expect(addToHighlight).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog', { name: 'Mostrar este story na comunidade?' })).toBeNull();
+  });
+
+  it('Y4. a refused add reverts the switch with the generic toast and re-reads the catalogue: the row that is no longer open disappears', async () => {
+    loadSheet
+      .mockResolvedValueOnce({
+        ok: true,
+        places: [
+          place([
+            { id: HIGHLIGHT, title: 'Fechado agora' },
+            { id: HIGHLIGHT_2, title: 'Outro' },
+          ]),
+        ],
+        selectedIds: [],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        places: [place([{ id: HIGHLIGHT_2, title: 'Outro' }])],
+        selectedIds: [],
+      });
+    addToHighlight.mockResolvedValue({ ok: false, code: 'generic' });
+    list({ member: { canHighlight: true } });
+    const sheet = await openChecklist();
+    fireEvent.click(
+      within(sheet).getByRole('switch', { name: 'Destacar em Fechado agora, Comunidade aberta' }),
+    );
+    const confirm = await screen.findByRole('dialog', {
+      name: 'Mostrar este story na comunidade?',
+    });
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Mostrar na comunidade' }));
+    });
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: REFUSED }),
+    );
+    await waitFor(() => expect(loadSheet).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        within(sheet).queryByRole('switch', {
+          name: 'Destacar em Fechado agora, Comunidade aberta',
+        }),
+      ).toBeNull(),
+    );
+    const left = within(sheet).getAllByRole('switch');
+    expect(left).toHaveLength(1);
+    expect(left[0]?.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('Y5. a refused write when nothing is open any more closes the sheet and removes "Destacar" from the menu, with only the generic sentence', async () => {
+    loadSheet
+      .mockResolvedValueOnce({
+        ok: true,
+        places: [place([{ id: HIGHLIGHT, title: 'Aberto' }])],
+        selectedIds: [HIGHLIGHT],
+      })
+      .mockResolvedValueOnce({ ok: true, places: [], selectedIds: [] });
+    removeFromHighlight.mockResolvedValue({ ok: false, code: 'generic' });
+    list({ member: { canHighlight: true } });
+    const sheet = await openChecklist();
+    await act(async () => {
+      fireEvent.click(
+        within(sheet).getByRole('switch', { name: 'Destacar em Aberto, Comunidade aberta' }),
+      );
+    });
+    await waitFor(() => expect(loadSheet).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Destacar story' })).toBeNull(),
+    );
+    const messages = toast.show.mock.calls.map((call) => (call[0] as { message: string }).message);
+    expect(messages).toEqual([REFUSED]);
+    expect(messages.join(' ')).not.toMatch(/produto|compra|permiss|reembols|comprador|acesso/i);
+    const menu = await openMenu();
+    expect(within(menu).queryByRole('button', { name: 'Destacar' })).toBeNull();
+  });
+
+  it('Y6. a buyer whose highlight closed before the tap gets no empty sheet and no "Criar destaque": the generic toast, and the door is gone', async () => {
+    loadSheet.mockResolvedValue({ ok: true, places: [], selectedIds: [] });
+    list({ member: { canHighlight: true } });
+    const menu = await openMenu();
+    await act(async () => {
+      fireEvent.click(within(menu).getByRole('button', { name: 'Destacar' }));
+    });
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: GENERIC }),
+    );
+    expect(screen.queryByRole('dialog', { name: 'Destacar story' })).toBeNull();
+    expect(screen.queryByText('Criar destaque')).toBeNull();
+    const again = await openMenu();
+    expect(within(again).queryByRole('button', { name: 'Destacar' })).toBeNull();
+  });
+});

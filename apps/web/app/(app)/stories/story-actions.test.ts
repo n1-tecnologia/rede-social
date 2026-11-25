@@ -8,6 +8,7 @@ import {
   loadAuthorStoriesAction,
   loadStoryAuthorsPageAction,
   markStoriesSeenAction,
+  publishStoryAction,
 } from './story-actions';
 
 /**
@@ -292,5 +293,43 @@ describe('loadAuthorStoriesAction / loadStoryAuthorsPageAction — the row (10-1
     vi.mocked(apiFetch).mockResolvedValue(status(500, { error: { code: 'INTERNAL' } }));
     await expect(loadStoryAuthorsPageAction('cur-1')).resolves.toEqual({ ok: false });
     expect(redirect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 11.1-16 (UI-D-891 g, T-11.1-59): a buyer's publish into an open highlight. The API answers a refused
+ * destination (a closed highlight, a revoked permission, `social` off) with a BARE 403 and the screen
+ * branches on "refused" only: the action returns the closed code `forbidden`, never navigates, never
+ * revalidates, and carries nothing that names a product, a permission or a refund.
+ */
+describe('publishStoryAction — a buyer’s refused destination is one neutral code (11.1-16)', () => {
+  const MEDIA = '0b000000-0000-4000-8000-000000000001';
+  const HIGHLIGHT = '0000000a-1111-4111-8111-000000000001';
+  const COMMUNITY = '0c000000-0000-4000-8000-0000000000c1';
+  const input = { mediaAssetId: MEDIA, mediaKind: 'image', caption: '', highlightId: HIGHLIGHT };
+
+  it('P1. a bare 403 is { ok: false, code: "forbidden" } with no navigation and no revalidation', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(status(403, { error: { code: 'FORBIDDEN' } }));
+    const result = await publishStoryAction(input, { communityId: COMMUNITY });
+    expect(result).toEqual({ ok: false, code: 'forbidden' });
+    expect(redirect).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toMatch(/produto|compra|permiss|reembols|comprador|acesso/i);
+    const logged = JSON.stringify(vi.mocked(console.error).mock.calls);
+    expect(logged).not.toMatch(/produto|compra|permiss|reembols|comprador|acesso/i);
+  });
+
+  it('P2. the highlightId is sent verbatim in the one POST, and a 404 is the bare not_found', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(status(404, { error: { code: 'NOT_FOUND' } }));
+    await expect(publishStoryAction(input, { communityId: COMMUNITY })).resolves.toEqual({
+      ok: false,
+      code: 'not_found',
+    });
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? [];
+    expect(path).toBe('/v1/stories');
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      highlightId: HIGHLIGHT,
+    });
   });
 });

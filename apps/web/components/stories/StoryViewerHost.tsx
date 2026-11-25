@@ -339,6 +339,18 @@ type HighlightSheetState = {
 };
 
 /**
+ * 11.1-16: whether a member's sheet read has somewhere to save into: a group to switch, or a community
+ * of their own to create a highlight in. Only the server's own facts (the places and the owner's
+ * `createHref`), no role and no id.
+ */
+function memberHasDestination(result: {
+  places: readonly unknown[];
+  createHref?: string;
+}): boolean {
+  return result.places.length > 0 || result.createHref !== undefined;
+}
+
+/**
  * The catalog namespace of the delete confirmation for a menu's role (UI-D-701): the history's own for
  * the organization's curator, a member's two variants for the author and the moderator. Every value
  * is a fixed string with no `{name}`.
@@ -537,6 +549,12 @@ export function StoryViewerHost({
   const [highlightFor, setHighlightFor] = useState<HighlightTarget | null>(null);
   const [highlightSheet, setHighlightSheet] = useState<HighlightSheetState | null>(null);
   const highlightReading = useRef(false);
+  /**
+   * 11.1-16 (UI-D-891 c, UI-D-893): a member's read that found nothing to save into (no highlight left
+   * open, no community of their own) takes "Destacar" out of their menu for the rest of the visit, as a
+   * re-render with the fact false would. It is never explained.
+   */
+  const [highlightDoorGone, setHighlightDoorGone] = useState(false);
   const genericError = labels.genericError;
 
   const openHighlight = useCallback(
@@ -547,7 +565,11 @@ export function StoryViewerHost({
       let opened = false;
       try {
         const result = await loadHighlightSheetAction(storyId);
-        if (result.ok) {
+        if (result.ok && member && !memberHasDestination(result)) {
+          // A highlight the administrator closed since the viewer opened: no sheet is ever drawn empty
+          // for a member who cannot create one (no "Criar destaque" for a buyer).
+          setHighlightDoorGone(true);
+        } else if (result.ok) {
           setHighlightSheet({
             storyId,
             places: result.places,
@@ -571,6 +593,37 @@ export function StoryViewerHost({
     [toast, genericError],
   );
 
+  /**
+   * 11.1-16 (UI-D-891 g, UI-D-893): after a member's refused write the viewer is never the guard, so it
+   * reads the sheet again: a highlight that is no longer open leaves the list, and with nothing left to
+   * save into the sheet closes and the entry goes. The new `selectedIds` identity re-seeds every switch
+   * from what the server holds. A failed read keeps what is on screen (the toast already said so).
+   */
+  const rereadHighlight = useCallback(async (storyId: string) => {
+    try {
+      const result = await loadHighlightSheetAction(storyId);
+      if (!result.ok) return;
+      if (!memberHasDestination(result)) {
+        setHighlightSheet((current) => (current ? { ...current, open: false } : current));
+        setHighlightFor(null);
+        setHighlightDoorGone(true);
+        return;
+      }
+      setHighlightSheet((current) =>
+        current && current.storyId === storyId
+          ? {
+              ...current,
+              places: result.places,
+              selectedIds: result.selectedIds,
+              createHref: result.createHref ?? null,
+            }
+          : current,
+      );
+    } catch {
+      // The same answer as `{ ok: false }`: keep the sheet as it is.
+    }
+  }, []);
+
   // Stable by habit: `BottomSheet`'s focus trap reads `onClose` through a ref and arms once per
   // opening, so a new identity would no longer move the focus.
   const closeHighlight = useCallback(() => {
@@ -579,6 +632,7 @@ export function StoryViewerHost({
   }, []);
 
   const highlightStoryId = highlightSheet?.storyId ?? null;
+  const memberSheet = highlightSheet?.member === true;
   const toggleHighlight = useCallback(
     async (highlightId: string, next: boolean, place: HighlightSheetPlace): Promise<boolean> => {
       if (highlightStoryId === null) return false;
@@ -609,10 +663,13 @@ export function StoryViewerHost({
               ? t('highlights.errors.full', { limit: STORY_HIGHLIGHT_MAX_ITEMS })
               : t('highlights.errors.generic'),
       });
+      // A member's refusal other than a full highlight is the answer to a door that closed meanwhile:
+      // read the destinations again so it is gone (11.1-16). The branch is on "refused" only.
+      if (memberSheet && result.code !== 'full') void rereadHighlight(highlightStoryId);
       // `false` is what makes the sheet's machine REVERT the switch in place.
       return false;
     },
-    [highlightStoryId, toast, t],
+    [highlightStoryId, memberSheet, rereadHighlight, toast, t],
   );
 
   /** A plain string, so `buildItem` does not change identity with the translator. */
@@ -978,7 +1035,9 @@ export function StoryViewerHost({
                 {menuView?.role === 'author' ? (
                   <StoryMenuRow icon={Plus} label={t('viewer.menuNew')} href="/stories/publicar" />
                 ) : null}
-                {menuView?.role === 'author' && memberMenu?.canHighlight === true ? (
+                {menuView?.role === 'author' &&
+                memberMenu?.canHighlight === true &&
+                !highlightDoorGone ? (
                   <StoryMenuRow
                     icon={BookmarkPlus}
                     label={t('viewer.highlight')}

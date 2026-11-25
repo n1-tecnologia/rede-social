@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetVideoSound, videoSoundWanted } from '@/components/media/video-sound';
 import type { StoryCommentsBinding } from './StoryViewerHost';
@@ -2347,7 +2347,12 @@ describe('StoryViewerHost — member groups: the author’s and the moderator’
   });
 
   it('M9. the author’s "Destacar" opens the highlight sheet for THAT story', async () => {
-    loadSheet.mockResolvedValue({ ok: true, places: [], selectedIds: [] });
+    loadSheet.mockResolvedValue({
+      ok: true,
+      places: [],
+      selectedIds: [],
+      createHref: '/comunidades/0c000000-0000-4000-8000-0000000000c1/destaques',
+    });
     memberHost({ isSelf: true, memberMenu: { canModerate: false, canHighlight: true } });
     const sheet = await openMenu();
     await act(async () => {
@@ -2355,6 +2360,203 @@ describe('StoryViewerHost — member groups: the author’s and the moderator’
     });
     expect(loadSheet).toHaveBeenCalledWith(STORY_ID);
     expect(screen.getByRole('dialog', { name: 'Destacar story' })).toBeTruthy();
+  });
+});
+
+/* ── 11.1-16 (UI-D-891, D-883, D-885): a buyer saves their own story from the viewer ──────────────── */
+
+describe('StoryViewerHost — the buyer’s "Destacar" (11.1-16, UI-D-891)', () => {
+  const STORY_ID = '0d000000-0000-4000-8000-0000000000d1';
+  const COMMUNITY = '0c000000-0000-4000-8000-0000000000c1';
+  const OPEN = '0000000a-1111-4111-8111-000000000001';
+  const OTHER = '0000000a-1111-4111-8111-000000000002';
+  const REFUSED = 'Não foi possível salvar. Tente novamente.';
+  const GENERIC = 'Algo deu errado. Tente novamente.';
+
+  const place = (rows: { id: string; title: string }[]) => ({
+    key: COMMUNITY,
+    label: 'Comunidade aberta',
+    communityId: COMMUNITY,
+    rows: rows.map((entry) => ({ ...entry, cover: null })),
+    canCreate: false,
+  });
+
+  function authorHost() {
+    return render(
+      <StoryViewerHost
+        groups={[
+          {
+            key: 'author:0e000000-0000-4000-8000-0000000000e1',
+            kind: 'member',
+            highlightId: null,
+            name: 'Helena',
+            avatar: { kind: 'avatar', src: null },
+            items: [item()],
+            member: { membershipId: '0e000000-0000-4000-8000-0000000000e1', isSelf: true },
+          },
+        ]}
+        labels={LABELS}
+        onLike={like as never}
+        onUnlike={unlike as never}
+        onClose={() => {}}
+        memberMenu={{ canModerate: false, canHighlight: true }}
+      />,
+    );
+  }
+
+  async function openMenu() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mais opções' }));
+    });
+    return screen.getByRole('dialog', { name: 'Opções do story' });
+  }
+
+  async function openChecklist() {
+    const menu = await openMenu();
+    await act(async () => {
+      fireEvent.click(within(menu).getByRole('button', { name: 'Destacar' }));
+    });
+    return screen.findByRole('dialog', { name: 'Destacar story' });
+  }
+
+  it('Z1. the sheet lists the open highlight with the notice, no create row and no "Criar destaque"; the first switch-on asks once', async () => {
+    loadSheet.mockResolvedValue({
+      ok: true,
+      places: [place([{ id: OPEN, title: 'Aberto' }])],
+      selectedIds: [],
+    });
+    authorHost();
+    const sheet = await openChecklist();
+    expect(
+      within(sheet).getByText('Todos os membros verão este story na comunidade.'),
+    ).toBeTruthy();
+    expect(within(sheet).queryByText('Criar destaque')).toBeNull();
+    fireEvent.click(
+      within(sheet).getByRole('switch', { name: 'Destacar em Aberto, Comunidade aberta' }),
+    );
+    const confirm = await screen.findByRole('dialog', {
+      name: 'Mostrar este story na comunidade?',
+    });
+    expect(addToHighlight).not.toHaveBeenCalled();
+    addToHighlight.mockResolvedValueOnce({ ok: true, highlightCount: 1 });
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Mostrar na comunidade' }));
+    });
+    await waitFor(() =>
+      expect(addToHighlight).toHaveBeenCalledWith(STORY_ID, OPEN, {
+        communityId: COMMUNITY,
+        revalidate: false,
+      }),
+    );
+  });
+
+  it('Z2. removing one’s own story is the switch turned off: one write, no confirmation', async () => {
+    loadSheet.mockResolvedValue({
+      ok: true,
+      places: [place([{ id: OPEN, title: 'Aberto' }])],
+      selectedIds: [OPEN],
+    });
+    removeFromHighlight.mockResolvedValueOnce({ ok: true, highlightCount: 0 });
+    authorHost();
+    const sheet = await openChecklist();
+    await act(async () => {
+      fireEvent.click(
+        within(sheet).getByRole('switch', { name: 'Destacar em Aberto, Comunidade aberta' }),
+      );
+    });
+    await waitFor(() =>
+      expect(removeFromHighlight).toHaveBeenCalledWith(STORY_ID, OPEN, {
+        communityId: COMMUNITY,
+        revalidate: false,
+      }),
+    );
+    expect(screen.queryByRole('dialog', { name: 'Mostrar este story na comunidade?' })).toBeNull();
+  });
+
+  it('Z3. a refused add reverts the switch with the generic toast and re-reads: the row that is no longer open disappears', async () => {
+    loadSheet
+      .mockResolvedValueOnce({
+        ok: true,
+        places: [
+          place([
+            { id: OPEN, title: 'Fechado agora' },
+            { id: OTHER, title: 'Outro' },
+          ]),
+        ],
+        selectedIds: [],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        places: [place([{ id: OTHER, title: 'Outro' }])],
+        selectedIds: [],
+      });
+    addToHighlight.mockResolvedValueOnce({ ok: false, code: 'generic' });
+    authorHost();
+    const sheet = await openChecklist();
+    fireEvent.click(
+      within(sheet).getByRole('switch', { name: 'Destacar em Fechado agora, Comunidade aberta' }),
+    );
+    const confirm = await screen.findByRole('dialog', {
+      name: 'Mostrar este story na comunidade?',
+    });
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Mostrar na comunidade' }));
+    });
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: REFUSED }),
+    );
+    await waitFor(() => expect(loadSheet).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        within(sheet).queryByRole('switch', {
+          name: 'Destacar em Fechado agora, Comunidade aberta',
+        }),
+      ).toBeNull(),
+    );
+    expect(within(sheet).getAllByRole('switch')).toHaveLength(1);
+  });
+
+  it('Z4. a refused write with nothing open left closes the sheet and removes "Destacar" from the menu, saying only the generic sentence', async () => {
+    loadSheet
+      .mockResolvedValueOnce({
+        ok: true,
+        places: [place([{ id: OPEN, title: 'Aberto' }])],
+        selectedIds: [OPEN],
+      })
+      .mockResolvedValueOnce({ ok: true, places: [], selectedIds: [] });
+    removeFromHighlight.mockResolvedValueOnce({ ok: false, code: 'generic' });
+    authorHost();
+    const sheet = await openChecklist();
+    await act(async () => {
+      fireEvent.click(
+        within(sheet).getByRole('switch', { name: 'Destacar em Aberto, Comunidade aberta' }),
+      );
+    });
+    await waitFor(() => expect(loadSheet).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Destacar story' })).toBeNull(),
+    );
+    const messages = toast.show.mock.calls.map((call) => (call[0] as { message: string }).message);
+    expect(messages).toEqual([REFUSED]);
+    expect(messages.join(' ')).not.toMatch(/produto|compra|permiss|reembols|comprador|acesso/i);
+    const menu = await openMenu();
+    expect(within(menu).queryByRole('button', { name: 'Destacar' })).toBeNull();
+  });
+
+  it('Z5. nothing open at the tap: no empty sheet, no "Criar destaque", the generic toast, and "Destacar" is gone from the menu', async () => {
+    loadSheet.mockResolvedValue({ ok: true, places: [], selectedIds: [] });
+    authorHost();
+    const menu = await openMenu();
+    await act(async () => {
+      fireEvent.click(within(menu).getByRole('button', { name: 'Destacar' }));
+    });
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: GENERIC }),
+    );
+    expect(screen.queryByRole('dialog', { name: 'Destacar story' })).toBeNull();
+    expect(screen.queryByText('Criar destaque')).toBeNull();
+    const again = await openMenu();
+    expect(within(again).queryByRole('button', { name: 'Destacar' })).toBeNull();
   });
 });
 
