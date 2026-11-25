@@ -14316,3 +14316,49 @@ describe('phase 11 sweep (11-27)', () => {
     }
   });
 });
+
+describe('phase 11.1 sweep (11.1-09)', () => {
+  it('phase 11.1 sweep: story highlight open-counts — the demo admin naming a lab community id gets no row for it beside the demo positive control, and the demo session on the lab host is refused (11.1-09)', async () => {
+    const created: string[] = [];
+    try {
+      const labAdminUser = await userIdOf('admin@rede-lab.local');
+      const [labCommunity] = await adminSql<{ id: string }[]>`
+        insert into public.communities (tenant_id, name, slug, kind, status, created_by_user_id)
+        values (${tenantIds.lab}::uuid, ${`p111-open-${RUN}`}, ${`p111-open-${RUN}`}, 'organization', 'active', ${labAdminUser}::uuid)
+        returning id::text as id`;
+      const labId = labCommunity?.id ?? '';
+      expect(labId, 'throwaway lab community').not.toBe('');
+      created.push(labId);
+      const demoCreated = await send('POST', '/v1/communities', tokens.demoAdmin, HOSTS.demo, {
+        name: `p111-open-${RUN}`,
+      });
+      expect(demoCreated.status).toBe(201);
+      const demoId = ((await demoCreated.json()) as { id: string }).id;
+      created.push(demoId);
+
+      const counts = async (ids: string[], token: string, host: string) =>
+        send(
+          'GET',
+          `/v1/stories/highlights/open-counts?communityIds=${ids.join(',')}`,
+          token,
+          host,
+        );
+
+      const res = await counts([labId, demoId], tokens.demoAdmin, HOSTS.demo);
+      expect(res.status, await res.clone().text()).toBe(200);
+      const items = ((await res.json()) as { items: { communityId: string }[] }).items;
+      expect(items.map((item) => item.communityId)).toEqual([demoId]);
+
+      await expectHostRefused(
+        await counts([demoId], tokens.demoAdmin, HOSTS.lab),
+        'open-counts, demo session on the lab host',
+      );
+      const asMember = await counts([demoId], tokens.demoMember, HOSTS.demo);
+      expect(asMember.status, 'a member is refused').toBe(403);
+    } finally {
+      if (created.length > 0) {
+        await adminSql`delete from public.communities where id = any (${created}::uuid[])`;
+      }
+    }
+  });
+});

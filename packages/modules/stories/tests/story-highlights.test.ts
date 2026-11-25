@@ -71,7 +71,10 @@ function classify(text: string): string {
   // 10-09: the place seam reads the community without a lock, then locks it `for share` for a caller who may curate.
   if (/from communities c .* for share$/.test(t)) return 'place-lock';
   if (/from communities c/.test(t)) return 'place';
-  if (/^select s\.id from stories s/.test(t)) return 'story';
+  // 11.1-09: the remove also reads the story's author (a buyer may remove only their own item).
+  if (/^select s\.id(, s\.author_user_id)? from stories s/.test(t)) return 'story';
+  // 11.1-09: every `contribute` caller serialises on one advisory lock keyed on the highlight, between the two reads.
+  if (/^select pg_advisory_xact_lock/.test(t)) return 'advisory-lock';
   if (/^delete from story_highlight_items/.test(t)) return 'remove';
   if (/^update story_highlights set cover_story_id = null/.test(t)) return 'clear-cover';
   if (/as highlight_count/.test(t)) return 'count';
@@ -99,7 +102,7 @@ const tx = {
       case 'renumber':
         return moved ? [{ id: A }] : [];
       case 'story':
-        return [{ id: STORY_ID }];
+        return [{ id: STORY_ID, author_user_id: USER_ID }];
       case 'remove':
       case 'update':
         return moved ? [{ id: 'row' }] : [];
@@ -207,8 +210,17 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
     });
 
     // The story row is never written (R-D-F): no statement of this remove targets `stories`. The highlight is read
-    // twice (quick 261112-kuk): once with no lock to decide the place, then `for update` for the curator.
-    expect(seen).toEqual(['highlight', 'highlight', 'story', 'remove', 'clear-cover', 'count']);
+    // twice (quick 261112-kuk): once with no lock to decide the place, then `for update` for the curator;
+    // 11.1-09: the `contribute` intent takes its advisory lock between the two.
+    expect(seen).toEqual([
+      'highlight',
+      'advisory-lock',
+      'highlight',
+      'story',
+      'remove',
+      'clear-cover',
+      'count',
+    ]);
     expect(texts.some((text) => /^(update|delete from) stories\b/.test(text))).toBe(false);
     expect(ctx.events).toHaveLength(1);
     await flush(ctx);

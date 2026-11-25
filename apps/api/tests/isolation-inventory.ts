@@ -238,6 +238,11 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/stories/mine': { case: 'phase 10 sweep: member stories and highlights' },
   'GET /v1/stories/highlights': { case: 'phase 10 sweep: member stories and highlights' },
   'GET /v1/stories/highlights/catalog': { case: 'phase 10 sweep: member stories and highlights' },
+  // 11.1-09 (UI-D-884 (3)): the staff-only open-highlight counts per community; one case proves it (the demo admin naming a lab
+  // community id gets no row for it, the demo session on the lab host is refused, beside the demo positive control).
+  'GET /v1/stories/highlights/open-counts': {
+    case: 'phase 11.1 sweep: story highlight open-counts',
+  },
   'PUT /v1/stories/highlights/order': { case: 'phase 10 sweep: member stories and highlights' },
   'GET /v1/stories/highlights/:highlightId': {
     case: 'phase 10 sweep: member stories and highlights',

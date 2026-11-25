@@ -104,6 +104,8 @@ const ROOM_COUNT =
 function classify(text: string): string {
   const t = text.replace(/\s+/g, ' ').trim();
   if (/^select h\.id, h\.community_id/.test(t)) return 'highlight';
+  // 11.1-09: every `contribute` caller serialises on one advisory lock keyed on the highlight, between the two reads.
+  if (/^select pg_advisory_xact_lock/.test(t)) return 'advisory-lock';
   // 10-09: the place seam reads the community without a lock, then locks it `for share` for a caller who may curate.
   if (/from communities c .* for share$/.test(t)) return 'place-lock';
   if (/from communities c/.test(t)) return 'place';
@@ -121,6 +123,8 @@ function scripted(query: SQL): unknown[] {
   const kind = classify(dialect.sqlToQuery(query).sql);
   seen.push(kind);
   switch (kind) {
+    case 'advisory-lock':
+      return [{}];
     case 'highlight':
       return [
         {
@@ -370,9 +374,11 @@ describe('05.2 — a publish INTO a highlight: destination first, one write, eve
     const ctx = context();
     const story = await publishStory(ctx, { ...input, highlightId: HIGHLIGHT_ID }, CURATOR);
 
-    // The highlight is read twice (quick 261112-kuk): unlocked to decide the place, then `for update` for the curator.
+    // The highlight is read twice (quick 261112-kuk): unlocked to decide the place, then `for update` for the curator;
+    // 11.1-09: the `contribute` intent takes its advisory lock between the two.
     expect(seen).toEqual([
       'highlight',
+      'advisory-lock',
       'highlight',
       'room',
       'asset',
@@ -437,7 +443,7 @@ describe('05.2 — a publish INTO a highlight: destination first, one write, eve
       status: 400,
       details: { highlight: 'full' },
     });
-    expect(seen).toEqual(['highlight', 'highlight', 'room']);
+    expect(seen).toEqual(['highlight', 'advisory-lock', 'highlight', 'room']);
     expect(ctx.events).toHaveLength(0);
   });
 
