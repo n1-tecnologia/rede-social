@@ -1,3 +1,4 @@
+import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
 import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
 import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import {
@@ -241,7 +242,13 @@ export const stories = pgTable(
     //      blocked or removed creator's community as "no row" and the branch closes (D-708), and
     //      `c.deleted_at is null` closes it for a deleted community (the rows are never touched). Branch 3
     //      is the one a reviewer forgets: without it a member's story saved in a community highlight would
-    //      be readable only by that member's followers.
+    //      be readable only by that member's followers. 11.1-04 (D-894, T-11.1-15): the inner `communities` read also
+    //      carries `c.id <> all (LOCKED_COMMUNITY_IDS)` (the coalesced kernel InitPlan, empty for staff), so a story a
+    //      BUYER saved in a highlight of a community the caller is locked out of (no active entitlement to any product
+    //      linked to it) is not readable even by someone who knows its id; an unlocked member, a buyer and staff read it
+    //      as before, and a community with no linked product locks nobody. Branch 3 therefore guarantees: the highlight
+    //      belongs to a community of this tenant, it is not deleted, it is not locked for the caller, and the read runs
+    //      under the caller's own RLS.
     // Likes and comments of a story inherit the gate through `feed_comments_story_gate` and
     // `feed_likes_story_gate` (feed module), which test the story through an inner `exists` that runs
     // under THIS policy. The service form of the same rule is the story predicate of plan 08; the two are
@@ -263,7 +270,8 @@ export const stories = pgTable(
                select 1 from public.communities c
                 where c.id = h.community_id
                   and c.tenant_id = app.tenant_id()
-                  and c.deleted_at is null))`,
+                  and c.deleted_at is null
+                  and c.id <> all (${LOCKED_COMMUNITY_IDS})))`,
     }),
     // 10-04 (D-705, T-10-10): the write half. A `member` claim may insert ONLY a followers story while
     // `social` is on; every other claim may insert ONLY an organization story. A forged `'tenant'` from a

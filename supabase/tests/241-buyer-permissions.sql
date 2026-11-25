@@ -32,7 +32,7 @@ begin;
 --
 -- Fixture ids use the `24100000-…` prefix and the tenants `pgtap-bperm-a` / `pgtap-bperm-b`. Like its siblings, this
 -- file ROLLS BACK.
-select plan(207);
+select plan(221);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-bperm-a', 'Permissoes A', '24100000-0000-4000-8000-000000000001');
@@ -1247,6 +1247,86 @@ select lives_ok(
 reset role;
 select is((select count(*)::int from public.story_highlight_items where highlight_id = '24100000-0000-4000-8000-0000000014f8' and story_id = '24100000-0000-4000-8000-000000001481'), 0,
   '17: …(gone)');
+
+-- ── 18. a locked member never reads a story a buyer saved in a community highlight (11.1-04, D-894; T-11.1-15) ──
+-- 1457 (BS1's followers story) sits in hOpen of CS (linked to PS and PN). 1456 (BS1's) is saved, as the migration role, in hNoLink
+-- (CNoLink: NO linked product, so nobody is locked out of it). The plain member (…05) holds no entitlement: locked out of CS.
+insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id) values
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f7', '24100000-0000-4000-8000-000000001456', '24100000-0000-4000-8000-000000000002');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001402');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000001457'), 1,
+  '18: D-716: an unlocked buyer (BS2, who does not follow BS1) reads the story saved in the highlight by id');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001403');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000001457'), 1,
+  '18: …and so does a member who holds only PN (any linked product unlocks the community)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000001457'), 1,
+  '18: …and staff (no lock for staff)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000001457'), 1,
+  '18: …and the author');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000001457'), 0,
+  '18: D-894: a member locked out of CS cannot read the saved story by id');
+select is((select count(*)::int from public.stories where id in ('24100000-0000-4000-8000-000000001457', '24100000-0000-4000-8000-000000001456')), 1,
+  '18: …nor in a list: of the two saved stories only the one in the community with no linked product is returned');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000001456'), 1,
+  '18: …and that one (no linked product, nobody locked out) reads as today');
+reset role;
+-- the grant lifts the lock at the next statement, a revoked one puts it back
+insert into public.store_entitlements (id, tenant_id, user_id, product_id, source, granted_by_user_id) values
+  ('24100000-0000-4000-8000-0000000014e5', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005', '24100000-0000-4000-8000-0000000014a1', 'grant', '24100000-0000-4000-8000-000000000002');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000001457'), 1,
+  '18: the same member holding PS reads the story (the control: the lock term, not the audience, was the refusal)');
+reset role;
+update public.store_entitlements set status = 'revoked', revoked_at = now() where id = '24100000-0000-4000-8000-0000000014e5';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000001457'), 0,
+  '18: …and the refunded one is locked out again at the next statement');
+reset role;
+-- tenant B never reaches it
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000001457'), 0,
+  '18: BPERM-25: the same user under tenant B''s claim does not read tenant A''s story');
+reset role;
+-- a story shown on the organization's strip stays readable to a locked member (no regression of an organization story)
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select lives_ok(
+  $$ insert into public.stories (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility)
+     values ('24100000-0000-4000-8000-000000001491', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', '24100000-0000-4000-8000-000000000aa1', 'image', 'da organizacao', 'tenant') $$,
+  '18: staff publish an organization story');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005');
+select is((select count(*)::int from public.stories where id = '24100000-0000-4000-8000-000000001491'), 1,
+  '18: …which the locked member still reads (branch 1 is untouched)');
+reset role;
+
+-- ── 19. the locked term stays an InitPlan (11.1-04, T-11.1-15) ──────────────────────────────────
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005');
+do $$
+declare
+  v_plan text;
+  v_line text;
+begin
+  v_plan := '';
+  for v_line in execute 'explain (verbose, costs off) select s.id from public.stories s where s.tenant_id = ''24100000-0000-4000-8000-000000000001'''
+  loop
+    v_plan := v_plan || v_line || E'\n';
+  end loop;
+  perform set_config('tests.plan_story', v_plan, true);
+end
+$$;
+reset role;
+select matches(current_setting('tests.plan_story'), 'InitPlan[^\n]*\n[^\n]*\n[^\n]*community_locked_ids',
+  '19: the locked-community term of the story audience gate is evaluated as an InitPlan (once per statement)');
+select ok((select qual ~* 'story_highlight_items.*coalesce\(\(\s*select app\.community_locked_ids\(\)'
+             from pg_policies where schemaname = 'public' and tablename = 'stories' and policyname = 'stories_audience_gate'),
+  '19: the stored policy carries the coalesce-select idiom, and the term sits inside branch 3 (after the highlight items join)');
 
 select * from finish();
 rollback;
