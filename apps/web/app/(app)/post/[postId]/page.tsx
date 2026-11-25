@@ -17,6 +17,7 @@ import { requireBootstrap } from '@/lib/bootstrap';
 import { type CommentThreadResult, getCommentThread, loadPost, loadPostComments } from '@/lib/feed';
 import { commentView, postAdminLabel, postCardView } from '@/lib/feed-view';
 import {
+  commentActionProps,
   feedCommentsProps,
   postCardLabels,
   postMenuLabels,
@@ -219,6 +220,8 @@ export default async function PostPage({
         reels={reels}
         comments={{
           ...feedCommentsProps(locale, tf, bootstrap, await getTranslations('moderation')),
+          // 11.1-15 (UI-D-888, UI-D-889): this post's facts, from the same builder the card read.
+          ...commentActionProps(result.post),
           initialItems: commentPage === null ? undefined : commentPage.items.map(toView),
           initialCursor: commentPage?.nextCursor ?? null,
           initialError: commentPage === null,
