@@ -1825,7 +1825,7 @@ Plans:
 
 **UI hint**: yes — the product form (five checkboxes per linked community), the highlight "Aberto a compradores" switch, controls that disappear on the member screens, the buyer's story and post flows.
 
-**Plans:** 18/18 plans executed (planned 2026-11-24: 18 plans in 9 waves; the database, contract, service, pure-function and security plans do not wait for the sketch; plan 01 draws sketch 026 and stops at the approval that only Igor writes; web plans 12 to 17 carry the approval precondition; plan 18 holds the release, the ledger and the exit gate)
+**Plans:** 18/20 plans executed (gap closure 11.1-19 and 11.1-20 planned 2026-11-25 from the verification's gaps_found; planned 2026-11-24: 18 plans in 9 waves; the database, contract, service, pure-function and security plans do not wait for the sketch; plan 01 draws sketch 026 and stops at the approval that only Igor writes; web plans 12 to 17 carry the approval precondition; plan 18 holds the release, the ledger and the exit gate)
 
 Plans:
 
@@ -1873,6 +1873,11 @@ Plans:
 **Wave 9** *(blocked on Wave 8 completion)*
 
 - [x] 11.1-18-PLAN.md — Release: the "Phase 11.1 release" section of `docs/DEPLOY.md`, the owner's ledger (all rows pending) and the exit gate
+
+**Gap closure** *(from 11.1-VERIFICATION.md, gaps_found 2026-11-25)*
+
+- [ ] 11.1-19-PLAN.md — Gap closure (WR-01, BPERM-21): a viewer without Compartilhar gets no share url from `postCardBase`, so the post's "..." sheet offers no "Copiar link" on the lists and the detail; tests through the real list, detail and menu
+- [ ] 11.1-20-PLAN.md — Gap closure (WR-02, BPERM-23): the refused word only for the member lane, a staff 403 logged as before; BPERM-28, BPERM-29 and BPERM-30 back to Pending in REQUIREMENTS.md
 
 **Cross-cutting constraints:**
 
