@@ -616,12 +616,22 @@ export const STORY_HIGHLIGHT_MAX_PER_PLACE = 50;
  * - `order_stale` — a reorder named a set of highlights that is not exactly the place's current set.
  * - `full` — the place already holds `STORY_HIGHLIGHT_MAX_PER_PLACE` highlights, or the highlight
  *   already holds `STORY_HIGHLIGHT_MAX_ITEMS` stories.
+ * - `open_unavailable` — (11.1, D-884, UI-D-886) the `openToBuyers` switch was refused: the highlight
+ *   belongs to a member community, to Início, or to an archived community, where a buyer's access can
+ *   never apply. The vocabulary stays at the END of the list; a client that does not know the word
+ *   reads it as a plain refusal.
  *
  * A MISS — an unknown highlight, story or community, or another tenant's — is deliberately NOT in
  * this vocabulary: it is a BARE 404 with no `details`, because a per-cause code over an enumerable
  * uuid space would be an existence oracle (D-23).
  */
-export const STORY_HIGHLIGHT_ISSUES = ['archived', 'title_invalid', 'order_stale', 'full'] as const;
+export const STORY_HIGHLIGHT_ISSUES = [
+  'archived',
+  'title_invalid',
+  'order_stale',
+  'full',
+  'open_unavailable',
+] as const;
 export type StoryHighlightIssue = (typeof STORY_HIGHLIGHT_ISSUES)[number];
 
 /** The route `defaultHook`'s and the web tier's lookup over that closed vocabulary. */
@@ -739,6 +749,10 @@ export type HighlightListQuery = z.infer<typeof highlightListQuerySchema>;
  *   the same statement as the row: the uploaded cover image, else the chosen story's image, else the
  *   most recently ADDED live image item, else null (the circle's brand-gradient fallback). Covers are
  *   image-only in 05.2 (D-101): a highlight whose items are all videos resolves no automatic cover.
+ * - `openToBuyers` (11.1, D-884, UI-D-886, BPERM-02) is the curator's switch that lets a buyer whose
+ *   product carries the story permission add and remove stories in this highlight. OPTIONAL and a
+ *   CURATOR read only: it is emitted solely to a caller holding the highlight curation permission,
+ *   and an API older than the web omits it (absent reads as off). A member never receives it.
  * - `coverStoryId` is the chosen story when one is set; `coverChosen` is true exactly when the cover
  *   came from an explicit choice (an uploaded image or a chosen story) rather than the default rule.
  * - `itemCount` counts MEMBER-VISIBLE items only (story not removed, asset `ready`) — the same
@@ -755,6 +769,7 @@ export const highlightSummarySchema = z
     coverStoryId: z.uuid().nullable(),
     coverChosen: z.boolean(),
     itemCount: z.number().int(),
+    openToBuyers: z.boolean().optional(),
   })
   .strict();
 export type HighlightSummary = z.infer<typeof highlightSummarySchema>;
@@ -816,17 +831,67 @@ export type HighlightCover = z.infer<typeof highlightCoverSchema>;
  *
  * The response is the highlight's summary AFTER the write. A PATCH identical to the stored row
  * changes nothing and announces nothing (`highlight.updated` counts transitions, not requests).
+ *
+ * 11.1 (D-884, UI-D-887): `openToBuyers` is the third key. Turning it on for a highlight of a member
+ * community, of Início or of an archived community is refused with `{ highlight: 'open_unavailable' }`.
  */
 export const updateHighlightSchema = z
   .object({
     title: storyHighlightTitleSchema.optional(),
     cover: highlightCoverSchema.nullable().optional(),
+    openToBuyers: z.boolean().optional(),
   })
   .strict()
-  .refine((value) => value.title !== undefined || value.cover !== undefined, {
-    message: 'Informe title ou cover.',
-  });
+  .refine(
+    (value) =>
+      value.title !== undefined || value.cover !== undefined || value.openToBuyers !== undefined,
+    { message: 'Informe title, cover ou openToBuyers.' },
+  );
 export type UpdateHighlight = z.infer<typeof updateHighlightSchema>;
+
+/**
+ * The most community ids one open-counts read takes. The stories module cannot import the store's
+ * `STORE_MAX_LINKS` (module boundary, MOD-02), so the same number is restated here: a product links
+ * at most that many communities, and the product form asks for all of them at once.
+ */
+export const STORY_OPEN_COUNTS_MAX_COMMUNITIES = 50;
+
+/**
+ * `GET /v1/stories/highlights/open-counts?communityIds=a,b,c` (UI-D-884 (3), staff only): how many
+ * highlights of each named community are open to buyers, for the product form's helper text. The ids
+ * ride as ONE comma-separated string, one to `STORY_OPEN_COUNTS_MAX_COMMUNITIES` uuids, deduplicated
+ * (first occurrence kept) after the cap is checked on what was sent. `.strict()`.
+ */
+export const openHighlightCountsQuerySchema = z
+  .object({
+    communityIds: z
+      .string()
+      .transform((raw) => raw.split(',').map((id) => id.trim()))
+      .pipe(
+        z
+          .array(z.uuid('community_invalid'))
+          .min(1, 'community_invalid')
+          .max(STORY_OPEN_COUNTS_MAX_COMMUNITIES, 'too_many_communities'),
+      )
+      .transform((ids) => [...new Set(ids)]),
+  })
+  .strict();
+export type OpenHighlightCountsQuery = z.infer<typeof openHighlightCountsQuerySchema>;
+
+/** The answer: one row per community the caller named that has a count. Never a member read. */
+export const openHighlightCountsSchema = z
+  .object({
+    items: z.array(
+      z
+        .object({
+          communityId: z.uuid(),
+          openHighlights: z.number().int().min(0),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type OpenHighlightCounts = z.infer<typeof openHighlightCountsSchema>;
 
 /**
  * `PUT /v1/stories/highlights/order` — reorder ONE place's highlights (R-D-C). `communityId` absent

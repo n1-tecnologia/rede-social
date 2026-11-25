@@ -98,6 +98,38 @@ describe('D-71 — every post says where it came from', () => {
   });
 });
 
+describe("11.1 BPERM-16 — the viewer's own actions ride the post only when one is withheld", () => {
+  const summary = { id: OTHER_UUID, name: 'Avisos da diretoria', slug: 'avisos-da-diretoria' };
+  const actions = { like: true, comment: false, share: true };
+
+  it('6a. actions is optional: a summary without it parses unchanged, one with it round-trips', () => {
+    expect(postCommunitySchema.parse(summary)).toEqual(summary);
+    expect('actions' in postCommunitySchema.parse(summary)).toBe(false);
+    expect(postCommunitySchema.parse({ ...summary, actions })).toEqual({ ...summary, actions });
+    expect(feedPostSchema.safeParse({ ...POST, community: { ...summary, actions } }).success).toBe(
+      true,
+    );
+  });
+
+  it('6b. actions is exactly three booleans, strict: a fourth key, a missing one or a non-boolean is refused', () => {
+    for (const bad of [
+      { ...actions, post: true },
+      { like: true, comment: false },
+      { ...actions, share: 'yes' },
+      { ...actions, productId: UUID },
+    ]) {
+      expect(postCommunitySchema.safeParse({ ...summary, actions: bad }).success).toBe(false);
+    }
+  });
+
+  it('6c. the summary stays strict: no other key rides beside actions', () => {
+    expect(postCommunitySchema.safeParse({ ...summary, actions, productId: UUID }).success).toBe(
+      false,
+    );
+    expect(postCommunitySchema.safeParse({ ...summary, entitlement: true }).success).toBe(false);
+  });
+});
+
 describe('COMM-04 — `archived` is a machine code in a closed vocabulary', () => {
   it('7. the vocabulary is exactly ["archived"] and the route lookup carries it', () => {
     expect([...FEED_COMMUNITY_ISSUES]).toEqual(['archived']);

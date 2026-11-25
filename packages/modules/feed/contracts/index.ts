@@ -173,7 +173,7 @@ export type FeedMemberIssue = (typeof FEED_MEMBER_ISSUES)[number];
 
 /**
  * The community a post belongs to, as the FEED projects it (D-71) — a NAME and the two ids the host
- * needs to build a route, and deliberately nothing else.
+ * needs to build a route, and the viewer's own actions there when at least one is withheld (11.1).
  *
  * **This is not `@rede-social/module-communities`' `CommunitySummary`, and it must not become it.** Two
  * reasons, and both are load-bearing:
@@ -187,12 +187,26 @@ export type FeedMemberIssue = (typeof FEED_MEMBER_ISSUES)[number];
  *     the "em {Comunidade}" segment has quietly become a second community card inside a post.
  *
  * `.strict()` is what keeps rule 2 true: a field cannot be added here by accident.
+ *
+ * 11.1 (BPERM-16, UI-D-889) widens "three fields only" by exactly ONE optional key: `actions`, the
+ * viewer's OWN `like`, `comment` and `share` in this community. It rides the post ONLY when at least
+ * one of the three is false, and ABSENT means all three are true, so every post a viewer with full
+ * actions sees (and every post served by an API older than the web) is byte for byte what it was.
+ * It is three booleans and nothing else: never a product, an entitlement or a flag name (D-888).
  */
 export const postCommunitySchema = z
   .object({
     id: z.uuid(),
     name: z.string(),
     slug: z.string(),
+    actions: z
+      .object({
+        like: z.boolean(),
+        comment: z.boolean(),
+        share: z.boolean(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type PostCommunity = z.infer<typeof postCommunitySchema>;

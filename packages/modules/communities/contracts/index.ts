@@ -182,8 +182,15 @@ export type CommunityCreator = z.infer<typeof communityCreatorSchema>;
 
 /**
  * The Escopo seam (10-06): the five actions a viewer may take in a community, in ONE object so the per-product
- * action scope built after Phase 11 refines them at one site. Phase 10 values: `post` equals
+ * action scope refines them at one site. Phase 10 values: `post` equals
  * `canPublish` and `story` follows the story rule (the story permissions plus the community rule, review WR-02); `like`, `comment` and `share` are `true` (no per-route permission guards them, D-701).
+ *
+ * 11.1 (BPERM-15, D-883): the SHAPE and its strictness are unchanged (five booleans, every one required);
+ * only what the values mean grew. For a buyer the five are the UNION of the flags of every product the
+ * viewer holds an active entitlement to that links this community (a flag is on when any such product
+ * turns it on); staff read all five true; and `post` and `story` are false whenever the tenant's
+ * `social` module is off, whatever a product grants. A viewer with no product grant reads exactly
+ * what Phase 10 gave, so an older web keeps working. The flags themselves never reach this schema.
  */
 export const communityActionsSchema = z
   .object({

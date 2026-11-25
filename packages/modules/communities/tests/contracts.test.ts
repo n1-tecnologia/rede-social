@@ -7,9 +7,11 @@ import {
   COMMUNITY_MAX_ORDER,
   COMMUNITY_PERMISSIONS,
   COMMUNITY_UNLOCK_NAMES_MAX,
+  communityActionsSchema,
   communityPageSchema,
   communitySummarySchema,
   communityUnlockRefusalSchema,
+  communityViewerSchema,
   createCommunitySchema,
   reorderCommunitiesSchema,
   updateCommunitySchema,
@@ -362,5 +364,34 @@ describe('11-15: the community viewer report riders', () => {
     expect(
       communitySummarySchema.safeParse({ ...base, viewer: { ...viewer, canMute: true } }).success,
     ).toBe(false);
+  });
+});
+
+/**
+ * 11.1 (BPERM-15, D-883): the buyer's union of flags changes what the five values MEAN, never the shape:
+ * `viewer.actions` is still exactly five required booleans, strict, and no product or flag name can ride
+ * beside them.
+ */
+describe('11.1: viewer.actions keeps its five-boolean shape for the buyer union', () => {
+  it('the actions object has exactly the keys like, comment, share, post, story', () => {
+    expect(Object.keys(communityActionsSchema.shape).sort()).toEqual(
+      ['comment', 'like', 'post', 'share', 'story'].sort(),
+    );
+  });
+
+  it('a buyer-shaped value (post on, story off) parses; a product or flag name beside them does not', () => {
+    const buyer = { like: true, comment: false, share: true, post: true, story: false };
+    expect(communityActionsSchema.parse(buyer)).toEqual(buyer);
+    expect(communityActionsSchema.safeParse({ ...buyer, productId: A }).success).toBe(false);
+    expect(communityActionsSchema.safeParse({ ...buyer, openHighlight: true }).success).toBe(false);
+    expect(
+      communityViewerSchema.safeParse({
+        isOwner: false,
+        canPublish: false,
+        canEdit: false,
+        canCurate: false,
+        actions: buyer,
+      }).success,
+    ).toBe(true);
   });
 });

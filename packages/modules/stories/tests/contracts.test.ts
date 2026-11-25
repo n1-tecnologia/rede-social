@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  highlightSummarySchema,
+  openHighlightCountsQuerySchema,
+  openHighlightCountsSchema,
   publishStorySchema,
   STORY_AUTHORS_PAGE_SIZE,
+  STORY_HIGHLIGHT_ISSUE_SET,
+  STORY_HIGHLIGHT_ISSUES,
   storyAuthorCircleSchema,
   storyAuthorSchema,
   storyAuthorsPageSchema,
   storyAuthorsQuerySchema,
   storyPageSchema,
   storySummarySchema,
+  updateHighlightSchema,
 } from '../contracts/index';
 
 /**
@@ -204,5 +210,105 @@ describe('11-15 storySummarySchema: the report riders', () => {
       nextCursor: null,
     });
     expect(page.items.map((item) => item.canBlock)).toEqual([true, undefined]);
+  });
+});
+
+describe('11.1 highlight openToBuyers, its issue code and the open-counts schemas (D-884, UI-D-886)', () => {
+  const HIGHLIGHT = {
+    id: ASSET,
+    communityId: null,
+    title: 'Aulas',
+    position: 0,
+    coverAssetId: null,
+    coverVariantWidths: [],
+    coverStoryId: null,
+    coverChosen: false,
+    itemCount: 0,
+  };
+  const COMMUNITY = '0c000000-0000-4000-8000-000000000001';
+  const OTHER = '0c000000-0000-4000-8000-000000000002';
+
+  it('the issue vocabulary is pinned, open_unavailable last, and the lookup carries it', () => {
+    expect([...STORY_HIGHLIGHT_ISSUES]).toEqual([
+      'archived',
+      'title_invalid',
+      'order_stale',
+      'full',
+      'open_unavailable',
+    ]);
+    expect(STORY_HIGHLIGHT_ISSUE_SET.has('open_unavailable')).toBe(true);
+    expect(STORY_HIGHLIGHT_ISSUE_SET.has('not_found')).toBe(false);
+  });
+
+  it('highlightSummarySchema: openToBuyers is optional and boolean; an old row parses and stays free of it', () => {
+    expect(highlightSummarySchema.parse(HIGHLIGHT)).not.toHaveProperty('openToBuyers');
+    expect(highlightSummarySchema.parse({ ...HIGHLIGHT, openToBuyers: true }).openToBuyers).toBe(
+      true,
+    );
+    expect(highlightSummarySchema.safeParse({ ...HIGHLIGHT, openToBuyers: 'on' }).success).toBe(
+      false,
+    );
+    expect(highlightSummarySchema.safeParse({ ...HIGHLIGHT, openToByers: true }).success).toBe(
+      false,
+    );
+  });
+
+  it('updateHighlightSchema: openToBuyers alone is a valid patch, an empty body and unknown keys are not', () => {
+    expect(updateHighlightSchema.parse({ openToBuyers: false })).toEqual({ openToBuyers: false });
+    expect(updateHighlightSchema.safeParse({ title: 'Novo' }).success).toBe(true);
+    expect(updateHighlightSchema.safeParse({ openToBuyers: 1 }).success).toBe(false);
+    expect(updateHighlightSchema.safeParse({}).success).toBe(false);
+    expect(
+      updateHighlightSchema.safeParse({ openToBuyers: true, productId: COMMUNITY }).success,
+    ).toBe(false);
+  });
+
+  it('openHighlightCountsQuerySchema: one to 50 comma-separated uuids, deduplicated, strict', () => {
+    expect(openHighlightCountsQuerySchema.parse({ communityIds: COMMUNITY }).communityIds).toEqual([
+      COMMUNITY,
+    ]);
+    expect(
+      openHighlightCountsQuerySchema.parse({ communityIds: `${COMMUNITY},${OTHER},${COMMUNITY}` })
+        .communityIds,
+    ).toEqual([COMMUNITY, OTHER]);
+    const fifty = Array.from(
+      { length: 50 },
+      (_, i) => `0c000000-0000-4000-8000-${String(i + 10).padStart(12, '0')}`,
+    );
+    expect(
+      openHighlightCountsQuerySchema.safeParse({ communityIds: fifty.join(',') }).success,
+    ).toBe(true);
+    expect(
+      openHighlightCountsQuerySchema.safeParse({
+        communityIds: [...fifty, `0c000000-0000-4000-8000-${'9'.padStart(12, '0')}`].join(','),
+      }).success,
+    ).toBe(false);
+    for (const bad of ['', 'nope', `${COMMUNITY},nope`, `${COMMUNITY},`]) {
+      expect(openHighlightCountsQuerySchema.safeParse({ communityIds: bad }).success, bad).toBe(
+        false,
+      );
+    }
+    expect(openHighlightCountsQuerySchema.safeParse({}).success).toBe(false);
+    expect(
+      openHighlightCountsQuerySchema.safeParse({ communityIds: COMMUNITY, limit: 1 }).success,
+    ).toBe(false);
+  });
+
+  it('openHighlightCountsSchema: items of communityId and a non-negative integer, strict', () => {
+    expect(openHighlightCountsSchema.parse({ items: [] })).toEqual({ items: [] });
+    const row = { communityId: COMMUNITY, openHighlights: 0 };
+    expect(
+      openHighlightCountsSchema.parse({ items: [row, { ...row, openHighlights: 3 }] }).items,
+    ).toHaveLength(2);
+    expect(
+      openHighlightCountsSchema.safeParse({ items: [{ ...row, openHighlights: -1 }] }).success,
+    ).toBe(false);
+    expect(
+      openHighlightCountsSchema.safeParse({ items: [{ ...row, openHighlights: 1.5 }] }).success,
+    ).toBe(false);
+    expect(openHighlightCountsSchema.safeParse({ items: [{ ...row, title: 'x' }] }).success).toBe(
+      false,
+    );
+    expect(openHighlightCountsSchema.safeParse({ items: [], total: 1 }).success).toBe(false);
   });
 });
