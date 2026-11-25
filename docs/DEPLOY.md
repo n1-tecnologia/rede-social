@@ -5657,6 +5657,245 @@ and one support account, on a phone and on a desktop browser (the first real-dev
 
 See the ledger named at the top. A row becomes `passed` only with the evidence you paste and your own date.
 
+## Phase 11.1 release (buyer permissions per product)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them: nothing of
+Phase 11.1 has been pushed, deployed or applied to a hosted project, and no agent touches homolog or production. No
+command here prints a secret. Phase 11.1 ships ON TOP of the Phase 11 release (direct messages, block effects and
+reports) and of every release above it. It is **expand-only**: nine migrations that only add columns, replace
+functions and replace or add row policies (see the grep below), and every new key the API answers is optional and
+is emitted only at a non-default value. The proofs only the owner can run (the administrator's product form and the
+open switch on a real phone at 320 and 390 px, a buyer's post and a story saved into an open highlight on the
+tenant's own domain, a refund through the real gateway while a buyer's screen is open, the VoiceOver and TalkBack
+walks, the held-out visual rows, the two Playwright runs, the sketch 026 approval kind and the defaults, every hosted
+release step and the first-day checks, and the full `pnpm verify`) are in the ledger
+`.planning/phases/11.1-permissoes-do-comprador-por-produto-numa-comunidade/11.1-MANUAL-PROOFS.md`; it ships with every
+row `pending`, and a row becomes `passed` only with the evidence you paste and your own date.
+
+**No tenant sees any change on the day of the release.** Every existing link between a product and a community
+carries the defaults (like, comment and share on; post and story off), no highlight is open to buyers, and a control
+changes for a buyer only after an administrator edits a product's ticks with the new web. A tenant with no products,
+links or highlights sees no change and its read-only checks print zero rows.
+
+### What ships
+
+- **Nine migrations, applied in timestamp order** (the order `ls supabase/migrations | grep buyer_permissions`
+  prints, all after `20261119195211_report_voice_gate.sql`). All nine are expand-only: this phase has no allowed
+  destructive statement (see the grep below). Each applies on an EMPTY tenant project and on an existing one. The
+  five new columns are added with a constant default, so a table of any size is not rewritten.
+  1. `20261125010854_buyer_permissions_columns.sql` (generated): `store_product_communities.can_like`, `can_comment`,
+     `can_share` (default true) and `can_post`, `can_story` (default false), all `NOT NULL`, and
+     `story_highlights.open_to_buyers` (default false, `NOT NULL`). Every existing row takes the defaults, so nothing
+     changes for anyone until an administrator edits a product.
+  2. `20261125010900_buyer_permissions_functions.sql` (hand-written): `app.community_buyer_scope()` (the one SQL
+     definition of what a member may do in each organization community, the union of the five flags over the
+     member's ACTIVE entitlements), `app.community_action_allowed(uuid, text)` REPLACED (it was the constant-false
+     stub of Phase 10, same signature) and `app.community_action_denied_ids(text)` (the lane form the like and comment
+     gates read). Security definers with an empty `search_path`; execute revoked from PUBLIC and granted to
+     `authenticated` only.
+  3. `20261125010937_buyer_permissions_post_gate.sql` (generated): `feed_posts_social_insert_gate` gains its fourth
+     clause with its own terms (the `social` module on, an active, not-deleted organization community of the tenant,
+     and `app.community_action_allowed(community_id, 'post')`).
+  4. `20261125115007_buyer_permissions_like_gate.sql` (generated): `feed_likes_community_gate` also refuses a like on a
+     post or a comment of a community whose `like` is denied.
+  5. `20261125115137_buyer_permissions_comment_gate.sql` (generated): a NEW restrictive insert policy
+     `feed_comments_community_insert_gate` refuses a comment in a community whose `comment` is denied.
+  6. `20261125115311_buyer_permissions_sample.sql` (hand-written): `app.feed_sample_post_ids()` REPLACED so the free
+     sample of a locked community shows only a post visible to the whole tenant (a buyer's post is never the sample,
+     D-893).
+  7. `20261125122923_buyer_permissions_item_insert_gate.sql` (generated): `story_highlight_items_member_insert_gate`
+     lets a buyer who holds `story` add one of their OWN stories to a highlight that is open to buyers.
+  8. `20261125123057_buyer_permissions_item_delete_gate.sql` (generated): `story_highlight_items_member_delete_gate`
+     lets that buyer take their own item out of an open highlight, only while holding `story` (D-895).
+  9. `20261125123221_buyer_permissions_audience_gate.sql` (generated): `stories_audience_gate` gains the
+     locked-community term, so a member locked out of a community cannot read a story a buyer saved in one of its
+     highlights (D-894).
+- **The API and the worker (one image, deployed together).** The per-link flags in the product body (`communityIds`
+  stays as it is; `communityLinks` carries the five booleans of every link and is sent only for a non-default save),
+  `communityPermissions` on the administrator's product read (non-default links only), the buyer's share of
+  `viewer.actions` on the community read, `community.actions` on a post of an organization community (only when a
+  flag is false), the bare 403 refusal of a like, a comment, a post or a story save the buyer does not hold, the
+  30-per-hour limiter on a buyer's post attempts (planner assumption A-11.1-LIM, a ledger row), the open switch on a
+  highlight (`openToBuyers`, emitted only as `true`, only to staff) and the staff-only `GET /v1/stories/highlights/open-counts`.
+  No new queue, job name, push hint or Realtime topic. The worker has no source change of its own in this phase; it is
+  rebuilt from the same image build so the two never differ.
+- **The web.** The permission group (five checkboxes) under each chosen community in the product form, the
+  "Aberto a compradores" switch in the highlight edit sheet and its pill on the manage list, the post card row that
+  closes up when a control is not offered, the comment composer, the Reels rail, the buyer's post flow from the
+  community page (the pinned composer and the neutral refusal sentence), and the buyer's story flow into open
+  highlights only.
+- **Facts the notes below rely on.** The permission is read from ACTIVE entitlements at statement time: a refund,
+  chargeback, revoke or cancel ends it at once, and what the buyer already published stays where it is (D-887). A
+  buyer can post only with the `social` module on and only in an organization community whose product ticks `post`.
+  A buyer's post is stamped `visibility = 'community'`, appears only on the community's page and notifies nobody.
+  Share is only a hidden control (D-889): nothing server-side gates it.
+- **The expand-only grep prints NOTHING** (this phase has no allowed destructive statement):
+  `grep -inE 'drop (table|column)|rename|set not null|alter column .* type' supabase/migrations/*buyer_permissions_*.sql`.
+  The `NOT NULL` of the new columns is declared with a constant default in the `ADD COLUMN`, which the pattern does not
+  match.
+
+### Read-only check on EVERY hosted project (run before anything else)
+
+Run these on each hosted tenant project, **including the one that holds several tenants (project 0)**, in the
+Supabase SQL editor or with `psql` and a read-only role. They only read. Paste the shapes and counts in the ledger;
+never a project reference, a tenant name or a member's e-mail. The central project holds no table of this phase
+(`pnpm db:generate:central` prints `No schema changes`): it needs no check.
+
+```sql
+-- A. Is any of this release already on the project? (expected before the release: no row)
+select table_name, column_name from information_schema.columns
+ where table_schema = 'public'
+   and ((table_name = 'store_product_communities'
+         and column_name in ('can_like', 'can_comment', 'can_share', 'can_post', 'can_story'))
+     or (table_name = 'story_highlights' and column_name = 'open_to_buyers'));
+-- B. Which of this release's versions are already recorded? (expected before the release: no row)
+select version from supabase_migrations.schema_migrations
+ where version in ('20261125010854', '20261125010900', '20261125010937', '20261125115007', '20261125115137',
+                   '20261125115311', '20261125122923', '20261125123057', '20261125123221')
+ order by version;
+-- C. Which of the three functions exist? (expected before the release: one row, community_action_allowed, the stub)
+select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app'
+   and p.proname in ('community_buyer_scope', 'community_action_allowed', 'community_action_denied_ids')
+ order by p.proname;
+-- D. How big are the tables the release touches?
+select (select count(*) from public.store_product_communities) as links,
+       (select count(*) from public.story_highlights) as highlights;
+```
+
+If query A returns rows (a project that already took the migrations), run queries F, G and H of "After the migration"
+below first: F and G must print 0 before the release goes on.
+
+Then, from the repository, the local checks that need no project:
+
+- `pnpm db:migrate-all -- --dry-run` lists the pending versions per project and writes nothing; on a project that has
+  the Phase 11 release the nine files above are the pending ones.
+- The expand-only grep above prints NOTHING.
+- The replaced `app.feed_sample_post_ids` and `app.community_action_allowed` bodies differ from their previous newest
+  version only as the file headers say; read both by hand before you apply them to a hosted project (the previous
+  bodies are the newest earlier files that define them: `grep -l 'function app.feed_sample_post_ids'
+  supabase/migrations/*.sql`).
+
+### Order
+
+1. **Migrations** on every tenant database first (project 0 included), through the ledgered fan-out (the Phase 09.2
+   Cloud Run Job `migrateAll`, databases before the services); the nine files apply in the order of their names, the
+   runner is serialised per database and idempotent, so a re-run is safe and reports nothing pending. **The whole set
+   runs in one sitting through `pnpm db:migrate-all`, one project at a time, and never two runs at once.**
+2. **API and worker** second, together, from the same image build, once every project is current.
+3. **Web** last, once the new API answers.
+
+**Why this order inverts Phase 11 (API and worker before the web).** Every new key the API answers is `.optional()`
+and is emitted only at a non-default value (`communityPermissions`, `community.actions`, `openToBuyers`, the buyer's
+extra `viewer.actions` facts), so the PREVIOUS web never meets a new key while every link holds the defaults, and the
+new API is safe against the previous web. The NEW web against an OLD API sends `communityIds` exactly as before
+unless an administrator chose a non-default tick, so it also works at defaults. Putting the API first means the
+database gates, the refusals and the facts exist before any screen can ask for them.
+
+### What each window does
+
+| Window | What happens | Failing part |
+|--------|--------------|--------------|
+| Window 1: migrations applied, old API and old web | Defaults reproduce today. The like and comment gates deny only a community whose like or comment flag is false and no link carries one; post and story default to false, which is what the Phase 10 stub (constant false) already answered. The previous API inserts links without the flags and the defaults apply. | None. |
+| Window 2: new API, old web | Every response is identical to the previous one until a flag is non-default. A non-default link is created only by an administrator using the new web, so the previous web never meets a new key. | A stale PWA bundle could meet `community.actions` on a post (a strict parse) after an administrator edits a product, until it reloads; mitigated by the service worker's `updateViaCache: 'none'`. |
+| Window 3: new web, old API | The product form works at the defaults and sends `communityIds` as before; a post card or a story entry reads an absent fact as "everything offered". | A non-default save: the old API refuses the unknown `communityLinks` key with a 400. Nothing is written. |
+| Window 4: new API against an UNMIGRATED database | The new code reads the flag columns and calls the new functions; the schema gate holds that project out `updating` instead of letting a member meet the error. | Everything of that tenant. **Never release the API before the migrations reach every project.** |
+| Window 5: rollback | Migrations are forward-only. Rolling the API back leaves the flag columns unread by the previous API, while the new database gates keep enforcing every non-default flag. | Roll forward, never back (see "Rollback limit"). |
+
+- **Two runs of `db:migrate-all` must never overlap.** An API instance restarting while migrations apply, or two
+  operators applying at once, is serialised by the ledgered `migrateAll` and the schema gate; that is proved on a
+  hosted project by you (a ledger row), not by the local suites.
+
+### Per-tenant effect
+
+- **On the day of the release no tenant sees a change.** Every link carries the defaults and no highlight is open.
+- **A buyer's controls change only after an administrator edits a product's ticks with the new web.** A control the
+  product does not allow disappears (no gray state, no notice) and the server refuses the same action with a bare 403
+  whatever the screen shows.
+- **A buyer can post only with the `social` module on and only in an organization community whose product ticks
+  "Postar na comunidade".** The post is the same post a member publishes, stamped for the community's page, and it
+  notifies nobody (assumption BPERM-23 `unclassified`: a ledger row asks you to confirm that product call).
+- **A buyer saves a story only into a highlight the administrator opened** with the new switch; a buyer never creates,
+  edits or reorders a highlight.
+- **Permissions add up** across two products that unlock the same community, and they end with the entitlement
+  (refund, chargeback, revoke, cancel) at the next statement; what the buyer published stays where it is.
+- **Staff keep every action**, a community with no linked product stays open as today, and a locked community keeps
+  its read-only sample (now organization posts only).
+
+### Rollback limit
+
+- **Migrations are never rolled back** (forward-only; there is no down migration). Roll forward with a fix.
+- **Rolling the API back below this phase** after an administrator edited a product's ticks leaves the flag columns
+  unread by the previous API while the new database gates keep enforcing every non-default flag: a buyer who lost
+  `like` or `comment` stays refused, and a buyer who holds `post` or `story` simply meets the previous API's refusal.
+  Roll the API forward, not back.
+- **Rolling the WEB back** is safe only while every link still holds the defaults (queries F and G print 0): the
+  previous web reads no new key and sends `communityIds` as before. Once an administrator has made a link non-default,
+  the previous web's strict parsers can refuse `communityPermissions` on the product read and `community.actions` on a
+  post (window 2), so roll the web forward, not back.
+- **The new API against an old schema is held out `updating`.** Do not release the API before the migrations reach
+  every project.
+
+### After the migration: read-only checks (every project)
+
+```sql
+-- E. The six columns exist with the right defaults. Expected: six rows; the five link columns read
+--    true, true, true, false, false (can_like, can_comment, can_share, can_post, can_story) and the highlight one false.
+select table_name, column_name, column_default, is_nullable from information_schema.columns
+ where table_schema = 'public'
+   and ((table_name = 'store_product_communities'
+         and column_name in ('can_like', 'can_comment', 'can_share', 'can_post', 'can_story'))
+     or (table_name = 'story_highlights' and column_name = 'open_to_buyers'))
+ order by table_name, column_name;
+-- F. Links whose five flags differ from the defaults. Expected at release: 0.
+select count(*) as links_off_defaults from public.store_product_communities
+ where not (can_like and can_comment and can_share and not can_post and not can_story);
+-- G. Highlights already open to buyers. Expected at release: 0.
+select count(*) as open_highlights from public.story_highlights where open_to_buyers;
+-- H. The three functions: present, definers, empty search_path, executable by authenticated only.
+--    Expected: three rows; definer t; config {search_path=""}; authenticated t; anon f. Read service_role
+--    against the migration text (the file grants authenticated only).
+select p.proname, p.prosecdef as definer, p.proconfig as config,
+       has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
+       has_function_privilege('anon', p.oid, 'execute') as anon,
+       has_function_privilege('service_role', p.oid, 'execute') as service_role
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app'
+   and p.proname in ('community_buyer_scope', 'community_action_allowed', 'community_action_denied_ids')
+ order by p.proname;
+-- I. The six policies exist. Expected: six rows.
+select tablename, policyname from pg_policies
+ where policyname in ('feed_posts_social_insert_gate', 'feed_likes_community_gate',
+                      'feed_comments_community_insert_gate', 'story_highlight_items_member_insert_gate',
+                      'story_highlight_items_member_delete_gate', 'stories_audience_gate')
+ order by policyname;
+-- J. The sample function reads tenant-visible posts only. Expected: t.
+select pg_get_functiondef('app.feed_sample_post_ids'::regproc) ilike '%visibility = ''tenant''%' as sample_tenant_only;
+```
+
+None of these prints a secret, a member's e-mail or a project reference. Paste the shapes and counts in the ledger.
+
+### Smoke checks (on the homolog host once it serves this release)
+
+In the app, on a homolog tenant with `store`, `social` and `feed` on, one product linked to one organization community,
+one administrator and two member accounts (one buyer of the product, one member without it), on a phone and on a
+desktop browser (the first real-device walks are ledger rows):
+
+- As the administrator, edit the product, tick "Postar na comunidade" and "Postar story" under the community and save;
+  open a highlight of that community to buyers with the "Aberto a compradores" switch. Reopen the product: the ticks
+  are as saved.
+- As the buyer, reload the community page: the post entry and the story entry appear; untick "Curtir" as the
+  administrator, reload as the buyer: the heart is gone on the community's posts and on the same posts in Início.
+- As the buyer, publish a post from the community page: it appears on the community's page only, and nobody is
+  notified. Save one of your own stories into the open highlight: members who can see the community read it.
+- As the member without the product: the community stays locked with its sample, and a buyer's post is never the sample.
+- Refund the purchase (the gateway sandbox on homolog): on the buyer's next refresh the controls are gone and the
+  locked page returns when no other product remains; what the buyer published stays where it is.
+
+### Manual proofs (hosted)
+
+See the ledger named at the top. A row becomes `passed` only with the evidence you paste and your own date.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
