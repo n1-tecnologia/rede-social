@@ -666,3 +666,78 @@ describe('/comunidades/[communityId] — the story viewer curates by viewer.canC
     expect(viewerProps()?.canCurate).toBe(true);
   });
 });
+
+/**
+ * 11.1-16 (UI-D-891 c, A-UI-13, UI-D-888): the buyer's story door on an ORGANIZATION community. The
+ * leading "+" is gated by `viewer.actions.story` alone, which the API makes true for a buyer only while
+ * the community has an open highlight; with it false the circle is absent and, when the row has no
+ * highlight circle either, the whole band row and its title are absent (the shipped null case, no
+ * reserved height).
+ */
+describe('/comunidades/[communityId] — the buyer’s story door (11.1-16)', () => {
+  const BUYER_VIEW: Viewer = {
+    isOwner: false,
+    canPublish: false,
+    canEdit: false,
+    canCurate: false,
+  };
+  const SECTION = 'aria-label="Destaques"';
+
+  it('B1. story true: the "+" circle opens the composer pre-filled for this community', async () => {
+    mocks.permissions = ['social.participate', 'stories.story.publish'];
+    mocks.result = {
+      status: 'ok',
+      community: community('organization', { ...BUYER_VIEW, story: true }),
+    };
+
+    const html = await render();
+
+    expect(ownCircle()?.href).toBe(`/stories/publicar?comunidade=${ID}`);
+    expect(html).toContain(SECTION);
+  });
+
+  it('B2. story false and no highlight: no "+", and the band row and its title are absent (no reserved height)', async () => {
+    mocks.permissions = ['social.participate', 'stories.story.publish'];
+    mocks.highlights = { items: [] };
+    mocks.result = {
+      status: 'ok',
+      community: community('organization', { ...BUYER_VIEW, story: false }),
+    };
+
+    const html = await render();
+
+    expect(ownCircle()).toBeUndefined();
+    expect(mocks.surfaceProps).toBeNull();
+    expect(html).not.toContain(SECTION);
+  });
+
+  it('B3. story false with a highlight to watch: the circle of the highlight stays, the "+" and every curator door do not', async () => {
+    mocks.permissions = ['social.participate', 'stories.story.publish'];
+    mocks.highlights = { items: [HIGHLIGHT] };
+    mocks.result = {
+      status: 'ok',
+      community: community('organization', { ...BUYER_VIEW, story: false }),
+    };
+
+    const html = await render();
+
+    expect(ownCircle()).toBeUndefined();
+    expect(manageCircle()).toBeUndefined();
+    expect(html).toContain(SECTION);
+    expect((mocks.surfaceProps?.viewer as { canCurate?: boolean } | undefined)?.canCurate).toBe(
+      false,
+    );
+  });
+
+  it('B4. the page reads the fact, not the permission: story true with no story permission on the session still shows the "+"', async () => {
+    mocks.permissions = ['social.participate'];
+    mocks.result = {
+      status: 'ok',
+      community: community('organization', { ...BUYER_VIEW, story: true }),
+    };
+
+    await render();
+
+    expect(ownCircle()).toBeDefined();
+  });
+});

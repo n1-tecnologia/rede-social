@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
+import { ownsActiveCommunity } from '@/lib/communities';
 import {
   hasHighlightDestination,
   loadAuthorStories,
   loadStories,
   loadStoryAuthors,
+  memberCanHighlight,
   storyWriteIssue,
 } from '@/lib/stories';
 
@@ -34,6 +36,10 @@ vi.mock('@/lib/env', () => ({
 
 // The transport, for the strip read below; `storyWriteIssue` never calls it.
 vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
+
+// `memberCanHighlight` composes the shipped ownership read with the catalogue; the ownership read has
+// its own suite in `communities.test.ts`.
+vi.mock('@/lib/communities', () => ({ ownsActiveCommunity: vi.fn() }));
 
 describe('storyWriteIssue — the publish refusal the composer can switch on', () => {
   it('1. a bare 404 is not_found', () => {
@@ -287,5 +293,45 @@ describe('hasHighlightDestination — a destination exists only if the catalogue
     await expect(hasHighlightDestination()).resolves.toBe(false);
     expect(log).toHaveBeenCalledWith('stories.highlight_destination_failed', expect.anything());
     log.mockRestore();
+  });
+});
+
+describe('memberCanHighlight — own community first, then the open catalogue (11.1-16)', () => {
+  const MODULES = [{ key: 'communities' }];
+  const ITEM = {
+    id: '0000000a-1111-4111-8111-0000000000a1',
+    communityId: '0c000000-0000-4000-8000-0000000000a1',
+    title: 'Aberto',
+    position: 0,
+    coverAssetId: null,
+    coverVariantWidths: [],
+    coverStoryId: null,
+    coverChosen: false,
+    itemCount: 1,
+  };
+
+  it('10. an owner is true WITHOUT reading the catalogue', async () => {
+    vi.mocked(apiFetch).mockClear();
+    vi.mocked(ownsActiveCommunity).mockResolvedValueOnce(true);
+    await expect(memberCanHighlight(MODULES)).resolves.toBe(true);
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('11. a buyer with an open highlight is true; with none open, false', async () => {
+    vi.mocked(ownsActiveCommunity).mockResolvedValue(false);
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ items: [ITEM] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await expect(memberCanHighlight(MODULES)).resolves.toBe(true);
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await expect(memberCanHighlight(MODULES)).resolves.toBe(false);
   });
 });

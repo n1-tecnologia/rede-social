@@ -38,6 +38,7 @@ import {
 } from '@rede-social/module-stories/contracts';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
+import { ownsActiveCommunity } from '@/lib/communities';
 
 /**
  * The ONE stories fetch implementation (the `getFeed` / `getCommunities` rule, D-58, Pitfall 9). The
@@ -532,6 +533,18 @@ export async function hasHighlightDestination(): Promise<boolean> {
     console.error('stories.highlight_destination_failed', { error: String(error) });
     return false;
   }
+}
+
+/**
+ * 11.1-16 (UI-D-891 a, c): whether a MEMBER is offered "Destacar" (the row menu of "Seus stories" and the
+ * viewer's menu on their own story). Two finished facts, no role: they own an active community (their
+ * own highlights are the way in), or the catalogue lists a highlight the administrator opened for them.
+ * The ownership read comes first and the catalogue is only read when it said no.
+ */
+export async function memberCanHighlight(
+  modules: ReadonlyArray<{ key: string }>,
+): Promise<boolean> {
+  return (await ownsActiveCommunity(modules)) || (await hasHighlightDestination());
 }
 
 /** `GET /v1/stories/{storyId}/highlights` — the ids of the highlights one story is in. Manage-only. */

@@ -3,8 +3,7 @@ import { PageHeader } from '@rede-social/ui';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { ownsActiveCommunity } from '@/lib/communities';
-import { loadOwnStories } from '@/lib/stories';
+import { loadOwnStories, memberCanHighlight } from '@/lib/stories';
 import { storyHistoryView } from '@/lib/story-view';
 import { getHostTenant } from '@/lib/tenant-host';
 import { StoryHistoryList } from './StoryHistoryList';
@@ -30,7 +29,9 @@ import { StoryHistoryList } from './StoryHistoryList';
  * **It opens for any member holding the publish permission too** (10-12, UI-D-705): `GET /v1/stories/mine`
  * answers a member their own history (expired included), so the same list is their "Seus stories",
  * reached from the publish header only. A member's screen differs in three places: the row menu's
- * "Destacar" exists only when they own an active community (`ownsActiveCommunity`), the delete
+ * "Destacar" exists only when they own an active community or the catalogue lists a highlight the
+ * administrator opened for them (`memberCanHighlight`, 11.1-16: a buyer; with none open the entry is
+ * absent and no sheet is ever drawn empty), the delete
  * confirmation and the empty state speak of Explorar, and the highlight sheet carries the visibility
  * notice and the once-per-opening confirm.
  *
@@ -59,7 +60,7 @@ export default async function StoryHistoryPage() {
     // the media screens' words, and duplicating them into `stories.json` would be drift.
     getTranslations('media'),
     loadOwnStories(),
-    isCurator ? Promise.resolve(false) : ownsActiveCommunity(bootstrap.modules),
+    isCurator ? Promise.resolve(false) : memberCanHighlight(bootstrap.modules),
   ]);
 
   return (

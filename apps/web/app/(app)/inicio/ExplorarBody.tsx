@@ -8,10 +8,9 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { type ReactNode, Suspense } from 'react';
 import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
 import { withAuthorInstagrams } from '@/lib/author-instagram';
-import { ownsActiveCommunity } from '@/lib/communities';
 import { loadFeed } from '@/lib/feed';
 import { buildFeedSurface, storyCommentsProps } from '@/lib/registry';
-import { loadStoryAuthors } from '@/lib/stories';
+import { loadStoryAuthors, memberCanHighlight } from '@/lib/stories';
 import {
   authorRowLabels,
   explorarStoriesRowKind,
@@ -99,7 +98,7 @@ async function StoriesRowSection({
   kind: 'member' | 'moderator';
   pending: Promise<StoryAuthorsPage | null>;
 }) {
-  const [page, tf, tfeed, tmod, t, locale, shareOrigin, ownsCommunity] = await Promise.all([
+  const [page, tf, tfeed, tmod, t, locale, shareOrigin, canHighlight] = await Promise.all([
     pending,
     getTranslations('stories'),
     // D-82: the sheet's own copy is the FEED's, read from the feed namespace.
@@ -108,7 +107,7 @@ async function StoriesRowSection({
     getTranslations(),
     getLocale(),
     primaryHostOrigin(),
-    kind === 'member' ? ownsActiveCommunity(bootstrap.modules) : Promise.resolve(false),
+    kind === 'member' ? memberCanHighlight(bootstrap.modules) : Promise.resolve(false),
   ]);
   const labels = authorRowLabels(tf);
   const member = kind === 'member';
@@ -139,10 +138,11 @@ async function StoriesRowSection({
         authorRing: { seen: labels.author, unseen: labels.authorUnseen },
         // UI-D-701: who gets "Mais opções" on a member group. The moderator's is a PERMISSION
         // (`moderation.manage`), never a role; "Destacar" is the author's, and only with an active
-        // community of their own. The API is the control on every write (UI-D-710).
+        // community of their own or a highlight the administrator opened for them (11.1-16, UI-D-891).
+        // The API is the control on every write (UI-D-710).
         memberMenu: {
           canModerate: bootstrap.permissions.includes('moderation.manage'),
-          canHighlight: ownsCommunity,
+          canHighlight,
         },
         ...(shareOrigin === null
           ? {}
