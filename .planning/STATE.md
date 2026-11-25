@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "11.1"
 current_phase_name: Permissões do comprador por produto numa comunidade
-current_plan: 15
+current_plan: 17
 status: executing
-stopped_at: Completed 11.1-13-PLAN.md (highlight screens; plans 01-14 and 16 done, next 15, the last of wave 7)
-last_updated: "2026-11-25T15:33:40.788Z"
+stopped_at: Completed 11.1-15-PLAN.md (comment surfaces and Reels rail; plans 01-16 done, wave 7 closed, next 17 of wave 8)
+last_updated: "2026-11-25T15:48:59.523Z"
 last_activity: 2026-11-25
-last_activity_desc: Completed 11.1-13 (highlight screens); plans 01-14 and 16 done, next 15, the last of wave 7
-state_head: a8a8a70a56097ee4ccfbcadf16d62ad059ef2e27
+last_activity_desc: Completed 11.1-15 (comment surfaces and Reels rail); plans 01-16 done, wave 7 closed, next 17 (wave 8)
+state_head: ba21656999f22374fe4e82419db45a9d75d8140d
 progress:
   total_phases: 36
   completed_phases: 0
   total_plans: 537
-  completed_plans: 506
+  completed_plans: 507
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 11.1 (Permissões do comprador por produto numa comunidade) — EXECUTING
-Current Plan: 15
+Current Plan: 17
 Total Plans in Phase: 18
-Plan: 15 of 18
+Plan: 17 of 18
 Status: Ready to execute
-Last activity: 2026-11-25 — Completed 11.1-13 (highlight screens); plans 01-14 and 16 done, next 15, the last of wave 7
+Last activity: 2026-11-25 — Completed 11.1-15 (comment surfaces and Reels rail); plans 01-16 done, wave 7 closed, next 17 (wave 8)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -409,6 +409,7 @@ Progress: [███████████████████░] 160/162
 | Phase 11.1 P14 | 50min | 3 tasks | 9 files |
 | Phase 11.1 P16 | 12 min | 3 tasks | 16 files |
 | Phase 11.1 P13 | 9 min | 3 tasks | 16 files |
+| Phase 11.1 P15 | 95 min | 3 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -1222,6 +1223,9 @@ Recent decisions affecting current work:
 - [Phase 11.1]: 11.1-16: the buyer's create affordance is a per-group flag (HighlightSheetPlace.canCreate, absent reads true) set by the page from the API's viewer.canCurate; the administrator's groups are unchanged
 - [Phase 11.1]: 11.1-16: a member's checklist read with no group and no createHref never opens the sheet and removes Destacar for the visit; after a refused write the host re-reads the destinations
 - [Phase 11.1]: 11.1-13: the Compradores pill is the manage row's aria-describedby (not part of its name) and shows only where the open switch exists — the row button's aria-label would hide the pill from a screen reader; the mark must never appear where the switch cannot act
+- [Phase 11.1]: 11.1-15: the comment surfaces read the facts of the post a shared sheet is open on (post.actions, ReelView.actions) as data; the registry builds the booleans only for the detail page
+- [Phase 11.1]: 11.1-15: a bare 403 on a like, a comment or a comment heart is the single word refused, read from the status alone; hosts revert, keep the draft and re-read the page, the Reels overlay does not refresh
+- [Phase 11.1]: 11.1-15: the Reels rail is not drawn at all when like, comment and share are all withheld; each control is optional on ReelRail
 
 ### Pending Todos
 
@@ -1367,6 +1371,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-25T15:33:40.437Z
-Stopped at: Completed 11.1-13-PLAN.md (highlight screens; plans 01-14 and 16 done, next 15, the last of wave 7)
+Last session: 2026-11-25T15:48:59.161Z
+Stopped at: Completed 11.1-15-PLAN.md (comment surfaces and Reels rail; plans 01-16 done, wave 7 closed, next 17 of wave 8)
 Resume file: None
