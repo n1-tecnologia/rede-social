@@ -1975,3 +1975,157 @@ describe('ProductForm — the helper stack, stored values and the lock-preview r
     });
   });
 });
+
+describe('ProductForm — keyboard and screen reader (11.1-12, UI-D-885, UI-D-896)', () => {
+  const BOTH = [
+    { id: C1, name: 'Mentoria ao vivo', coverAssetId: null, coverVariantWidths: [640] },
+    { id: C2, name: 'Bastidores da mentoria', coverAssetId: null, coverVariantWidths: [640] },
+  ];
+  const BOTH_INITIAL = { ...EDIT_INITIAL, communities: BOTH };
+  const STORY_ON = (id: string) => ({
+    communityId: id,
+    like: true,
+    comment: true,
+    share: true,
+    post: false,
+    story: true,
+  });
+
+  const item = (id: string) =>
+    document.querySelector(`[data-product-community="${id}"]`) as HTMLElement;
+
+  it('K1. (a) the fieldset is a group named "Quem comprar pode: em {community}" and each box is announced by its label with its checked state', () => {
+    renderEdit({ initial: BOTH_INITIAL });
+    const groupOne = screen.getByRole('group', { name: 'Quem comprar pode: em Mentoria ao vivo' });
+    expect(
+      screen.getByRole('group', { name: 'Quem comprar pode: em Bastidores da mentoria' }),
+    ).toBeTruthy();
+    const names = ['Curtir', 'Comentar', 'Compartilhar', 'Postar na comunidade', 'Postar story'];
+    const checked = [true, true, true, false, false];
+    names.forEach((name, index) => {
+      const checkbox = within(groupOne).getByRole('checkbox', { name }) as HTMLInputElement;
+      expect(checkbox.checked).toBe(checked[index]);
+    });
+    expect(within(groupOne).getAllByRole('checkbox')).toHaveLength(5);
+  });
+
+  it('K2. (b) inside a community the tab stops are its remove button, then the five native boxes, then the next community; no roving tabindex', () => {
+    renderEdit({ initial: BOTH_INITIAL });
+    const stops = (root: ParentNode) =>
+      Array.from(root.querySelectorAll<HTMLElement>('button, input, a[href], [tabindex]')).map(
+        (element) =>
+          element.tagName === 'INPUT'
+            ? `box:${element.closest('label')?.textContent}`
+            : `button:${element.getAttribute('aria-label')}`,
+      );
+    expect(stops(item(C1))).toEqual([
+      'button:Remover Mentoria ao vivo',
+      'box:Curtir',
+      'box:Comentar',
+      'box:Compartilhar',
+      'box:Postar na comunidade',
+      'box:Postar story',
+    ]);
+    // The next community follows in document order.
+    const all = Array.from(document.querySelectorAll('[data-product-community]')).map((node) =>
+      node.getAttribute('data-product-community'),
+    );
+    expect(all).toEqual([C1, C2]);
+    // Native tab stops only: Space toggles a native checkbox, so no custom key model exists.
+    for (const element of Array.from(item(C1).querySelectorAll('[tabindex]'))) {
+      expect(['0', null]).toContain(element.getAttribute('tabindex'));
+    }
+    for (const input of Array.from(item(C1).querySelectorAll('input'))) {
+      expect(input.getAttribute('type')).toBe('checkbox');
+      expect(input.hasAttribute('tabindex')).toBe(false);
+    }
+  });
+
+  it('K3. (c) the social-off line describes both post boxes, the no-open-highlight line the story box, nothing the others', () => {
+    renderEdit({
+      initial: BOTH_INITIAL,
+      socialOn: false,
+      openHighlightCounts: { [C1]: 0, [C2]: 1 },
+      communityPermissions: [STORY_ON(C1)],
+    });
+    const social = document.querySelector('[data-product-permissions-social-off]') as HTMLElement;
+    const noOpen = document.querySelector(
+      `[data-product-no-open-highlight="${C1}"]`,
+    ) as HTMLElement;
+    expect(social.id).not.toBe('');
+    expect(noOpen.id).not.toBe('');
+
+    const described = (id: string, name: string) =>
+      (within(item(id)).getByRole('checkbox', { name }) as HTMLInputElement).getAttribute(
+        'aria-describedby',
+      );
+    expect(described(C1, 'Postar na comunidade')).toBe(social.id);
+    expect(described(C1, 'Postar story')?.split(' ')).toEqual([social.id, noOpen.id]);
+    for (const name of ['Curtir', 'Comentar', 'Compartilhar']) {
+      expect(described(C1, name)).toBeNull();
+    }
+    // The second community has a count of 1: only the social line describes its post boxes.
+    expect(described(C2, 'Postar na comunidade')).toBe(social.id);
+    expect(described(C2, 'Postar story')).toBe(social.id);
+  });
+
+  it('K4. (c) with social on and no known zero nothing is described', () => {
+    renderEdit({ communityPermissions: [STORY_ON(C1)], openHighlightCounts: { [C1]: 3 } });
+    for (const input of Array.from(item(C1).querySelectorAll('input'))) {
+      expect(input.hasAttribute('aria-describedby')).toBe(false);
+    }
+  });
+
+  it('K5. (d) removing a community lands focus on the NEXT remove button, else the previous one, else the choose button, never body', async () => {
+    const THIRD = '88888888-8888-4888-8888-888888888888';
+    const THREE = [
+      ...BOTH,
+      { id: THIRD, name: 'Encontros mensais', coverAssetId: null, coverVariantWidths: [640] },
+    ];
+    renderEdit({
+      initial: { ...EDIT_INITIAL, communities: THREE },
+      communities: [
+        ...COMMUNITIES,
+        { id: THIRD, name: 'Encontros mensais', coverAssetId: null, coverVariantWidths: [] },
+      ],
+    });
+
+    // The middle one: the next one's remove button.
+    fireEvent.click(screen.getByRole('button', { name: 'Remover Bastidores da mentoria' }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole('button', { name: 'Remover Encontros mensais' }),
+      ),
+    );
+    // The last one: the previous one's remove button.
+    fireEvent.click(screen.getByRole('button', { name: 'Remover Encontros mensais' }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole('button', { name: 'Remover Mentoria ao vivo' }),
+      ),
+    );
+    // The only one: the "Escolher comunidades" button.
+    fireEvent.click(screen.getByRole('button', { name: 'Remover Mentoria ao vivo' }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole('button', { name: 'Escolher comunidades' }),
+      ),
+    );
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('K6. (e) a 60-character name with markup stays text in the legend suffix and the row, and nothing raw is injected', () => {
+    const name = `<b>${'x'.repeat(53)}</b>`;
+    expect(name).toHaveLength(60);
+    const NAMED = [{ id: C1, name, coverAssetId: null, coverVariantWidths: [640] }];
+    renderEdit({ initial: { ...EDIT_INITIAL, communities: NAMED }, communities: NAMED });
+    expect(item(C1).querySelector('b')).toBeNull();
+    expect(item(C1).querySelector('legend .sr-only')?.textContent).toBe(` em ${name}`);
+    expect(item(C1).textContent).toContain(name);
+    expect(
+      Array.from(item(C1).querySelectorAll('label span')).every((span) =>
+        span.className.includes('break-words'),
+      ),
+    ).toBe(true);
+  });
+});

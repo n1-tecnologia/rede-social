@@ -366,6 +366,13 @@ export function ProductForm({
   const [pending, startTransition] = useTransition();
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const communitiesRef = useRef<HTMLDivElement>(null);
+  /**
+   * UI-D-885: where the focus goes once a removed community has left the DOM: the next community's
+   * remove button, else the previous one's, else the "Escolher comunidades" button (`rowId: null`);
+   * `null` = nothing pending. Never `body`.
+   */
+  const [focusAfterRemove, setFocusAfterRemove] = useState<{ rowId: string | null } | null>(null);
   /** A create that succeeded while its mapping did not: the next Salvar updates THIS product (A-P12). */
   const createdId = useRef<string | null>(null);
   /** The last mapping pair the server accepted (trimmed); only a difference calls the second endpoint. */
@@ -718,6 +725,15 @@ export function ProductForm({
     if (!returnAfterSave(router, landing, done)) router.push(landing);
   };
 
+  /** The `X` of one community row: removes it and queues the focus for its neighbour (UI-D-885). */
+  const removeCommunity = (index: number) => {
+    const row = selectedRows[index];
+    if (!row) return;
+    const neighbour = selectedRows[index + 1] ?? selectedRows[index - 1] ?? null;
+    toggle(row.id);
+    setFocusAfterRemove({ rowId: neighbour?.id ?? null });
+  };
+
   const toggle = (id: string) => {
     setSelected((current) => toggled(current, id));
     setPermissions((current) => {
@@ -746,6 +762,20 @@ export function ProductForm({
     : mode === 'edit'
       ? t('form.save')
       : t('form.create');
+
+  useEffect(() => {
+    if (focusAfterRemove === null) return;
+    const root = communitiesRef.current;
+    setFocusAfterRemove(null);
+    if (!root) return;
+    const target =
+      focusAfterRemove.rowId === null
+        ? root.querySelector<HTMLElement>('[data-product-communities-open]')
+        : (Array.from(root.querySelectorAll<HTMLElement>('[data-product-community]'))
+            .find((row) => row.getAttribute('data-product-community') === focusAfterRemove.rowId)
+            ?.querySelector<HTMLElement>('button') ?? null);
+    target?.focus();
+  }, [focusAfterRemove]);
 
   /** UI-D-884 (2): the one social-off line, from data (`socialOn`), never a role. */
   const socialNote = showSocialOffNote({ socialOn, communityCount: selectedRows.length });
@@ -1095,13 +1125,13 @@ export function ProductForm({
 
         {/* ── (5) Comunidades liberadas: only while the communities module is on (D-363). ── */}
         {communities !== null ? (
-          <div data-product-communities className="flex flex-col gap-2">
+          <div ref={communitiesRef} data-product-communities className="flex flex-col gap-2">
             <span className="text-sm font-normal text-text-secondary">
               {t('form.communities.label')}
             </span>
             {selectedRows.length > 0 ? (
               <ul className="flex flex-col gap-4">
-                {selectedRows.map((row) => (
+                {selectedRows.map((row, index) => (
                   <li
                     key={row.id}
                     data-product-community={row.id}
@@ -1118,7 +1148,7 @@ export function ProductForm({
                         className="shrink-0 text-text-tertiary"
                         label={t('form.communities.remove', { community: row.name })}
                         disabled={pending}
-                        onClick={() => toggle(row.id)}
+                        onClick={() => removeCommunity(index)}
                       />
                     </div>
                     <ProductCommunityPermissions
