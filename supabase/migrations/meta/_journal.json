@@ -1618,6 +1618,13 @@
       "when": 1795607497763,
       "tag": "20261125115137_buyer_permissions_comment_gate",
       "breakpoints": true
+    },
+    {
+      "idx": 231,
+      "version": "7",
+      "when": 1795607591727,
+      "tag": "20261125115311_buyer_permissions_sample",
+      "breakpoints": true
     }
   ]
 }

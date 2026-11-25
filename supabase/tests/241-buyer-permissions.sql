@@ -32,7 +32,7 @@ begin;
 --
 -- Fixture ids use the `24100000-…` prefix and the tenants `pgtap-bperm-a` / `pgtap-bperm-b`. Like its siblings, this
 -- file ROLLS BACK.
-select plan(120);
+select plan(136);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-bperm-a', 'Permissoes A', '24100000-0000-4000-8000-000000000001');
@@ -743,6 +743,92 @@ select results_eq(
 select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c7'::uuid, 'like'), true,
   '11: …who does hold them (the control)');
 reset role;
+
+-- ── 12. the free sample never shows a buyer's post (11.1-03, D-893, D-892) ───────────────────────
+-- CL8 (c8) is locked for the plain member (linked to P8, which only U9 holds). Its newest live post is a BUYER's
+-- `visibility = 'community'` post (b82, one minute after the organization's b72). CL9 (c9) is linked to a product nobody
+-- holds and carries ONLY a buyer's post (b91): a locked community with no tenant-visible post shows no sample.
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, kind, position) values
+  ('24100000-0000-4000-8000-0000000000c9', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'So de comprador', 'so-de-comprador', 'organization', 7);
+insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents, status) values
+  ('24100000-0000-4000-8000-0000000000aa', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'P10', 100, 'active');
+insert into public.store_product_communities (tenant_id, product_id, community_id) values
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000aa', '24100000-0000-4000-8000-0000000000c9');
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility, community_id, created_at) values
+  ('24100000-0000-4000-8000-000000000b82', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', 'do comprador em c8', 'community', '24100000-0000-4000-8000-0000000000c8', now() + interval '1 minute'),
+  ('24100000-0000-4000-8000-000000000b91', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009', 'so do comprador', 'community', '24100000-0000-4000-8000-0000000000c9', now());
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005');
+select is((select count(*)::int from public.feed_posts where id = '24100000-0000-4000-8000-000000000b82'), 0,
+  '12: D-893: a member who has not bought never reads the buyer''s post by id');
+select results_eq(
+  $$ select id from public.feed_posts where community_id = '24100000-0000-4000-8000-0000000000c8' $$,
+  ARRAY['24100000-0000-4000-8000-000000000b72'::uuid],
+  '12: …nor by list: the locked community shows only the organization''s newest post, the sample');
+select is(
+  array(select s.id from unnest(app.feed_sample_post_ids()) s(id)
+         where s.id = any (array['24100000-0000-4000-8000-000000000b71', '24100000-0000-4000-8000-000000000b72', '24100000-0000-4000-8000-000000000b73',
+                                 '24100000-0000-4000-8000-000000000b74', '24100000-0000-4000-8000-000000000b82', '24100000-0000-4000-8000-000000000b91']::uuid[])
+         order by s.id),
+  array['24100000-0000-4000-8000-000000000b71', '24100000-0000-4000-8000-000000000b72']::uuid[],
+  '12: …the sample holds the organization''s post of each locked community that has one, never the buyer''s newer post, and none for the community that has only a buyer''s post');
+select is((select p.caption from public.feed_posts p
+            where p.id = any (app.feed_sample_post_ids()) and p.community_id = '24100000-0000-4000-8000-0000000000c1'),
+  'da organizacao', '12: …and CA, which holds several buyer posts beside the organization''s, samples the organization''s');
+select is((select count(*)::int from public.feed_posts where id = '24100000-0000-4000-8000-000000000b91'), 0,
+  '12: a locked community with no tenant-visible post shows no sample (the buyer''s only post is hidden by id)');
+select is((select count(*)::int from public.feed_posts where community_id = '24100000-0000-4000-8000-0000000000c9'), 0,
+  '12: …nor by list');
+select is((select count(*)::int from public.feed_posts where community_id = '24100000-0000-4000-8000-0000000000c7'), 1,
+  '12: a plain organization community keeps the shipped sample (its newest tenant post)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009');
+select results_eq(
+  $$ select id from public.feed_posts where community_id = '24100000-0000-4000-8000-0000000000c8' order by id $$,
+  ARRAY['24100000-0000-4000-8000-000000000b72'::uuid, '24100000-0000-4000-8000-000000000b82'::uuid],
+  '12: the buyer (who holds P8, so CL8 is unlocked for them) reads both the organization''s post and the buyer''s post');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select is((select count(*)::int from public.feed_posts where id in ('24100000-0000-4000-8000-000000000b82', '24100000-0000-4000-8000-000000000b91')), 2,
+  '12: staff read the buyer''s posts (no lock for staff)');
+reset role;
+select ok((select prosecdef and provolatile = 's' and 'search_path=""' = any (proconfig)
+             from pg_proc where oid = to_regprocedure('app.feed_sample_post_ids()')),
+  '12: the replaced sample function is still SECURITY DEFINER, stable, with an empty search_path');
+select ok(has_function_privilege('authenticated', 'app.feed_sample_post_ids()', 'EXECUTE')
+          and not has_function_privilege('anon', 'app.feed_sample_post_ids()', 'EXECUTE'),
+  '12: …executable by authenticated and not by anon (the grants survived)');
+select ok((select pg_get_functiondef(oid) like '%visibility = ''tenant''%' from pg_proc where oid = to_regprocedure('app.feed_sample_post_ids()')),
+  '12: …and selects only tenant-visible posts');
+
+-- ── 13. the gates are InitPlans, never a per-row SubPlan (T-11.1-12) ───────────────────────────
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009');
+do $$
+declare
+  v_plan text;
+  v_line text;
+begin
+  v_plan := '';
+  for v_line in execute
+    'explain select p.id from public.feed_posts p
+      where p.community_id is null
+         or p.community_id <> all (coalesce((select app.community_action_denied_ids(''like'')), ''{}''::uuid[]))'
+  loop
+    v_plan := v_plan || v_line || E'\n';
+  end loop;
+  perform set_config('tests.plan_denied', v_plan, true);
+end
+$$;
+reset role;
+select matches(current_setting('tests.plan_denied'), 'InitPlan',
+  '13: the denied-ids idiom of the like and comment gates is evaluated as an InitPlan (once per statement)');
+select doesnt_match(current_setting('tests.plan_denied'), '(?<!Init)SubPlan',
+  '13: …and never as a per-row SubPlan');
+select ok((select with_check ~* 'coalesce\(\(\s*select app\.community_action_denied_ids\(''like''::text\)'
+             from pg_policies where schemaname = 'public' and tablename = 'feed_likes' and policyname = 'feed_likes_community_gate'),
+  '13: the stored like policy carries the coalesce-select idiom');
+select ok((select with_check ~* 'coalesce\(\(\s*select app\.community_action_denied_ids\(''comment''::text\)'
+             from pg_policies where schemaname = 'public' and tablename = 'feed_comments' and policyname = 'feed_comments_community_insert_gate'),
+  '13: …and so does the stored comment policy');
 
 select * from finish();
 rollback;
