@@ -216,3 +216,66 @@ describe('/criar — the administrator picker offers organization communities on
     expect((await props({ comunidade: ORG })).initialCommunityId).toBe(ORG);
   });
 });
+
+/**
+ * 11.1-17 (UI-D-892, D-880, D-881, A-UI-14): the BUYER's `/criar?comunidade={id}`. A buyer is a member
+ * (`social.participate`, no `content.publish`) and the community is the ORGANIZATION's: the page keeps
+ * the pinned composer only when the API's own fact `viewer.actions.post` is true, resolves it on the
+ * server before painting (no client fetch, no flash), adds no destination picker, and falls back
+ * SILENTLY to the Explorar composer for every id the viewer may not post in.
+ */
+describe('/criar?comunidade= - a buyer in the ORGANIZATION community (11.1-17, UI-D-892)', () => {
+  const buyerView = (over: Overrides = {}) =>
+    community({
+      kind: 'organization',
+      isOwner: false,
+      canPublish: false,
+      name: 'Mentoria Aurora',
+      ...over,
+    });
+
+  it('Q1. (the path) post true pins the organization community: member limits, no destination list, no picker', async () => {
+    mocks.loadCommunity.mockResolvedValue({ status: 'ok', community: buyerView({ post: true }) });
+
+    const p = await props({ comunidade: ID });
+
+    expect(mocks.loadCommunity).toHaveBeenCalledWith(ID);
+    expect(p.memberCommunity).toEqual({ id: ID, name: 'Mentoria Aurora' });
+    expect(p.memberLimits).toBeDefined();
+    expect(p.destinations).toEqual([]);
+    expect(p.initialCommunityId).toBeNull();
+    // A-UI-14: the buyer's composer has no destination list to pick from, so the list is never read.
+    expect(mocks.listAllCommunities).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it('Q2. post false is the plain Explorar composer, silently, beside the positive control of Q1', async () => {
+    mocks.loadCommunity.mockResolvedValue({ status: 'ok', community: buyerView({ post: false }) });
+
+    const p = await props({ comunidade: ID });
+
+    expect(p.memberCommunity).toBeUndefined();
+    expect(p.memberLimits).toBeDefined();
+    expect(p.destinations).toEqual([]);
+    expect(mocks.redirect).not.toHaveBeenCalled();
+
+    mocks.loadCommunity.mockResolvedValue({ status: 'ok', community: buyerView({ post: true }) });
+    expect((await props({ comunidade: ID })).memberCommunity).toBeDefined();
+  });
+
+  it('Q3. the fact decides, never the kind, the owner flag or canPublish', async () => {
+    // post true with every other flag false: pinned.
+    mocks.loadCommunity.mockResolvedValue({
+      status: 'ok',
+      community: buyerView({ post: true, canPublish: false, isOwner: false }),
+    });
+    expect((await props({ comunidade: ID })).memberCommunity).toBeDefined();
+
+    // post false with every other flag true: not pinned.
+    mocks.loadCommunity.mockResolvedValue({
+      status: 'ok',
+      community: buyerView({ post: false, canPublish: true, isOwner: true }),
+    });
+    expect((await props({ comunidade: ID })).memberCommunity).toBeUndefined();
+  });
+});

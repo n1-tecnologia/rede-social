@@ -696,3 +696,69 @@ describe('ComposerForm - the member composer inside a community (UI-D-711)', () 
     expect(screen.queryByText(EDIT_HELPER)).toBeNull();
   });
 });
+
+/**
+ * 11.1-17 Task 1 (UI-D-892, D-880, D-881, D-882, A-UI-14): the buyer's composer is the shipped member
+ * composer pinned to the organization community. The audience line is the read-only destination line,
+ * there is no destination picker, the create body names the community, the member lands back on the
+ * community page with the shipped success toast, and nothing on the screen promises a notification.
+ */
+const BUYER_COMMUNITY = { id: '6e1d2d3f-8b52-4d63-8e4b-1f7a2c3d4e51', name: 'Mentoria Aurora' };
+const BUYER_LINE = 'Todos os membros veem esta publicação na comunidade Mentoria Aurora.';
+
+function buyerComposer() {
+  return render(
+    <ComposerForm
+      mode="create"
+      tenantName="Rede Lab"
+      memberLimits={MEMBER_LIMITS}
+      memberCommunity={BUYER_COMMUNITY}
+    />,
+  );
+}
+
+describe('ComposerForm - the buyer pinned to the organization community (11.1-17 Task 1)', () => {
+  it('U1. the read-only audience line names the community; no picker, no attachment row, no Explorar line', () => {
+    buyerComposer();
+
+    expect(document.querySelector('[data-composer-audience]')?.textContent).toBe(BUYER_LINE);
+    expect(screen.queryByText(AUDIENCE)).toBeNull();
+    expect(document.querySelector('[data-composer-destination]')).toBeNull();
+    expect(screen.queryByTestId('composer-add-file')).toBeNull();
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
+  it('U2. publishing sends the communityId and lands on the community page with the shipped toast', async () => {
+    buyerComposer();
+    typeCaption('Preparei um resumo da aula de hoje.');
+
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
+
+    const body = createPost.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.communityId).toBe(BUYER_COMMUNITY.id);
+    expect('attachmentAssetIds' in body).toBe(false);
+    expect(replace).toHaveBeenCalledWith(`/comunidades/${BUYER_COMMUNITY.id}`);
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: (catalogs.feed.toasts as Record<string, string>).created,
+    });
+  });
+
+  it('U3. D-881: nothing on the composer or the success toast promises a notification or a push', async () => {
+    buyerComposer();
+    typeCaption('Preparei um resumo da aula de hoje.');
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
+
+    const words = /notifica|avis|push|todos receber|seguidor/i;
+    expect(document.body.textContent ?? '').not.toMatch(words);
+    expect(JSON.stringify(toast.show.mock.calls)).not.toMatch(words);
+  });
+
+  it('U4. the buyer composer is never the administrator composer: without memberCommunity it is Explorar, as shipped', () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={MEMBER_LIMITS} />);
+    expect(screen.getByText(AUDIENCE)).toBeTruthy();
+    expect(screen.queryByText(BUYER_LINE)).toBeNull();
+  });
+});

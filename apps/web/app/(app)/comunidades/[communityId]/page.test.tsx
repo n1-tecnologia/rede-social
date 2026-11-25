@@ -1,3 +1,5 @@
+import { FeedList, type FeedListProps, type PostCardView } from '@rede-social/module-feed/ui';
+import { ToastProvider } from '@rede-social/ui';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -739,5 +741,132 @@ describe('/comunidades/[communityId] — the buyer’s story door (11.1-16)', ()
     await render();
 
     expect(ownCircle()).toBeDefined();
+  });
+});
+
+/**
+ * 11.1-17 (UI-D-892, D-880, UI-D-710 Escopo seam): the buyer's compose entries on the community page.
+ *
+ * The page hands `canPost` (the API's `viewer.actions.post` and an active community) and `createHref`
+ * to the feed list, and the REAL list draws the three entries from them: the floating button (phone),
+ * the desktop "Criar publicação" and the empty state's own CTA. The cases render the real `FeedList`
+ * with exactly the props the page captured, so the DOM is what a buyer would get. A buyer is a member
+ * of an ORGANIZATION community: not the owner, `canPublish` false, `post` true or false.
+ */
+describe('/comunidades/[communityId] - the buyer’s compose entries (11.1-17)', () => {
+  const BUYER_VIEW: Viewer = {
+    isOwner: false,
+    canPublish: false,
+    canEdit: false,
+    canCurate: false,
+  };
+  const HREF = `href="/criar?comunidade=${ID}"`;
+  const POST: PostCardView = {
+    id: '00000000-0000-4000-8000-000000000001',
+    caption: 'Uma novidade',
+    author: { displayName: 'Ana Souza', profileHref: '/membros/m1', avatarUrl: null },
+    createdAtIso: '2026-10-08T10:00:00.000Z',
+    createdAtRelative: 'há 1 h',
+    createdAtAbsolute: '08/10/2026',
+    community: null,
+    shareUrl: null,
+    edited: false,
+    canManage: false,
+    editHref: null,
+    likeCount: 0,
+    commentCount: 0,
+    viewerLiked: false,
+    ariaLabel: 'post-1',
+    media: { mediaKind: 'none', images: [], attachments: [] },
+  } as PostCardView;
+
+  /** The real list over the props the page handed to its post column. */
+  function entries(items: PostCardView[]) {
+    const {
+      share: _share,
+      menu: _menu,
+      reels: _reels,
+      communityId: _id,
+      ...list
+    } = (mocks.postsProps ?? {}) as Props;
+    return renderToStaticMarkup(
+      <ToastProvider>
+        <FeedList {...(list as unknown as FeedListProps)} initialItems={items} />
+      </ToastProvider>,
+    );
+  }
+  const count = (html: string, needle: string) => html.split(needle).length - 1;
+
+  async function renderBuyer(post: boolean, over: { status?: 'active' | 'archived' } = {}) {
+    mocks.permissions = ['social.participate', 'feed.post.create'];
+    mocks.result = {
+      status: 'ok',
+      community: community('organization', { ...BUYER_VIEW, post }, over),
+    };
+    await render();
+  }
+
+  it('E1. (the path) post true: the desktop button, the empty-state CTA and (with posts) the floating button all open /criar?comunidade={id}', async () => {
+    await renderBuyer(true);
+
+    expect(mocks.postsProps?.canPost).toBe(true);
+    expect(mocks.postsProps?.createHref).toBe(`/criar?comunidade=${ID}`);
+
+    // Empty list: the desktop header button and the empty card's own CTA; the floating button stands
+    // down so the screen keeps one brand fill (UI-D-17).
+    const empty = entries([]);
+    expect(count(empty, HREF)).toBe(2);
+    expect(empty).not.toContain('data-compose-fab');
+    expect(empty).toContain('Publicar nesta comunidade');
+
+    // A list with a post: the desktop header button and the floating button.
+    const filled = entries([POST]);
+    expect(count(filled, HREF)).toBe(2);
+    expect(filled).toContain('data-compose-fab');
+  });
+
+  it('E2. post false: none of the three entries is in the DOM (absent, not disabled) and no /criar link exists', async () => {
+    await renderBuyer(false);
+
+    expect(mocks.postsProps?.canPost).toBe(false);
+    for (const html of [entries([]), entries([POST])]) {
+      expect(html).not.toContain('/criar');
+      expect(html).not.toContain('data-compose-fab');
+      expect(html).not.toContain('Publicar nesta comunidade');
+      expect(html).not.toMatch(/\sdisabled(=|\s|>)/);
+      expect(html).not.toContain('aria-disabled');
+    }
+  });
+
+  it('E3. post false: the empty state keeps its title and body with no button; the body is the shipped one for a non-owner', async () => {
+    await renderBuyer(false);
+
+    const html = entries([]);
+    expect(html).toContain('Nada publicado ainda');
+    expect(html).toContain('As publicações desta comunidade vão aparecer aqui.');
+    expect(html).not.toContain('Compartilhe a primeira novidade');
+    expect(html).not.toContain('<button');
+    expect(labels().emptyBodyAuthor).toBe('As publicações desta comunidade vão aparecer aqui.');
+  });
+
+  it('E4. post true but the community is archived: no entry at all, as for the administrator', async () => {
+    await renderBuyer(true, { status: 'archived' });
+
+    expect(mocks.postsProps?.canPost).toBe(false);
+    expect(entries([])).not.toContain('/criar');
+    expect(entries([POST])).not.toContain('data-compose-fab');
+  });
+
+  it('E5. the page holds no role or product comparison: the same fixture with the administrator role and no fact still shows no entry', async () => {
+    mocks.permissions = ADMIN_PERMISSIONS;
+    mocks.role = 'admin_tenant';
+    mocks.result = {
+      status: 'ok',
+      community: community('organization', { ...BUYER_VIEW, post: false }),
+    };
+    await render();
+
+    expect(mocks.postsProps?.canPost).toBe(false);
+    expect(entries([])).not.toContain('/criar');
   });
 });
