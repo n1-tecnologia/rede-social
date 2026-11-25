@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "11.1"
 current_phase_name: Permissões do comprador por produto numa comunidade
-current_plan: 3
+current_plan: 4
 status: executing
-stopped_at: Completed 11.1-05-PLAN.md
-last_updated: "2026-11-25T01:22:20.844Z"
+stopped_at: Completed 11.1-03-PLAN.md
+last_updated: "2026-11-25T11:57:15.522Z"
 last_activity: 2026-11-24
 last_activity_desc: Phase 11.1 execution started
-state_head: af71659ccd454ca278107f0325c25818a1c86258
+state_head: 1aeab9e0aecdf3a4f7bcb2eba7ea52ee12c74c36
 progress:
   total_phases: 36
   completed_phases: 0
   total_plans: 537
-  completed_plans: 493
+  completed_plans: 494
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 11.1 (Permissões do comprador por produto numa comunidade) — EXECUTING
-Current Plan: 3
+Current Plan: 4
 Total Plans in Phase: 18
-Plan: 3 of 18
+Plan: 4 of 18
 Status: Ready to execute
 Last activity: 2026-11-24 — Phase 11.1 execution started
 
@@ -396,6 +396,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12.4 P22 | 17 min | 3 tasks | 15 files |
 | Phase 11.1 P02 | 11 min | 3 tasks | 19 files |
 | Phase 11.1 P05 | 8 min | 3 tasks | 11 files |
+| Phase 11.1 P03 | 8 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -1199,6 +1200,7 @@ Recent decisions affecting current work:
 - [Phase 12.4]: 12.4-17: the scroll check asserts an anchored message and scrollTop moving by the bar delta (the shipped hook's contract), not scrollTop unchanged
 - [Phase 12.4]: 12.4-18: release notes follow the migrations (the pre-activation window is benign, the 42P10 window is the failing one); CASE-28 and CASE-29 stay open as owner proofs; Nyquist flags left false because guard:lanes is red on four 07/08 test statements
 - [Phase 11.1]: 11.1-02: an archived organization community stays in the buyer scope map (post refused by the gate and the service); allowed() coalesces to false, never null — D-890 keeps today's like, comment and share behaviour until the administrator edits the product
+- [Phase 11.1]: 11.1-03: deniedCommunityIds inlines the action literal (sql.raw over a closed union) because a policy is DDL and cannot carry a bind parameter — drizzle-kit rendered the interpolated action as $1 in ALTER POLICY, which does not apply
 
 ### Pending Todos
 
@@ -1344,6 +1346,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-25T01:22:20.493Z
-Stopped at: Completed 11.1-05-PLAN.md
+Last session: 2026-11-25T11:57:15.121Z
+Stopped at: Completed 11.1-03-PLAN.md
 Resume file: None
