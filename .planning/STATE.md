@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "11.1"
 current_phase_name: Permissões do comprador por produto numa comunidade
-current_plan: 19
-status: ready_to_execute
-stopped_at: Planned gap closure 11.1-19 (WR-01 share menu) and 11.1-20 (WR-02 + BPERM-28..30 rows); plan-checker passed; next /gsd-execute-phase 11.1 --gaps-only
-last_updated: "2026-11-25T18:10:00.000Z"
+current_plan: 20
+status: executing
+stopped_at: Completed 11.1-19-PLAN.md
+last_updated: "2026-11-25T19:12:23.213Z"
 last_activity: 2026-11-25
-last_activity_desc: Planned the verification gap closure for 11.1 (plans 19 and 20, wave 1, checker passed); 18 plans executed, verification gaps_found
-state_head: 155edce3
+last_activity_desc: Phase 11.1 execution started
+state_head: 2ab1753c61b8e5d45aaeccc7ba8fd57a34d0f3cb
 progress:
   total_phases: 36
   completed_phases: 0
   total_plans: 539
-  completed_plans: 509
+  completed_plans: 510
   percent: 0
 ---
 
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 11.1 (Permissões do comprador por produto numa comunidade) — 18 PLANS EXECUTED, VERIFICATION gaps_found, GAP CLOSURE 19 AND 20 PLANNED
-Current Plan: 19
+Phase: 11.1 (Permissões do comprador por produto numa comunidade) — EXECUTING GAP CLOSURE (plans 19 and 20)
+Current Plan: 20
 Total Plans in Phase: 20
-Plan: 19 of 20 (18 executed; 19 and 20 are gap_closure plans, wave 1, not started)
-Status: Ready to execute the gap plans (`/gsd-execute-phase 11.1 --gaps-only`), then re-verify (expect human_needed because the 34-row ledger is all pending); the phase is not closed
-Last activity: 2026-11-25 — Planned the verification gap closure: 11.1-19 (WR-01, "Copiar link" in the "..." menu, BPERM-21) and 11.1-20 (WR-02 `mapRefused` scoped to the member lane, BPERM-28..30 rows back to Pending); plan-checker passed, decision coverage 17/17
+Plan: 20 of 20 (18 executed earlier; 19 and 20 are the gap_closure plans)
+Status: Ready to execute
+Last activity: 2026-11-25 — Phase 11.1 gap-closure execution started (--gaps-only)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -412,6 +412,7 @@ Progress: [███████████████████░] 160/162
 | Phase 11.1 P15 | 95 min | 3 tasks | 20 files |
 | Phase 11.1 P17 | 9 min | 3 tasks | 12 files |
 | Phase 11.1 P18 | 31 min | 3 tasks | 3 files |
+| Phase 11.1 P19 | 20 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -1229,6 +1230,7 @@ Recent decisions affecting current work:
 - [Phase 11.1]: 11.1-15: a bare 403 on a like, a comment or a comment heart is the single word refused, read from the status alone; hosts revert, keep the draft and re-read the page, the Reels overlay does not refresh
 - [Phase 11.1]: 11.1-15: the Reels rail is not drawn at all when like, comment and share are all withheld; each control is optional on ReelRail
 - [Phase 11.1]: 11.1-18: release order is migrations, then API and worker together, then web (inverse of Phase 11), because every new response key is optional and emitted only at non-default values — the previous web never meets a new key while links hold the defaults; the new API is safe against the previous web
+- [Phase 11.1]: 11.1-19: WR-01 fixed at the source: postCardBase nulls shareUrl when postActionsView(post).share is false; no render-site gate, no packages/ or server change (D-888, D-889)
 
 ### Pending Todos
 
@@ -1374,6 +1376,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-25T16:33:42.329Z
-Stopped at: Completed 11.1-18-PLAN.md (release half; all 18 plans executed, verification pending)
+Last session: 2026-11-25T19:12:22.825Z
+Stopped at: Completed 11.1-19-PLAN.md
 Resume file: None

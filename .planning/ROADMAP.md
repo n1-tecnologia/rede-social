@@ -1825,7 +1825,7 @@ Plans:
 
 **UI hint**: yes — the product form (five checkboxes per linked community), the highlight "Aberto a compradores" switch, controls that disappear on the member screens, the buyer's story and post flows.
 
-**Plans:** 18/20 plans executed (gap closure 11.1-19 and 11.1-20 planned 2026-11-25 from the verification's gaps_found; planned 2026-11-24: 18 plans in 9 waves; the database, contract, service, pure-function and security plans do not wait for the sketch; plan 01 draws sketch 026 and stops at the approval that only Igor writes; web plans 12 to 17 carry the approval precondition; plan 18 holds the release, the ledger and the exit gate)
+**Plans:** 19/20 plans executed (gap closure 11.1-19 and 11.1-20 planned 2026-11-25 from the verification's gaps_found; planned 2026-11-24: 18 plans in 9 waves; the database, contract, service, pure-function and security plans do not wait for the sketch; plan 01 draws sketch 026 and stops at the approval that only Igor writes; web plans 12 to 17 carry the approval precondition; plan 18 holds the release, the ledger and the exit gate)
 
 Plans:
 
@@ -1876,7 +1876,7 @@ Plans:
 
 **Gap closure** *(from 11.1-VERIFICATION.md, gaps_found 2026-11-25)*
 
-- [ ] 11.1-19-PLAN.md — Gap closure (WR-01, BPERM-21): a viewer without Compartilhar gets no share url from `postCardBase`, so the post's "..." sheet offers no "Copiar link" on the lists and the detail; tests through the real list, detail and menu
+- [x] 11.1-19-PLAN.md — Gap closure (WR-01, BPERM-21): a viewer without Compartilhar gets no share url from `postCardBase`, so the post's "..." sheet offers no "Copiar link" on the lists and the detail; tests through the real list, detail and menu
 - [ ] 11.1-20-PLAN.md — Gap closure (WR-02, BPERM-23): the refused word only for the member lane, a staff 403 logged as before; BPERM-28, BPERM-29 and BPERM-30 back to Pending in REQUIREMENTS.md
 
 **Cross-cutting constraints:**
@@ -2475,7 +2475,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10.1. Rede Social - Ingresso pago do evento pela Kiwify (INSERTED) | 19/19 | Complete    | 2026-11-13 |
 | 10.2. Abertura das inscrições do evento com contagem regressiva (INSERTED) | 16/16 | In Progress|  |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 28/28 | In Progress|  |
-| 11.1. Permissões do comprador por produto numa comunidade (INSERTED) | 18/18 | In Progress|  |
+| 11.1. Permissões do comprador por produto numa comunidade (INSERTED) | 19/20 | In Progress|  |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 12.4. Abertura de chamado no suporte (INSERTED) | 22/22 | In Progress|  |
 | 12.5. Mensagem de voz no chat (INSERTED) | 18/18 | Complete    | 2026-11-17 |
