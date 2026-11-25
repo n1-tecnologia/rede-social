@@ -444,6 +444,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 ### Voice messages
 
 **Message model**
+
 - [x] **VOICE-01**: A chat message is either text or one recording: `chat_messages.body` becomes nullable and a CHECK requires exactly one of `body` (1 to 2000 characters after trim) or `media_asset_id` with `voice_seconds` between 1 and 300; a row with both or neither is refused for every writer *(D-846)*
 - [x] **VOICE-02**: A recording is referenced by an expand-only FK to `media_assets` and its server-verified duration is copied on the message; an asset can back at most one message (unique per tenant), so a repeated send of the same take answers the stored message and never makes a second one *(D-846, D-857)*
 - [x] **VOICE-03**: The message INSERT policy accepts a recording only when the asset is the author's own, in the author's tenant, `audio` kind and `voice` purpose, `ready`, not deleted, and its `duration_seconds` equals the message's `voice_seconds`; a foreign, processing, deleted, non-audio or other member's asset is refused *(D-858, T-voice)*
@@ -452,6 +453,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **VOICE-06**: Direct and group conversations accept a recording through the same message model and policy, with no change in this phase to their screens *(D-847)*
 
 **Recording**
+
 - [x] **VOICE-07**: The microphone shares the send button's slot (mic when the field is empty after trim, send otherwise), is drawn on the server render and withdrawn after mount when the browser has no recording API, and never appears where the composer is replaced by a read-only strip *(D-851, UI-D-841)*
 - [x] **VOICE-08**: The microphone permission is requested only at the tap on the microphone; a refused, absent or busy microphone shows the specified sentence, keeps the text composer working and keeps the mic tappable *(D-852, UI-D-842)*
 - [x] **VOICE-09**: While recording, the composer shows trash, the pill (dot, "Gravando", elapsed `m:ss`) and send; one tap on send stops and sends; the trash discards at once; the take is kept in memory only *(D-849, UI-D-843)*
@@ -460,6 +462,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **VOICE-12**: Every exit (send, discard, too short, interruption, leaving the screen, the composer being replaced) stops every audio track; starting a recording pauses any playing voice message *(UI-D-845)*
 
 **Sending, upload, normalization**
+
 - [x] **VOICE-13**: `audio` is a media kind and `voice` a media purpose with mimes `audio/webm`, `audio/mp4`, `audio/ogg` (parameters stripped by the client), a 6 MiB cap (one PUT) and a 300-second duration declared in `MEDIA_LIMITS`; the private bucket allow-list is exactly the contract union *(D-848)*
 - [x] **VOICE-14**: Starting a `voice` upload requires `chat.support.contact` or `chat.support` for the caller in a tenant with chat on; any other caller gets 403, with no new permission *(D-847)*
 - [x] **VOICE-15**: Completing a voice upload checks the object's size, its content type and the 16-byte signature the declared mime demands (EBML at 0, `ftyp` at 4, `OggS` at 0), then leaves the asset `processing` and enqueues the existing derive job; a mismatch removes the object and marks the row `rejected` *(D-848)*
@@ -468,6 +471,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **VOICE-18**: The member and the staff each send a recording through a new route (`POST /v1/chat/support/voice-messages`, `POST /v1/chat/conversations/{id}/voice-messages`) with the same guard chain, refusals and order as text (blocked, removed, not a participant, closed case); an asset still `pending` or `processing` answers a retriable `voice_not_ready`, any unusable asset answers one `voice_invalid`; the closed `CHAT_ISSUES` list and its contract test gain these codes *(D-862)*
 
 **Playback**
+
 - [x] **VOICE-19**: A voice bubble draws from the stored duration and makes no media request until the first tap; the first tap assigns the same-origin media path to the audio element inside the tap handler *(D-853, UI-D-849)*
 - [x] **VOICE-20**: The player offers play/pause, a draggable bar whose maximum is the stored duration, the elapsed and total time and the 1x, 1.5x, 2x speed cycle (per player, not stored); only one player plays at a time and the paused one keeps its position *(D-853, D-854, UI-D-849, UI-D-850)*
 - [x] **VOICE-21**: A failed or expired link shows the error state and a tap fetches a fresh link and resumes from the same position; a format the browser cannot decode (element error code 4) shows the "unsupported" sentence *(UI-D-849)*
@@ -475,6 +479,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **VOICE-23**: The optimistic voice bubble uses the player's geometry, shows upload progress then "Enviando…" through normalization, keeps the take for "Tentar novamente" and "Descartar" on a retriable failure, offers only "Descartar" on a permanent refusal without naming a quota or limit, and posts takes in tap order *(UI-D-846, UI-D-847)*
 
 **Access and quota**
+
 - [x] **VOICE-24**: `GET /v1/media/{id}/original` for a voice asset answers 302 only to its uploader and to users who can read the message through the chat policies (the member, the tenant's staff for a support conversation, the participants of a direct or group one); a same-tenant non-participant and another tenant's user get the same bare 404 as a miss *(D-858)*
 - [x] **VOICE-25**: The gate is a kernel-declared seam with a chat-owned body built over the chat RLS, asked by the same one-read `serveVariant('original')` gate; non-voice assets are unaffected *(D-858)*
 - [x] **VOICE-26**: A voice recording counts in the tenant ceiling and the member share through the existing byte sums with no separate budget; `DELETE /v1/media/{id}` is refused for a voice asset and the admin media list excludes voice assets *(D-857, D-859)*
@@ -482,28 +487,32 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **VOICE-37**: When a member's account is anonymised or deleted, every voice recording that member sent is removed: the media asset is soft-deleted and its storage object is purged, and the message stays in the thread as a bubble that reads "Mensagem de voz apagada" with no player, no media request and no duration; text messages keep today's behaviour; the change keeps `app.account_anonymise` identical in every other respect *(D-868, Igor 2026-11-17)*
 
 **Previews and push**
+
 - [x] **VOICE-28**: Wherever a message's text is a preview (inbox row, "Meus chamados" card), a voice message carries its stored duration as an optional `voiceSeconds` and the host renders "Mensagem de voz · m:ss" with a microphone glyph *(D-860, UI-D-853)*
 - [x] **VOICE-29**: The push to the team (new case, reopened case, new message) and to the member (staff reply) carries "Mensagem de voz · m:ss" in the slot where a preview goes, built by the server copy file and cut by the existing 100-grapheme rule; no bell row is added *(D-860)*
 - [x] **VOICE-30**: A case whose first message is a recording and has no typed subject is labelled "Mensagem de voz" (no duration) in the bar, card, inbox row and details *(D-861)*
 
 **Cases**
+
 - [x] **VOICE-31**: The recording's first send opens the case with the chosen category and typed subject exactly as text does, and a failed first send keeps the opener's chip and subject *(D-861, UI-D-852)*
 - [x] **VOICE-32**: A staff voice reply takes an unowned `Aberto` case and does not reopen a `Resolvido` one, as text does *(D-806, UI-D-852)*
 
 **Native shell text**
+
 - [x] **VOICE-33**: The microphone permission text of the app shell reads "{tenant} usa o microfone para gravar o som dos seus vídeos e as suas mensagens de voz." and stays under the 200-character schema limit *(UI-D-856)*
 
 **Release, tests, owner proofs**
+
 - [x] **VOICE-34**: Every new table column, policy, function, route, kernel import, sweep function and gate carries a cross-tenant negative with a positive control (pgTAP and integration); both new routes are in the isolation inventory with a case id; the chat README lists the new sweep function and any new kernel specifier *(MOD-05, TENANT-05)*
 - [x] **VOICE-35**: The release is expand-only and ordered (migrations on every tenant database, then API and worker from a rebuilt image that contains ffmpeg, then web); the failing windows are named in `docs/DEPLOY.md` and the ledger
 - [x] **VOICE-36**: The owner proves on real devices and records in the ledger: recording and playing on an iPhone (Safari and the installed PWA), on an Android phone and on desktop Firefox; the permission prompt on each; the first-tap gesture; an interruption by a call and by backgrounding; the screen-reader phrases; seeking and resuming inside the signed URL's hour *(CONTEXT discretion, UI-SPEC row V40)*
 
 ### Buyer permissions per product (Phase 11.1)
 
-- [ ] **BPERM-01**: `store_product_communities` gains `can_like`, `can_comment`, `can_share` (default true) and `can_post`, `can_story` (default false), `boolean not null`, added expand-only; every existing link carries exactly today's behaviour and no response of any tenant changes at release *(D-890, D-891, D-892)*
+- [x] **BPERM-01**: `store_product_communities` gains `can_like`, `can_comment`, `can_share` (default true) and `can_post`, `can_story` (default false), `boolean not null`, added expand-only; every existing link carries exactly today's behaviour and no response of any tenant changes at release *(D-890, D-891, D-892)*
 - [ ] **BPERM-02**: `story_highlights` gains `open_to_buyers boolean not null default false`; it is written only by a holder of `stories.story.manage` on an organization place, never for Início or a member community, and appears only on curator reads *(D-884, UI-D-886, UI-D-887)*
-- [ ] **BPERM-03**: A member's permissions in an organization community are the union (`bool_or`) of the five flags of every linked product with an active entitlement of that member, tenant-pinned, store module on, `member` claim only; staff, a community with no link, a member community and a null role are never granted by it *(D-880, D-886, D-892)*
-- [ ] **BPERM-04**: `app.community_action_allowed` replaces the constant-false stub with the same signature, answers true only through a product grant, and the scope map and the two wrappers agree for every community and action (pgTAP equivalence) *(D-880, D-886)*
+- [x] **BPERM-03**: A member's permissions in an organization community are the union (`bool_or`) of the five flags of every linked product with an active entitlement of that member, tenant-pinned, store module on, `member` claim only; staff, a community with no link, a member community and a null role are never granted by it *(D-880, D-886, D-892)*
+- [x] **BPERM-04**: `app.community_action_allowed` replaces the constant-false stub with the same signature, answers true only through a product grant, and the scope map and the two wrappers agree for every community and action (pgTAP equivalence) *(D-880, D-886)*
 - [ ] **BPERM-05**: A revoked, refunded, charged-back or cancelled entitlement stops granting at the next statement; posts, comments and highlighted stories already written stay and are not hidden *(D-887)*
 - [ ] **BPERM-06**: A buyer without `like` cannot like or unlike a post nor like a comment (service 403 and restrictive RLS); story comment likes still reach the existing 400 `story_comment_not_likeable` *(D-888, D-891)*
 - [ ] **BPERM-07**: A buyer without `comment` cannot create a root comment or a reply (service 403 and a restrictive insert policy) while reading comments is unchanged *(D-888, D-892)*
@@ -1255,10 +1264,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VOICE-35 | Phase 12.5 | Complete |
 | VOICE-36 | Phase 12.5 | Complete |
 | VOICE-37 | Phase 12.5 | Complete |
-| BPERM-01 | Phase 11.1 | Pending |
+| BPERM-01 | Phase 11.1 | Complete |
 | BPERM-02 | Phase 11.1 | Pending |
-| BPERM-03 | Phase 11.1 | Pending |
-| BPERM-04 | Phase 11.1 | Pending |
+| BPERM-03 | Phase 11.1 | Complete |
+| BPERM-04 | Phase 11.1 | Complete |
 | BPERM-05 | Phase 11.1 | Pending |
 | BPERM-06 | Phase 11.1 | Pending |
 | BPERM-07 | Phase 11.1 | Pending |

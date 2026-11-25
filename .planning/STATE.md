@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 11
-current_phase_name: Rede Social - Direct Messages, Member Blocking and Reports
-current_plan: 28
-status: verifying
-stopped_at: Phase 11 executed 28/28 and pushed to origin/master 2026-11-23 (verification human_needed, security 41/41 with AR-11-01..05 accepted by Igor, WR-03 and WR-05 fixed); awaiting the owner's closure word. Phase 11.1 inserted, context gathered 2026-11-24 (bdafb734) and UI-SPEC approved by the checker (1b168f26); planning only, pointer stays on 11; next /gsd-plan-phase 11.1 (sketch 026 approval is Igor's hand, gates only the web plans)
-last_updated: "2026-11-23T21:40:35.392Z"
-last_activity: 2026-11-23
-last_activity_desc: Phase 11 verified (human_needed), security audited, UAT file written
-state_head: e708260d760c400011f1dcdfdce3d2605fcb700e
+current_phase: "11.1"
+current_phase_name: Permissões do comprador por produto numa comunidade
+current_plan: 2
+status: executing
+stopped_at: Completed 11.1-02-PLAN.md
+last_updated: "2026-11-25T01:16:58.361Z"
+last_activity: 2026-11-24
+last_activity_desc: Phase 11.1 execution started
+state_head: dc3c9b4d0a9b74423fb9c0ad1514df40d0c935f6
 progress:
   total_phases: 36
   completed_phases: 0
-  total_plans: 519
-  completed_plans: 491
+  total_plans: 537
+  completed_plans: 492
   percent: 0
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 11 — Rede Social - Direct Messages, Member Blocking and Reports
+**Current focus:** Phase 11.1 — Permissões do comprador por produto numa comunidade
 
 ## Current Position
 
-Phase: 11 (Rede Social - Direct Messages, Member Blocking and Reports) — EXECUTED, VERIFICATION human_needed
-Current Plan: 28
-Total Plans in Phase: 28
-Plan: 28 of 28
-Status: Executed; 11-VERIFICATION.md human_needed, 11-SECURITY.md threats_open 0 (T-11-36 open below the threshold, AR-11-01..05 proposed), 11-UAT.md pending; ledger P1..P41 are the owner's
-Last activity: 2026-11-23 — verification, security and UAT written; nothing pushed
+Phase: 11.1 (Permissões do comprador por produto numa comunidade) — EXECUTING
+Current Plan: 2
+Total Plans in Phase: 18
+Plan: 2 of 18
+Status: Ready to execute
+Last activity: 2026-11-24 — Phase 11.1 execution started
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -394,6 +394,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12.4 P18 | 11 min | 3 tasks | 5 files |
 | Phase 12.4 P21 | 9 min | 3 tasks | 12 files |
 | Phase 12.4 P22 | 17 min | 3 tasks | 15 files |
+| Phase 11.1 P02 | 11 min | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -1196,6 +1197,7 @@ Recent decisions affecting current work:
 - [Phase 12.4]: 12.4-19: the sheets' facts (category, priority, typed subject, opening instant) ride on the staff header view; each sheet captures the case state when it opens and sends that as the expected state
 - [Phase 12.4]: 12.4-17: the scroll check asserts an anchored message and scrollTop moving by the bar delta (the shipped hook's contract), not scrollTop unchanged
 - [Phase 12.4]: 12.4-18: release notes follow the migrations (the pre-activation window is benign, the 42P10 window is the failing one); CASE-28 and CASE-29 stay open as owner proofs; Nyquist flags left false because guard:lanes is red on four 07/08 test statements
+- [Phase 11.1]: 11.1-02: an archived organization community stays in the buyer scope map (post refused by the gate and the service); allowed() coalesces to false, never null — D-890 keeps today's like, comment and share behaviour until the administrator edits the product
 
 ### Pending Todos
 
@@ -1341,6 +1343,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-19T13:06:39.192Z
-Stopped at: Phase 11 UI-SPEC approved
-Resume file: .planning/phases/11-rede-social-direct-messages-member-blocking-and-reports/11-UI-SPEC.md
+Last session: 2026-11-25T01:16:58.008Z
+Stopped at: Completed 11.1-02-PLAN.md
+Resume file: None
