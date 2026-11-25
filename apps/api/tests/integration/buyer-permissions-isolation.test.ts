@@ -10,12 +10,15 @@ import {
 import type { CommunitySummary } from '@rede-social/module-communities/contracts';
 import type { FeedComment, FeedPage, FeedPost } from '@rede-social/module-feed/contracts';
 import type { CommunityAccess, ProductDetail } from '@rede-social/module-store/contracts';
+import postgres from 'postgres';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   adminSql,
   api,
   createSharedIdentity,
   HOSTS,
+  notificationJobsOf,
+  pushSendJobsOf,
   removeIdentitiesByPrefix,
   SEED_PASSWORD,
   signInAs,
@@ -235,6 +238,7 @@ const itemsOf = async (highlightId: string) =>
      where highlight_id = ${highlightId}::uuid order by added_at, id`;
 
 async function sweep(): Promise<void> {
+  await dropRaceTriggers();
   const products = adminSql`select id from public.store_products where name like ${`${PREFIX}%`}`;
   const communities = adminSql`select id from public.communities where name like ${`${PREFIX}%`}`;
   await adminSql`delete from public.story_highlights where title like ${`${PREFIX}%`}`;
@@ -251,6 +255,11 @@ async function sweep(): Promise<void> {
   await adminSql`delete from public.store_products where name like ${`${PREFIX}%`}`;
   await adminSql`delete from public.communities where name like ${`${PREFIX}%`}`;
   await removeIdentitiesByPrefix(PREFIX);
+  // 11.1-11 case 17: the throwaway tenant that owns nothing (swept by shape, so a crashed run's is collected too)
+  await adminSql`delete from public.tenant_modules where tenant_id in (
+    select id from public.tenants where slug like 'bpi-%-vazio')`;
+  await adminSql`delete from public.tenant_domains where host like 'bpi-%-vazio.localhost'`;
+  await adminSql`delete from public.tenants where slug like 'bpi-%-vazio'`;
 }
 
 beforeAll(async () => {
@@ -338,6 +347,8 @@ beforeEach(() => {
 afterAll(async () => {
   await sweep();
   for (const restore of restores.reverse()) await restore();
+  await lane1.end();
+  await holder.end();
   await adminSql.end();
   await sqlClient.end();
 });
@@ -655,3 +666,953 @@ describe('11.1-11 refund: re-purchase, the admin path, the same function for eve
     expect(await logRowsFor(written.story)).toHaveLength(0);
   });
 });
+
+// ── Task 2: the revoke race on two connections ───────────────────────────────────────────────────────────────────
+
+/** The two raw connections of the race: connection 1 is the buyer's lane, connection 2 (`adminSql`) the revoker. */
+const lane1 = postgres('postgres://postgres:postgres@127.0.0.1:54322/postgres', {
+  prepare: false,
+  max: 1,
+});
+const holder = postgres('postgres://postgres:postgres@127.0.0.1:54322/postgres', {
+  prepare: false,
+  max: 1,
+});
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** The claims `withTenantTx` binds for a member lane, as one JSON text. */
+const claimsOf = (userId: string, tenant = tenantId, role = 'member') =>
+  JSON.stringify({ sub: userId, role: 'authenticated', tenant_id: tenant, tenant_role: role });
+
+const likeRowsOf = async (postId: string, userId: string): Promise<number> => {
+  const rows = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from public.feed_likes
+     where post_id = ${postId}::uuid and user_id = ${userId}::uuid`;
+  return rows[0]?.n ?? 0;
+};
+
+/** Ends buyer2's grant exactly as the definer does: the entitlement AND its live order (history is kept). */
+const REVOKE_BUYER2 = () =>
+  `update public.store_entitlements set status = 'revoked', revoked_at = now()
+    where user_id = '${users.buyer2}'::uuid and product_id = '${fx.productA}'::uuid and status = 'active';
+   update public.store_orders set status = 'revoked', revoked_at = now()
+    where user_id = '${users.buyer2}'::uuid and product_id = '${fx.productA}'::uuid and status in ('pending', 'paid')`;
+const revokeBuyer2 = () => adminSql.unsafe(REVOKE_BUYER2());
+
+/** Makes buyer2 a holder of product B too (it ticks nothing): the community stays open when product A is revoked. */
+async function holdProductB(): Promise<void> {
+  if ((await entitlementStatus(users.buyer2, fx.productB)).includes('active')) return;
+  expect(
+    await gatewayPurchase(memberships.buyer2, fx.productB, `${PREFIX}-b2-${randomUUID()}`),
+  ).toBe('purchased');
+}
+
+/** Ends buyer2's hold of product B (entitlement and live order, as the definer does). */
+const releaseProductB = () =>
+  adminSql.unsafe(
+    `update public.store_entitlements set status = 'revoked', revoked_at = now()
+      where user_id = '${users.buyer2}'::uuid and product_id = '${fx.productB}'::uuid and status = 'active';
+     update public.store_orders set status = 'revoked', revoked_at = now()
+      where user_id = '${users.buyer2}'::uuid and product_id = '${fx.productB}'::uuid and status in ('pending', 'paid')`,
+  );
+
+/** Puts buyer2 back as a holder of product A with a FRESH purchase (the previous order stays history). */
+async function rebuyBuyer2(): Promise<void> {
+  const active = (await entitlementStatus(users.buyer2, fx.productA)).includes('active');
+  if (active) return;
+  expect(
+    await gatewayPurchase(memberships.buyer2, fx.productA, `${PREFIX}-r-${randomUUID()}`),
+  ).toBe('purchased');
+}
+
+/**
+ * The race of D-888 / Pitfall 3 made deterministic at the API level: a SECOND connection holds an ACCESS EXCLUSIVE lock on
+ * the table the write inserts into, `send` fires the request (the guard passes, the insert blocks on the lock), and only
+ * then the revoke commits and the lock goes: the insert statement starts AFTER the revoke, exactly like a revoke landing
+ * between the guard and the write.
+ */
+async function raceBetweenGuardAndWrite(
+  table: 'feed_likes' | 'feed_comments',
+  flipSql: string,
+  send: () => Promise<Response> | Response,
+): Promise<Response> {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let locked: () => void = () => {};
+  const lockedP = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const held = holder.begin(async (tx) => {
+    await tx.unsafe(`lock table public.${table} in access exclusive mode`);
+    locked();
+    await gate;
+    await tx.unsafe(flipSql);
+  });
+  await lockedP;
+  const pending = send();
+  let blocked = false;
+  for (let i = 0; i < 100 && !blocked; i += 1) {
+    const rows = await adminSql`
+      select 1 from pg_stat_activity
+       where wait_event_type = 'Lock' and query ilike ${`%insert into ${table}%`}
+         and pid <> pg_backend_pid()`;
+    blocked = rows.length > 0;
+    if (!blocked) await sleep(50);
+  }
+  release();
+  await held;
+  expect(
+    blocked,
+    `the ${table} insert must have been waiting on the lock (the guard already passed)`,
+  ).toBe(true);
+  return await pending;
+}
+
+describe('11.1-11 race: a revoke committing between the read and the write (D-888, Pitfall 3, T-11.1-41)', () => {
+  it('6. two connections: connection 1 reads the grant (true) in a READ COMMITTED transaction, connection 2 revokes and commits, and connection 1’s NEXT like insert is refused 42501 by the restrictive gate', async () => {
+    await rebuyBuyer2();
+    await adminSql`delete from public.feed_likes where user_id = ${users.buyer2}::uuid and post_id = ${fx.adminPost}::uuid`;
+    let refusal: { code?: string } | null = null;
+    let readBefore: boolean | null = null;
+    let revoked = false;
+    try {
+      await lane1.begin('isolation level read committed', async (tx) => {
+        await tx`select set_config('request.jwt.claims', ${claimsOf(users.buyer2)}, true)`;
+        await tx`set local role authenticated`;
+        const [first] = await tx<{ ok: boolean }[]>`
+          select app.community_action_allowed(${fx.orgA}::uuid, 'like') as ok`;
+        readBefore = first?.ok ?? null;
+        // connection 2: the revoke commits while connection 1's transaction is still open
+        await revokeBuyer2();
+        revoked = true;
+        await tx`
+          insert into public.feed_likes (tenant_id, post_id, user_id)
+          values (${tenantId}::uuid, ${fx.adminPost}::uuid, ${users.buyer2}::uuid)`;
+      });
+    } catch (error) {
+      refusal = error as { code?: string };
+    }
+    expect(revoked, 'connection 2 committed its revoke before the insert').toBe(true);
+    expect(readBefore, 'the first read saw the grant').toBe(true);
+    expect(
+      (refusal as { code?: string } | null)?.code,
+      'the next statement is a new snapshot',
+    ).toBe('42501');
+    expect(await likeRowsOf(fx.adminPost, users.buyer2)).toBe(0);
+    // the same lane on a NEW statement sees no grant at all
+    expect(await scopeOf(users.buyer2)).toEqual({});
+  });
+
+  it('7. a revoke committing AFTER the insert leaves the row in place, and no entitlement row lock was taken (the revoke never waited)', async () => {
+    await rebuyBuyer2();
+    await adminSql`delete from public.feed_likes where user_id = ${users.buyer2}::uuid and post_id = ${fx.adminPost}::uuid`;
+    let revokeMs = Number.POSITIVE_INFINITY;
+    await lane1.begin('isolation level read committed', async (tx) => {
+      await tx`select set_config('request.jwt.claims', ${claimsOf(users.buyer2)}, true)`;
+      await tx`set local role authenticated`;
+      await tx`
+        insert into public.feed_likes (tenant_id, post_id, user_id)
+        values (${tenantId}::uuid, ${fx.adminPost}::uuid, ${users.buyer2}::uuid)`;
+      // the revoke is a plain UPDATE of the entitlement row: if the insert had locked it, this would wait for our commit
+      const started = Date.now();
+      await Promise.race([
+        revokeBuyer2(),
+        sleep(4000).then(() => {
+          throw new Error('the revoke waited on a lock held by the like insert');
+        }),
+      ]);
+      revokeMs = Date.now() - started;
+    });
+    expect(revokeMs).toBeLessThan(4000);
+    expect(
+      await likeRowsOf(fx.adminPost, users.buyer2),
+      'the like written before the revoke stays',
+    ).toBe(1);
+    expect(await scopeOf(users.buyer2)).toEqual({});
+    await adminSql`delete from public.feed_likes where user_id = ${users.buyer2}::uuid`;
+  });
+
+  it('8. the API maps the member 42501 of a revoke landing between the guard and the write to the bare 403, on like, comment heart and comment, and a staff 42501 stays a 500', async () => {
+    // product B (no flag) keeps the community OPEN after A is revoked, so the refusal is the gate's 42501 and not a locked read
+    await holdProductB();
+    await rebuyBuyer2();
+    const raced = await raceBetweenGuardAndWrite('feed_likes', REVOKE_BUYER2(), () =>
+      likePost(tokens.buyer2, fx.adminPost),
+    );
+    await expectBare403(raced, 'like raced by a revoke');
+    expect(await likeRowsOf(fx.adminPost, users.buyer2)).toBe(0);
+
+    await rebuyBuyer2();
+    const racedHeart = await raceBetweenGuardAndWrite('feed_likes', REVOKE_BUYER2(), () =>
+      post(`/v1/feed/comments/${fx.adminComment}/like`, tokens.buyer2),
+    );
+    await expectBare403(racedHeart, 'comment heart raced by a revoke');
+
+    await rebuyBuyer2();
+    const racedComment = await raceBetweenGuardAndWrite('feed_comments', REVOKE_BUYER2(), () =>
+      commentOn(tokens.buyer2, fx.adminPost, `${PREFIX} corrida`),
+    );
+    await expectBare403(racedComment, 'comment raced by a revoke');
+    const [written] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_comments
+       where author_user_id = ${users.buyer2}::uuid and body = ${`${PREFIX} corrida`}`;
+    expect(written?.n).toBe(0);
+
+    // positive control: with the grant in place the very same calls pass
+    await rebuyBuyer2();
+    expect((await likePost(tokens.buyer2, fx.adminPost)).status).toBe(200);
+    await adminSql`delete from public.feed_likes where user_id = ${users.buyer2}::uuid`;
+
+    // the LAST product revoked: the community turns locked at the write statement, so the comment is already hidden
+    // from the lane. Whatever the answer is (the bare 403 or the locked read's 404) it is never a 500 and nothing lands.
+    await releaseProductB();
+    const lastProduct = await raceBetweenGuardAndWrite('feed_likes', REVOKE_BUYER2(), () =>
+      post(`/v1/feed/comments/${fx.adminComment}/like`, tokens.buyer2),
+    );
+    expect([403, 404], `the last-product race answered ${lastProduct.status}`).toContain(
+      lastProduct.status,
+    );
+    const [landed] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_likes
+       where comment_id = ${fx.adminComment}::uuid and user_id = ${users.buyer2}::uuid`;
+    expect(landed?.n).toBe(0);
+    await rebuyBuyer2();
+
+    // staff: a 42501 raised for the administrator is NEVER masked (a real policy bug stays a 500)
+    await adminSql.unsafe(`
+      create or replace function public.bpi_raise_42501() returns trigger language plpgsql as $f$
+      begin raise exception 'bpi staff refusal' using errcode = '42501'; end $f$`);
+    await adminSql.unsafe(`
+      create trigger bpi_raise_42501 before insert on public.feed_likes
+        for each row when (new.user_id = '${users.admin}'::uuid) execute function public.bpi_raise_42501()`);
+    try {
+      await adminSql`delete from public.feed_likes where user_id = ${users.admin}::uuid`;
+      const staff = await likePost(tokens.admin, fx.adminPost);
+      expect(staff.status).toBe(500);
+    } finally {
+      await dropRaceTriggers();
+    }
+    await adminSql`delete from public.feed_likes where user_id = ${users.admin}::uuid`;
+  });
+});
+
+async function dropRaceTriggers(): Promise<void> {
+  await adminSql`drop trigger if exists bpi_raise_42501 on public.feed_likes`;
+  await adminSql`drop function if exists public.bpi_raise_42501()`;
+}
+
+// ── Task 2: the notification negative through the worker's own job path ──────────────────────────────────────────
+
+/**
+ * Plays the worker for the fan-out jobs that name `postId` ONLY (the old jobs of the local stack are none of this suite's
+ * business): each `created` row goes through the real `notificationsFanoutJob.handler` and is marked `completed`, like
+ * `boss.work` would. Returns how many handlers ran.
+ */
+async function runFanoutFor(postId: string): Promise<number> {
+  const { notificationsFanoutJob } = await import('@rede-social/module-notifications/server');
+  const rows = (await notificationJobsOf(tenantId)).filter(
+    (row) => row.state === 'created' && JSON.stringify(row.data).includes(postId),
+  );
+  for (const row of rows) {
+    await notificationsFanoutJob.handler(
+      row.data as Parameters<typeof notificationsFanoutJob.handler>[0],
+    );
+    await adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name = 'notifications.fanout' and id = ${row.id}::uuid`;
+  }
+  return rows.length;
+}
+
+const notificationsAbout = (postId: string) =>
+  adminSql<{ user_id: string; kind: string }[]>`
+    select user_id::text as user_id, kind from public.notifications
+     where tenant_id = ${tenantId}::uuid and subject_id = ${postId}::uuid`;
+
+const pushJobsAbout = async (postId: string) =>
+  (await pushSendJobsOf(tenantId)).filter((row) => JSON.stringify(row.data).includes(postId));
+
+describe('11.1-11 notification negative: a buyer’s post tells nobody, a staff post of the same community still does (D-881, T-11.1-42)', () => {
+  it('9. BPERM-10/D-881: the buyer’s community post raises no notification row and no push job after the worker ran its fan-out job; the administrator’s post of the same community notifies its holders (positive control)', async () => {
+    restores.push(await withModuleEnabled('demo', 'notifications'));
+    await rebuyBuyer2();
+    await adminSql`update public.store_product_communities set can_post = true where product_id = ${fx.productA}::uuid`;
+
+    const mine = await publish(tokens.buyer2, `${PREFIX} do comprador notificacao`, fx.orgA);
+    expect(mine.status, await mine.clone().text()).toBe(201);
+    const buyerPost = ((await mine.json()) as FeedPost).id;
+    const [stored] = await adminSql<{ visibility: string }[]>`
+      select visibility from public.feed_posts where id = ${buyerPost}::uuid`;
+    expect(stored?.visibility).toBe('community');
+
+    // the staff post of the SAME community, written after, notifies the holders
+    const staff = await publish(tokens.admin, `${PREFIX} do admin notificacao`, fx.orgA);
+    expect(staff.status, await staff.clone().text()).toBe(201);
+    const staffPost = ((await staff.json()) as FeedPost).id;
+
+    // the event bus enqueued a fan-out job for each post; the worker's handler resolves each one
+    const buyerJobs = (await notificationJobsOf(tenantId)).filter((row) =>
+      JSON.stringify(row.data).includes(buyerPost),
+    );
+    const staffJobs = (await notificationJobsOf(tenantId)).filter((row) =>
+      JSON.stringify(row.data).includes(staffPost),
+    );
+    expect(
+      buyerJobs.length,
+      'the bus enqueues a job for every post.published, a buyer’s included',
+    ).toBe(1);
+    expect(staffJobs.length).toBe(1);
+
+    expect(await runFanoutFor(buyerPost)).toBe(1);
+    expect(await notificationsAbout(buyerPost), 'no row for any user of the tenant').toEqual([]);
+    expect(await pushJobsAbout(buyerPost), 'no push job names the buyer’s post').toEqual([]);
+    const [anyRow] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications
+       where tenant_id = ${tenantId}::uuid and (payload::text like ${`%${buyerPost}%`}
+          or dedupe_key like ${`%${buyerPost}%`})`;
+    expect(anyRow?.n, 'no row of any kind mentions the post').toBe(0);
+
+    // positive control: the staff post of the same community reaches the holders (the community is gated, so only they)
+    expect(await runFanoutFor(staffPost)).toBe(1);
+    const told = await notificationsAbout(staffPost);
+    expect(told.length, 'the staff post notifies').toBeGreaterThan(0);
+    expect(told.map((row) => row.user_id)).toContain(users.buyer2);
+    expect(told.map((row) => row.user_id)).not.toContain(users.reader);
+    expect(told.map((row) => row.user_id)).not.toContain(users.admin);
+
+    await adminSql`delete from public.notifications where subject_id in (${buyerPost}::uuid, ${staffPost}::uuid)`;
+    await adminSql`update public.store_product_communities set can_post = true where product_id = ${fx.productA}::uuid`;
+  });
+});
+
+// ── Task 2: the cross-tenant matrix (T-isolation, BPERM-25) ──────────────────────────────────────────────────────
+
+/** A response as comparable bytes: status plus the body with the per-request id dropped. */
+async function bytesOfAnswer(res: Response): Promise<string> {
+  const text = await res.text();
+  try {
+    const parsed = JSON.parse(text) as { error?: { requestId?: string } };
+    if (parsed.error) {
+      const { requestId: _requestId, ...error } = parsed.error;
+      return `${res.status} ${JSON.stringify({ error })}`;
+    }
+  } catch {
+    // not JSON: compare the raw text
+  }
+  return `${res.status} ${text}`;
+}
+
+/**
+ * The oracle rule (D-23): a foreign id answers the SAME bytes as an id that exists nowhere, so the answer cannot tell a
+ * caller whether the row exists in some other tenant. Returns the shared answer for further needles.
+ */
+async function expectSameAsUnknown(
+  label: string,
+  foreign: () => Promise<Response> | Response,
+  unknown: () => Promise<Response> | Response,
+  status = 404,
+): Promise<string> {
+  const [a, b] = [await foreign(), await unknown()];
+  expect(a.status, `${label}: foreign id`).toBe(status);
+  expect(b.status, `${label}: unknown id`).toBe(status);
+  const [foreignBytes, unknownBytes] = [await bytesOfAnswer(a), await bytesOfAnswer(b)];
+  expect(foreignBytes, `${label}: a foreign id answers like an unknown one`).toBe(unknownBytes);
+  return foreignBytes;
+}
+
+/** `app.community_action_allowed` for one lane, claims bound exactly as `withTenantTx` binds them. */
+async function allowedOf(
+  userId: string,
+  tenant: string,
+  community: string,
+  action: string,
+  role = 'member',
+): Promise<boolean> {
+  const rows = await adminSql.begin(async (tx) => {
+    await tx`select set_config('request.jwt.claims', ${claimsOf(userId, tenant, role)}, true)`;
+    await tx`set local role authenticated`;
+    return tx<{ ok: boolean }[]>`
+      select app.community_action_allowed(${community}::uuid, ${action}::text) as ok`;
+  });
+  return rows[0]?.ok === true;
+}
+
+/** `app.community_action_denied_ids(action)` for one lane. */
+async function deniedOf(userId: string, tenant: string, action: string, role = 'member') {
+  const rows = await adminSql.begin(async (tx) => {
+    await tx`select set_config('request.jwt.claims', ${claimsOf(userId, tenant, role)}, true)`;
+    await tx`set local role authenticated`;
+    return tx<{ ids: string[] | null }[]>`
+      select app.community_action_denied_ids(${action}::text) as ids`;
+  });
+  return rows[0]?.ids ?? [];
+}
+
+/** Tenant B (`rede-lab`): the same shapes as tenant A, built through the owner connection and the real routes. */
+const b = {
+  admin: '',
+  adminUser: '',
+  buyer: '',
+  buyerUser: '',
+  buyerMembership: '',
+  orgB: '',
+  productB: '',
+  hB: '',
+  storyB: '',
+  postB: '',
+  commentB: '',
+};
+const dual = { userId: '', token: '', membershipA: '' };
+const empty = { tenant: '', host: '', slug: '', member: '', admin: '', memberUser: '' };
+
+async function insertLabStory(author: string, label: string): Promise<string> {
+  const asset = randomUUID();
+  createdAssets.push(asset);
+  await adminSql`
+    insert into public.media_assets
+      (id, tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths)
+    values (${asset}::uuid, ${labTenantId}::uuid, ${author}::uuid, 'image', 'story', 'ready', 'supabase',
+            'image/webp', 1024, '{640,1080}'::int[])`;
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.stories
+      (tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility, published_at, expires_at)
+    values (${labTenantId}::uuid, ${author}::uuid, ${asset}::uuid, 'image', ${`${PREFIX} ${label}`},
+            'followers', now(), now() + interval '24 hours')
+    returning id`;
+  return row?.id ?? '';
+}
+
+describe('11.1-11 matrix: a buyer of one tenant holds, reads and writes nothing through another tenant (BPERM-25, T-11.1-40)', () => {
+  beforeAll(async () => {
+    restores.push(await withStoreEnabled('lab'));
+    restores.push(await withSocialEnabled('lab'));
+    restores.push(await withCommunitiesEnabled('lab'));
+    restores.push(await withStoriesEnabled('lab'));
+    b.admin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
+    const [admin] = await adminSql<{ user_id: string }[]>`
+      select m.user_id::text as user_id from public.memberships m
+        join public.users u on u.id = m.user_id
+       where u.email = 'admin@rede-lab.local' and m.tenant_id = ${labTenantId}::uuid`;
+    b.adminUser = admin?.user_id ?? '';
+    const buyer = await createSharedIdentity({ prefix: PREFIX, memberships: [{ host: 'lab' }] });
+    b.buyerUser = buyer.userId;
+    b.buyer = await signInAs(buyer.email, buyer.password);
+    const [membership] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.memberships
+       where user_id = ${b.buyerUser}::uuid and tenant_id = ${labTenantId}::uuid`;
+    b.buyerMembership = membership?.id ?? '';
+
+    // tenant B's organization community carries the SAME name (and so the same slug) as tenant A's `orgA`
+    const orgB = await post('/v1/communities', b.admin, { name: `${PREFIX} orgA` }, HOSTS.lab);
+    expect(orgB.status, await orgB.clone().text()).toBe(201);
+    b.orgB = ((await orgB.json()) as { id: string }).id;
+    const productB = await post(
+      '/v1/store/products',
+      b.admin,
+      {
+        name: `${PREFIX} produto lab`,
+        priceCents: 1990,
+        communityLinks: [
+          { communityId: b.orgB, like: true, comment: true, share: true, post: true, story: true },
+        ],
+      },
+      HOSTS.lab,
+    );
+    expect(productB.status, await productB.clone().text()).toBe(201);
+    b.productB = ((await productB.json()) as ProductDetail).id;
+    expect(
+      await gatewayPurchase(b.buyerMembership, b.productB, `${PREFIX}-lab-1`, labTenantId),
+    ).toBe('purchased');
+    b.storyB = await insertLabStory(b.buyerUser, 'story do lab');
+    const [highlight] = await adminSql<{ id: string }[]>`
+      insert into public.story_highlights
+        (tenant_id, community_id, title, position, created_by_user_id, open_to_buyers)
+      values (${labTenantId}::uuid, ${b.orgB}::uuid, ${`${PREFIX} aberto lab`}, 0, ${b.adminUser}::uuid, true)
+      returning id::text as id`;
+    b.hB = highlight?.id ?? '';
+    await adminSql`
+      insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+      values (${labTenantId}::uuid, ${b.hB}::uuid, ${b.storyB}::uuid, ${b.buyerUser}::uuid)`;
+    const postB = await post(
+      '/v1/feed/posts',
+      b.admin,
+      { caption: `${PREFIX} post do lab`, communityId: b.orgB },
+      HOSTS.lab,
+    );
+    expect(postB.status, await postB.clone().text()).toBe(201);
+    b.postB = ((await postB.json()) as { id: string }).id;
+    const commentB = await post(
+      `/v1/feed/posts/${b.postB}/comments`,
+      b.admin,
+      { body: `${PREFIX} comentario do lab` },
+      HOSTS.lab,
+    );
+    expect(commentB.status, await commentB.clone().text()).toBe(201);
+    b.commentB = ((await commentB.json()) as FeedComment).id;
+
+    // one user, two tenants: holds product A in tenant A and NOTHING in tenant B
+    const shared = await createSharedIdentity({
+      prefix: PREFIX,
+      memberships: [{ host: 'demo' }, { host: 'lab' }],
+    });
+    dual.userId = shared.userId;
+    dual.token = await signInAs(shared.email, shared.password);
+    const [dualMembership] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.memberships
+       where user_id = ${dual.userId}::uuid and tenant_id = ${tenantId}::uuid`;
+    dual.membershipA = dualMembership?.id ?? '';
+    expect(await gatewayPurchase(dual.membershipA, fx.productA, `${PREFIX}-dual`)).toBe(
+      'purchased',
+    );
+    await rebuyBuyer2();
+  });
+
+  it('10. the like, the comment and the post of tenant A’s buyer against tenant B’s ids answer exactly what an unknown id answers; A’s own call passes beside each', async () => {
+    const stranger = randomUUID();
+    await expectSameAsUnknown(
+      'like on a foreign post',
+      () => likePost(tokens.buyer2, b.postB),
+      () => likePost(tokens.buyer2, stranger),
+    );
+    await expectSameAsUnknown(
+      'comment on a foreign post',
+      () => commentOn(tokens.buyer2, b.postB, `${PREFIX} nao deve gravar`),
+      () => commentOn(tokens.buyer2, stranger, `${PREFIX} nao deve gravar`),
+    );
+    await expectSameAsUnknown(
+      'comment heart on a foreign comment',
+      () => post(`/v1/feed/comments/${b.commentB}/like`, tokens.buyer2),
+      () => post(`/v1/feed/comments/${stranger}/like`, tokens.buyer2),
+    );
+    await expectSameAsUnknown(
+      'post into a foreign community',
+      () => publish(tokens.buyer2, `${PREFIX} nao deve gravar`, b.orgB),
+      () => publish(tokens.buyer2, `${PREFIX} nao deve gravar`, stranger),
+    );
+    const [leaked] = await adminSql<{ n: number }[]>`
+      select (select count(*) from public.feed_likes where user_id = ${users.buyer2}::uuid and post_id = ${b.postB}::uuid)::int
+           + (select count(*) from public.feed_comments where author_user_id = ${users.buyer2}::uuid and post_id = ${b.postB}::uuid)::int
+           + (select count(*) from public.feed_posts where caption = ${`${PREFIX} nao deve gravar`})::int as n`;
+    expect(leaked?.n, 'nothing was written in tenant B').toBe(0);
+    // the positive control: tenant A's own calls, the very same shapes, pass
+    expect((await likePost(tokens.buyer2, fx.adminPost)).status).toBe(200);
+    expect((await commentOn(tokens.buyer2, fx.adminPost, `${PREFIX} controle A`)).status).toBe(201);
+    expect((await post(`/v1/feed/comments/${fx.adminComment}/like`, tokens.buyer2)).status).toBe(
+      200,
+    );
+    expect((await publish(tokens.buyer2, `${PREFIX} controle A`, fx.orgA)).status).toBe(201);
+    await adminSql`delete from public.feed_likes where user_id = ${users.buyer2}::uuid`;
+  });
+
+  it('11. the highlight item, the open switch and the open counts of tenant A against tenant B’s highlight and community answer like unknown ids; A’s own pass', async () => {
+    const stranger = randomUUID();
+    const mine = await insertStory(users.buyer2, 'story de A cruzado');
+    await expectSameAsUnknown(
+      'add into a foreign highlight (buyer)',
+      () => addItem(tokens.buyer2, b.hB, mine),
+      () => addItem(tokens.buyer2, stranger, mine),
+    );
+    await expectSameAsUnknown(
+      'add into a foreign highlight (administrator)',
+      () => addItem(tokens.admin, b.hB, mine),
+      () => addItem(tokens.admin, stranger, mine),
+    );
+    await expectSameAsUnknown(
+      'remove from a foreign highlight (buyer)',
+      () => del(`/v1/stories/highlights/${b.hB}/stories/${b.storyB}`, tokens.buyer2),
+      () => del(`/v1/stories/highlights/${stranger}/stories/${b.storyB}`, tokens.buyer2),
+    );
+    await expectSameAsUnknown(
+      'remove from a foreign highlight (administrator)',
+      () => del(`/v1/stories/highlights/${b.hB}/stories/${b.storyB}`, tokens.admin),
+      () => del(`/v1/stories/highlights/${stranger}/stories/${b.storyB}`, tokens.admin),
+    );
+    const patchOpen = (token: string, id: string, open: boolean) =>
+      request(`/v1/stories/highlights/${id}`, token, {
+        method: 'PATCH',
+        body: JSON.stringify({ openToBuyers: open }),
+      });
+    await expectSameAsUnknown(
+      'the open switch on a foreign highlight',
+      () => patchOpen(tokens.admin, b.hB, false),
+      () => patchOpen(tokens.admin, stranger, false),
+    );
+    const [stillOpen] = await adminSql<{ open_to_buyers: boolean }[]>`
+      select open_to_buyers from public.story_highlights where id = ${b.hB}::uuid`;
+    expect(stillOpen?.open_to_buyers, 'tenant B’s highlight stayed open').toBe(true);
+    const [stillItem] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.story_highlight_items where highlight_id = ${b.hB}::uuid`;
+    expect(stillItem?.n, 'tenant B’s item stayed').toBe(1);
+
+    // the open counts: a foreign community is ABSENT, the same as an unknown id; A's own community has its row
+    const counts = (ids: string[]) =>
+      get(`/v1/stories/highlights/open-counts?communityIds=${ids.join(',')}`, tokens.admin);
+    await expectSameAsUnknown(
+      'open counts of a foreign community',
+      () => counts([b.orgB]),
+      () => counts([stranger]),
+      200,
+    );
+    const both = await counts([b.orgB, stranger, fx.orgA]);
+    const rows = ((await both.json()) as { items: { communityId: string; openCount: number }[] })
+      .items;
+    expect(rows.map((row) => row.communityId)).toEqual([fx.orgA]);
+    expect(JSON.stringify(rows)).not.toContain(b.orgB);
+
+    // the positive control: tenant A's own highlight takes the story and the administrator's switch answers 200
+    expect((await addItem(tokens.buyer2, fx.hOpen, mine)).status).toBe(200);
+    expect((await removeItemOf(tokens.buyer2, fx.hOpen, mine)).status).toBe(200);
+    expect((await patchOpen(tokens.admin, fx.hOpen, true)).status).toBe(200);
+  });
+
+  it('12. viewer.actions, post.community.actions, the catalogue and the product read never answer for tenant B; A’s own reads pass', async () => {
+    const stranger = randomUUID();
+    await expectSameAsUnknown(
+      'community detail (viewer.actions)',
+      () => get(`/v1/communities/${b.orgB}`, tokens.buyer2),
+      () => get(`/v1/communities/${stranger}`, tokens.buyer2),
+    );
+    const list = await get('/v1/communities', tokens.buyer2);
+    expect(list.status).toBe(200);
+    const listed = ((await list.json()) as { items: CommunitySummary[] }).items;
+    expect(listed.map((item) => item.id)).not.toContain(b.orgB);
+    expect(
+      listed.map((item) => item.id),
+      'positive control: A’s own community',
+    ).toContain(fx.orgA);
+    await expectSameAsUnknown(
+      'post detail (community.actions)',
+      () => get(`/v1/feed/posts/${b.postB}`, tokens.buyer2),
+      () => get(`/v1/feed/posts/${stranger}`, tokens.buyer2),
+    );
+    await expectSameAsUnknown(
+      'comment list of a foreign post',
+      () => get(`/v1/feed/posts/${b.postB}/comments`, tokens.buyer2),
+      () => get(`/v1/feed/posts/${stranger}/comments`, tokens.buyer2),
+    );
+    const feed = await get(`/v1/feed?communityId=${b.orgB}&limit=25`, tokens.buyer2);
+    const feedUnknown = await get(`/v1/feed?communityId=${stranger}&limit=25`, tokens.buyer2);
+    expect(await bytesOfAnswer(feed), 'the community feed of a foreign community').toBe(
+      await bytesOfAnswer(feedUnknown),
+    );
+    expect(feed.status).toBe(404);
+    expect((await get(`/v1/feed/posts/${fx.adminPost}`, tokens.buyer2)).status).toBe(200);
+
+    // the buyer catalogue: A's open highlight, never B's
+    await adminSql`update public.story_highlights set open_to_buyers = true where id = ${fx.hOpen}::uuid`;
+    const catalog = await get('/v1/stories/highlights/catalog', tokens.buyer2);
+    expect(catalog.status, await catalog.clone().text()).toBe(200);
+    const catalogIds = ((await catalog.json()) as { items: { id: string }[] }).items.map(
+      (item) => item.id,
+    );
+    expect(catalogIds).toContain(fx.hOpen);
+    expect(catalogIds).not.toContain(b.hB);
+
+    // the member product read and the catalogue of products
+    await expectSameAsUnknown(
+      'product read',
+      () => get(`/v1/store/products/${b.productB}`, tokens.buyer2),
+      () => get(`/v1/store/products/${stranger}`, tokens.buyer2),
+    );
+    const products = await get('/v1/store/products', tokens.buyer2);
+    expect(products.status).toBe(200);
+    const productsText = await products.text();
+    expect(productsText).not.toContain(b.productB);
+    expect(productsText).toContain(fx.productA);
+    await expectSameAsUnknown(
+      'community access read',
+      () => get(`/v1/store/communities/${b.orgB}/access`, tokens.buyer2),
+      () => get(`/v1/store/communities/${stranger}/access`, tokens.buyer2),
+    );
+  });
+
+  it('13. the product form (communityLinks) of tenant A cannot touch tenant B’s product or name tenant B’s community; its own link writes pass', async () => {
+    const stranger = randomUUID();
+    const links = (communityId: string) => [
+      { communityId, like: true, comment: true, share: true, post: true, story: true },
+    ];
+    const patchProduct = (id: string, communityId: string) =>
+      request(`/v1/store/products/${id}`, tokens.admin, {
+        method: 'PATCH',
+        body: JSON.stringify({ communityLinks: links(communityId) }),
+      });
+    await expectSameAsUnknown(
+      'patch a foreign product',
+      () => patchProduct(b.productB, fx.orgA),
+      () => patchProduct(stranger, fx.orgA),
+    );
+    const [untouched] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.store_product_communities
+       where product_id = ${b.productB}::uuid and community_id = ${b.orgB}::uuid and can_post and can_story`;
+    expect(untouched?.n, 'tenant B’s link kept its flags and its community').toBe(1);
+    const [leakedLink] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.store_product_communities
+       where product_id = ${b.productB}::uuid and community_id = ${fx.orgA}::uuid`;
+    expect(leakedLink?.n).toBe(0);
+
+    // naming a foreign community in OUR product's links is refused like naming one that exists nowhere
+    const createWith = (communityId: string) =>
+      post('/v1/store/products', tokens.admin, {
+        name: `${PREFIX} produto cruzado`,
+        priceCents: 500,
+        communityLinks: links(communityId),
+      });
+    const refused = await expectSameAsUnknown(
+      'communityLinks naming a foreign community',
+      () => createWith(b.orgB),
+      () => createWith(stranger),
+      400,
+    );
+    expect(refused).not.toContain(b.orgB);
+    const [crossed] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.store_products where name = ${`${PREFIX} produto cruzado`}`;
+    expect(crossed?.n, 'no product was created by either refusal').toBe(0);
+    // positive controls: our own community in the same body, on create and on patch
+    const ok = await createWith(fx.orgA);
+    expect(ok.status, await ok.clone().text()).toBe(201);
+    expect((await patchProduct(fx.productA, fx.orgA)).status).toBe(200);
+  });
+
+  it('14. tenant A’s session on tenant B’s host is refused TENANT_HOST_MISMATCH before any read; the same call on its own host passes', async () => {
+    const mismatch = async (res: Response, label: string) => {
+      expect(res.status, label).toBe(403);
+      expect(((await res.json()) as Envelope).error.code, label).toBe('TENANT_HOST_MISMATCH');
+    };
+    await mismatch(
+      await get(`/v1/communities/${b.orgB}`, tokens.buyer2, HOSTS.lab),
+      'community read',
+    );
+    await mismatch(
+      await post(`/v1/feed/posts/${b.postB}/like`, tokens.buyer2, undefined, HOSTS.lab),
+      'like',
+    );
+    await mismatch(
+      await post(
+        '/v1/feed/posts',
+        tokens.buyer2,
+        { caption: `${PREFIX} host`, communityId: b.orgB },
+        HOSTS.lab,
+      ),
+      'post',
+    );
+    await mismatch(
+      await get('/v1/stories/highlights/catalog', tokens.buyer2, HOSTS.lab),
+      'catalogue',
+    );
+    await mismatch(
+      await put(`/v1/stories/highlights/${b.hB}/stories/${b.storyB}`, tokens.buyer2, HOSTS.lab),
+      'item add',
+    );
+    await mismatch(await get('/v1/store/products', tokens.buyer2, HOSTS.lab), 'product list');
+    // the other way round: tenant B's buyer on tenant A's host
+    await mismatch(await get(`/v1/communities/${fx.orgA}`, b.buyer, HOSTS.demo), 'B on A’s host');
+    expect(
+      (await get(`/v1/communities/${fx.orgA}`, tokens.buyer2)).status,
+      'positive control',
+    ).toBe(200);
+    expect(
+      (await get(`/v1/communities/${b.orgB}`, b.buyer, HOSTS.lab)).status,
+      'positive control B',
+    ).toBe(200);
+  });
+
+  it('15. the symmetric direction (creation order is irrelevant): tenant B’s buyer against tenant A’s ids answers like unknown ids, beside B’s own passing call', async () => {
+    const stranger = randomUUID();
+    const onLab = (path: string, init: RequestInit = {}) => request(path, b.buyer, init, HOSTS.lab);
+    await expectSameAsUnknown(
+      'B likes a post of A',
+      () => onLab(`/v1/feed/posts/${fx.adminPost}/like`, { method: 'POST' }),
+      () => onLab(`/v1/feed/posts/${stranger}/like`, { method: 'POST' }),
+    );
+    await expectSameAsUnknown(
+      'B posts into a community of A',
+      () =>
+        onLab('/v1/feed/posts', {
+          method: 'POST',
+          body: JSON.stringify({ caption: `${PREFIX} nao deve gravar B`, communityId: fx.orgA }),
+        }),
+      () =>
+        onLab('/v1/feed/posts', {
+          method: 'POST',
+          body: JSON.stringify({ caption: `${PREFIX} nao deve gravar B`, communityId: stranger }),
+        }),
+    );
+    await expectSameAsUnknown(
+      'B reads a community of A',
+      () => onLab(`/v1/communities/${fx.orgA}`),
+      () => onLab(`/v1/communities/${stranger}`),
+    );
+    await expectSameAsUnknown(
+      'B adds into a highlight of A',
+      () => onLab(`/v1/stories/highlights/${fx.hOpen}/stories/${b.storyB}`, { method: 'PUT' }),
+      () => onLab(`/v1/stories/highlights/${stranger}/stories/${b.storyB}`, { method: 'PUT' }),
+    );
+    const none = await adminSql`
+      select 1 from public.feed_posts where caption = ${`${PREFIX} nao deve gravar B`}`;
+    expect(none).toHaveLength(0);
+    // positive control: B's own buyer likes B's post, posts into B's community and sees B's catalogue
+    expect((await onLab(`/v1/feed/posts/${b.postB}/like`, { method: 'POST' })).status).toBe(200);
+    const posted = await onLab('/v1/feed/posts', {
+      method: 'POST',
+      body: JSON.stringify({ caption: `${PREFIX} do comprador do lab`, communityId: b.orgB }),
+    });
+    expect(posted.status, await posted.clone().text()).toBe(201);
+    const catalog = await onLab('/v1/stories/highlights/catalog');
+    const ids = ((await catalog.json()) as { items: { id: string }[] }).items.map(
+      (item) => item.id,
+    );
+    expect(ids).toContain(b.hB);
+    expect(ids).not.toContain(fx.hOpen);
+  });
+
+  it('16. BPERM-25 adjacency: two tenants each hold a community with the SAME name and slug and one user is a member of both; tenant A’s grant never answers for B’s twin, under either claim', async () => {
+    const [twins] = await adminSql<{ names: string[]; slugs: string[]; tenants: number }[]>`
+      select array_agg(name) as names, array_agg(slug) as slugs, count(distinct tenant_id)::int as tenants
+        from public.communities where id in (${fx.orgA}::uuid, ${b.orgB}::uuid)`;
+    expect(twins?.tenants).toBe(2);
+    expect(new Set(twins?.names).size, 'the two communities carry one name').toBe(1);
+    expect(new Set(twins?.slugs).size, 'the two communities carry one slug').toBe(1);
+
+    // under tenant A's claim the shared user holds every permission in A's community and none of them in B's
+    for (const action of ['like', 'comment', 'share', 'post', 'story']) {
+      expect(
+        await allowedOf(dual.userId, tenantId, fx.orgA, action),
+        `A claim, A community, ${action}`,
+      ).toBe(true);
+      expect(
+        await allowedOf(dual.userId, tenantId, b.orgB, action),
+        `A claim, B community, ${action}`,
+      ).toBe(false);
+      expect(
+        await allowedOf(dual.userId, labTenantId, fx.orgA, action),
+        `B claim, A community, ${action}`,
+      ).toBe(false);
+      expect(
+        await allowedOf(dual.userId, labTenantId, b.orgB, action),
+        `B claim, B community, ${action}`,
+      ).toBe(false);
+    }
+    expect(Object.keys(await scopeOf(dual.userId, tenantId))).toEqual([fx.orgA]);
+    expect(await scopeOf(dual.userId, labTenantId)).toEqual({});
+    // the lane form: under B's claim A's community is in nobody's denied list either (it does not exist there)
+    expect(await deniedOf(dual.userId, labTenantId, 'like')).not.toContain(fx.orgA);
+    // staff fail closed in both tenants
+    expect(await scopeOf(users.admin, tenantId, 'admin_tenant')).toEqual({});
+    expect(await scopeOf(b.adminUser, labTenantId, 'admin_tenant')).toEqual({});
+
+    // through the API, same token, two hosts: it posts in A, and in B's same-named community it is refused
+    const inA = await publish(dual.token, `${PREFIX} dual em A`, fx.orgA);
+    expect(inA.status, await inA.clone().text()).toBe(201);
+    const labPost = (caption: string, communityId: string) =>
+      post('/v1/feed/posts', dual.token, { caption, communityId }, HOSTS.lab);
+    const inB = await labPost(`${PREFIX} dual em B`, b.orgB);
+    expect(inB.status, 'the grant of A does not post in B').toBeGreaterThanOrEqual(403);
+    expect(inB.status).toBeLessThan(500);
+    const [rowB] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_posts where caption = ${`${PREFIX} dual em B`}`;
+    expect(rowB?.n).toBe(0);
+    await expectSameAsUnknown(
+      'the shared user under B’s claim reaches no post of A',
+      () =>
+        request(`/v1/feed/posts/${fx.adminPost}/like`, dual.token, { method: 'POST' }, HOSTS.lab),
+      () =>
+        request(`/v1/feed/posts/${randomUUID()}/like`, dual.token, { method: 'POST' }, HOSTS.lab),
+    );
+    // the viewer flags: A's community reads every flag for the shared user, B's twin reads today's member values
+    const actionsAt = async (community: string, host: string) => {
+      const res = await get(`/v1/communities/${community}`, dual.token, host);
+      return {
+        status: res.status,
+        actions: ((await res.json()) as CommunitySummary).viewer?.actions,
+      };
+    };
+    expect((await actionsAt(fx.orgA, HOSTS.demo)).actions).toEqual(ALL_ON);
+    const twin = await actionsAt(b.orgB, HOSTS.lab);
+    expect(twin.status).toBe(200);
+    expect(twin.actions?.post).toBe(false);
+    expect(twin.actions?.story).toBe(false);
+  });
+
+  it('17. BPERM-25 empty and ordering: a tenant with no community, product or entitlement answers empty or false everywhere, never an error', async () => {
+    empty.slug = `${PREFIX}-vazio`;
+    empty.host = `${empty.slug}.localhost`;
+    const [tenant] = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${empty.slug}, 'Vazia', 'Regras de teste.', 1) returning id::text as id`;
+    empty.tenant = tenant?.id ?? '';
+    for (const key of ['feed', 'store', 'social', 'communities', 'stories']) {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${empty.tenant}::uuid, ${key}, true)`;
+    }
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
+      values (${empty.tenant}::uuid, ${empty.host}, true, now())`;
+    moduleFlags.invalidate(empty.tenant);
+    const member = await createSharedIdentity({
+      prefix: PREFIX,
+      memberships: [{ tenantSlug: empty.slug }],
+    });
+    const admin = await createSharedIdentity({
+      prefix: PREFIX,
+      memberships: [{ tenantSlug: empty.slug, role: 'admin_tenant' }],
+    });
+    empty.memberUser = member.userId;
+    empty.member = await signInAs(member.email, member.password);
+    empty.admin = await signInAs(admin.email, admin.password);
+
+    const read = async (path: string, token = empty.member) => {
+      const res = await get(path, token, empty.host);
+      expect(res.status, `${path} -> ${await res.clone().text()}`).toBe(200);
+      return (await res.json()) as { items: unknown[] };
+    };
+    expect((await read('/v1/communities')).items).toEqual([]);
+    expect((await read('/v1/stories/highlights/catalog', empty.admin)).items).toEqual([]);
+    expect((await read('/v1/store/products')).items).toEqual([]);
+    expect((await read('/v1/feed?limit=25')).items).toEqual([]);
+    expect(
+      (await read(`/v1/stories/highlights/open-counts?communityIds=${randomUUID()}`, empty.admin))
+        .items,
+    ).toEqual([]);
+
+    // a foreign id answers the same bare 404 as an unknown one, in a tenant that owns nothing
+    const stranger = randomUUID();
+    await expectSameAsUnknown(
+      'a tenant with nothing, a community of another tenant',
+      () => get(`/v1/communities/${fx.orgA}`, empty.member, empty.host),
+      () => get(`/v1/communities/${stranger}`, empty.member, empty.host),
+    );
+    await expectSameAsUnknown(
+      'a tenant with nothing, a like on a post of another tenant',
+      () =>
+        request(
+          `/v1/feed/posts/${fx.adminPost}/like`,
+          empty.member,
+          { method: 'POST' },
+          empty.host,
+        ),
+      () =>
+        request(`/v1/feed/posts/${stranger}/like`, empty.member, { method: 'POST' }, empty.host),
+    );
+
+    // the functions answer empty and false, never an error
+    expect(await scopeOf(empty.memberUser, empty.tenant)).toEqual({});
+    expect(await allowedOf(empty.memberUser, empty.tenant, fx.orgA, 'like')).toBe(false);
+    expect(await allowedOf(empty.memberUser, empty.tenant, stranger, 'post')).toBe(false);
+    expect(await deniedOf(empty.memberUser, empty.tenant, 'like')).toEqual([]);
+    // and with no claims at all
+    const bare = await adminSql.begin(async (tx) => {
+      await tx`select set_config('request.jwt.claims', '', true)`;
+      await tx`set local role authenticated`;
+      return tx<{ scope: unknown; ok: boolean }[]>`
+        select app.community_buyer_scope() as scope, app.community_action_allowed(${fx.orgA}::uuid, 'like') as ok`;
+    });
+    expect(bare[0]).toEqual({ scope: {}, ok: false });
+  });
+});
+
+const removeItemOf = (token: string, highlightId: string, storyId: string) =>
+  del(`/v1/stories/highlights/${highlightId}/stories/${storyId}`, token);
