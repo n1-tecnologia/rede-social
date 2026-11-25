@@ -887,8 +887,11 @@ describe('ComposerForm - a refused publish from the pinned composer (11.1-17 Tas
         composerErrors.publish,
       ),
     );
-    expect((screen.getByRole('button', { name: PUBLISH }) as HTMLButtonElement).disabled).toBe(
-      false,
+    // The transition can still read "Publicando…" when the error lands under load; wait for the label to come back.
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: PUBLISH }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
     );
   });
 
