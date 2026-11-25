@@ -197,6 +197,28 @@ export async function deleteCommunitiesByPrefix(prefix: string): Promise<void> {
   await sql()`delete from public.communities where name like ${`${prefix}%`}`;
 }
 
+/**
+ * 11.1-17: sets the buyer permission flags of ONE product-to-community link directly (what the product
+ * form's five boxes write through the API). A flag left out keeps its stored value, so a spec raises one
+ * at a time. The defaults of a new link are like, comment and share ticked, post and story not.
+ */
+export async function setLinkPermissions(
+  productId: string,
+  communityId: string,
+  flags: Partial<Record<'like' | 'comment' | 'share' | 'post' | 'story', boolean>>,
+): Promise<void> {
+  const rows = await sql()`
+    update public.store_product_communities
+       set can_like = coalesce(${flags.like ?? null}::boolean, can_like),
+           can_comment = coalesce(${flags.comment ?? null}::boolean, can_comment),
+           can_share = coalesce(${flags.share ?? null}::boolean, can_share),
+           can_post = coalesce(${flags.post ?? null}::boolean, can_post),
+           can_story = coalesce(${flags.story ?? null}::boolean, can_story)
+     where product_id = ${productId}::uuid and community_id = ${communityId}::uuid
+    returning product_id`;
+  if (rows.length !== 1) throw new Error(`no link of ${productId} to ${communityId}`);
+}
+
 /** Revokes an entitlement directly (what `app.store_revoke` does for a grant). 08.2-09. */
 export async function revokeEntitlement(entitlementId: string): Promise<void> {
   await sql()`

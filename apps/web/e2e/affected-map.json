@@ -93,7 +93,8 @@
         "profile.spec.ts",
         "social.spec.ts",
         "phase9-smoke.spec.ts",
-        "safety.spec.ts"
+        "safety.spec.ts",
+        "buyer-permissions-member.spec.ts"
       ]
     },
     {
@@ -119,7 +120,8 @@
         "phase7-smoke.spec.ts",
         "store.spec.ts",
         "profile.spec.ts",
-        "safety.spec.ts"
+        "safety.spec.ts",
+        "buyer-permissions-member.spec.ts"
       ]
     },
     {
@@ -144,7 +146,8 @@
         "reels.spec.ts",
         "stories.spec.ts",
         "profile.spec.ts",
-        "phase9-smoke.spec.ts"
+        "phase9-smoke.spec.ts",
+        "buyer-permissions-member.spec.ts"
       ]
     },
     {
@@ -167,7 +170,8 @@
         "phase8-smoke.spec.ts",
         "csp.spec.ts",
         "safety.spec.ts",
-        "buyer-permissions-admin.spec.ts"
+        "buyer-permissions-admin.spec.ts",
+        "buyer-permissions-member.spec.ts"
       ]
     },
     {
@@ -183,7 +187,8 @@
         "phase8-smoke.spec.ts",
         "csp.spec.ts",
         "platform-wizard.spec.ts",
-        "buyer-permissions-admin.spec.ts"
+        "buyer-permissions-admin.spec.ts",
+        "buyer-permissions-member.spec.ts"
       ]
     },
     {
@@ -208,7 +213,8 @@
         "store.spec.ts",
         "profile.spec.ts",
         "safety.spec.ts",
-        "buyer-permissions-admin.spec.ts"
+        "buyer-permissions-admin.spec.ts",
+        "buyer-permissions-member.spec.ts"
       ]
     },
     {
@@ -224,7 +230,8 @@
         "phase8-smoke.spec.ts",
         "csp.spec.ts",
         "feed.spec.ts",
-        "feed-composer.spec.ts"
+        "feed-composer.spec.ts",
+        "buyer-permissions-member.spec.ts"
       ]
     },
     {
@@ -739,7 +746,8 @@
         "shell.spec.ts",
         "profile.spec.ts",
         "courses-admin.spec.ts",
-        "buyer-permissions-admin.spec.ts"
+        "buyer-permissions-admin.spec.ts",
+        "buyer-permissions-member.spec.ts"
       ]
     },
     {

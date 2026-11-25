@@ -1213,6 +1213,15 @@ export async function insertHighlightFixture(
   return id;
 }
 
+/** 11.1-17: opens or closes one highlight to buyers (the administrator's "Aberto a compradores" switch). */
+export async function setHighlightOpenToBuyers(highlightId: string, open: boolean): Promise<void> {
+  const rows = await sql()`
+    update public.story_highlights set open_to_buyers = ${open}
+     where id = ${highlightId}::uuid
+    returning id`;
+  if (rows.length !== 1) throw new Error(`no highlight ${highlightId}`);
+}
+
 /** Hard-deletes a tenant's highlights whose title starts with `prefix` (their items cascade). */
 export async function deleteHighlightsByTitlePrefix(
   tenantSlug: string,
