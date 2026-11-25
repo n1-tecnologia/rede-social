@@ -514,17 +514,17 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **BPERM-03**: A member's permissions in an organization community are the union (`bool_or`) of the five flags of every linked product with an active entitlement of that member, tenant-pinned, store module on, `member` claim only; staff, a community with no link, a member community and a null role are never granted by it *(D-880, D-886, D-892)*
 - [x] **BPERM-04**: `app.community_action_allowed` replaces the constant-false stub with the same signature, answers true only through a product grant, and the scope map and the two wrappers agree for every community and action (pgTAP equivalence) *(D-880, D-886)*
 - [ ] **BPERM-05**: A revoked, refunded, charged-back or cancelled entitlement stops granting at the next statement; posts, comments and highlighted stories already written stay and are not hidden *(D-887)*
-- [ ] **BPERM-06**: A buyer without `like` cannot like or unlike a post nor like a comment (service 403 and restrictive RLS); story comment likes still reach the existing 400 `story_comment_not_likeable` *(D-888, D-891)*
-- [ ] **BPERM-07**: A buyer without `comment` cannot create a root comment or a reply (service 403 and a restrictive insert policy) while reading comments is unchanged *(D-888, D-892)*
+- [x] **BPERM-06**: A buyer without `like` cannot like or unlike a post nor like a comment (service 403 and restrictive RLS); story comment likes still reach the existing 400 `story_comment_not_likeable` *(D-888, D-891)*
+- [x] **BPERM-07**: A buyer without `comment` cannot create a root comment or a reply (service 403 and a restrictive insert policy) while reading comments is unchanged *(D-888, D-892)*
 - [ ] **BPERM-08**: Every refusal of this phase is `403 FORBIDDEN` with no `details`, identical for a missing flag, a missing product and a closed highlight; no product id or flag name appears in any member-readable payload or log line *(D-888)*
-- [ ] **BPERM-09**: A buyer holding `post` publishes through `POST /v1/feed/posts` only into an active, live organization community; the post is stamped `visibility = 'community'` and the database insert gate carries its own `social_enabled()`, active, not-deleted, organization-kind and tenant terms *(D-880, D-881, D-882)*
+- [x] **BPERM-09**: A buyer holding `post` publishes through `POST /v1/feed/posts` only into an active, live organization community; the post is stamped `visibility = 'community'` and the database insert gate carries its own `social_enabled()`, active, not-deleted, organization-kind and tenant terms *(D-880, D-881, D-882)*
 - [ ] **BPERM-10**: A buyer's post appears only on the community page, never in Início, Explorar or Reels, and raises no bell row, push or fan-out job *(D-881)*
 - [x] **BPERM-11**: With `social` off a buyer keeps reading and keeps like/comment where the product allows, and `post` and `story` answer false and are refused *(D-882)*
 - [ ] **BPERM-12**: A buyer holding `story` saves one of their own stories only into a highlight that is open to buyers, in an active organization community, through publish-with-highlight or add; they cannot create, rename, re-cover, reorder or delete a highlight; item insert and delete gates carry the open, organization, active and own-story terms *(D-883, D-884, D-885)*
 - [ ] **BPERM-13**: A buyer removes only their own story from an open highlight; the administrator removes any item from any highlight as today; a highlight closed afterwards keeps its items *(D-885, D-887)*
 - [ ] **BPERM-14**: The highlight catalogue for a buyer lists only open highlights of communities where `story` is granted, without any open flag on the payload *(UI-D-887, UI-D-891)*
 - [x] **BPERM-15**: `viewer.actions` on the community list and detail is the union for a buyer, `story` true only while an open highlight exists, `post`/`story` false with `social` off, staff all true, and no linked product as today; the list stays one statement *(D-886, D-892, UI-D-888)*
-- [ ] **BPERM-16**: A post of an organization community carries an optional `community.actions {like, comment, share}` only when at least one is false for the viewer, computed in the same statement; absent means all true *(UI-D-889)*
+- [x] **BPERM-16**: A post of an organization community carries an optional `community.actions {like, comment, share}` only when at least one is false for the viewer, computed in the same statement; absent means all true *(UI-D-889)*
 - [x] **BPERM-17**: The product body accepts per-link flags (`communityLinks`) beside `communityIds`, both together is a 400, a changed flag on an existing link is persisted by an idempotent upsert in the product transaction, and the manager read returns flags only for non-default links *(D-890, D-363)*
 - [x] **BPERM-18**: A locked community keeps its read-only sample (organization posts only) and the locked-member read of a buyer's story is closed *(D-892, D-356; confirm Open Questions 1 and 2)*
 - [ ] **BPERM-19**: The product form shows five checkboxes per linked community with the specified defaults, helpers and focus rules, and saves the flags in the same request *(UI-D-883..UI-D-885)*
@@ -534,7 +534,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [ ] **BPERM-23**: The buyer's post flow is the member composer pinned to the community with the neutral refusal sentence and no silent change of destination *(UI-D-892, UI-D-893)*
 - [ ] **BPERM-24**: All new strings are pt-BR in the host catalogs, no member-readable string names a product, purchase or permission, and `scripts/check-ui-literals.sh` passes *(UI-D-882, UI-D-897)*
 - [ ] **BPERM-25**: Every new or changed function, column and policy carries a cross-tenant negative with a positive control (pgTAP and integration): a buyer of tenant A never holds, reads or writes anything through a community, product, highlight or story of tenant B *(D-880, T-isolation)*
-- [ ] **BPERM-26**: A member post limiter caps buyer-branch publishes per hour, every attempt counted *(D-880, Claude's discretion)*
+- [x] **BPERM-26**: A member post limiter caps buyer-branch publishes per hour, every attempt counted *(D-880, Claude's discretion)*
 - [ ] **BPERM-27**: The release is expand-only and ordered (migrations on every tenant database, then API and worker, then web); every new response key is `.optional()` and emitted only at non-default values; the previous API and web keep working in each window named in `docs/DEPLOY.md` *(D-890, D-891)*
 - [ ] **BPERM-28**: The first walk on a real phone at 320 and 390 px (admin sets flags and the open switch; a buyer posts and saves a story on the tenant's own domain) is proved by the owner and recorded in the ledger *(UI-D-883..UI-D-892)*
 - [ ] **BPERM-29**: A refund through the real gateway while a buyer's screen is open ends the controls on the next refresh and the server refuses meanwhile; proved by the owner and recorded in the ledger *(D-887, UI-D-893)*
@@ -1269,17 +1269,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BPERM-03 | Phase 11.1 | Complete |
 | BPERM-04 | Phase 11.1 | Complete |
 | BPERM-05 | Phase 11.1 | Pending |
-| BPERM-06 | Phase 11.1 | Pending |
-| BPERM-07 | Phase 11.1 | Pending |
+| BPERM-06 | Phase 11.1 | Complete |
+| BPERM-07 | Phase 11.1 | Complete |
 | BPERM-08 | Phase 11.1 | Pending |
-| BPERM-09 | Phase 11.1 | Pending |
+| BPERM-09 | Phase 11.1 | Complete |
 | BPERM-10 | Phase 11.1 | Pending |
 | BPERM-11 | Phase 11.1 | Complete |
 | BPERM-12 | Phase 11.1 | Pending |
 | BPERM-13 | Phase 11.1 | Pending |
 | BPERM-14 | Phase 11.1 | Pending |
 | BPERM-15 | Phase 11.1 | Complete |
-| BPERM-16 | Phase 11.1 | Pending |
+| BPERM-16 | Phase 11.1 | Complete |
 | BPERM-17 | Phase 11.1 | Complete |
 | BPERM-18 | Phase 11.1 | Complete |
 | BPERM-19 | Phase 11.1 | Pending |
@@ -1289,7 +1289,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BPERM-23 | Phase 11.1 | Pending |
 | BPERM-24 | Phase 11.1 | Pending |
 | BPERM-25 | Phase 11.1 | Pending |
-| BPERM-26 | Phase 11.1 | Pending |
+| BPERM-26 | Phase 11.1 | Complete |
 | BPERM-27 | Phase 11.1 | Pending |
 | BPERM-28 | Phase 11.1 | Pending |
 | BPERM-29 | Phase 11.1 | Pending |
