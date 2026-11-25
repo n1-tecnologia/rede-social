@@ -7,6 +7,8 @@ import { createTranslator } from 'next-intl';
 import type { getTranslations } from 'next-intl/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
+import type { ReelsOverlayBinding } from '../reels/ReelsOverlay';
+import type { PostDetailProps } from './PostDetail';
 
 /**
  * 11.1-19 (WR-01, D-888, D-889, UI-D-888, BPERM-21): a viewer whose per-post share fact is false is
@@ -28,6 +30,32 @@ vi.mock('@/lib/env', () => ({
   },
 }));
 vi.mock('@/components/media/VideoPlayer', () => ({ VideoPlayer: () => null }));
+// The post detail page's collaborators that this file does not exercise. PostMenu is NOT stubbed:
+// the real sheet's row rule is part of what is proven.
+vi.mock('@rede-social/module-feed/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@rede-social/module-feed/ui')>()),
+  CommentsList: () => <div data-testid="comments-list" />,
+}));
+vi.mock('@/components/reels/ReelsOverlay', () => ({ ReelsOverlay: () => null }));
+vi.mock('@/components/reels/ReelsHost', () => ({ REELS_ALL_LANE: 'all' }));
+vi.mock('@/app/(app)/reels/reels-actions', () => ({
+  loadReelsPageAction: vi.fn(),
+  loadReelStartAction: vi.fn(),
+}));
+vi.mock('@/components/media/FeedVideo', () => ({ suspendFeedVideos: () => () => {} }));
+vi.mock('./useSharePost', () => ({ useSharePost: () => vi.fn() }));
+vi.mock('./useDeletePost', () => ({ useDeletePost: () => vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
+vi.mock('next-intl', async (importOriginal) => {
+  const original = await importOriginal<typeof import('next-intl')>();
+  const { loadMessages: load } = await import('@/i18n/messages');
+  const messages = load();
+  return {
+    ...original,
+    useTranslations: (namespace?: string) =>
+      original.createTranslator({ locale: 'pt-BR', messages, namespace } as never),
+  };
+});
 vi.mock('motion/react', async () => {
   const { createElement, forwardRef } = await import('react');
   const MOTION_ONLY = new Set(['initial', 'animate', 'exit', 'transition', 'variants', 'layout']);
@@ -58,6 +86,7 @@ vi.mock('motion/react', async () => {
 });
 
 const { postCardView } = await import('@/lib/feed-view');
+const { PostDetail } = await import('./PostDetail');
 
 afterEach(cleanup);
 
@@ -219,3 +248,112 @@ describe('the "..." sheet of a list card follows the viewer share fact (11.1-19,
     expect(onShare).toHaveBeenCalledWith({ postId: POST_ID, url: `${ORIGIN}/post/${POST_ID}` });
   });
 });
+
+/** The real post detail page around the same card, with the real PostMenu behind its "..." control. */
+function renderDetail(shape: Shape) {
+  const view = card(shape);
+  const props: PostDetailProps = {
+    post: view,
+    captionTruncateAt: 200,
+    locale: 'pt-BR',
+    labels: listProps(view).labels as unknown as PostDetailProps['labels'],
+    onLike: vi.fn(),
+    onUnlike: vi.fn(),
+    genericErrorLabel: 'error',
+    share: { title: 'tenant', copied: 'copied' },
+    menu: {
+      labels: MENU_LABELS,
+      deletedLabel: 'deleted',
+      removedLabel: 'removed',
+      onDelete: vi.fn(),
+      // The report row needs the host's actions (the page passes them when social is on).
+      safety: { socialOn: true, reportAction: vi.fn(), blockAction: vi.fn() },
+    },
+    // CommentsList is stubbed; the report wiring only spreads the label block it is handed.
+    comments: { labels: { item: {} } } as unknown as PostDetailProps['comments'],
+    reels: { labels: { region: 'region' }, backLabel: 'back' } as ReelsOverlayBinding,
+  };
+  render(
+    <ToastProvider>
+      <PostDetail {...props} />
+    </ToastProvider>,
+  );
+}
+
+describe('the "..." sheet of the post detail follows the viewer share fact (11.1-19, WR-01)', () => {
+  it('share false on a manageable post: the control stays, the sheet holds the author rows and no Copiar link', () => {
+    renderDetail({ facts: { like: true, comment: true, share: false }, canManage: true });
+    fireEvent.click(moreButton() as HTMLElement);
+    expect(screen.getByRole('link', { name: 'edit-label' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'delete-label' })).toBeTruthy();
+    expect(copyRow()).toBeNull();
+  });
+
+  it('share true (like and comment false): the same post keeps Copiar link', () => {
+    renderDetail({ facts: { like: false, comment: false, share: true }, canManage: true });
+    fireEvent.click(moreButton() as HTMLElement);
+    expect(screen.getByRole('link', { name: 'edit-label' })).toBeTruthy();
+    expect(copyRow()).toBeTruthy();
+  });
+});
+
+type Host = 'FeedList' | 'PostDetail';
+
+const HOSTS: Record<Host, (shape: Shape) => unknown> = {
+  FeedList: (shape) => renderList(shape),
+  PostDetail: (shape) => renderDetail(shape),
+};
+
+/** The page's report row speaks the real catalog; the list's harness uses its sentinel label. */
+const REPORT_LABEL: Record<Host, string> = {
+  FeedList: 'report-post',
+  PostDetail: (
+    createTranslator({
+      locale: 'pt-BR',
+      messages: loadMessages(),
+      namespace: 'safety',
+    } as never) as unknown as Translator
+  )('menu.reportPost'),
+};
+
+/**
+ * The "..." visibility matrix, against BOTH hosts. Each negative row has a positive sibling that
+ * flips the one term back (share true, no fact, no community), so a screen that renders nothing at
+ * all cannot pass.
+ */
+describe.each(['FeedList', 'PostDetail'] as const)(
+  '%s: the "..." control and the copy row (11.1-19)',
+  (host) => {
+    const draw = HOSTS[host];
+
+    it('(a) share false, reportable only: the control stays for Denunciar and the sheet has no copy row', () => {
+      draw({ facts: { like: true, comment: true, share: false }, canReport: true });
+      fireEvent.click(moreButton() as HTMLElement);
+      expect(screen.getByRole('button', { name: REPORT_LABEL[host] })).toBeTruthy();
+      expect(copyRow()).toBeNull();
+    });
+
+    it('(b) share false, not manageable, not reportable: no "..." control at all', () => {
+      draw({ facts: { like: true, comment: true, share: false } });
+      expect(moreButton()).toBeNull();
+    });
+
+    it.each([
+      ['a community with no actions', undefined],
+      ['a post with no community', 'none' as const],
+    ])(
+      '(c) %s, not manageable, not reportable: the control and the copy row are its one row',
+      (_name, facts) => {
+        draw({ facts });
+        fireEvent.click(moreButton() as HTMLElement);
+        expect(copyRow()).toBeTruthy();
+      },
+    );
+
+    it('(d) share true with like and comment false: the control and the copy row are present', () => {
+      draw({ facts: { like: false, comment: false, share: true } });
+      fireEvent.click(moreButton() as HTMLElement);
+      expect(copyRow()).toBeTruthy();
+    });
+  },
+);

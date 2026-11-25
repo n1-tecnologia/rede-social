@@ -167,6 +167,38 @@ describe('reelView — the feed card mapping, reused (REELS-05, FEED-07)', () =>
     } satisfies ReelView);
   });
 
+  it('a post whose community fact withholds share has a null shareUrl and still carries the fact (11.1-19, D-888)', async () => {
+    const withheld = reelView(
+      post({
+        community: {
+          id: COMMUNITY,
+          name: 'Corrida',
+          slug: 'corrida',
+          actions: { like: true, comment: true, share: false },
+        },
+      }),
+      await feedTranslator(),
+      ORIGIN,
+    );
+    expect(withheld?.shareUrl).toBeNull();
+    expect(withheld?.actions).toEqual({ like: true, comment: true, share: false });
+
+    // Positive control: with share true the url is the card's own.
+    const allowed = reelView(
+      post({
+        community: {
+          id: COMMUNITY,
+          name: 'Corrida',
+          slug: 'corrida',
+          actions: { like: false, comment: false, share: true },
+        },
+      }),
+      await feedTranslator(),
+      ORIGIN,
+    );
+    expect(allowed?.shareUrl).toBe(`${ORIGIN}/post/${POST}`);
+  });
+
   it('with no verified primary host (shareOrigin null) the shareUrl is null', async () => {
     const view = reelView(post(), await feedTranslator(), null);
     expect(view?.shareUrl).toBeNull();

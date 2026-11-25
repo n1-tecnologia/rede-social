@@ -11,7 +11,8 @@ import type { PostDetailProps } from './PostDetail';
  * 11.1-14 (UI-D-889, D-889): the post detail page draws the REAL card, so the per-post fact that
  * rides on the card view governs the page too, including when the page is the notification deep
  * link (`?comentario=`, which only changes what `CommentsList` pins and never what the card draws).
- * `share` false hides the send glyph and nothing else: the "..." menu keeps its own rows.
+ * `share` false hides the send glyph and, through the builder, the post's share url (11.1-19, D-888):
+ * the "..." control then stays only for the rows the post still has (the author's own, a report).
  *
  * Stubbed: the comment list, the menu and the Reels overlay (they record nothing here).
  */
@@ -100,12 +101,20 @@ function show(post: PostCardView) {
 }
 
 describe('PostDetail draws the per-post fact (11.1-14)', () => {
-  it('share false: no send glyph, the heart and the comment glyph stay, the menu control stays', () => {
-    const card = show(view({ actions: { like: true, comment: true, share: false } }));
+  it('share false: no send glyph, the heart and the comment glyph stay, the control stays for the author rows', () => {
+    // The builder yields no share url for this viewer (11.1-19); the post is manageable, so the
+    // "..." control stays for the author's own rows, not for a copy row.
+    const card = show(
+      view({
+        actions: { like: true, comment: true, share: false },
+        shareUrl: null,
+        canManage: true,
+        editHref: '/post/1/editar',
+      }),
+    );
     expect(card.queryByRole('button', { name: 'share-label' })).toBeNull();
     expect(card.getByRole('button', { name: 'like-label' })).toBeTruthy();
     expect(card.getByRole('button', { name: 'comment-label' })).toBeTruthy();
-    // D-889: nothing else is gated by share, the "..." control (copy link among its rows) stays.
     expect(card.getByRole('button', { name: 'more-options-label' })).toBeTruthy();
   });
 
