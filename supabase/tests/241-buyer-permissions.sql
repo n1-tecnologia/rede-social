@@ -32,7 +32,7 @@ begin;
 --
 -- Fixture ids use the `24100000-…` prefix and the tenants `pgtap-bperm-a` / `pgtap-bperm-b`. Like its siblings, this
 -- file ROLLS BACK.
-select plan(136);
+select plan(156);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-bperm-a', 'Permissoes A', '24100000-0000-4000-8000-000000000001');
@@ -829,6 +829,206 @@ select ok((select with_check ~* 'coalesce\(\(\s*select app\.community_action_den
 select ok((select with_check ~* 'coalesce\(\(\s*select app\.community_action_denied_ids\(''comment''::text\)'
              from pg_policies where schemaname = 'public' and tablename = 'feed_comments' and policyname = 'feed_comments_community_insert_gate'),
   '13: …and so does the stored comment policy');
+
+-- ── fixture for sections 14 to 19 (11.1-04, as the migration role) ──────────────────────────────
+-- BS1 and BS2 hold PS (the `story` flag on in CS, CArch and CDel); BS3 holds PN (linked to CS with `story` off). CS is an
+-- active organization community, CArch is archived and CDel soft-deleted (both linked to PS), CNoLink has no product, CMem is
+-- a MEMBER community created by BS1. Highlights: hOpen and hOpen2 (CS, open), hClosed (CS, closed), hMem (CMem, open), hArch,
+-- hDel, hInicio (no community, open), hNoLink (CNoLink, open). Tenant B: CB with the open highlight hB, linked to PBS (`story`
+-- off) which BS1 also holds there. Every story is a followers story of its author.
+select tests.auth_user('bs1@bperm-a.local', '24100000-0000-4000-8000-000000001401');
+select tests.auth_user('bs2@bperm-a.local', '24100000-0000-4000-8000-000000001402');
+select tests.auth_user('bs3@bperm-a.local', '24100000-0000-4000-8000-000000001403');
+select tests.member('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select tests.member('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001402');
+select tests.member('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001403');
+select tests.member('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401');
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, kind, position, status, deleted_at) values
+  ('24100000-0000-4000-8000-0000000014c1', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'Historias', 'historias', 'organization', 20, 'active', null),
+  ('24100000-0000-4000-8000-0000000014c2', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', 'Da BS1', 'da-bs1', 'member', 1000000, 'active', null),
+  ('24100000-0000-4000-8000-0000000014c3', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'Arquivada H', 'arquivada-h', 'organization', 21, 'archived', null),
+  ('24100000-0000-4000-8000-0000000014c4', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'Apagada H', 'apagada-h', 'organization', 22, 'active', now()),
+  ('24100000-0000-4000-8000-0000000014c5', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'Sem produto H', 'sem-produto-h', 'organization', 23, 'active', null),
+  ('24100000-0000-4000-8000-0000000014d1', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000012', 'Historias B', 'historias-b', 'organization', 20, 'active', null);
+insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents, status) values
+  ('24100000-0000-4000-8000-0000000014a1', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'PS', 100, 'active'),
+  ('24100000-0000-4000-8000-0000000014a2', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'PN', 100, 'active'),
+  ('24100000-0000-4000-8000-0000000014a3', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000012', 'PBS', 100, 'active');
+insert into public.store_product_communities (tenant_id, product_id, community_id, can_story) values
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014a1', '24100000-0000-4000-8000-0000000014c1', true),
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014a1', '24100000-0000-4000-8000-0000000014c3', true),
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014a1', '24100000-0000-4000-8000-0000000014c4', true),
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014a2', '24100000-0000-4000-8000-0000000014c1', false),
+  ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000014a3', '24100000-0000-4000-8000-0000000014d1', false);
+insert into public.store_entitlements (id, tenant_id, user_id, product_id, source, granted_by_user_id) values
+  ('24100000-0000-4000-8000-0000000014e1', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-0000000014a1', 'grant', '24100000-0000-4000-8000-000000000002'),
+  ('24100000-0000-4000-8000-0000000014e2', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001402', '24100000-0000-4000-8000-0000000014a1', 'grant', '24100000-0000-4000-8000-000000000002'),
+  ('24100000-0000-4000-8000-0000000014e3', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001403', '24100000-0000-4000-8000-0000000014a2', 'grant', '24100000-0000-4000-8000-000000000002'),
+  ('24100000-0000-4000-8000-0000000014e4', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-0000000014a3', 'grant', '24100000-0000-4000-8000-000000000012');
+insert into public.story_highlights (id, tenant_id, community_id, title, position, created_by_user_id, open_to_buyers) values
+  ('24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014c1', 'H aberto', 1, '24100000-0000-4000-8000-000000000002', true),
+  ('24100000-0000-4000-8000-0000000014f2', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014c1', 'H fechado', 2, '24100000-0000-4000-8000-000000000002', false),
+  ('24100000-0000-4000-8000-0000000014f3', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014c2', 'H da BS1', 1, '24100000-0000-4000-8000-000000001401', true),
+  ('24100000-0000-4000-8000-0000000014f4', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014c3', 'H arquivada', 1, '24100000-0000-4000-8000-000000000002', true),
+  ('24100000-0000-4000-8000-0000000014f5', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014c4', 'H apagada', 1, '24100000-0000-4000-8000-000000000002', true),
+  ('24100000-0000-4000-8000-0000000014f6', '24100000-0000-4000-8000-000000000001', null, 'H inicio', 1, '24100000-0000-4000-8000-000000000002', true),
+  ('24100000-0000-4000-8000-0000000014f7', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014c5', 'H sem produto', 1, '24100000-0000-4000-8000-000000000002', true),
+  ('24100000-0000-4000-8000-0000000014f8', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-0000000014d1', 'H aberto B', 1, '24100000-0000-4000-8000-000000000012', true),
+  ('24100000-0000-4000-8000-0000000014f9', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014c1', 'H aberto 2', 3, '24100000-0000-4000-8000-000000000002', true);
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, variant_widths) values
+  ('24100000-0000-4000-8000-000000001501', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-000000001502', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-000000001503', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-000000001504', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-000000001505', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-000000001506', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-000000001507', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-000000001508', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001402', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-000000001509', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001402', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-00000000150a', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001403', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('24100000-0000-4000-8000-00000000150b', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640}');
+-- 1451..1457: BS1's stories in A; 1461, 1462: BS2's; 1471: BS3's; 1481: BS1's story in tenant B
+insert into public.stories (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility, published_at, expires_at) values
+  ('24100000-0000-4000-8000-000000001451', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-000000001501', 'image', 's1451', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000001452', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-000000001502', 'image', 's1452', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000001453', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-000000001503', 'image', 's1453', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000001454', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-000000001504', 'image', 's1454', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000001455', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-000000001505', 'image', 's1455', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000001456', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-000000001506', 'image', 's1456', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000001457', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-000000001507', 'image', 's1457', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000001461', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001402', '24100000-0000-4000-8000-000000001508', 'image', 's1461', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000001462', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001402', '24100000-0000-4000-8000-000000001509', 'image', 's1462', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000001471', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001403', '24100000-0000-4000-8000-00000000150a', 'image', 's1471', 'followers', now() - interval '1 hour', now() + interval '23 hours'),
+  ('24100000-0000-4000-8000-000000001481', '24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000001401', '24100000-0000-4000-8000-00000000150b', 'image', 's1481', 'followers', now() - interval '1 hour', now() + interval '23 hours');
+
+-- ── 14. the item insert gate (11.1-04, D-883, D-884, D-885; BPERM-02, BPERM-12) ───────────────────
+-- THE PATH: BS1 saves THEIR OWN story into an open highlight of an active organization community, holding `story`.
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001451', '24100000-0000-4000-8000-000000001401') $$,
+  '14: D-884: a buyer holding story saves their own story into an open highlight of an organization community');
+-- the highlight closed: the same save is refused, then accepted again once it is reopened (positive control)
+reset role;
+update public.story_highlights set open_to_buyers = false where id = '24100000-0000-4000-8000-0000000014f9';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f9', '24100000-0000-4000-8000-000000001451', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '14: a highlight with open_to_buyers = false refuses the buyer (42501)');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f2', '24100000-0000-4000-8000-000000001452', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '14: …the highlight that was never open refuses the buyer too (42501)');
+reset role;
+update public.story_highlights set open_to_buyers = true where id = '24100000-0000-4000-8000-0000000014f9';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f9', '24100000-0000-4000-8000-000000001451', '24100000-0000-4000-8000-000000001401') $$,
+  '14: …and the reopened highlight accepts the same save (the control)');
+reset role;
+-- the link flag off (BS3 holds PN, whose link has story = false; BS1 holds PS with it off after the flip)
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001403');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001471', '24100000-0000-4000-8000-000000001403') $$,
+  '42501', null, '14: a buyer whose link has can_story = false is refused (42501)');
+reset role;
+update public.store_product_communities set can_story = false where product_id = '24100000-0000-4000-8000-0000000014a1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001452', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '14: the flag flipped off for BS1 refuses the same save (42501)');
+reset role;
+update public.store_product_communities set can_story = true where product_id = '24100000-0000-4000-8000-0000000014a1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001452', '24100000-0000-4000-8000-000000001401') $$,
+  '14: …and the flag back on accepts it (the control)');
+-- someone else's story (D-885)
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001461', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '14: D-885: a buyer cannot save ANOTHER member''s story into an open highlight (42501)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001402');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001461', '24100000-0000-4000-8000-000000001402') $$,
+  '14: …while its author, also a buyer, saves it (the control)');
+reset role;
+-- social off: the insert alternative carries its own social term
+update public.tenant_modules set enabled = false
+ where tenant_id = '24100000-0000-4000-8000-000000000001' and module_key = 'social';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001453', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '14: social off refuses the buyer (42501): the gate carries its own social term');
+reset role;
+update public.tenant_modules set enabled = true
+ where tenant_id = '24100000-0000-4000-8000-000000000001' and module_key = 'social';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001453', '24100000-0000-4000-8000-000000001401') $$,
+  '14: …and social back on accepts it (the control)');
+-- an archived, a soft-deleted, an un-linked and a null-community highlight, all open
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f4', '24100000-0000-4000-8000-000000001454', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '14: an open highlight of an ARCHIVED community refuses the buyer (42501)');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f5', '24100000-0000-4000-8000-000000001454', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '14: …of a SOFT-DELETED community (42501)');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f7', '24100000-0000-4000-8000-000000001454', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '14: …of a community with NO linked product (42501)');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f6', '24100000-0000-4000-8000-000000001454', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '14: …and the Inicio highlight (no community, 42501)');
+-- the member-created community: a product grant never reaches it; its creator still does (ITEM_OWNER)
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001402');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f3', '24100000-0000-4000-8000-000000001462', '24100000-0000-4000-8000-000000001402') $$,
+  '42501', null, '14: D-883: an open highlight of a MEMBER community is closed to a buyer who is not its creator (42501)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f3', '24100000-0000-4000-8000-000000001454', '24100000-0000-4000-8000-000000001401') $$,
+  '14: …while its creator saves their own story there as before (the control, the owner path)');
+reset role;
+-- a revoked entitlement refuses, a re-activated one accepts (D-895)
+update public.store_entitlements set status = 'revoked', revoked_at = now() where id = '24100000-0000-4000-8000-0000000014e1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001455', '24100000-0000-4000-8000-000000001401') $$,
+  '42501', null, '14: D-895: a revoked entitlement refuses the buyer (42501)');
+reset role;
+update public.store_entitlements set status = 'active', revoked_at = null where id = '24100000-0000-4000-8000-0000000014e1';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000001401');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f1', '24100000-0000-4000-8000-000000001455', '24100000-0000-4000-8000-000000001401') $$,
+  '14: …and the re-activated entitlement accepts it (the control)');
+reset role;
+-- staff inserts are unchanged: into a closed highlight, any story
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000014f2', '24100000-0000-4000-8000-000000001462', '24100000-0000-4000-8000-000000000002') $$,
+  '14: staff still insert an item into a closed highlight');
+reset role;
 
 select * from finish();
 rollback;

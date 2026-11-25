@@ -40,6 +40,32 @@ const ITEM_OWNER = sql`exists (
      and h.tenant_id = app.tenant_id()
      and c.kind = 'member'
      and c.created_by_user_id = app.user_id())`;
+/**
+ * 11.1-04 (D-883, D-884, D-885, D-887; BPERM-02, BPERM-12): the BUYER alternative of the two item gates, and of no other
+ * policy. A buyer holding the `story` permission of an ORGANIZATION community may save (insert) and remove (delete) the
+ * item of THEIR OWN story in a highlight the administrator opened to buyers (`open_to_buyers`). It reads, for the item's
+ * highlight: the highlight is of this tenant and open; its community is an organization, active and not deleted
+ * community; and `app.community_action_allowed(c.id, 'story')` (plan 02's union over the caller's active entitlements)
+ * holds. The terms are all here, not in the service, so the service is never the only guard: a member community's
+ * highlight is reachable only through `ITEM_OWNER` (its creator), never through a product grant, and a refunded or
+ * unticked buyer or a closed highlight loses the alternative at the next statement (D-895). Both uses AND it with
+ * `ITEM_STORY_AUTHOR`, so a buyer touches only their own story (D-885); an administrator keeps every item through the
+ * `app.tenant_role() <> 'member'` branch.
+ *
+ * WHY `HIGHLIGHT_OWNER` AND THE THREE `story_highlights_member_*` GATES DO NOT CHANGE (D-884, research correction
+ * 2026-11-24): a buyer cannot create, rename, re-cover, reorder, open or delete a highlight, so the highlight-level gates
+ * stay creator-only. An item is never updated by a member (the update gate stays `app.tenant_role() <> 'member'`).
+ */
+const ITEM_BUYER_OPEN = sql`exists (
+  select 1 from public.story_highlights h
+    join public.communities c on c.id = h.community_id and c.tenant_id = h.tenant_id
+   where h.id = story_highlight_items.highlight_id
+     and h.tenant_id = app.tenant_id()
+     and h.open_to_buyers
+     and c.kind = 'organization'
+     and c.status = 'active'
+     and c.deleted_at is null
+     and app.community_action_allowed(c.id, 'story'))`;
 // The story being saved is the caller's OWN (the database mirror of `curatableStory`, T-10-34, T-10-35, D-716).
 const ITEM_STORY_AUTHOR = sql`exists (
   select 1 from public.stories s
@@ -407,7 +433,7 @@ export const storyHighlightItems = pgTable(
       as: 'restrictive',
       for: 'insert',
       to: authenticatedRole,
-      withCheck: sql`app.tenant_role() <> 'member' or (app.tenant_role() = 'member' and ${SOCIAL_ENABLED} and ${ITEM_OWNER} and ${ITEM_STORY_AUTHOR})`,
+      withCheck: sql`app.tenant_role() <> 'member' or (app.tenant_role() = 'member' and ${SOCIAL_ENABLED} and (${ITEM_OWNER} or ${ITEM_BUYER_OPEN}) and ${ITEM_STORY_AUTHOR})`,
     }),
     pgPolicy('story_highlight_items_member_update_gate', {
       as: 'restrictive',
