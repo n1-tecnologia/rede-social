@@ -842,3 +842,165 @@ describe('the front write bodies (12.3-12, D-696, D-699, OQ-4)', () => {
     ).toBe('category_name_too_long');
   });
 });
+
+describe('store per-link buyer flags (11.1-05, D-890, D-891)', () => {
+  const link = (n: number, over: Record<string, unknown> = {}) => ({
+    communityId: id(n),
+    like: true,
+    comment: true,
+    share: true,
+    post: false,
+    story: false,
+    ...over,
+  });
+
+  it('TRACER: a body carrying communityLinks parses through create and patch and exposes the five flags', () => {
+    const body = { ...base, communityLinks: [link(1, { post: true })] };
+    const created = productInputSchema.parse(body);
+    expect(created.communityLinks).toEqual([link(1, { post: true })]);
+    const flags = created.communityLinks?.[0];
+    expect(flags && [flags.like, flags.comment, flags.share, flags.post, flags.story]).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
+    const patched = productPatchSchema.parse({ communityLinks: [link(2)] });
+    expect(patched.communityLinks).toEqual([link(2)]);
+    // the field is the only one sent: the patch's "not empty" refine counts it
+    expect(productPatchSchema.safeParse({ communityLinks: [] }).success).toBe(true);
+    expect(issueOf({}, productPatchSchema)).toBeUndefined();
+    expect(productPatchSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('community_links_conflict is part of the closed vocabulary', () => {
+    expect(STORE_ISSUES).toContain('community_links_conflict');
+    expect(STORE_ISSUE_SET.has('community_links_conflict')).toBe(true);
+  });
+
+  it('communityIds together with communityLinks is refused with community_links_conflict (create and patch)', () => {
+    expect(issueOf({ ...base, communityIds: [id(1)], communityLinks: [link(1)] })).toBe(
+      'community_links_conflict',
+    );
+    expect(issueOf({ communityIds: [id(1)], communityLinks: [link(1)] }, productPatchSchema)).toBe(
+      'community_links_conflict',
+    );
+    // the create default of [] is not "sent": links alone are fine, and so is an explicit empty list
+    expect(productInputSchema.safeParse({ ...base, communityLinks: [link(1)] }).success).toBe(true);
+    expect(
+      productInputSchema.safeParse({ ...base, communityIds: [], communityLinks: [link(1)] })
+        .success,
+    ).toBe(true);
+  });
+
+  it('a duplicate communityId inside communityLinks is refused with community_links_conflict', () => {
+    expect(issueOf({ ...base, communityLinks: [link(1), link(1, { post: true })] })).toBe(
+      'community_links_conflict',
+    );
+    expect(issueOf({ communityLinks: [link(1), link(1)] }, productPatchSchema)).toBe(
+      'community_links_conflict',
+    );
+    expect(
+      productInputSchema.safeParse({ ...base, communityLinks: [link(1), link(2)] }).success,
+    ).toBe(true);
+  });
+
+  it('a link is strict: an unknown key, a missing flag, a non-boolean flag or a bad id is refused', () => {
+    expect(
+      productInputSchema.safeParse({ ...base, communityLinks: [link(1, { x: 1 })] }).success,
+    ).toBe(false);
+    const { story: _story, ...noStory } = link(1);
+    expect(productInputSchema.safeParse({ ...base, communityLinks: [noStory] }).success).toBe(
+      false,
+    );
+    expect(
+      productInputSchema.safeParse({ ...base, communityLinks: [link(1, { like: 'yes' })] }).success,
+    ).toBe(false);
+    expect(issueOf({ ...base, communityLinks: [link(1, { communityId: 'nope' })] })).toBe(
+      'community_invalid',
+    );
+    expect(productInputSchema.safeParse({ ...base, communityLinks: 'x' }).success).toBe(false);
+  });
+
+  it('communityLinks: 50 pass, 51 fail too_many_communities', () => {
+    const fifty = Array.from({ length: 50 }, (_, i) => link(i + 1));
+    expect(productInputSchema.safeParse({ ...base, communityLinks: fifty }).success).toBe(true);
+    expect(issueOf({ ...base, communityLinks: [...fifty, link(51)] })).toBe('too_many_communities');
+    expect(issueOf({ communityLinks: [...fifty, link(51)] }, productPatchSchema)).toBe(
+      'too_many_communities',
+    );
+  });
+
+  it('compat: the shipped create and patch payloads parse exactly as before', () => {
+    const old = productInputSchema.parse({ ...base, communityIds: [id(1), id(1), id(2)] });
+    expect(old.communityIds).toEqual([id(1), id(2)]);
+    expect(old.communityLinks).toBeUndefined();
+    expect('communityLinks' in productInputSchema.parse(base)).toBe(false);
+    const neither = productPatchSchema.parse({ name: 'x' });
+    expect(neither.communityLinks).toBeUndefined();
+    expect(productPatchSchema.parse({ communityIds: [id(3)] }).communityIds).toEqual([id(3)]);
+  });
+
+  const detail = {
+    id: id(9),
+    name: 'Curso',
+    description: '',
+    priceCents: 1990,
+    currency: 'BRL',
+    imageAssetId: null,
+    status: 'active',
+    owned: false,
+    communities: [{ id: id(1), name: 'Turma', coverAssetId: null }],
+    unlockedCourses: [],
+    unlockedLives: [],
+  };
+
+  it('manager read: communityPermissions is optional, strict, and an old read without it parses', () => {
+    expect(productDetailSchema.safeParse(detail).success).toBe(true);
+    const flags = {
+      communityId: id(1),
+      like: false,
+      comment: true,
+      share: true,
+      post: true,
+      story: false,
+    };
+    const parsed = productDetailSchema.parse({
+      ...detail,
+      holderCount: 2,
+      communityPermissions: [flags],
+    });
+    expect(parsed.communityPermissions).toEqual([flags]);
+    expect(productDetailSchema.safeParse({ ...detail, communityPermissions: [] }).success).toBe(
+      true,
+    );
+    expect(
+      productDetailSchema.safeParse({ ...detail, communityPermissions: [{ ...flags, x: 1 }] })
+        .success,
+    ).toBe(false);
+    const { story: _s, ...short } = flags;
+    expect(
+      productDetailSchema.safeParse({ ...detail, communityPermissions: [short] }).success,
+    ).toBe(false);
+  });
+
+  it('productCommunitySchema (shared with members) is unchanged: no flag key is accepted (T-11.1-18)', () => {
+    const card = { id: id(1), name: 'Turma', coverAssetId: null };
+    expect(productDetailSchema.safeParse({ ...detail, communities: [card] }).success).toBe(true);
+    for (const key of ['like', 'comment', 'share', 'post', 'story', 'communityPermissions']) {
+      expect(
+        productDetailSchema.safeParse({ ...detail, communities: [{ ...card, [key]: true }] })
+          .success,
+      ).toBe(false);
+    }
+    expect(
+      purchaseResultSchema.safeParse({
+        owned: true,
+        communities: [{ ...card, post: true }],
+        courses: [],
+        lives: [],
+      }).success,
+    ).toBe(false);
+  });
+});

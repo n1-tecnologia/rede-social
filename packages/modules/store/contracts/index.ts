@@ -38,7 +38,9 @@ export const STORE_MAX_LINKS = 50;
  *    or not a uuid), `too_many_lives` (08.4, D-418), and (12.3, D-690, D-694) `category_invalid` (a
  *    category slug that is malformed or is not a category of this tenant), `category_name_required`,
  *    `category_name_too_long`, `category_name_taken`, `category_icon_invalid`, `too_many_categories`,
- *    `promo_invalid`, `featured_invalid` and `too_many_featured` (the writes of the store front);
+ *    `promo_invalid`, `featured_invalid` and `too_many_featured` (the writes of the store front), and
+ *    (11.1, D-890, D-891) `community_links_conflict` (a product body that sends BOTH `communityIds` and
+ *    `communityLinks`, or the same `communityId` twice inside `communityLinks`);
  *  - `409 CONFLICT`: `unavailable` (the product is archived), `price_changed` (the price moved) and
  *    `community_deleted` (09.3 WR-03: reactivating a product that links a deleted community).
  */
@@ -66,6 +68,7 @@ export const STORE_ISSUES = [
   'promo_invalid',
   'featured_invalid',
   'too_many_featured',
+  'community_links_conflict',
 ] as const;
 export type StoreIssue = (typeof STORE_ISSUES)[number];
 
@@ -389,6 +392,35 @@ const productCourseIdsField = z
   .array(z.uuid('course_invalid'))
   .max(STORE_MAX_LINKS, 'too_many_courses');
 const productLiveIdsField = z.array(z.uuid('live_invalid')).max(STORE_MAX_LINKS, 'too_many_lives');
+
+/**
+ * 11.1 (D-890, D-891): one community a product opens WITH the buyer's flags for it, the compatible
+ * product-body form of `communityIds` (which keeps its meaning and its defaults). `like`, `comment`
+ * and `share` are on by default in the database and `post` and `story` are off, so the web sends
+ * every flag explicitly. `.strict()`: a sixth key or a missing flag fails loudly. Exists on the
+ * product BODY and on the manager read only, never on a member-readable schema (D-888).
+ */
+export const productCommunityLinkSchema = z
+  .object({
+    communityId: z.uuid('community_invalid'),
+    like: z.boolean(),
+    comment: z.boolean(),
+    share: z.boolean(),
+    post: z.boolean(),
+    story: z.boolean(),
+  })
+  .strict();
+export type ProductCommunityLink = z.infer<typeof productCommunityLinkSchema>;
+
+/** Optional on both bodies; the cap is the one `communityIds` has. */
+const productCommunityLinksField = z
+  .array(productCommunityLinkSchema)
+  .max(STORE_MAX_LINKS, 'too_many_communities');
+
+/** True when a `communityLinks` array names the same community twice. */
+const hasDuplicateLink = (links: ProductCommunityLink[]): boolean =>
+  new Set(links.map((link) => link.communityId)).size !== links.length;
+
 /** A SET: duplicates collapse (first occurrence kept), after the cap is checked on what was sent. */
 const dedupe = (ids: string[]) => [...new Set(ids)];
 
@@ -397,6 +429,11 @@ const dedupe = (ids: string[]) => [...new Set(ids)];
  * (first occurrence kept), after the cap is checked on what was sent. Since 08.4 (D-418) the product
  * form is the ONLY place a course or a live is linked to a product. `.strict()`: an unknown key
  * fails loudly.
+ *
+ * 11.1 (D-890, D-891): `communityLinks` is the OPTIONAL per-link form of `communityIds`, a client
+ * sends ONE of the two. Both together (a non-empty `communityIds` next to `communityLinks`) or a
+ * duplicate `communityId` inside `communityLinks` is a 400 `community_links_conflict`. Absent, the
+ * body means exactly what it meant before.
  */
 export const productInputSchema = z
   .object({
@@ -405,6 +442,7 @@ export const productInputSchema = z
     priceCents: priceCentsSchema,
     imageAssetId: productImageField.default(null),
     communityIds: productCommunityIdsField.default([]).transform(dedupe),
+    communityLinks: productCommunityLinksField.optional(),
     courseIds: productCourseIdsField.default([]).transform(dedupe),
     liveIds: productLiveIdsField.default([]).transform(dedupe),
     /**
@@ -413,7 +451,17 @@ export const productInputSchema = z
      */
     category: categorySlugField.nullable().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((body, ctx) => {
+    if (body.communityLinks === undefined) return;
+    if (body.communityIds.length > 0 || hasDuplicateLink(body.communityLinks)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['communityLinks'],
+        message: 'community_links_conflict',
+      });
+    }
+  });
 export type ProductInput = z.infer<typeof productInputSchema>;
 
 /**
@@ -429,6 +477,9 @@ export type ProductInput = z.infer<typeof productInputSchema>;
  * that are not in the sent set, so a link to an ARCHIVED course or a CANCELLED live is kept on every
  * replace and accepted when re-sent (the 08.3 WR-04 rule, mirrored). A new
  * `priceCents` changes only the product row; existing orders keep their snapshotted amount (D-361).
+ * 11.1 (D-890, D-891): `communityLinks`, when present, REPLACES the same set of links as
+ * `communityIds` does but carries each link's buyer flags; sending both, or a duplicate
+ * `communityId`, is a 400 `community_links_conflict`. It counts as a field for the 'not empty' rule.
  */
 export const productPatchSchema = z
   .object({
@@ -437,6 +488,7 @@ export const productPatchSchema = z
     priceCents: priceCentsSchema.optional(),
     imageAssetId: productImageField.optional(),
     communityIds: productCommunityIdsField.transform(dedupe).optional(),
+    communityLinks: productCommunityLinksField.optional(),
     courseIds: productCourseIdsField.transform(dedupe).optional(),
     liveIds: productLiveIdsField.transform(dedupe).optional(),
     /** 12.3 (OQ-3): absent leaves the category alone, `null` clears it, a slug sets it. */
@@ -445,6 +497,16 @@ export const productPatchSchema = z
   .strict()
   .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
     message: 'patch_empty',
+  })
+  .superRefine((patch, ctx) => {
+    if (patch.communityLinks === undefined) return;
+    if (patch.communityIds !== undefined || hasDuplicateLink(patch.communityLinks)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['communityLinks'],
+        message: 'community_links_conflict',
+      });
+    }
   });
 export type ProductPatch = z.infer<typeof productPatchSchema>;
 
@@ -457,6 +519,22 @@ export const productCommunitySchema = z
   })
   .strict();
 export type ProductCommunity = z.infer<typeof productCommunitySchema>;
+
+/**
+ * 11.1 (D-891): one link's buyer flags on the MANAGER read of a product. Kept OFF
+ * `productCommunitySchema`, which members and the purchase answer share (D-888, T-11.1-18).
+ */
+export const productCommunityPermissionSchema = z
+  .object({
+    communityId: z.uuid(),
+    like: z.boolean(),
+    comment: z.boolean(),
+    share: z.boolean(),
+    post: z.boolean(),
+    story: z.boolean(),
+  })
+  .strict();
+export type ProductCommunityPermission = z.infer<typeof productCommunityPermissionSchema>;
 
 /** The course states a product may list (the linkable ones; an archived course is kept but not listed). */
 export const PRODUCT_COURSE_STATUSES = ['draft', 'published'] as const;
@@ -610,6 +688,12 @@ export const productDetailSchema = z
     category: z.string().regex(STORE_CATEGORY_SLUG_RE).optional(),
     owned: z.boolean(),
     communities: z.array(productCommunitySchema),
+    /**
+     * 11.1 (D-891): the buyer flags of the product's links, emitted ONLY for a holder of
+     * `store.product.manage` and ONLY for links that differ from today's defaults (like, comment and
+     * share on, post and story off); absence means every link has the defaults. Never on a member read.
+     */
+    communityPermissions: z.array(productCommunityPermissionSchema).optional(),
     holderCount: z.number().int().min(0).optional(),
     courses: z.array(productCourseSchema).optional(),
     lives: z.array(productLiveSchema).optional(),
