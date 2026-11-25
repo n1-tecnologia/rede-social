@@ -210,6 +210,140 @@ describe('11.1-06 tracer: an administrator saves a product with a non-default li
   });
 });
 
-// Kept so the helper constants are referenced by the later describes appended by Task 2 and Task 3.
-void FLAG_KEYS;
-void (null as unknown as Envelope);
+describe('11.1-06 update path: a changed flag, communityIds alone, archived links, an idempotent re-save', () => {
+  const fx = { a: '', b: '', c: '', archived: '', product: '' };
+
+  beforeAll(async () => {
+    fx.a = await createCommunity('upd-a');
+    fx.b = await createCommunity('upd-b');
+    fx.c = await createCommunity('upd-c');
+    fx.archived = await createCommunity('upd-arq');
+    const product = await createProduct('atualiza', {
+      communityLinks: [link(fx.a), link(fx.archived, { post: true, story: true })],
+    });
+    fx.product = product.id;
+    // The community is archived AFTER the link exists: the form can no longer list or re-send it (CR-02).
+    await adminSql`update public.communities set status = 'archived' where id = ${fx.archived}::uuid`;
+  });
+
+  const flagsOf = async (communityId: string) =>
+    (await linkRows(fx.product)).find((row) => row.community_id === communityId);
+
+  it('a. D-891: PATCH communityLinks changing one flag of an existing link persists it and the next manager read returns it', async () => {
+    const before = await linkXmin(fx.product, fx.a);
+    const res = await patch(fx.product, { communityLinks: [link(fx.a, { comment: false })] });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await flagsOf(fx.a)).toMatchObject({
+      can_comment: false,
+      can_like: true,
+      can_post: false,
+    });
+    expect(await linkXmin(fx.product, fx.a)).not.toBe(before);
+    const read = await managerRead(fx.product);
+    expect(read.communityPermissions).toEqual([{ communityId: fx.a, ...DEFAULTS, comment: false }]);
+    // The positive control of the unchanged case below: the flag is back to default and the key disappears.
+    const back = await patch(fx.product, { communityLinks: [link(fx.a)] });
+    expect(back.status).toBe(200);
+    expect(await managerRead(fx.product)).not.toHaveProperty('communityPermissions');
+  });
+
+  it('b. T-11.1-23: an unchanged re-save writes no row (the link keeps its row version)', async () => {
+    const saved = await patch(fx.product, { communityLinks: [link(fx.a, { share: false })] });
+    expect(saved.status).toBe(200);
+    const first = await linkXmin(fx.product, fx.a);
+    const again = await patch(fx.product, { communityLinks: [link(fx.a, { share: false })] });
+    expect(again.status).toBe(200);
+    expect(await linkXmin(fx.product, fx.a)).toBe(first);
+    expect(await flagsOf(fx.a)).toMatchObject({ can_share: false });
+    // control: a real change moves the row version
+    const changed = await patch(fx.product, { communityLinks: [link(fx.a, { share: true })] });
+    expect(changed.status).toBe(200);
+    expect(await linkXmin(fx.product, fx.a)).not.toBe(first);
+  });
+
+  it('c. D-363: communityIds alone leaves the stored flags of an existing link and gives a NEW link the defaults', async () => {
+    await adminSql`
+      update public.store_product_communities set can_post = true
+       where product_id = ${fx.product}::uuid and community_id = ${fx.a}::uuid`;
+    const res = await patch(fx.product, { communityIds: [fx.a, fx.b] });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await flagsOf(fx.a)).toMatchObject({ can_post: true });
+    expect(await flagsOf(fx.b)).toEqual({
+      community_id: fx.b,
+      can_like: true,
+      can_comment: true,
+      can_share: true,
+      can_post: false,
+      can_story: false,
+    });
+    // the manager read carries only what differs from the defaults
+    expect((await managerRead(fx.product)).communityPermissions).toEqual([
+      { communityId: fx.a, ...DEFAULTS, post: true },
+    ]);
+  });
+
+  it('d. D-363: a patch with neither field (a price edit) leaves the links and their flags untouched', async () => {
+    const before = await linkRows(fx.product);
+    const xminA = await linkXmin(fx.product, fx.a);
+    const res = await patch(fx.product, { priceCents: 2490 });
+    expect(res.status).toBe(200);
+    expect(await linkRows(fx.product)).toEqual(before);
+    expect(await linkXmin(fx.product, fx.a)).toBe(xminA);
+  });
+
+  it('e. CR-02: a link to an ARCHIVED community survives a communityLinks replace that omits it, an ACTIVE one omitted is unlinked', async () => {
+    const res = await patch(fx.product, {
+      communityLinks: [link(fx.a, { post: true }), link(fx.c, { story: true })],
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const rows = await linkRows(fx.product);
+    expect(rows.map((row) => row.community_id).sort()).toEqual([fx.a, fx.c, fx.archived].sort());
+    expect(rows.find((row) => row.community_id === fx.archived)).toMatchObject({
+      can_post: true,
+      can_story: true,
+    });
+    expect(rows.find((row) => row.community_id === fx.b)).toBeUndefined();
+    // the archived link is not on the manager read (the form cannot show it); the order is the list order
+    const byId = <T extends { communityId: string }>(list: T[] = []) =>
+      [...list].sort((x, y) => x.communityId.localeCompare(y.communityId));
+    expect(byId((await managerRead(fx.product)).communityPermissions)).toEqual(
+      byId([
+        { communityId: fx.a, ...DEFAULTS, post: true },
+        { communityId: fx.c, ...DEFAULTS, story: true },
+      ]),
+    );
+  });
+
+  it('f. D-890: communityIds beside communityLinks, and a duplicate id inside communityLinks, are 400 community_links_conflict on create and on patch', async () => {
+    const both = { communityIds: [fx.a], communityLinks: [link(fx.a)] };
+    const dup = { communityLinks: [link(fx.a), link(fx.a, { post: true })] };
+    for (const body of [both, dup]) {
+      const created = await post('/v1/store/products', tokens.demoAdmin, {
+        name: `${PREFIX} conflito`,
+        priceCents: 100,
+        ...body,
+      });
+      expect(created.status).toBe(400);
+      expect(((await created.json()) as Envelope).error.details).toEqual({
+        store: 'community_links_conflict',
+      });
+      const patched = await patch(fx.product, body);
+      expect(patched.status).toBe(400);
+      expect(((await patched.json()) as Envelope).error.details).toEqual({
+        store: 'community_links_conflict',
+      });
+    }
+    const named =
+      await adminSql`select 1 from public.store_products where name = ${`${PREFIX} conflito`}`;
+    expect(named).toHaveLength(0);
+  });
+
+  it('g. D-364: a flags-only save needs no preview: the lock preview names nothing for communities the product already links', async () => {
+    const res = await post('/v1/store/products/lock-preview', tokens.demoAdmin, {
+      productId: fx.product,
+      communityIds: [fx.a, fx.c],
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { items: unknown[] }).items).toEqual([]);
+  });
+});
