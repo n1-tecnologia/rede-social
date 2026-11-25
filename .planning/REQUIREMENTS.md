@@ -528,7 +528,7 @@ Phase 12.4 turns the member's one support thread into a numbered case with a sta
 - [x] **BPERM-17**: The product body accepts per-link flags (`communityLinks`) beside `communityIds`, both together is a 400, a changed flag on an existing link is persisted by an idempotent upsert in the product transaction, and the manager read returns flags only for non-default links *(D-890, D-363)*
 - [x] **BPERM-18**: A locked community keeps its read-only sample (organization posts only) and the locked-member read of a buyer's story is closed *(D-892, D-356; confirm Open Questions 1 and 2)*
 - [x] **BPERM-19**: The product form shows five checkboxes per linked community with the specified defaults, helpers and focus rules, and saves the flags in the same request *(UI-D-883..UI-D-885)*
-- [ ] **BPERM-20**: The highlight edit sheet has the "Aberto a compradores" switch (persisting at once, absent for member communities, Início and archived) and the manage list marks open highlights *(UI-D-886, UI-D-887)*
+- [x] **BPERM-20**: The highlight edit sheet has the "Aberto a compradores" switch (persisting at once, absent for member communities, Início and archived) and the manage list marks open highlights *(UI-D-886, UI-D-887)*
 - [ ] **BPERM-21**: A control the viewer's facts do not allow is not rendered on the post card, comment sheet, post detail, Reels rail and compose entries, and the row closes up or disappears *(D-888, D-889, UI-D-888, UI-D-889)*
 - [x] **BPERM-22**: The buyer's story flow offers only open highlights, keeps the visibility warning, hides the entry points when none is open *(D-883, UI-D-891)*
 - [ ] **BPERM-23**: The buyer's post flow is the member composer pinned to the community with the neutral refusal sentence and no silent change of destination *(UI-D-892, UI-D-893)*
@@ -1283,7 +1283,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BPERM-17 | Phase 11.1 | Complete |
 | BPERM-18 | Phase 11.1 | Complete |
 | BPERM-19 | Phase 11.1 | Complete |
-| BPERM-20 | Phase 11.1 | Pending |
+| BPERM-20 | Phase 11.1 | Complete |
 | BPERM-21 | Phase 11.1 | Pending |
 | BPERM-22 | Phase 11.1 | Complete |
 | BPERM-23 | Phase 11.1 | Pending |

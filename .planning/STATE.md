@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "11.1"
 current_phase_name: Permissões do comprador por produto numa comunidade
-current_plan: 13
+current_plan: 15
 status: executing
-stopped_at: Completed 11.1-16-PLAN.md (buyer story flow; plans 01-12, 14 and 16 done, next 13 then 15 of wave 7)
-last_updated: "2026-11-25T15:18:35.280Z"
+stopped_at: Completed 11.1-13-PLAN.md (highlight screens; plans 01-14 and 16 done, next 15, the last of wave 7)
+last_updated: "2026-11-25T15:33:40.788Z"
 last_activity: 2026-11-25
-last_activity_desc: Completed 11.1-16 (buyer story flow); plans 01-12, 14 and 16 done, next wave 7 plans 13 then 15
-state_head: 3327d351bc9fb9ad89656305da6e4b4672b601b2
+last_activity_desc: Completed 11.1-13 (highlight screens); plans 01-14 and 16 done, next 15, the last of wave 7
+state_head: a8a8a70a56097ee4ccfbcadf16d62ad059ef2e27
 progress:
   total_phases: 36
   completed_phases: 0
   total_plans: 537
-  completed_plans: 505
+  completed_plans: 506
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 11.1 (Permissões do comprador por produto numa comunidade) — EXECUTING
-Current Plan: 13
+Current Plan: 15
 Total Plans in Phase: 18
-Plan: 13 of 18
+Plan: 15 of 18
 Status: Ready to execute
-Last activity: 2026-11-25 — Completed 11.1-16 (buyer story flow); plans 01-12, 14 and 16 done, next wave 7 plans 13 then 15
+Last activity: 2026-11-25 — Completed 11.1-13 (highlight screens); plans 01-14 and 16 done, next 15, the last of wave 7
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -408,6 +408,7 @@ Progress: [███████████████████░] 160/162
 | Phase 11.1 P12 | 25 min | 3 tasks | 10 files |
 | Phase 11.1 P14 | 50min | 3 tasks | 9 files |
 | Phase 11.1 P16 | 12 min | 3 tasks | 16 files |
+| Phase 11.1 P13 | 9 min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -1220,6 +1221,7 @@ Recent decisions affecting current work:
 - [Phase 11.1]: 11.1-14: the per-post fact for the post card rides on PostCardView.actions set by postCardBase (not a FeedList function: list pages cross the server boundary as data); all-false card reuses the row-less meta and keeps the comment count a button; focus on a vanished control goes to the next remaining control, else previous, else the card
 - [Phase 11.1]: 11.1-16: the buyer's create affordance is a per-group flag (HighlightSheetPlace.canCreate, absent reads true) set by the page from the API's viewer.canCurate; the administrator's groups are unchanged
 - [Phase 11.1]: 11.1-16: a member's checklist read with no group and no createHref never opens the sheet and removes Destacar for the visit; after a refused write the host re-reads the destinations
+- [Phase 11.1]: 11.1-13: the Compradores pill is the manage row's aria-describedby (not part of its name) and shows only where the open switch exists — the row button's aria-label would hide the pill from a screen reader; the mark must never appear where the switch cannot act
 
 ### Pending Todos
 
@@ -1365,6 +1367,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-25T15:18:30.041Z
-Stopped at: Completed 11.1-16-PLAN.md (buyer story flow; plans 01-12, 14 and 16 done, next 13 then 15 of wave 7)
+Last session: 2026-11-25T15:33:40.437Z
+Stopped at: Completed 11.1-13-PLAN.md (highlight screens; plans 01-14 and 16 done, next 15, the last of wave 7)
 Resume file: None
