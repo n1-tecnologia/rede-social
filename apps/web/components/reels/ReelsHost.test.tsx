@@ -279,6 +279,7 @@ function commentLabels(): CommentsListLabels {
   return {
     region: f('comments.region'),
     emptyLabel: f('comments.empty'),
+    emptyReadOnlyLabel: f('comments.emptyReadOnly'),
     errorLabel: f('errors.comments'),
     errorRepliesLabel: f('errors.replies'),
     retryLabel: f('comments.retry'),
@@ -1851,5 +1852,204 @@ describe('ReelsHost — the desktop player (2026-10-23, the YouTube Shorts layou
     await flush();
     expect(pagerProps.at(-1)?.labels.fullscreen).toBe(r('fullscreen.enter'));
     expect(pagerProps.at(-1)?.labels.exitFullscreen).toBe(r('fullscreen.exit'));
+  });
+});
+
+/* ── 11.1-15: the viewer's facts on the rail and the sheet, and a neutral refusal ─────────────── */
+
+describe('ReelsHost — the rail draws only what the facts of the viewer allow (11.1-15, UI-D-889, D-888)', () => {
+  const FACTS = (like: boolean, comment: boolean, share: boolean) => ({
+    actions: { like, comment, share },
+  });
+  const rail = (k = 0) => pageAt(k) as HTMLElement;
+  const has = (name: string, k = 0) => within(rail(k)).queryByRole('button', { name }) !== null;
+
+  it('like false: comment and send remain, no heart, no like slot, and they close up', async () => {
+    renderHost({ initial: { items: [view(1, FACTS(false, true, true)), view(2)], nextCursor: null } });
+    await flush();
+    expect(has(f('actions.like'))).toBe(false);
+    expect(has(f('actions.unlike'))).toBe(false);
+    expect(heartOn(0)).toBeNull();
+    expect(countOn(0, 'like')).toBeUndefined();
+    expect(has(f('actions.comment'))).toBe(true);
+    expect(has(f('actions.share'))).toBe(true);
+    expect(countOn(0, 'comment')).toBeDefined();
+  });
+
+  it('comment false: heart and send remain, no comment control and no comment slot', async () => {
+    renderHost({ initial: { items: [view(1, FACTS(true, false, true)), view(2)], nextCursor: null } });
+    await flush();
+    expect(has(f('actions.like'))).toBe(true);
+    expect(has(f('actions.comment'))).toBe(false);
+    expect(countOn(0, 'comment')).toBeUndefined();
+    expect(has(f('actions.share'))).toBe(true);
+  });
+
+  it('share false: heart and comment remain even with a share link, and no send control', async () => {
+    renderHost({ initial: { items: [view(1, FACTS(true, true, false)), view(2)], nextCursor: null } });
+    await flush();
+    expect(has(f('actions.like'))).toBe(true);
+    expect(has(f('actions.comment'))).toBe(true);
+    expect(has(f('actions.share'))).toBe(false);
+  });
+
+  it('all three false: no rail at all (no control, no slot, no avatar wrapper), the caption stays', async () => {
+    renderHost({ initial: { items: [view(1, FACTS(false, false, false)), view(2)], nextCursor: null } });
+    await flush();
+    // The pager's own pause control is not the rail: the three rail controls and their slots are gone.
+    for (const name of [f('actions.like'), f('actions.comment'), f('actions.share')]) {
+      expect(has(name)).toBe(false);
+    }
+    expect(rail().querySelector('[data-reel-count]')).toBeNull();
+    expect(within(rail()).getByText('Legenda 1')).toBeTruthy();
+    expect(within(rail()).getByText('Autora 1')).toBeTruthy();
+  });
+
+  it('POSITIVE CONTROL: a reel with no fact keeps the shipped rail, and each page reads its own view', async () => {
+    renderHost({
+      initial: { items: [view(1), view(2, FACTS(false, true, true)), view(3)], nextCursor: null },
+    });
+    await flush();
+    expect(has(f('actions.like'), 0)).toBe(true);
+    expect(has(f('actions.comment'), 0)).toBe(true);
+    expect(has(f('actions.share'), 0)).toBe(true);
+    // The neighbour page is aria-hidden, so it is read through the DOM.
+    expect(heartOn(1)).toBeNull();
+    expect(heartOn(0)).not.toBeNull();
+  });
+
+  it('the double tap is inert without like: no request, no heart, and it still works with like', async () => {
+    const like = vi.fn(async () => ({ ok: true, liked: true, likeCount: 1 }) as const);
+    renderHost({
+      onLike: like,
+      initial: { items: [view(1, FACTS(false, true, true)), view(2)], nextCursor: null },
+    });
+    await flush();
+    await act(async () => {
+      pagerProps.at(-1)?.onDoubleTap();
+    });
+    await flush();
+    expect(like).not.toHaveBeenCalled();
+    expect(heartOn(0)).toBeNull();
+
+    cleanup();
+    controllers.clear();
+    const likeOk = vi.fn(async () => ({ ok: true, liked: true, likeCount: 1 }) as const);
+    renderHost({ onLike: likeOk, initial: { items: [view(1, FACTS(true, true, true))], nextCursor: null } });
+    await flush();
+    await act(async () => {
+      pagerProps.at(-1)?.onDoubleTap();
+    });
+    await flush();
+    expect(likeOk).toHaveBeenCalledTimes(1);
+  });
+
+  it('beside the desktop player the same rail closes up, and with all three false the slot is empty', async () => {
+    viewportWidth = 1024;
+    renderHost({ initial: { items: [view(1, FACTS(false, true, true)), view(2)], nextCursor: null } });
+    await flush();
+    const side = document.querySelector<HTMLElement>('[data-reels-rail-slot] [data-reel-rail="side"]');
+    expect(side).not.toBeNull();
+    expect(within(side as HTMLElement).queryByRole('button', { name: f('actions.like') })).toBeNull();
+    expect(within(side as HTMLElement).getByRole('button', { name: f('actions.comment') })).toBeTruthy();
+    cleanup();
+    controllers.clear();
+    renderHost({
+      initial: { items: [view(1, FACTS(false, false, false)), view(2)], nextCursor: null },
+    });
+    await flush();
+    expect(document.querySelector('[data-reel-rail="side"]')).toBeNull();
+  });
+
+  it('the sheet opened on a reel reads the facts of that reel: like false draws no heart on the comments', async () => {
+    loadComments.mockResolvedValue({
+      ok: true,
+      items: [
+        { ...createdComment(), id: 'c1', body: 'primeiro', canDelete: false },
+        { ...createdComment(), id: 'c2', body: 'segundo', canDelete: false },
+      ],
+      nextCursor: null,
+    });
+    renderHost({ initial: { items: [view(1, FACTS(false, true, true)), view(2)], nextCursor: null } });
+    await flush();
+    const dialog = await openSheet();
+    expect(within(dialog).getByText('primeiro')).toBeTruthy();
+    expect(dialog.querySelectorAll('[data-comment-like]')).toHaveLength(0);
+    // comment is true here: the composer and Responder stay.
+    expect(within(dialog).getByPlaceholderText(f('comments.placeholder'))).toBeTruthy();
+    expect(dialog.querySelectorAll('[data-comment-reply]')).toHaveLength(2);
+  });
+
+  it('POSITIVE CONTROL: a reel with no fact opens the shipped sheet with its comment hearts', async () => {
+    loadComments.mockResolvedValue({
+      ok: true,
+      items: [{ ...createdComment(), id: 'c1', body: 'primeiro', canDelete: false }],
+      nextCursor: null,
+    });
+    renderHost();
+    await flush();
+    const dialog = await openSheet();
+    expect(dialog.querySelectorAll('[data-comment-like]')).toHaveLength(1);
+  });
+});
+
+describe('ReelsHost — a refused write is neutral and re-reads the facts (11.1-15, UI-D-893)', () => {
+  const refusedLike = vi.fn(async () => ({ ok: false, code: 'refused' }) as const);
+
+  it('a refused like reverts the heart, shows the shipped generic toast and refreshes the tab', async () => {
+    renderHost({ onLike: refusedLike });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    expect(refusedLike).toHaveBeenCalledWith(postId(1));
+    expect(toast.show).toHaveBeenCalledTimes(1);
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: f('errors.generic') });
+    expect(
+      screen.getByRole('button', { name: f('actions.like') }).getAttribute('aria-pressed'),
+    ).toBe('false');
+    expect(countOn(0, 'like')).toBe('');
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('in the overlay the same refusal toasts and does not refresh the feed underneath', async () => {
+    renderHost({ onLike: refusedLike, onBack: vi.fn(), backLabel: r('backToPost') });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: f('errors.generic') });
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('names nothing: the toast is the catalog sentence and carries no forbidden word', async () => {
+    renderHost({ onLike: refusedLike });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    for (const call of toast.show.mock.calls) {
+      const message = String((call[0] as { message: string }).message);
+      expect(message).toBe(f('errors.generic'));
+      expect(message).not.toMatch(/produto|compra|permiss|reembolso|assinatura/i);
+    }
+  });
+
+  it('a refused comment keeps the draft with the shipped inline error, and the tab refreshes', async () => {
+    createComment.mockResolvedValue({ ok: false, code: 'refused' });
+    renderHost();
+    await flush();
+    const dialog = await openSheet();
+    const input = within(dialog).getByPlaceholderText(f('comments.placeholder')) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'Meu rascunho' } });
+    const form = input.closest('form');
+    if (!form) throw new Error('the comment field has no form');
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+    await flush();
+    expect(createComment).toHaveBeenCalledTimes(1);
+    expect(
+      (within(dialog).getByPlaceholderText(f('comments.placeholder')) as HTMLTextAreaElement).value,
+    ).toBe('Meu rascunho');
+    expect(within(dialog).getByText(f('errors.commentSubmit'))).toBeTruthy();
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

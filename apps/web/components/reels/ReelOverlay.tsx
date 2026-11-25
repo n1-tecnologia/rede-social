@@ -48,6 +48,14 @@ import { announcedCount } from '@/lib/reels-count';
  * author's Instagram line (2026-10-09) rides the view (`view.author.handle`) into the caption block,
  * under the name.
  *
+ * **The viewer's facts** (11.1-15, D-888, UI-D-889). `view.actions` is the finished per-post fact the
+ * feed's one view builder derived from `postActionsView` (carried as data, like the card's); absent
+ * means all three, today's behaviour. A control the facts do not allow is NOT rendered: the rail
+ * closes up control by control (like, comment, share) and with all three false there is no rail, only
+ * the caption. The double tap is inert without `like` (it registers nothing the pager could call).
+ * Nothing here reads a role, a product or an entitlement, and the server refuses the write whatever
+ * the rail shows.
+ *
  * The client-safe `announcedCount` is imported from `lib/reels-count`: `lib/reels` reaches the
  * server-only API client.
  *
@@ -128,6 +136,14 @@ export function ReelOverlay({
 
   const [expanded, setExpanded] = useState(false);
 
+  // 11.1-15: the viewer's facts for THIS post; a post with none reads as all true.
+  const canLike = view.actions?.like ?? true;
+  const canComment = view.actions?.comment ?? true;
+  const canShare = view.actions?.share ?? true;
+  const hasRail = canLike || canComment || (canShare && Boolean(view.shareUrl));
+  const canLikeRef = useRef(canLike);
+  canLikeRef.current = canLike;
+
   useEffect(() => {
     if (!current) setExpanded(false);
   }, [current]);
@@ -140,6 +156,8 @@ export function ReelOverlay({
   useEffect(() => {
     bind(view.id, {
       likeOnly: () => {
+        // 11.1-15: without the `like` fact the double tap does nothing (no request, no heart).
+        if (!canLikeRef.current) return;
         if (likedRef.current) return;
         // Marked at once, so a second double tap before the next render sends nothing either.
         likedRef.current = true;
@@ -186,23 +204,25 @@ export function ReelOverlay({
         label: labels.railAuthor.replace('{name}', () => authorName),
       }}
       like={
-        <LikeButton
-          tone={placement === 'side' ? 'disc' : 'overMedia'}
-          glyphSize={placement === 'side' ? 22 : 28}
-          liked={state.liked}
-          countLabel={announcedCount(state.likeCount, labels.likes, locale)}
-          likeLabel={labels.like}
-          unlikeLabel={labels.unlike}
-          pulseKey={pulseKey}
-          onToggle={toggle}
-        />
+        canLike ? (
+          <LikeButton
+            tone={placement === 'side' ? 'disc' : 'overMedia'}
+            glyphSize={placement === 'side' ? 22 : 28}
+            liked={state.liked}
+            countLabel={announcedCount(state.likeCount, labels.likes, locale)}
+            likeLabel={labels.like}
+            unlikeLabel={labels.unlike}
+            pulseKey={pulseKey}
+            onToggle={toggle}
+          />
+        ) : undefined
       }
       likeCount={compactCount(state.likeCount, locale)}
       commentLabel={labels.comment}
       commentCount={compactCount(commentCount, locale)}
-      onComment={() => onComment(view.id)}
+      onComment={canComment ? () => onComment(view.id) : undefined}
       shareLabel={labels.share}
-      onShare={shareUrl ? () => onShare({ postId: view.id, url: shareUrl }) : undefined}
+      onShare={canShare && shareUrl ? () => onShare({ postId: view.id, url: shareUrl }) : undefined}
     />
   );
 
@@ -211,10 +231,11 @@ export function ReelOverlay({
       {desktopInfo ? createPortal(caption('side'), desktopInfo) : caption('over')}
       {desktopRail ? (
         createPortal(rail('side'), desktopRail)
-      ) : (
-        // From md the rail beside the player replaces it, before hydration too.
+      ) : // From md the rail beside the player replaces it, before hydration too. With every control
+      // withheld (11.1-15) there is nothing to wrap.
+      hasRail ? (
         <div className="md:hidden">{rail('over')}</div>
-      )}
+      ) : null}
     </>
   );
 }

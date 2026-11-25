@@ -24,6 +24,12 @@ import { useReelsBottomClearance } from './ReelsStage';
  * **The author link is a plain `<a>`** (D-52, D-129): a module must not depend on the web framework,
  * and the host is free to intercept the navigation.
  *
+ * **Each control is optional** (11.1-15, UI-D-889, D-888). A host whose viewer is not allowed one of
+ * like, comment or share passes none of that control (no `like` node, no `onComment`, no `onShare`):
+ * it is NOT rendered, the others close up in their shipped order, and with all three absent the rail
+ * is not drawn at all (the caption block, the author's own link, stays). The rail reads no fact and no
+ * role of its own; the host decides and the server refuses the write whatever the screen shows.
+ *
  * **Pointers stop here.** The rail sits over the pager's tap surface; a tap on any control must
  * never also pause the video or count toward a double-tap like.
  *
@@ -47,14 +53,18 @@ export type ReelRailProps = {
     /** The link's accessible name ("Ver o perfil de {name}"). */
     label: string;
   };
-  /** The host-built like control (the feed's `LikeButton tone="overMedia" glyphSize={28}`). */
-  like: ReactNode;
+  /**
+   * The host-built like control (the feed's `LikeButton tone="overMedia" glyphSize={28}`). Absent →
+   * no like control and no like count slot (11.1-15).
+   */
+  like?: ReactNode;
   /** The drawn like count (`compactCount`), or `null` at zero. */
   likeCount: string | null;
   commentLabel: string;
   /** The drawn comment count (`compactCount`), or `null` at zero. */
   commentCount: string | null;
-  onComment(): void;
+  /** Absent → no comment control and no comment count slot (11.1-15). */
+  onComment?: () => void;
   shareLabel: string;
   /** Absent → no share control at all (T-04-51). */
   onShare?: () => void;
@@ -127,6 +137,8 @@ export function ReelRail({
   placement = 'over',
 }: ReelRailProps) {
   const clearance = useReelsBottomClearance();
+  // 11.1-15: nothing to draw when the viewer may do none of the three (the hooks above ran already).
+  if (!like && !onComment && !onShare) return null;
   if (placement === 'side') {
     return (
       <div
@@ -134,20 +146,24 @@ export function ReelRail({
         className="flex w-20 flex-col items-center gap-4"
         {...STOP_POINTER}
       >
-        <div className="flex flex-col items-center gap-1">
-          {like}
-          <SideCount which="like" value={likeCount} />
-        </div>
-        <div className="flex flex-col items-center gap-1">
-          <IconButton
-            icon={MessageCircle}
-            size={SIDE_GLYPH}
-            label={commentLabel}
-            onClick={onComment}
-            className={SIDE_DISC}
-          />
-          <SideCount which="comment" value={commentCount} />
-        </div>
+        {like ? (
+          <div className="flex flex-col items-center gap-1">
+            {like}
+            <SideCount which="like" value={likeCount} />
+          </div>
+        ) : null}
+        {onComment ? (
+          <div className="flex flex-col items-center gap-1">
+            <IconButton
+              icon={MessageCircle}
+              size={SIDE_GLYPH}
+              label={commentLabel}
+              onClick={onComment}
+              className={SIDE_DISC}
+            />
+            <SideCount which="comment" value={commentCount} />
+          </div>
+        ) : null}
         {onShare ? (
           <div className="flex flex-col items-center gap-1">
             <IconButton
@@ -181,21 +197,25 @@ export function ReelRail({
         <Avatar src={author.avatarUrl} alt={author.name} size="md" className="ring-2 ring-white" />
       </a>
 
-      <div className="flex flex-col items-center">
-        {like}
-        <CountSlot which="like" value={likeCount} />
-      </div>
+      {like ? (
+        <div className="flex flex-col items-center">
+          {like}
+          <CountSlot which="like" value={likeCount} />
+        </div>
+      ) : null}
 
-      <div className="flex flex-col items-center">
-        <IconButton
-          icon={MessageCircle}
-          size={GLYPH}
-          label={commentLabel}
-          onClick={onComment}
-          className={OVER_MEDIA_BUTTON}
-        />
-        <CountSlot which="comment" value={commentCount} />
-      </div>
+      {onComment ? (
+        <div className="flex flex-col items-center">
+          <IconButton
+            icon={MessageCircle}
+            size={GLYPH}
+            label={commentLabel}
+            onClick={onComment}
+            className={OVER_MEDIA_BUTTON}
+          />
+          <CountSlot which="comment" value={commentCount} />
+        </div>
+      ) : null}
 
       {onShare ? (
         <IconButton

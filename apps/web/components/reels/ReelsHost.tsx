@@ -48,8 +48,10 @@ import { LinkButton } from '@/app/(auth)/LinkButton';
 import {
   isCommunityLockedCode,
   isFollowRequiredCode,
+  isRefusedCode,
   useCommunityLockedRefusal,
   useFollowRequiredRefusal,
+  useRefusedRefresh,
 } from '@/components/feed/community-locked';
 import { useSharePost } from '@/components/feed/useSharePost';
 import {
@@ -201,7 +203,16 @@ export type ReelsHostLabels = {
  */
 export type ReelsCommentsBinding = Omit<
   CommentSheetProps,
-  'open' | 'onClose' | 'targetId' | 'onCountChange' | 'variant'
+  | 'open'
+  | 'onClose'
+  | 'targetId'
+  | 'onCountChange'
+  | 'variant'
+  // 11.1-15 (UI-D-889): the facts of the post the sheet is open on and the reaction to a refusal
+  // are this host's, read from the reel's own view data, never one static value for every reel.
+  | 'canComment'
+  | 'canLikeComment'
+  | 'onRefused'
 >;
 
 /** A post as the viewer is shown it once a like settled or a comment landed (2026-10-09). */
@@ -884,13 +895,20 @@ export function ReelsHost({
     },
     [closeSheet, lockedRefusal, followRefusal],
   );
+  // 11.1-15 (UI-D-893): a REFUSED write (a bare 403) re-reads the page facts. In the overlay it
+  // does not refresh, for the reason the two reactions above give.
+  const refusedRefresh = useRefusedRefresh({ refresh: !overlay });
   const onLikeError = useCallback(
     (code?: string) => {
       if (isCommunityLockedCode(code) || isFollowRequiredCode(code))
         onLocked(code as CommentAccessRefusal);
-      else toast.show({ tone: 'error', message: genericError });
+      else {
+        // The shipped generic toast whatever the reason; the screen never learns one.
+        toast.show({ tone: 'error', message: genericError });
+        if (isRefusedCode(code)) refusedRefresh();
+      }
     },
-    [toast, genericError, onLocked],
+    [toast, genericError, onLocked, refusedRefresh],
   );
 
   /**
@@ -1297,6 +1315,14 @@ export function ReelsHost({
   // 2026-10-23 — the comments BESIDE the desktop player (xl): the post they belong to, and its count
   // with this visit's deltas, beside the title.
   const panelView = panelOpen && sheetFor !== null ? views.get(sheetFor) : undefined;
+  // 11.1-15 (UI-D-888, UI-D-889): the facts of the post the sheet or the panel is open on, read from
+  // its view's data; a reel with none reads as all true.
+  const sheetActions = sheetFor === null ? undefined : views.get(sheetFor)?.actions;
+  const commentFacts = {
+    canComment: sheetActions?.comment ?? true,
+    canLikeComment: sheetActions?.like ?? true,
+    onRefused: refusedRefresh,
+  };
   const panelCount = panelView
     ? compactCount(
         Math.max(0, withInteraction(panelView, interactions[panelView.id]).commentCount),
@@ -1323,6 +1349,7 @@ export function ReelsHost({
               targetId={sheetFor}
               onCountChange={(delta) => bumpCommentCount(sheetFor, delta)}
               onLocked={onLocked}
+              {...commentFacts}
               className="absolute top-2 right-[88px] bottom-2 z-[6] hidden w-[420px] xl:flex"
             />
           ) : null}
@@ -1340,6 +1367,7 @@ export function ReelsHost({
           if (sheetFor !== null) bumpCommentCount(sheetFor, delta);
         }}
         onLocked={onLocked}
+        {...commentFacts}
       />
     </>
   );

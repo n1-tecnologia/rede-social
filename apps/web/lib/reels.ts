@@ -54,6 +54,13 @@ export type ReelView = {
   commentCount: number;
   viewerLiked: boolean;
   video: { assetId: string; width: number | null; height: number | null };
+  /**
+   * 11.1-15 (UI-D-889): the viewer's own like, comment and share facts for this post, carried as
+   * DATA exactly as the card view carries them (`postCardBase` builds it, only when something is
+   * withheld). Absent means all three, today's behaviour; the server refuses the write whatever the
+   * rail shows.
+   */
+  actions?: { like: boolean; comment: boolean; share: boolean };
 };
 
 /**
@@ -96,6 +103,7 @@ export function reelView(
     likeCount: card.likeCount,
     commentCount: card.commentCount,
     viewerLiked: card.viewerLiked,
+    ...(card.actions ? { actions: card.actions } : {}),
     video: { assetId: video.assetId, width: video.width, height: video.height },
   };
 }

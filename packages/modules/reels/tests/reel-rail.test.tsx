@@ -238,3 +238,66 @@ describe('ReelRail beside the desktop player (placement="side", 2026-10-23)', ()
     expect(screen.queryByText('share-label')).toBeNull();
   });
 });
+
+/**
+ * 11.1-15 (UI-D-889, D-888): a control the host does not pass is not rendered, the others close up in
+ * their shipped order, and with all three absent there is no rail. Each refusal sits beside its
+ * positive control.
+ */
+describe('ReelRail — a control the viewer may not use is absent (11.1-15)', () => {
+  const names = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('button, a')).map(
+      (el) => el.getAttribute('aria-label') ?? el.textContent,
+    );
+
+  it('without a like node: comment and share remain, no like slot, they close up', () => {
+    const { container } = render(<ReelRail {...props({ like: undefined })} />);
+    expect(screen.queryByTestId('like-node')).toBeNull();
+    expect(container.querySelector('[data-reel-count="like"]')).toBeNull();
+    expect(names(container)).toEqual(['author-profile-label', 'comment-label', 'share-label']);
+    expect(container.querySelector('[data-reel-count="comment"]')).not.toBeNull();
+  });
+
+  it('without onComment: like and share remain and no comment slot is reserved', () => {
+    const { container } = render(<ReelRail {...props({ onComment: undefined })} />);
+    expect(screen.getByTestId('like-node')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'comment-label' })).toBeNull();
+    expect(container.querySelector('[data-reel-count="comment"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'share-label' })).toBeTruthy();
+  });
+
+  it('without onShare: like and comment remain (the shipped no-share case)', () => {
+    render(<ReelRail {...props({ onShare: undefined })} />);
+    expect(screen.getByTestId('like-node')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'comment-label' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'share-label' })).toBeNull();
+  });
+
+  it('all three absent: no rail at all, over the video and beside the player', () => {
+    const none = { like: undefined, onComment: undefined, onShare: undefined };
+    const over = render(<ReelRail {...props(none)} />);
+    expect(over.container.innerHTML).toBe('');
+    over.unmount();
+    const side = render(<ReelRail {...props({ ...none, placement: 'side' })} />);
+    expect(side.container.innerHTML).toBe('');
+  });
+
+  it('beside the player: the same closing up, with no empty wrapper left behind', () => {
+    const { container } = render(
+      <ReelRail {...props({ placement: 'side', like: undefined, onShare: undefined })} />,
+    );
+    expect(screen.getByRole('button', { name: 'comment-label' })).toBeTruthy();
+    expect(screen.queryByTestId('like-node')).toBeNull();
+    expect(container.querySelectorAll('[data-reel-rail="side"] > div')).toHaveLength(1);
+  });
+
+  it('POSITIVE CONTROL: all three given is the shipped rail', () => {
+    const { container } = render(<ReelRail {...props()} />);
+    expect(names(container)).toEqual([
+      'author-profile-label',
+      'like-node',
+      'comment-label',
+      'share-label',
+    ]);
+  });
+});
