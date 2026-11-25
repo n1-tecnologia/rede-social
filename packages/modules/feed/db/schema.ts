@@ -36,6 +36,7 @@ export const SAMPLE_POST_IDS = sql`coalesce((select app.feed_sample_post_ids()),
  * locked ids: `community_id <> all (${DENIED_LIKE_COMMUNITY_IDS})`.
  */
 const DENIED_LIKE_COMMUNITY_IDS = deniedCommunityIds('like');
+const DENIED_COMMENT_COMMUNITY_IDS = deniedCommunityIds('comment');
 
 /**
  * 09.3-06 (D-555): the ids of this tenant's SOFT-DELETED communities (`app.community_deleted_ids()`, a
@@ -677,6 +678,24 @@ export const feedComments = pgTable(
         select 1 from public.feed_posts p
          where p.id = feed_comments.post_id
            and (p.community_id is null or p.community_id <> all (${LOCKED_COMMUNITY_IDS})))`,
+    }),
+    // 11.1-03 (D-888, D-892; BPERM-07): the buyer's COMMENT gate. RESTRICTIVE, INSERT only, so READING IS NEVER
+    // REDUCED (UI-D-890): `feed_comments_community_gate` above and every select policy stay exactly as they are. A
+    // root comment and a reply both name the post, so one check covers both: the post must be readable by the caller
+    // (the inner `feed_posts` read is itself RLS-scoped) and its community must not be one where the caller's union of
+    // product grants lacks `comment` (`app.community_action_denied_ids`: a community with no linked product is never
+    // in it, staff by claim get the empty set, a null role denies). A STORY comment (`post_id` null) passes untouched.
+    // The policy evaluates in the INSERT statement's own snapshot, so a flag edit or a revoke committed between the
+    // service guard (plan 08, 403 before any write) and this insert is seen (42501); a revoke committed AFTER the
+    // insert leaves the comment in place (D-887).
+    pgPolicy('feed_comments_community_insert_gate', {
+      as: 'restrictive',
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`post_id is null or exists (
+        select 1 from public.feed_posts p
+         where p.id = feed_comments.post_id
+           and (p.community_id is null or p.community_id <> all (${DENIED_COMMENT_COMMUNITY_IDS})))`,
     }),
     // 09-14 (WR-07, SOCIAL-03, T-04-54 [informational]; T-09-49): the DELETE backstop on comments. The
     // service soft-deletes (an UPDATE of `deleted_at`), so a member lane that hard-deletes a comment is a

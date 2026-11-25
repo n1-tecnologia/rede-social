@@ -32,7 +32,7 @@ begin;
 --
 -- Fixture ids use the `24100000-…` prefix and the tenants `pgtap-bperm-a` / `pgtap-bperm-b`. Like its siblings, this
 -- file ROLLS BACK.
-select plan(97);
+select plan(120);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-bperm-a', 'Permissoes A', '24100000-0000-4000-8000-000000000001');
@@ -618,6 +618,130 @@ select lives_ok(
   '9: BPERM-06: deleting a like is not an insert, the gate does not touch it (the service guard owns it)');
 select is((select count(*)::int from public.feed_likes where user_id = '24100000-0000-4000-8000-000000000009' and post_id = '24100000-0000-4000-8000-000000000b71'), 0,
   '9: …and the like is gone');
+reset role;
+
+-- ── 10. the comment insert gate (11.1-03, D-888, D-892; BPERM-07) ───────────────────────────────
+-- A reply fixture on the CL7 comment (the organization's heart on the CL7 post came from section 9), then the matrix as U9 (comment off in
+-- CL7, on in CL8).
+insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind) values
+  ('24100000-0000-4000-8000-000000000d75', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b71',
+   '24100000-0000-4000-8000-000000000002', 'resposta', 1, '24100000-0000-4000-8000-000000000d71', 0, 'post');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009');
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b71', '24100000-0000-4000-8000-000000000009', 'raiz') $$,
+  '42501', null, '10: BPERM-07: a buyer whose union lacks comment is refused a root comment on a post of that community (42501)');
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b71', '24100000-0000-4000-8000-000000000009', 'resposta',
+             1, '24100000-0000-4000-8000-000000000d71', 0, 'post') $$,
+  '42501', null, '10: …and a reply (42501)');
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b71', '24100000-0000-4000-8000-000000000009', 'raiz') $$,
+  '42501', null, '10: …the refusal repeats identically (idempotent)');
+select is((select count(*)::int from public.feed_comments where post_id = '24100000-0000-4000-8000-000000000b71' and author_user_id = '24100000-0000-4000-8000-000000000009'), 0,
+  '10: …and leaves no row');
+select lives_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b72', '24100000-0000-4000-8000-000000000009', 'raiz em c8') $$,
+  '10: the same buyer comments on a post of the community whose product holds comment (positive control)');
+select lives_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b72', '24100000-0000-4000-8000-000000000009', 'resposta em c8',
+             1, '24100000-0000-4000-8000-000000000d72', 0, 'post') $$,
+  '10: …and replies there (positive control)');
+select lives_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b72', '24100000-0000-4000-8000-000000000009', 'raiz em c8') $$,
+  '10: …twice: comments carry no uniqueness, an allowed insert repeated never raises a duplicate key');
+select is((select count(*)::int from public.feed_comments where post_id = '24100000-0000-4000-8000-000000000b72' and author_user_id = '24100000-0000-4000-8000-000000000009' and parent_id is null), 2,
+  '10: …and leaves two roots');
+select lives_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b74', '24100000-0000-4000-8000-000000000009', 'sem comunidade') $$,
+  '10: a comment on a post with no community passes');
+select lives_ok(
+  $$ insert into public.feed_comments (tenant_id, story_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000ab1', '24100000-0000-4000-8000-000000000009', 'na historia') $$,
+  '10: a STORY comment (no post) passes the new gate');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000005');
+select lives_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b73', '24100000-0000-4000-8000-000000000005', 'sem produto') $$,
+  '10: D-892: a comment on a post of an organization community with NO linked product passes (never denied)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'admin_tenant');
+select lives_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b71', '24100000-0000-4000-8000-000000000002', 'da organizacao') $$,
+  '10: D-892: staff by claim comment on the same community (the denied set is empty for them)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000011', '24100000-0000-4000-8000-000000000b72', '24100000-0000-4000-8000-000000000004', 'de B em A') $$,
+  '42501', null, '10: BPERM-25: the buyer under tenant B''s claim is refused a comment on tenant A''s post (42501)');
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b72', '24100000-0000-4000-8000-000000000004', 'carimbo de A') $$,
+  '42501', null, '10: …and so is a row stamped with tenant A');
+reset role;
+select ok((select not (permissive = 'PERMISSIVE') and cmd = 'INSERT' and with_check like '%community_action_denied_ids%'
+             from pg_policies where schemaname = 'public' and tablename = 'feed_comments' and policyname = 'feed_comments_community_insert_gate'),
+  '10: the new policy is restrictive, for insert, and calls the denied-ids scope');
+select ok((select qual like '%community_locked_ids%' and qual not like '%community_action_denied_ids%'
+             from pg_policies where schemaname = 'public' and tablename = 'feed_comments' and policyname = 'feed_comments_community_gate'),
+  '10: UI-D-890: the select gate of comments is untouched (the locked term only, no denied term)');
+-- the flag flips: a comment passes once the flag is on (the statement's own snapshot sees the committed flag)
+update public.store_product_communities set can_comment = true where product_id = '24100000-0000-4000-8000-0000000000a7';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009');
+select lives_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b71', '24100000-0000-4000-8000-000000000009', 'agora pode') $$,
+  '10: BPERM-07 concurrency: with the flag turned on the same comment passes at the next statement');
+reset role;
+update public.store_product_communities set can_comment = false where product_id = '24100000-0000-4000-8000-0000000000a7';
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009');
+select is((select count(*)::int from public.feed_comments where post_id = '24100000-0000-4000-8000-000000000b71' and author_user_id = '24100000-0000-4000-8000-000000000009'), 1,
+  '10: D-887: the flag turned off again leaves the comment already written in place and readable');
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000b71', '24100000-0000-4000-8000-000000000009', 'de novo nao') $$,
+  '42501', null, '10: …and a new comment is refused again (42501)');
+reset role;
+delete from public.feed_comments where post_id = '24100000-0000-4000-8000-000000000b71' and author_user_id = '24100000-0000-4000-8000-000000000009';
+
+-- ── 11. reading is never reduced (UI-D-890) ────────────────────────────────────────────────────
+-- U9 holds NO like and NO comment in CL7; U10 holds all five there through another product. Both read the same rows.
+select tests.auth_user('u10@bperm-a.local', '24100000-0000-4000-8000-00000000000a');
+select tests.member('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-00000000000a');
+insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents, status) values
+  ('24100000-0000-4000-8000-0000000000a9', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000002', 'P9', 100, 'active');
+insert into public.store_product_communities (tenant_id, product_id, community_id, can_like, can_comment, can_share, can_post, can_story) values
+  ('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-0000000000a9', '24100000-0000-4000-8000-0000000000c7', true, true, true, true, true);
+insert into public.store_entitlements (id, tenant_id, user_id, product_id, source, granted_by_user_id) values
+  ('24100000-0000-4000-8000-0000000000eb', '24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-00000000000a', '24100000-0000-4000-8000-0000000000a9', 'grant', '24100000-0000-4000-8000-000000000002');
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-000000000009');
+select results_eq(
+  $$ select (select count(*)::int from public.feed_posts where community_id = '24100000-0000-4000-8000-0000000000c7'),
+            (select count(*)::int from public.feed_comments where post_id = '24100000-0000-4000-8000-000000000b71'),
+            (select count(*)::int from public.feed_likes where post_id = '24100000-0000-4000-8000-000000000b71') $$,
+  $$ values (1, 3, 1) $$,
+  '11: UI-D-890: a buyer with no like and no comment reads the post, its comments (root, reply and the organization''s) and its likes');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c7'::uuid, 'like'), false,
+  '11: …and holds neither flag (the control for the count above)');
+reset role;
+select tests.as_tenant('24100000-0000-4000-8000-000000000001', '24100000-0000-4000-8000-00000000000a');
+select results_eq(
+  $$ select (select count(*)::int from public.feed_posts where community_id = '24100000-0000-4000-8000-0000000000c7'),
+            (select count(*)::int from public.feed_comments where post_id = '24100000-0000-4000-8000-000000000b71'),
+            (select count(*)::int from public.feed_likes where post_id = '24100000-0000-4000-8000-000000000b71') $$,
+  $$ values (1, 3, 1) $$,
+  '11: …the same counts for a buyer holding all five flags');
+select is(app.community_action_allowed('24100000-0000-4000-8000-0000000000c7'::uuid, 'like'), true,
+  '11: …who does hold them (the control)');
 reset role;
 
 select * from finish();
